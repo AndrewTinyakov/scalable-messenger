@@ -1,0 +1,56 @@
+asyncapi: 3.0.0
+info:
+  title: Messenger transport contracts
+  version: 1.0.0
+  description: Confirmed send commands, saved room events, and client socket frames.
+defaultContentType: application/json
+servers:
+  rabbitmq:
+    host: rabbitmq:5672
+    pathname: /
+    protocol: amqp
+    protocolVersion: 0-9-1
+  redis:
+    host: redis:6379
+    protocol: redis
+  websocket:
+    host: localhost:8080
+    pathname: /ws
+    protocol: wss
+channels:
+  sendCommand:
+    $ref: ./channels/commands.yaml#/sendCommand
+  sendJobs:
+    $ref: ./channels/commands.yaml#/sendJobs
+  deadLetteredSend:
+    $ref: ./channels/dead-letters.yaml#/deadLetteredSend
+  roomEvents:
+    $ref: ./channels/events.yaml#/roomEvents
+  socketFrames:
+    $ref: ./channels/websocket.yaml#/socketFrames
+operations:
+  queueSend:
+    action: send
+    channel:
+      $ref: '#/channels/sendCommand'
+    summary: Publish a persistent command and report queued only after a positive publisher confirm.
+  processSend:
+    action: receive
+    channel:
+      $ref: '#/channels/sendJobs'
+    summary: Acknowledge only after the SQL result and outbox commit.
+  inspectFailedSend:
+    action: receive
+    channel:
+      $ref: '#/channels/deadLetteredSend'
+    summary: Inspect malformed or exhausted commands; this queue retains responsibility for unresolved confirmed sends.
+  publishRoomEvent:
+    action: send
+    channel:
+      $ref: '#/channels/roomEvents'
+    summary: Append bounded Stream history and publish to each interested node.
+  exchangeSocketFrames:
+    action: receive
+    channel:
+      $ref: '#/channels/socketFrames'
+    summary: Authenticated client frames over a bounded WebSocket connection.

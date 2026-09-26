@@ -1,0 +1,25 @@
+$schema: http://json-schema.org/draft-07/schema#
+title: SendMessageCommandV1
+type: object
+additionalProperties: false
+required: [version, conversationId, requestId, senderId, body, sentAt]
+properties:
+  version:
+    type: integer
+    const: 1
+  conversationId:
+    type: string
+    pattern: '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'
+  requestId:
+    type: string
+    pattern: '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'
+  senderId:
+    type: string
+    pattern: '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'
+  body:
+    type: string
+    minLength: 1
+    maxLength: 4000
+  sentAt:
+    type: string
+    format: date-time

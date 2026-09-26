@@ -1,0 +1,14 @@
+roomEvents:
+  address: messenger:{room}:live
+  description: >-
+    Redis sharded Pub/Sub channel. The relay appends event JSON to
+    messenger:{room}:stream before SPUBLISH of {epoch,streamId,event}.
+    Room is user:<ULID> or group:<ULID>; the braces form a Redis hash tag.
+  parameters:
+    room:
+      description: Logical user or group room.
+  messages:
+    MessageSavedEventV1:
+      $ref: ../messages.yaml#/messages/MessageSavedEventV1
+    SendRejectedEventV1:
+      $ref: ../messages.yaml#/messages/SendRejectedEventV1

@@ -1,0 +1,40 @@
+$schema: http://json-schema.org/draft-07/schema#
+title: MessageSavedEventV1
+type: object
+additionalProperties: false
+required: [type, version, eventId, room, conversationId, requestId, messageId, sequence, senderId, body, createdAt]
+properties:
+  type:
+    const: message_saved
+  version:
+    type: integer
+    const: 1
+  eventId:
+    type: string
+    pattern: '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'
+  room:
+    type: string
+    pattern: '^(user|group):[0-7][0-9A-HJKMNP-TV-Z]{25}$'
+  conversationId:
+    type: string
+    pattern: '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'
+  requestId:
+    type: string
+    pattern: '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'
+  messageId:
+    type: string
+    pattern: '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'
+  sequence:
+    type: string
+    pattern: '^[1-9][0-9]*$'
+    description: Decimal 64-bit integer encoded as a string for JavaScript precision.
+  senderId:
+    type: string
+    pattern: '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'
+  body:
+    type: string
+    minLength: 1
+    maxLength: 4000
+  createdAt:
+    type: string
+    format: date-time

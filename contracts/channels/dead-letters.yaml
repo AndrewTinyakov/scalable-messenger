@@ -1,0 +1,19 @@
+deadLetteredSend:
+  address: messenger.send.dead
+  description: >-
+    Durable quorum queue bound to the messenger.commands.dead exchange.
+    Malformed and delivery-limit-exhausted commands stay here for inspection
+    and replay after the underlying cause is fixed.
+  messages:
+    SendMessageCommandV1:
+      $ref: ../messages.yaml#/messages/SendMessageCommandV1
+  bindings:
+    amqp:
+      is: queue
+      queue:
+        name: messenger.send.dead
+        durable: true
+        exclusive: false
+        autoDelete: false
+        vhost: /
+      bindingVersion: 0.3.0

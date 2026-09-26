@@ -1,0 +1,42 @@
+sendCommand:
+  address: messenger.send.{partition}
+  description: >-
+    Direct exchange messenger.commands. Partition is FNV-1a 32 of UTF-8
+    conversationId modulo four. Routing keys and queue names are
+    messenger.send.0 through messenger.send.3. Quorum queues are durable,
+    bounded, and reject new publishes on overflow.
+  parameters:
+    partition:
+      description: Fixed partition number from zero to three.
+  messages:
+    SendMessageCommandV1:
+      $ref: ../messages.yaml#/messages/SendMessageCommandV1
+  bindings:
+    amqp:
+      is: routingKey
+      exchange:
+        name: messenger.commands
+        type: direct
+        durable: true
+        autoDelete: false
+        vhost: /
+      bindingVersion: 0.3.0
+sendJobs:
+  address: messenger.send.{partition}
+  description: Manual consumer ACK after SQL commit. Transient failures remain retryable.
+  parameters:
+    partition:
+      description: Fixed partition number from zero to three.
+  messages:
+    SendMessageCommandV1:
+      $ref: ../messages.yaml#/messages/SendMessageCommandV1
+  bindings:
+    amqp:
+      is: queue
+      queue:
+        name: messenger.send.{partition}
+        durable: true
+        exclusive: false
+        autoDelete: false
+        vhost: /
+      bindingVersion: 0.3.0

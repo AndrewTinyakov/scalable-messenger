@@ -1,0 +1,13 @@
+socketFrames:
+  address: /ws
+  description: >-
+    Bearer session token is supplied during upgrade. One socket can subscribe
+    to authorized conversations; the authenticated user's room joins on connect.
+    Client application acknowledgement never follows from a socket write alone.
+  messages:
+    SocketSendV1:
+      $ref: ../messages.yaml#/messages/SocketSendV1
+    SocketSubscribeV1:
+      $ref: ../messages.yaml#/messages/SocketSubscribeV1
+    SocketAppliedV1:
+      $ref: ../messages.yaml#/messages/SocketAppliedV1

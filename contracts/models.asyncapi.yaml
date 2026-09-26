@@ -1,0 +1,18 @@
+asyncapi: 3.0.0
+info:
+  title: Messenger generated transport models
+  version: 1.0.0
+components:
+  messages:
+    SendMessageCommandV1:
+      name: SendMessageCommandV1
+      payload:
+        $ref: ./schemas/message/command/send-message-v1.yaml
+    MessageSavedEventV1:
+      name: MessageSavedEventV1
+      payload:
+        $ref: ./schemas/message/event/message-saved-v1.yaml
+    SendRejectedEventV1:
+      name: SendRejectedEventV1
+      payload:
+        $ref: ./schemas/message/event/send-rejected-v1.yaml

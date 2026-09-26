@@ -1,0 +1,46 @@
+server:
+  port: 8080
+spring:
+  application:
+    name: messenger-api
+  mvc:
+    servlet:
+      path: /api
+    problemdetails:
+      enabled: true
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/messenger}
+    username: ${DATABASE_USER:messenger}
+    password: ${DATABASE_PASSWORD:messenger}
+  flyway:
+    enabled: true
+  jooq:
+    sql-dialect: postgres
+  rabbitmq:
+    host: ${RABBIT_HOST:localhost}
+    port: ${RABBIT_PORT:5672}
+    username: ${RABBIT_USER:guest}
+    password: ${RABBIT_PASSWORD:guest}
+    listener:
+      simple:
+        acknowledge-mode: manual
+        prefetch: 20
+        auto-startup: ${MESSENGER_CONSUMER_ENABLED:true}
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+messenger:
+  role: ${MESSENGER_ROLE:http}
+  relay:
+    enabled: ${MESSENGER_RELAY_ENABLED:true}
+    delay-ms: 1000
+    batch-size: 50
+    lease-seconds: 30
+  web:
+    allowed-origin: ${CLIENT_ORIGIN:http://localhost:5173}

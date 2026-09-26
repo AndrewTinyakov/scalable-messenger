@@ -1,0 +1,40 @@
+correlationIds:
+  SendRequestId:
+    location: $message.payload#/requestId
+messages:
+  SendMessageCommandV1:
+    name: SendMessageCommandV1
+    contentType: application/json
+    correlationId:
+      $ref: '#/correlationIds/SendRequestId'
+    payload:
+      $ref: ./schemas/message/command/send-message-v1.yaml
+  MessageSavedEventV1:
+    name: MessageSavedEventV1
+    contentType: application/json
+    correlationId:
+      $ref: '#/correlationIds/SendRequestId'
+    payload:
+      $ref: ./schemas/message/event/message-saved-v1.yaml
+  SendRejectedEventV1:
+    name: SendRejectedEventV1
+    contentType: application/json
+    correlationId:
+      $ref: '#/correlationIds/SendRequestId'
+    payload:
+      $ref: ./schemas/message/event/send-rejected-v1.yaml
+  SocketSendV1:
+    name: SocketSendV1
+    contentType: application/json
+    payload:
+      $ref: ./schemas/socket/frame/send-v1.yaml
+  SocketSubscribeV1:
+    name: SocketSubscribeV1
+    contentType: application/json
+    payload:
+      $ref: ./schemas/socket/frame/subscribe-v1.yaml
+  SocketAppliedV1:
+    name: SocketAppliedV1
+    contentType: application/json
+    payload:
+      $ref: ./schemas/socket/frame/applied-v1.yaml

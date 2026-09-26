@@ -10,6 +10,8 @@ x-api-environment: &api-environment
   SPRING_RABBITMQ_PASSWORD: messenger
   SPRING_DATA_REDIS_HOST: redis
   SPRING_DATA_REDIS_PORT: 6379
+  METRICS_USERNAME: metrics
+  METRICS_PASSWORD: messenger-metrics
 
 x-api: &api
   image: messenger-api:local

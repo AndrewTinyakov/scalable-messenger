@@ -18,10 +18,19 @@ import (
 	"messenger/ws/internal/protocol"
 	"messenger/ws/internal/rabbitmq"
 	"messenger/ws/internal/redisroom"
+	roomregistry "messenger/ws/internal/room"
 )
 
 var errRateLimited = errors.New("rate limited")
 var errRoomLimit = errors.New("room limit")
+
+type roomCoordinator interface {
+	Join(context.Context, roomregistry.Recipient, string, string, string, string) error
+	LeaveAll(roomregistry.Recipient)
+	LeaveConversation(roomregistry.Recipient, string, string)
+	RunChecks(context.Context)
+	Close()
+}
 
 type Server struct {
 	config      config.Config
@@ -29,7 +38,7 @@ type Server struct {
 	api         *apiclient.Client
 	publisher   *rabbitmq.Publisher
 	redis       *redisroom.Client
-	rooms       *Rooms
+	rooms       roomCoordinator
 	registry    *prometheus.Registry
 	metrics     *monitoring.Metrics
 	ctx         context.Context
@@ -43,7 +52,7 @@ type Server struct {
 func NewServer(parent context.Context, cfg config.Config, logger *slog.Logger, api *apiclient.Client, publisher *rabbitmq.Publisher, redis *redisroom.Client, registry *prometheus.Registry, metrics *monitoring.Metrics) *Server {
 	ctx, cancel := context.WithCancel(parent)
 	s := &Server{config: cfg, logger: logger, api: api, publisher: publisher, redis: redis, registry: registry, metrics: metrics, ctx: ctx, cancel: cancel, connections: make(map[*Connection]struct{})}
-	s.rooms = NewRooms(redis, logger, cfg.ReplayLimit, cfg.QueueItems, cfg.PositionCheckInterval, metrics)
+	s.rooms = roomregistry.NewRooms(redis, logger, cfg.ReplayLimit, cfg.QueueItems, cfg.PositionCheckInterval, metrics)
 	s.wg.Add(1)
 	go func() { defer s.wg.Done(); s.rooms.RunChecks(ctx) }()
 	s.wg.Add(1)
@@ -253,10 +262,7 @@ func (c *Connection) handle(f protocol.Frame) error {
 		c.Enqueue(protocol.Event{Type: "queued", Version: 1, ConversationID: f.ConversationID, RequestID: f.RequestID})
 		return nil
 	case "applied":
-		c.mu.Lock()
-		c.applied[f.ConversationID] = f.Sequence
-		c.mu.Unlock()
-		return nil
+		return c.acks.apply(f.ConversationID, f.Sequence)
 	default:
 		return errors.New("unknown frame")
 	}

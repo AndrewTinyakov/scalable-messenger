@@ -16,6 +16,7 @@ type Config struct {
 	MaxFrameBytes         int64
 	QueueItems            int
 	QueueBytes            int
+	PendingACKLimit       int
 	MaxConnections        int
 	MaxRoomsPerConnection int
 	PublishConcurrency    int
@@ -23,6 +24,7 @@ type Config struct {
 	ConfirmTimeout        time.Duration
 	APITimeout            time.Duration
 	WriteTimeout          time.Duration
+	ACKTimeout            time.Duration
 	PongTimeout           time.Duration
 	PingInterval          time.Duration
 	PositionCheckInterval time.Duration
@@ -47,6 +49,9 @@ func Load() (Config, error) {
 	if c.QueueBytes, err = intEnv("WS_QUEUE_BYTES", 262144); err != nil {
 		return c, err
 	}
+	if c.PendingACKLimit, err = intEnv("WS_PENDING_ACK_LIMIT", 256); err != nil {
+		return c, err
+	}
 	if c.MaxConnections, err = intEnv("WS_MAX_CONNECTIONS", 10000); err != nil {
 		return c, err
 	}
@@ -68,6 +73,9 @@ func Load() (Config, error) {
 	if c.WriteTimeout, err = durationEnv("WS_WRITE_TIMEOUT", 5*time.Second); err != nil {
 		return c, err
 	}
+	if c.ACKTimeout, err = durationEnv("WS_ACK_TIMEOUT", 30*time.Second); err != nil {
+		return c, err
+	}
 	if c.PongTimeout, err = durationEnv("WS_PONG_TIMEOUT", 60*time.Second); err != nil {
 		return c, err
 	}
@@ -83,7 +91,7 @@ func Load() (Config, error) {
 	if c.ShutdownTimeout, err = durationEnv("WS_SHUTDOWN_TIMEOUT", 10*time.Second); err != nil {
 		return c, err
 	}
-	if c.MaxFrameBytes <= 0 || c.QueueItems <= 0 || c.QueueBytes <= 0 || c.MaxConnections <= 0 || c.MaxRoomsPerConnection <= 0 || c.PublishConcurrency <= 0 || c.ReplayLimit <= 0 || c.ConfirmTimeout <= 0 || c.APITimeout <= 0 || c.WriteTimeout <= 0 || c.PongTimeout <= 0 || c.PingInterval <= 0 || c.PositionCheckInterval <= 0 || c.ReauthorizeInterval <= 0 || c.ShutdownTimeout <= 0 || c.PingInterval >= c.PongTimeout {
+	if c.MaxFrameBytes <= 0 || c.QueueItems <= 0 || c.QueueBytes <= 0 || c.PendingACKLimit <= 0 || c.MaxConnections <= 0 || c.MaxRoomsPerConnection <= 0 || c.PublishConcurrency <= 0 || c.ReplayLimit <= 0 || c.ConfirmTimeout <= 0 || c.APITimeout <= 0 || c.WriteTimeout <= 0 || c.ACKTimeout <= 0 || c.PongTimeout <= 0 || c.PingInterval <= 0 || c.PositionCheckInterval <= 0 || c.ReauthorizeInterval <= 0 || c.ShutdownTimeout <= 0 || c.PingInterval >= c.PongTimeout {
 		return c, fmt.Errorf("invalid WS capacity or timeout")
 	}
 	return c, nil

@@ -19,18 +19,23 @@ type Connection struct {
 	token       string
 	ctx         context.Context
 	cancel      context.CancelFunc
-	out         chan []byte
+	out         chan outbound
 	mu          sync.Mutex
 	queuedBytes int
 	closed      bool
 	rooms       map[string]string
-	applied     map[string]string
+	acks        *ackTracker
 	once        sync.Once
+}
+
+type outbound struct {
+	payload []byte
+	event   protocol.Event
 }
 
 func newConnection(server *Server, socket *websocket.Conn, session apiclient.Session, token string) *Connection {
 	ctx, cancel := context.WithCancel(server.ctx)
-	return &Connection{server: server, socket: socket, session: session, token: token, ctx: ctx, cancel: cancel, out: make(chan []byte, server.config.QueueItems), rooms: make(map[string]string), applied: make(map[string]string)}
+	return &Connection{server: server, socket: socket, session: session, token: token, ctx: ctx, cancel: cancel, out: make(chan outbound, server.config.QueueItems), rooms: make(map[string]string), acks: newACKTracker(server.config.PendingACKLimit, server.config.ACKTimeout)}
 }
 
 func (c *Connection) Enqueue(event protocol.Event) bool {
@@ -53,7 +58,7 @@ func (c *Connection) Enqueue(event protocol.Event) bool {
 		return false
 	}
 	select {
-	case c.out <- data:
+	case c.out <- outbound{payload: data, event: event}:
 		c.queuedBytes += len(data)
 		c.server.metrics.QueuedBytes.Add(float64(len(data)))
 		c.mu.Unlock()
@@ -84,21 +89,43 @@ func (c *Connection) writeLoop() {
 	defer c.Close()
 	ticker := time.NewTicker(c.server.config.PingInterval)
 	defer ticker.Stop()
+	ackInterval := c.server.config.ACKTimeout / 4
+	if ackInterval > time.Second {
+		ackInterval = time.Second
+	}
+	if ackInterval < 10*time.Millisecond {
+		ackInterval = 10 * time.Millisecond
+	}
+	ackTicker := time.NewTicker(ackInterval)
+	defer ackTicker.Stop()
 	for {
+		if len(c.acks.expired(time.Now())) > 0 {
+			c.closeForRecovery()
+			return
+		}
 		select {
 		case <-c.ctx.Done():
 			return
-		case data := <-c.out:
+		case next := <-c.out:
 			c.mu.Lock()
 			if !c.closed {
-				c.queuedBytes -= len(data)
-				c.server.metrics.QueuedBytes.Sub(float64(len(data)))
+				c.queuedBytes -= len(next.payload)
+				c.server.metrics.QueuedBytes.Sub(float64(len(next.payload)))
 			}
 			c.mu.Unlock()
+			if err := c.acks.markSent(next.event, time.Now()); err != nil {
+				c.closeForRecovery()
+				return
+			}
 			if err := c.socket.SetWriteDeadline(time.Now().Add(c.server.config.WriteTimeout)); err != nil {
 				return
 			}
-			if err := c.socket.WriteMessage(websocket.TextMessage, data); err != nil {
+			if err := c.socket.WriteMessage(websocket.TextMessage, next.payload); err != nil {
+				return
+			}
+		case <-ackTicker.C:
+			if len(c.acks.expired(time.Now())) > 0 {
+				c.closeForRecovery()
 				return
 			}
 		case <-ticker.C:
@@ -107,6 +134,11 @@ func (c *Connection) writeLoop() {
 			}
 		}
 	}
+}
+
+func (c *Connection) closeForRecovery() {
+	deadline := time.Now().Add(c.server.config.WriteTimeout)
+	_ = c.socket.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(4001, "recovery_required"), deadline)
 }
 
 func (c *Connection) readLoop() {
@@ -138,6 +170,9 @@ func (c *Connection) readLoop() {
 			}
 			if errors.Is(err, errRoomLimit) {
 				code = "room_limit"
+			}
+			if errors.Is(err, errInvalidACK) {
+				code = "invalid_frame"
 			}
 			c.error(code, frame.RequestID)
 		}

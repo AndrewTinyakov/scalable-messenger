@@ -54,3 +54,8 @@ operations:
     channel:
       $ref: '#/channels/socketFrames'
     summary: Authenticated client frames over a bounded WebSocket connection.
+  sendSocketFrames:
+    action: send
+    channel:
+      $ref: '#/channels/socketFrames'
+    summary: Confirmed queue status, durable results, subscription state, and recovery errors.

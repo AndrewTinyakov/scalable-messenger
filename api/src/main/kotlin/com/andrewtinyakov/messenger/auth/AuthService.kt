@@ -3,6 +3,7 @@ package com.andrewtinyakov.messenger.auth
 import com.andrewtinyakov.messenger.shared.ApiException
 import com.andrewtinyakov.messenger.shared.newId
 import com.andrewtinyakov.messenger.shared.sha256
+import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.Size
 import org.jooq.exception.DataAccessException
@@ -16,25 +17,37 @@ import java.util.Base64
 import java.util.UUID
 
 data class Credentials(
-    @field:NotBlank @field:Size(min = 3, max = 40) val username: String,
-    @field:NotBlank @field:Size(min = 8, max = 100) val password: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    @field:NotBlank
+    @field:Size(min = 3, max = 40) val username: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    @field:NotBlank
+    @field:Size(min = 8, max = 100) val password: String,
     val deviceId: String? = null,
 )
 
 data class UserView(
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val id: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val username: String,
 )
 
 data class AuthView(
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val token: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val user: UserView,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val deviceId: String,
 )
 
 data class SessionView(
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val userId: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val username: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val deviceId: String,
 )
 
@@ -51,12 +64,12 @@ class AuthService(
         val username = input.username.trim().lowercase()
         if (!username.matches(Regex("[a-z0-9_]{3,40}"))) throw ApiException(400, "INVALID_USERNAME", "Use letters, digits, or underscore")
         val user = UserView(newId(), username)
-        val passwordHash = encoder.encode(input.password)
+        val passwordHash = requireNotNull(encoder.encode(input.password))
         try {
             return tx.execute {
                 repository.insertUser(user.id, user.username, passwordHash)
                 issue(user, input.deviceId)
-            }!!
+            }
         } catch (error: DataAccessException) {
             if (error.sqlState() != "23505") throw error
             throw ApiException(409, "USERNAME_TAKEN", "Username already exists")

@@ -470,10 +470,14 @@ components:
       properties:
         name:
           type: string
+          maxLength: 80
+          minLength: 0
         memberIds:
           type: array
           items:
             type: string
+          maxItems: 49
+          minItems: 1
       required:
       - memberIds
       - name
@@ -485,7 +489,9 @@ components:
         kind:
           type: string
         name:
-          type: string
+          type:
+          - string
+          - "null"
         members:
           type: array
           items:
@@ -512,6 +518,7 @@ components:
       properties:
         userId:
           type: string
+          pattern: "[0-7][0-9A-HJKMNP-TV-Z]{25}"
       required:
       - userId
     Credentials:
@@ -526,7 +533,9 @@ components:
           maxLength: 100
           minLength: 8
         deviceId:
-          type: string
+          type:
+          - string
+          - "null"
       required:
       - password
       - username
@@ -549,11 +558,17 @@ components:
         status:
           type: string
         messageId:
-          type: string
+          type:
+          - string
+          - "null"
         sequence:
-          type: string
+          type:
+          - string
+          - "null"
         reason:
-          type: string
+          type:
+          - string
+          - "null"
       required:
       - status
     HistoryView:

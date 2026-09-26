@@ -160,6 +160,7 @@ export function useMessenger(session: Session) {
       try {
         const result = await api.sendStatus(session.token, send.conversationId, send.requestId)
         if (result.status === 'saved') {
+          if (!result.messageId) throw new Error('Saved status is missing a message ID')
           updatePending(send.requestId, 'saved', { messageId: result.messageId })
           await catchUp(send.conversationId)
         } else if (result.status === 'rejected') {
@@ -316,6 +317,7 @@ export function useMessenger(session: Session) {
     try {
       const result = await api.sendStatus(session.token, send.conversationId, send.requestId)
       if (result.status === 'saved') {
+        if (!result.messageId) throw new Error('Saved status is missing a message ID')
         updatePending(requestId, 'saved', { messageId: result.messageId })
         await catchUp(send.conversationId)
       } else if (result.status === 'rejected') {

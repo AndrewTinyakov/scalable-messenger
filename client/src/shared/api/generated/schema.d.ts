@@ -191,7 +191,7 @@ export interface components {
         ConversationView: {
             id: string;
             kind: string;
-            name?: string;
+            name?: string | null;
             members: components["schemas"]["UserView"][];
             lastSequence: string;
         };
@@ -205,7 +205,7 @@ export interface components {
         Credentials: {
             username: string;
             password: string;
-            deviceId?: string;
+            deviceId?: string | null;
         };
         AuthView: {
             token: string;
@@ -214,9 +214,9 @@ export interface components {
         };
         SendStatusView: {
             status: string;
-            messageId?: string;
-            sequence?: string;
-            reason?: string;
+            messageId?: string | null;
+            sequence?: string | null;
+            reason?: string | null;
         };
         HistoryView: {
             messages: components["schemas"]["MessageView"][];

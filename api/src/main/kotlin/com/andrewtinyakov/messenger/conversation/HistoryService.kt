@@ -2,24 +2,34 @@ package com.andrewtinyakov.messenger.conversation
 
 import com.andrewtinyakov.messenger.shared.ApiException
 import com.andrewtinyakov.messenger.shared.requireId
+import io.swagger.v3.oas.annotations.media.Schema
 import org.springframework.stereotype.Service
 import java.time.OffsetDateTime
 
 data class MessageView(
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val id: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val conversationId: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val sequence: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val senderId: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val body: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val createdAt: OffsetDateTime,
 )
 
 data class HistoryView(
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val messages: List<MessageView>,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val nextSequence: String,
 )
 
 data class SendStatusView(
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val status: String,
     val messageId: String? = null,
     val sequence: String? = null,

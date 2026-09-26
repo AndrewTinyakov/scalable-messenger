@@ -1,0 +1,79 @@
+name: Verify
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.11
+          cache: npm
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 25
+          cache: gradle
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 1.26.0
+          cache-dependency-path: ws/go.sum
+      - name: Install JavaScript dependencies
+        run: |
+          npm ci
+          npm --prefix contracts ci
+          npm --prefix client ci
+      - name: Validate contracts and generated message models
+        run: |
+          npm run validate:asyncapi
+          npm run test:contracts
+          npm run generate:asyncapi:kotlin
+          npm run generate:asyncapi:go
+          git add --intent-to-add api/src/generated/asyncapi/kotlin ws/internal/generated/messaging
+          git diff --exit-code -- api/src/generated/asyncapi/kotlin ws/internal/generated/messaging
+      - name: Test API, WebSocket server, and client
+        run: |
+          ./api/gradlew -p api test ktlintCheck --no-daemon
+          go -C ws vet ./...
+          go -C ws test -race -count=1 ./...
+          npm --prefix client run typecheck
+          npm --prefix client test
+          npm --prefix client run build
+      - name: Start the prototype
+        run: |
+          docker compose -f compose.yaml -f .github/compose-ci.yaml up --build -d
+          for attempt in {1..90}; do
+            api_status="$(curl --max-time 2 --silent --output /dev/null --write-out '%{http_code}' http://localhost:8080/api/v1/auth/session || true)"
+            if [ "$api_status" = "401" ]; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose ps
+          docker compose logs --tail=100 api-1 api-2
+          exit 1
+      - name: Check generated HTTP and SQL models
+        run: |
+          npm run generate:openapi
+          ./api/gradlew -p api jooqCodegen --no-daemon
+          git add --intent-to-add contracts/openapi.yaml client/src/shared/api/generated api/src/generated/java
+          git diff --exit-code -- contracts/openapi.yaml client/src/shared/api/generated api/src/generated/java
+      - name: Run cross-process tests
+        run: npm run test:resilience
+      - name: Show logs on failure
+        if: failure()
+        run: |
+          docker compose ps --all
+          docker compose logs --no-color --tail=250
+      - name: Stop the prototype
+        if: always()
+        run: docker compose -f compose.yaml -f .github/compose-ci.yaml down --volumes

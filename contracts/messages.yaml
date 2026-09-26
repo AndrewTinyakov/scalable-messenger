@@ -38,3 +38,33 @@ messages:
     contentType: application/json
     payload:
       $ref: ./schemas/socket/frame/applied-v1.yaml
+  SocketQueuedV1:
+    name: SocketQueuedV1
+    contentType: application/json
+    payload:
+      $ref: ./schemas/socket/frame/queued-v1.yaml
+  SocketSubscribedV1:
+    name: SocketSubscribedV1
+    contentType: application/json
+    payload:
+      $ref: ./schemas/socket/frame/subscribed-v1.yaml
+  SocketMessageSavedV1:
+    name: SocketMessageSavedV1
+    contentType: application/json
+    payload:
+      $ref: ./schemas/socket/frame/message-saved-v1.yaml
+  SocketSendRejectedV1:
+    name: SocketSendRejectedV1
+    contentType: application/json
+    payload:
+      $ref: ./schemas/socket/frame/send-rejected-v1.yaml
+  SocketRecoveryFailedV1:
+    name: SocketRecoveryFailedV1
+    contentType: application/json
+    payload:
+      $ref: ./schemas/socket/frame/recovery-failed-v1.yaml
+  SocketErrorV1:
+    name: SocketErrorV1
+    contentType: application/json
+    payload:
+      $ref: ./schemas/socket/frame/error-v1.yaml

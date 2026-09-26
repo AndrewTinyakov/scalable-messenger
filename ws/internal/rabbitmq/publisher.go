@@ -5,16 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"hash/fnv"
 	"sync"
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+	"messenger/ws/internal/messaging"
 	"messenger/ws/internal/protocol"
 )
-
-const Exchange = "messenger.commands"
-const Partitions = 4
 
 var ErrUnknownOutcome = errors.New("publish outcome unknown")
 var ErrRejected = errors.New("publish rejected")
@@ -46,26 +43,29 @@ func (p *Publisher) declare() error {
 		return err
 	}
 	defer ch.Close()
-	if err := ch.ExchangeDeclare(Exchange, "direct", true, false, false, false, nil); err != nil {
+	if err := ch.ExchangeDeclare(messaging.Exchange, "direct", true, false, false, false, nil); err != nil {
 		return fmt.Errorf("declare exchange: %w", err)
 	}
-	for i := 0; i < Partitions; i++ {
-		name := fmt.Sprintf("messenger.send.%d", i)
-		args := amqp.Table{"x-queue-type": "quorum", "x-max-length": int32(10000), "x-overflow": "reject-publish"}
+	if err := ch.ExchangeDeclare(messaging.DeadExchange, "direct", true, false, false, false, nil); err != nil {
+		return fmt.Errorf("declare dead exchange: %w", err)
+	}
+	if _, err := ch.QueueDeclare(messaging.DeadQueue, true, false, false, false, amqp.Table{"x-queue-type": "quorum"}); err != nil {
+		return fmt.Errorf("declare dead queue: %w", err)
+	}
+	if err := ch.QueueBind(messaging.DeadQueue, messaging.DeadQueue, messaging.DeadExchange, false, nil); err != nil {
+		return fmt.Errorf("bind dead queue: %w", err)
+	}
+	for i := 0; i < messaging.Partitions; i++ {
+		name := messaging.QueueName(i)
+		args := amqp.Table(messaging.QueueArguments())
 		if _, err := ch.QueueDeclare(name, true, false, false, false, args); err != nil {
 			return fmt.Errorf("declare %s: %w", name, err)
 		}
-		if err := ch.QueueBind(name, name, Exchange, false, nil); err != nil {
+		if err := ch.QueueBind(name, name, messaging.Exchange, false, nil); err != nil {
 			return fmt.Errorf("bind %s: %w", name, err)
 		}
 	}
 	return nil
-}
-
-func Route(conversationID string) string {
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(conversationID))
-	return fmt.Sprintf("messenger.send.%d", h.Sum32()%Partitions)
 }
 
 func (p *Publisher) Publish(ctx context.Context, command protocol.SendCommand) error {
@@ -96,7 +96,7 @@ func (p *Publisher) Publish(ctx context.Context, command protocol.SendCommand) e
 	if err != nil {
 		return err
 	}
-	if err := ch.PublishWithContext(ctx, Exchange, Route(command.ConversationID), true, false, amqp.Publishing{ContentType: "application/json", DeliveryMode: amqp.Persistent, Body: body, MessageId: command.RequestID, Timestamp: time.Now().UTC()}); err != nil {
+	if err := ch.PublishWithContext(ctx, messaging.Exchange, messaging.Route(command.ConversationID), true, false, amqp.Publishing{ContentType: "application/json", DeliveryMode: amqp.Persistent, Body: body, MessageId: command.RequestID, Timestamp: time.Now().UTC()}); err != nil {
 		return fmt.Errorf("publish command: %w", err)
 	}
 	timer := time.NewTimer(p.confirmTimeout)

@@ -1,7 +1,6 @@
 package com.andrewtinyakov.messenger.outbox
 
 import com.andrewtinyakov.messenger.messaging.RoomEventV1
-import com.fasterxml.jackson.databind.ObjectMapper
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.data.redis.core.StringRedisTemplate
@@ -9,6 +8,7 @@ import org.springframework.data.redis.core.script.DefaultRedisScript
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 import org.springframework.transaction.support.TransactionTemplate
+import tools.jackson.databind.ObjectMapper
 import java.time.Clock
 import java.time.OffsetDateTime
 import java.util.UUID
@@ -71,7 +71,7 @@ class OutboxRelay(
     private fun claim(): List<PendingEvent> = tx.execute {
         val now = OffsetDateTime.now(clock)
         repository.claim(now, batchSize, owner, now.plusSeconds(leaseSeconds))
-    } ?: emptyList()
+    }
 
     private fun publish(row: PendingEvent) {
         val slot = "{${row.room}}"

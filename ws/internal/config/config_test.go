@@ -16,3 +16,15 @@ func TestLoadRejectsPingAfterPong(t *testing.T) {
 		t.Fatal("Load() error = nil, want invalid deadlines")
 	}
 }
+
+func TestLoadRejectsInvalidACKBounds(t *testing.T) {
+	t.Setenv("WS_PENDING_ACK_LIMIT", "0")
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() accepted zero pending ACK limit")
+	}
+	t.Setenv("WS_PENDING_ACK_LIMIT", "10")
+	t.Setenv("WS_ACK_TIMEOUT", "0s")
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() accepted zero ACK timeout")
+	}
+}

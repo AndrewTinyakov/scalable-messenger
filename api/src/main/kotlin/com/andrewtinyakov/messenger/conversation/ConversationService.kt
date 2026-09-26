@@ -4,30 +4,48 @@ import com.andrewtinyakov.messenger.auth.UserView
 import com.andrewtinyakov.messenger.shared.ApiException
 import com.andrewtinyakov.messenger.shared.newId
 import com.andrewtinyakov.messenger.shared.requireId
+import io.swagger.v3.oas.annotations.media.Schema
+import jakarta.validation.constraints.NotBlank
+import jakarta.validation.constraints.Pattern
+import jakarta.validation.constraints.Size
 import org.jooq.exception.DataAccessException
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
 
 data class ConversationView(
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val id: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val kind: String,
     val name: String?,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val members: List<UserView>,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val lastSequence: String,
 )
 
 data class DirectRequest(
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    @field:Pattern(regexp = "[0-7][0-9A-HJKMNP-TV-Z]{25}")
     val userId: String,
 )
 
 data class GroupRequest(
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    @field:NotBlank
+    @field:Size(max = 80)
     val name: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    @field:Size(min = 1, max = 49)
     val memberIds: List<String>,
 )
 
 data class AuthorizationView(
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val allowed: Boolean,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val room: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val version: Int,
 )
 
@@ -54,7 +72,7 @@ class ConversationService(
                 repository.insertDirect(created, key)
                 repository.insertMembers(created, listOf(userId, other))
                 created
-            }!!
+            }
             return detail(id, userId)
         } catch (error: DataAccessException) {
             if (error.sqlState() != "23505") throw error
@@ -77,7 +95,7 @@ class ConversationService(
             repository.insertGroup(created, name, userId)
             repository.insertMembers(created, members)
             created
-        }!!
+        }
         return detail(id, userId)
     }
 

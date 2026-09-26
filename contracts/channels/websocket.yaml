@@ -1,9 +1,21 @@
 socketFrames:
   address: /ws
   description: >-
-    Bearer session token is supplied during upgrade. One socket can subscribe
+    The opaque session token is supplied as the token query parameter during
+    upgrade. One socket can subscribe
     to authorized conversations; the authenticated user's room joins on connect.
-    Client application acknowledgement never follows from a socket write alone.
+    A client frame is limited to 32768 bytes by default. The server checks session
+    and conversation authorization on join and periodically afterward. It sends
+    ping every 25 seconds and closes a connection that misses the 60-second pong
+    deadline. Outbound queues are bounded by count and bytes; a slow client is
+    closed and must reconnect and fetch SQL history. A queued frame follows a
+    Rabbit publisher confirm; a message_saved or send_rejected frame follows the
+    committed SQL result. Client application acknowledgement never follows from
+    a socket write alone. Written message_saved frames require a cumulative
+    applied acknowledgement. The default pending window is 256 frames and the
+    default acknowledgement timeout is 30 seconds; either limit closes the socket
+    with code 4001 (recovery_required). recovery_failed requires SQL history
+    catch-up.
   messages:
     SocketSendV1:
       $ref: ../messages.yaml#/messages/SocketSendV1
@@ -11,3 +23,15 @@ socketFrames:
       $ref: ../messages.yaml#/messages/SocketSubscribeV1
     SocketAppliedV1:
       $ref: ../messages.yaml#/messages/SocketAppliedV1
+    SocketQueuedV1:
+      $ref: ../messages.yaml#/messages/SocketQueuedV1
+    SocketSubscribedV1:
+      $ref: ../messages.yaml#/messages/SocketSubscribedV1
+    SocketMessageSavedV1:
+      $ref: ../messages.yaml#/messages/SocketMessageSavedV1
+    SocketSendRejectedV1:
+      $ref: ../messages.yaml#/messages/SocketSendRejectedV1
+    SocketRecoveryFailedV1:
+      $ref: ../messages.yaml#/messages/SocketRecoveryFailedV1
+    SocketErrorV1:
+      $ref: ../messages.yaml#/messages/SocketErrorV1

@@ -3,6 +3,20 @@ server:
 spring:
   application:
     name: messenger-api
+  security:
+    user:
+      name: ${METRICS_USERNAME:metrics}
+      password: ${METRICS_PASSWORD:${random.uuid}}
+      roles: MONITORING
+  jackson:
+    deserialization:
+      accept-float-as-int: false
+      fail-on-unknown-properties: true
+      fail-on-null-for-primitives: true
+      fail-on-trailing-tokens: true
+    mapper:
+      allow-coercion-of-scalars: false
+    default-property-inclusion: non_null
   mvc:
     servlet:
       path: /api
@@ -34,7 +48,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,prometheus
 messenger:
   role: ${MESSENGER_ROLE:http}
   relay:

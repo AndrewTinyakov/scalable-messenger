@@ -4,9 +4,9 @@ import com.andrewtinyakov.messenger.generated.messaging.command.SendMessageComma
 import com.andrewtinyakov.messenger.shared.newId
 import com.andrewtinyakov.messenger.shared.requireId
 import com.andrewtinyakov.messenger.shared.sha256
-import com.fasterxml.jackson.databind.ObjectMapper
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
+import tools.jackson.databind.ObjectMapper
 import java.time.Clock
 import java.time.OffsetDateTime
 

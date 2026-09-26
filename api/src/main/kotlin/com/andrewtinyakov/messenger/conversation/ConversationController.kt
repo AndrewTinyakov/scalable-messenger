@@ -1,6 +1,7 @@
 package com.andrewtinyakov.messenger.conversation
 
 import com.andrewtinyakov.messenger.auth.AuthService
+import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
@@ -30,7 +31,7 @@ class ConversationController(
     @ResponseStatus(HttpStatus.CREATED)
     fun direct(
         @RequestHeader("Authorization", required = false) bearer: String?,
-        @RequestBody input: DirectRequest,
+        @Valid @RequestBody input: DirectRequest,
     ): ConversationView =
         conversations.direct(auth.session(bearer).userId, input)
 
@@ -38,7 +39,7 @@ class ConversationController(
     @ResponseStatus(HttpStatus.CREATED)
     fun group(
         @RequestHeader("Authorization", required = false) bearer: String?,
-        @RequestBody input: GroupRequest,
+        @Valid @RequestBody input: GroupRequest,
     ): ConversationView =
         conversations.group(auth.session(bearer).userId, input)
 

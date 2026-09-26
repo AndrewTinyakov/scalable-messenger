@@ -72,16 +72,21 @@ test('a confirmed send is saved once and reaches another socket', { timeout: 900
     body: { userId: bob.user.id },
   });
   const aliceSocket = await connect(alice.token);
+  const aliceSecondSocket = await connect(alice.token);
   const bobSocket = await connect(bob.token);
-  t.after(() => { aliceSocket.socket.close(); bobSocket.socket.close(); });
+  t.after(() => { aliceSocket.socket.close(); aliceSecondSocket.socket.close(); bobSocket.socket.close(); });
 
+  aliceSecondSocket.send({ type: 'subscribe', conversationId: conversation.id, lastAppliedSequence: '0' });
+  await aliceSecondSocket.waitFor((frame) => frame.type === 'subscribed' && frame.conversationId === conversation.id);
   bobSocket.send({ type: 'subscribe', conversationId: conversation.id, lastAppliedSequence: '0' });
   await bobSocket.waitFor((frame) => frame.type === 'subscribed' && frame.conversationId === conversation.id);
   const requestId = ulid();
   aliceSocket.send({ type: 'send', conversationId: conversation.id, requestId, body: 'A message across two nodes' });
   await aliceSocket.waitFor((frame) => frame.type === 'queued' && frame.requestId === requestId);
   const received = await bobSocket.waitFor((frame) => frame.type === 'message_saved' && frame.requestId === requestId);
+  const senderDeviceReceived = await aliceSecondSocket.waitFor((frame) => frame.type === 'message_saved' && frame.requestId === requestId);
   const event = received.event ?? received;
+  assert.equal((senderDeviceReceived.event ?? senderDeviceReceived).messageId, event.messageId);
   assert.equal(event.body, 'A message across two nodes');
   assert.equal(event.sequence, '1');
   assert.equal(event.senderId, alice.user.id);
@@ -169,6 +174,56 @@ test('a confirmed command survives a stopped worker', {
   assert.equal(finalStatus.status, 'saved');
 });
 
+test('a queued sender can recover a rejection after group removal', {
+  skip: process.env.MESSENGER_RESILIENCE !== '1',
+  timeout: 90000,
+}, async (t) => {
+  const suffix = randomBytes(5).toString('hex');
+  const owner = await api('/auth/register', { method: 'POST', body: { username: `revoke_owner_${suffix}`, password: 'long-demo-password' } });
+  const member = await api('/auth/register', { method: 'POST', body: { username: `revoke_sender_${suffix}`, password: 'long-demo-password' } });
+  const group = await api('/conversations/groups', {
+    token: owner.token, method: 'POST', body: { name: 'Revocation test', memberIds: [member.user.id] },
+  });
+  const socket = await connect(member.token);
+  t.after(() => socket.socket.close());
+  socket.send({ type: 'subscribe', conversationId: group.id, lastAppliedSequence: '0' });
+  await socket.waitFor((frame) => frame.type === 'subscribed' && frame.conversationId === group.id);
+
+  execFileSync('docker', ['compose', 'stop', 'command-worker'], { stdio: 'pipe' });
+  t.after(() => execFileSync('docker', ['compose', 'up', '-d', '--no-deps', 'command-worker'], { stdio: 'pipe' }));
+  const requestId = ulid();
+  socket.send({ type: 'send', conversationId: group.id, requestId, body: 'Queued before removal' });
+  await socket.waitFor((frame) => frame.type === 'queued' && frame.requestId === requestId);
+  await api(`/conversations/${group.id}/members/${member.user.id}`, {
+    token: owner.token, method: 'DELETE',
+  });
+  execFileSync('docker', ['compose', 'up', '-d', '--no-deps', 'command-worker'], { stdio: 'pipe' });
+
+  let finalStatus;
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const response = await fetch(`${base}/api/v1/conversations/${group.id}/send-status/${requestId}`, {
+      headers: { authorization: `Bearer ${member.token}` },
+    });
+    if (response.status === 404) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      continue;
+    }
+    assert.equal(response.status, 200);
+    finalStatus = await response.json();
+    if (finalStatus.status === 'rejected') break;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  assert.ok(finalStatus, 'queued request did not reach a durable result');
+  assert.equal(finalStatus.status, 'rejected');
+  assert.equal(finalStatus.reason, 'NOT_A_MEMBER');
+  const unknownResponse = await fetch(`${base}/api/v1/conversations/${group.id}/send-status/${ulid()}`, {
+    headers: { authorization: `Bearer ${member.token}` },
+  });
+  assert.equal(unknownResponse.status, 404);
+  const history = await api(`/conversations/${group.id}/messages?afterSeq=0`, { token: owner.token });
+  assert.deepEqual(history.messages, []);
+});
+
 test('SQL history remains available while Redis is down', {
   skip: process.env.MESSENGER_RESILIENCE !== '1',
   timeout: 90000,
@@ -200,4 +255,42 @@ test('SQL history remains available while Redis is down', {
   assert.deepEqual(history.messages.map((message) => message.body), ['Recover through SQL']);
   assert.equal(recipientSocket.socket.readyState, WebSocket.OPEN);
   await recipientSocket.waitFor((frame) => frame.type === 'recovery_failed' && frame.conversationId === conversation.id, 15000);
+});
+
+test('a trimmed Redis cursor forces SQL catch-up', {
+  skip: process.env.MESSENGER_RESILIENCE !== '1',
+  timeout: 90000,
+}, async (t) => {
+  const suffix = randomBytes(5).toString('hex');
+  const sender = await api('/auth/register', { method: 'POST', body: { username: `trim_sender_${suffix}`, password: 'long-demo-password' } });
+  const recipient = await api('/auth/register', { method: 'POST', body: { username: `trim_reader_${suffix}`, password: 'long-demo-password' } });
+  const conversation = await api('/conversations/direct', {
+    token: sender.token, method: 'POST', body: { userId: recipient.user.id },
+  });
+  const senderSocket = await connect(sender.token);
+  const recipientSocket = await connect(recipient.token);
+  t.after(() => { senderSocket.socket.close(); recipientSocket.socket.close(); });
+  recipientSocket.send({ type: 'subscribe', conversationId: conversation.id, lastAppliedSequence: '0' });
+  await recipientSocket.waitFor((frame) => frame.type === 'subscribed' && frame.conversationId === conversation.id);
+
+  const requestId = ulid();
+  senderSocket.send({ type: 'send', conversationId: conversation.id, requestId, body: 'Before stream trim' });
+  const received = await recipientSocket.waitFor((frame) => frame.type === 'message_saved' && frame.requestId === requestId);
+  const saved = received.event ?? received;
+  assert.ok(saved.epoch && saved.streamId && saved.room);
+  execFileSync('docker', ['compose', 'exec', '-T', 'redis', 'redis-cli',
+    'XTRIM', `messenger:{${saved.room}}:stream`, 'MAXLEN', '0'], { stdio: 'pipe' });
+
+  const resumed = await connect(recipient.token);
+  t.after(() => resumed.socket.close());
+  resumed.send({
+    type: 'subscribe',
+    conversationId: conversation.id,
+    epoch: saved.epoch,
+    streamId: saved.streamId,
+    lastAppliedSequence: saved.sequence,
+  });
+  await resumed.waitFor((frame) => frame.type === 'recovery_failed' && frame.conversationId === conversation.id);
+  const history = await api(`/conversations/${conversation.id}/messages?afterSeq=0`, { token: recipient.token });
+  assert.deepEqual(history.messages.map((message) => message.body), ['Before stream trim']);
 });

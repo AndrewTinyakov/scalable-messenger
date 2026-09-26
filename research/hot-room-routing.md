@@ -1,0 +1,75 @@
+# Routing many chat rooms and one very large room
+
+This note uses first-party documentation and engineering posts. The concrete room-pool scheduler below is a proposed design, not a description of Twitch's internal architecture.
+
+## Correct the subscription-count premise
+
+`100,000` rooms in the product do **not** imply `100,000` Redis subscriptions on every gateway. A gateway subscribes when it has at least one local listener in a room and unsubscribes after the last one leaves. If 100,000 rooms are active and each has listeners on two gateways on average, there are about 200,000 room–gateway interests **across the fleet**. On 20 balanced gateways that is about 10,000 interests per gateway. This is an example, not a capacity claim. Centrifugo explicitly uses subscriptions for channels its local clients need and describes production deployments with millions of active channels and hundreds of subscriber nodes. [Centrifugo Redis scaling](https://centrifugal.dev/blog/2026/06/29/scaling-redis-pub-sub), [Centrifugo engines](https://centrifugal.dev/docs/server/engines).
+
+One Redis connection can subscribe to many channels. Channel count, Pub/Sub connection count, subscription churn, Redis CPU, inter-node traffic, and gateway socket writes are different limits. Redis `PUBLISH` has documented cost `O(N+M)`, where `N` is subscribers to that channel and `M` is all pattern subscriptions. Centrifugo batches subscriptions and, for Redis Cluster sharded Pub/Sub, groups channels into application partitions to reuse connections; the partitioning **does not remove per-channel interests**. [Redis PUBLISH](https://redis.io/docs/latest/commands/publish/), [Centrifugo Redis scaling](https://centrifugal.dev/blog/2026/06/29/scaling-redis-pub-sub).
+
+RabbitMQ's equivalent is one gateway queue with bindings for rooms that gateway currently hosts. Large or rapidly changing binding sets consume metadata and can cost routing time. RabbitMQ warns that transient binding removal and re-addition can cause inconsistent routing during node recovery. Avoid a queue per socket. [RabbitMQ exchanges and bindings](https://www.rabbitmq.com/docs/exchanges), [RabbitMQ memory](https://www.rabbitmq.com/docs/memory-use).
+
+## If room-level interests become expensive
+
+These options exchange routing precision for less subscription state. Measure before choosing one.
+
+| Scheme | Broker state | Cost paid elsewhere |
+| --- | --- | --- |
+| Exact room subscriptions or bindings | One interest per active room–gateway pair | Least unnecessary delivery. Join/leave churn and broker metadata remain. This is the sensible messenger baseline. |
+| Fixed hash buckets, `bucket = hash(roomId) % B` | At most `B` bucket names, subscribed to by gateways with local rooms in each bucket | Gateway receives events for other rooms in the same bucket and filters against its local membership. Tune `B` against churn and wasted messages. This is a proposed design, not a broker feature. |
+| One inbox per gateway plus a room coordinator | Fixed inboxes, and coordinator keeps the interested gateway set | No per-room broker bindings, but the interest set still exists in coordinator memory. Frontends register on first local join and unregister on last leave. Publisher routes to the room coordinator, which sends one event to each interested gateway. Ably documents this form of channel processor and frontend interest map. [Ably architecture](https://ably.com/docs/platform/architecture/platform-scalability). |
+| One inbox per gateway plus external `room → gateways` directory | Fixed inboxes | Publisher performs a lookup or uses a cache; leases, stale entries, and join/leave races must be handled. Usually more moving parts than the coordinator or broker binding approach. |
+
+The [Socket.IO sharded Redis adapter](https://socket.io/docs/v4/redis-adapter/) shows the same choice: `static` uses two Pub/Sub channels per namespace, `dynamic` adds a channel per public room, and `dynamic-private` adds one per room, including private ones. Static reduces channel state but sends more packets to uninterested Socket.IO servers. Do not confuse Redis **sharded Pub/Sub** with bucketed application rooms. Sharded Pub/Sub limits which Redis shard carries a channel; it does not by itself reduce the number of logical channel subscriptions. [Redis Pub/Sub](https://redis.io/docs/latest/develop/pubsub/), [Centrifugo Redis scaling](https://centrifugal.dev/blog/2026/06/29/scaling-redis-pub-sub).
+
+Pattern subscriptions such as `chat:*` are not a free replacement for exact interests: Redis evaluates patterns on publish, and broad patterns deliver messages the gateway may discard. A per-gateway directory is also unnecessary when broker subscriptions already embody the interest map. [Redis PUBLISH](https://redis.io/docs/latest/commands/publish/), [RabbitMQ exchanges](https://www.rabbitmq.com/docs/exchanges).
+
+## A Twitch-like room
+
+The established pattern is **separate room processing from connection delivery**. Ably consistently hashes channels onto processors, then sends each publication to frontends with subscribers; each frontend fans out locally. The processor tracks which frontends have subscribers. Discord describes a guild process that routes events to session processes and, for large guilds, relays that split fanout across machines. These are first-party examples of a large logical room spanning many delivery workers. They do **not** prove that Twitch uses this exact architecture. [Ably architecture](https://ably.com/docs/platform/architecture/platform-scalability), [Discord large guilds](https://discord.com/blog/maxjourney-pushing-discords-limits-with-a-million-plus-online-users-in-a-single-server).
+
+Ably says its load balancer can send a new client connection to any frontend, using random allocation and current load. Its consistent hash places the **channel processor**, not all clients in that channel. A frontend tells the processor when it gains a subscriber. The processor keeps the set of interested frontends and sends each channel message only to them; each frontend writes to local subscribers. Ably also says that one very high-rate channel can saturate its processor. The documentation does not claim to place a hot channel's viewers on a chosen frontend subset. [Ably architecture](https://ably.com/docs/platform/architecture/platform-scalability).
+
+For a project, implement a room coordinator plus an elastic pool of delivery gateways:
+
+```text
+client publish → authenticated chat/API processor → durable message + room sequence
+                                                → room coordinator
+                                                → gateways with viewers of this room
+                                                → local WebSocket viewers
+```
+
+The coordinator can be found by deterministic hash of the room ID, so a publisher needs no external `room → gateway IDs` query. The coordinator still maintains an in-memory set of interested gateway IDs, with leases or heartbeats. A gateway registers when its first viewer joins and removes itself after the last leaves. The broker can hold this routing state instead through exact room subscriptions. There is no way to route only to interested nodes while keeping neither an interest map nor deterministic placement information somewhere; broad delivery is the remaining choice. Ably documents the coordinator interest map. [Ably architecture](https://ably.com/docs/platform/architecture/platform-scalability).
+
+### Constrain a hot room to a dynamic gateway set
+
+This placement policy helps when a large room could fit on a minority of the gateway fleet. If the entire fleet serves only that one giant room, nearly every gateway is required, so the policy saves no broker copies. To show a real choice in the teaching project, simulate many channels with a skewed audience and one hot channel. A viewer's socket should watch one channel at a time; sockets that subscribe to many unrelated channels cannot be placed near all of them.
+
+Three concrete placements are worth comparing:
+
+| Placement | Handshake route | Strength | Cost |
+| --- | --- | --- | --- |
+| Normal balancing, like Ably's documented frontend approach | Any healthy gateway with spare capacity | No room-aware ingress or placement controller; gateways scale as a fleet | A hot room may occupy every gateway, so its processor must send each message to every gateway with viewers |
+| Hash room ID to a pool; balance within the pool | L7 selects a room pool, then its least-loaded gateway | No per-room gateway list; the pool can autoscale | A hot room scales its entire pool; changing pool membership or moving a room needs care, and other rooms in that pool share its load |
+| Assign an elastic gateway set per hot room | L7 reads a cached room assignment, then selects a healthy gateway with spare capacity | Can match one hot room's gateway count to measured demand | Needs a controller, placement state, and safe transitions |
+
+For an elastic assignment, keep two sets distinct. `eligible(room)` contains gateways that may accept **new** viewer connections. `active(room)` contains gateways that **currently have** viewers and must receive every publication. The sets differ while a gateway drains or after the controller adds capacity. Gateways register with the room processor when their first local viewer joins, renew an interest lease, and unregister after the last leaves. A crashed gateway's lease expires. The processor fans out to `active(room)`, never merely to `eligible(room)`.
+
+The placement controller collects per-gateway health, active connections, outbound bytes per second, fanout write rate, CPU, and outbound queue lag. A useful capacity estimate for a room with `R` viewers and `M` messages per second is `max(ceil(R / safe_connection_capacity), ceil(R × M / safe_write_capacity))`, with extra capacity for one gateway failure. These capacities come from load tests, not a universal WebSocket limit. The controller adds an eligible gateway when the room exceeds its target, then sends new viewers there. It removes a gateway from the eligible set before draining it. Hysteresis prevents a room from changing size after every small traffic shift. Cluster autoscaling must start healthy gateways before the room assignment can use them.
+
+The L7 ingress reads a normalized room ID from the handshake URL, such as `/chat/channels/abc`. It uses a local cached copy of the assignment and picks a healthy eligible gateway by available connection and outbound capacity. It forwards the WebSocket upgrade and then proxies bytes for the life of that connection. The gateway still authenticates the user and checks permission to join `abc`; a URL is routing input, not proof of access. A simpler implementation is an HTTP discovery endpoint that returns a short-lived, signed gateway address, followed by a direct WebSocket connection. That saves a long-lived proxy hop but adds a client round trip and reconnect logic. [NGINX WebSocket proxying](https://nginx.org/en/docs/http/websocket.html).
+
+Hashing alone does not provide dynamic capacity. `hash(roomId)` selects one node, which recreates the Kanban limit. Hashing `roomId` to a pool works if the pool itself can grow. A top-`K` rendezvous hash can select gateway candidates, but `K`, topology changes, and old live connections still require shared control state. Neither the placement assignment nor the current membership set needs a database lookup for every published message; the room processor can hold membership in memory, as Ably describes. [Ably architecture](https://ably.com/docs/platform/architecture/platform-scalability).
+
+You can deliberately place a large room's viewers on a subset of gateways, instead of scattering them across the entire fleet. This is a proposed placement policy built on the documented two-tier fanout pattern. A room scheduler tracks load and assigns a set `S(room)` of delivery gateways. An L7 handshake router reads a trustworthy room ID, verifies access, then chooses a gateway in `S(room)` with spare capacity. The set grows and shrinks based on connection count, outbound bytes/sec, event rate, event-loop or CPU pressure, and headroom for failure. It is **not** a fixed two- or three-node allocation.
+
+As a gateway is added, new viewers connect there. Established WebSockets stay on their old gateways; scaling out does not move them automatically. If active rebalancing is needed, drain selected old viewers and let them reconnect with jitter and resume from a durable message sequence. On scale-in, stop new handshakes to the retiring gateway, keep delivering to it until its last local viewer leaves, then remove it from the interested set. Publish to both old and new gateways while both hold viewers. Version the assignment and account for a register/publish race with a snapshot or sequence replay. Redis Pub/Sub itself offers at-most-once live delivery, so it cannot provide that replay. [Redis Pub/Sub](https://redis.io/docs/latest/develop/pubsub/), [Ably architecture](https://ably.com/docs/platform/architecture/platform-scalability).
+
+This policy reduces broker deliveries only when it reduces the number `K` of gateways holding room viewers. If a room occupies 5 of 100 gateways, a publication needs 5 gateway deliveries, not 100. If a normal interested-node broker already sees viewers on only 5 gateways, the policy saves no additional broker deliveries. It adds routing and rebalancing complexity. In either case, `R` viewers receiving `M` messages per second still require roughly `R × M` client deliveries before batching, filtering, or reduced update frequency. Discord's large-guild post quantifies this multiplication and describes sending fewer updates to passive sessions. [Discord large guilds](https://discord.com/blog/maxjourney-pushing-discords-limits-with-a-million-plus-online-users-in-a-single-server).
+
+The single room coordinator can itself become the bottleneck when publishers and messages are very hot. Ably notes that very high message rates on one channel can hit the processing capacity of its one channel processor. A chat system may then partition work by subchannel, separate publishers from delivery, or reduce event frequency, but must define how messages retain a useful room order. [Ably architecture](https://ably.com/docs/platform/architecture/platform-scalability).
+
+## Recommendation for the projects
+
+Use exact active-room subscriptions and local fanout for the Messenger workload. Measure active room–gateway pairs, bind/unbind rate, broker CPU, broker publish-to-gateway lag, unnecessary deliveries, and gateway outbound bandwidth. A bucket or coordinator is an alternative design when room subscription overhead dominates. For the giant-room demo, compare normal connection balancing plus interested-node fanout against elastic room-aware placement at the **same viewer and message load**. These are peer designs, not early and late product stages. The comparison must include recovery and rebalancing cost, not just broker message count.

@@ -1,0 +1,12 @@
+{
+  "name": "@messenger/client",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "dependencies": {
+    "@messenger/contracts": "*",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "lucide-react": "^1.48.0"
+  }
+}

@@ -1,0 +1,50 @@
+x-application: &application
+  build:
+    context: .
+    target: application
+  environment: &environment
+    DATABASE_URL: postgres://messenger:messenger@postgres:5432/messenger
+    RABBIT_URL: amqp://guest:guest@rabbitmq:5672
+    REDIS_URL: redis://redis:6379
+    APP_ORIGIN: http://localhost:8080
+  restart: unless-stopped
+  depends_on:
+    postgres: { condition: service_healthy }
+    rabbitmq: { condition: service_healthy }
+    redis: { condition: service_healthy }
+services:
+  migrate:
+    <<: *application
+    command: npm run db:migrate
+    restart: "no"
+  api:
+    <<: *application
+    command: npm run start:api
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+  gateway:
+    <<: *application
+    command: npm run start:gateway
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+  gateway-two:
+    <<: *application
+    command: npm run start:gateway
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+  worker:
+    <<: *application
+    command: npm run start:worker
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+  relay:
+    <<: *application
+    command: npm run start:relay
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+  web:
+    build:
+      context: .
+      target: web
+    ports: ["127.0.0.1:8080:80"]
+    depends_on: [api, gateway, gateway-two]

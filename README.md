@@ -38,7 +38,7 @@ docker compose -f compose.yml -f compose.app.yml up -d --build
 docker compose -f compose.yml -f compose.app.yml exec api-gateway npm run db:seed
 ```
 
-Open http://localhost:8080. nginx balances HTTP requests over all three `api-gateway` instances and WebSocket upgrades over all three `ws-gateway` instances. Sessions live in PostgreSQL and rate limits in Redis, so the proxy needs no sticky sessions. DNS refresh follows replica replacements.
+Open http://localhost:8080. nginx balances HTTP requests over all three `api-gateway` instances and WebSocket upgrades over all three `ws-gateway` instances. Sessions live in PostgreSQL and rate limits in Redis, so the proxy needs no sticky sessions. DNS refresh follows replica replacements. The proxy starts only after gateway health checks pass. During replica replacement, DNS and upstream failure tracking can briefly produce retryable HTTP errors; socket clients reconnect and recover saved history.
 
 ```sh
 npm run cluster:up
@@ -46,7 +46,7 @@ npm run test:cluster
 CLUSTER_FAILURE_DRILL=1 npm run test:cluster
 ```
 
-The cluster check requires three distinct API instance IDs and three distinct WS instance IDs. It checks cross-instance live group messages, the sender's second socket, duplicate request handling, and SQL history. The optional failure drill stops one API container and one recipient WS container, checks continued sending and reconnect/catch-up on the surviving replicas, then restarts both containers even if an assertion fails. It only stops containers with the expected Messenger Compose labels. Use `CLUSTER_URL` to target a different base URL; the stop drill is for this local Docker project.
+The cluster check requires three distinct API instance IDs and three distinct WS instance IDs. It checks cross-instance live group messages, the sender's second socket, duplicate request handling, and SQL history. The optional failure drill stops one API container and one recipient WS container, checks continued sending and reconnect/catch-up on the surviving replicas, then restarts both containers even if an assertion fails and waits for them to become healthy. It only stops containers with the expected Messenger Compose labels. Use `CLUSTER_URL` to target a different base URL; the stop drill is for this local Docker project.
 
 For another local size, run `docker compose -f compose.yml -f compose.app.yml up -d --scale api-gateway=5 --scale ws-gateway=5`. The check requires at least three instances. `npm run cluster:down` stops the complete stack without removing database volumes.
 

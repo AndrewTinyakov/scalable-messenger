@@ -273,6 +273,23 @@ async function failureDrill(input: {
       throw new Error(
         `Failed to restart ${failures.length} stopped container(s): ${failures.map((result) => String(result.status === "rejected" ? result.reason : "")).join(", ")}`,
       );
+    await Promise.all(
+      stopped.map(async (id) => {
+        const deadline = Date.now() + 15_000;
+        while (Date.now() < deadline) {
+          const { stdout } = await execFileAsync(
+            "docker",
+            ["inspect", "--format", "{{.State.Health.Status}}", id],
+            { timeout: 5_000 },
+          );
+          if (stdout.trim() === "healthy") return;
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+        throw new Error(
+          `Restarted replica ${id.slice(0, 12)} did not become healthy`,
+        );
+      }),
+    );
   }
 }
 
@@ -350,6 +367,8 @@ async function main(): Promise<void> {
     if (data.service !== "api-gateway")
       throw new Error(`Unexpected API health service: ${String(data.service)}`);
     apiInstances.add(field(data, "instanceId"));
+    if (apiInstances.size < 3)
+      await new Promise((resolve) => setTimeout(resolve, 100));
   }
   if (apiInstances.size < 3)
     throw new Error(

@@ -17,3 +17,5 @@ The local stack has one RabbitMQ node and one Redis node. Replicated broker fail
 Initial findings: Standards 3, Spec 3. The code defects and module concern were addressed. The remaining Spec limitation is replicated broker failover and capacity validation.
 
 Final local checks: 20 tests passed across seven files; strict typechecking, Vite production build, Prettier, Docker image builds, and the six-replica acceptance check passed. Desktop browser sends and a 390px iframe viewport were checked with the shared preview.
+
+A repeated replica drill exposed a short proxy recovery window and a test cleanup race. The proxy now waits for gateway readiness, refreshes Docker DNS every second, and uses bounded upstream failure timers. Drill cleanup waits for restarted containers to become healthy. Five consecutive API/WS replica-stop drills passed afterward. Brief retryable HTTP errors during routing convergence are possible; the result establishes recovery, not uninterrupted responses or a production availability guarantee.

@@ -98,6 +98,7 @@ export type ClientFrame = z.infer<typeof clientFrameSchema>;
 export const serverFrameSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("ready"),
+    instanceId: z.string(),
     user: userSchema,
     deviceId: idSchema,
     rooms: z.array(z.string()),

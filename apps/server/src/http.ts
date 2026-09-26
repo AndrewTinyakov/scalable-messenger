@@ -1,7 +1,9 @@
+import { hostname } from "node:os";
 import Fastify from "fastify";
 import cookie from "@fastify/cookie";
 import { ZodError } from "zod";
 import type { Store } from "./db/index.js";
+export const instanceId = `${hostname()}:${process.pid}`;
 export const sessionCookie = "messenger_session";
 export function httpError(statusCode: number, message: string) {
   return Object.assign(new Error(message), { statusCode });
@@ -21,12 +23,10 @@ export function createHttp(options: { origin: string; production: boolean }) {
   });
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof ZodError)
-      return reply
-        .code(400)
-        .send({
-          error: "Invalid request",
-          details: error.issues.map((issue) => issue.message),
-        });
+      return reply.code(400).send({
+        error: "Invalid request",
+        details: error.issues.map((issue) => issue.message),
+      });
     const status =
       error instanceof Error &&
       "statusCode" in error &&
@@ -34,16 +34,14 @@ export function createHttp(options: { origin: string; production: boolean }) {
         ? error.statusCode
         : 500;
     if (status >= 500) request.log.error(error);
-    return reply
-      .code(status)
-      .send({
-        error:
-          status >= 500
-            ? "Service temporarily unavailable"
-            : error instanceof Error
-              ? error.message
-              : "Request failed",
-      });
+    return reply.code(status).send({
+      error:
+        status >= 500
+          ? "Service temporarily unavailable"
+          : error instanceof Error
+            ? error.message
+            : "Request failed",
+    });
   });
   return app;
 }

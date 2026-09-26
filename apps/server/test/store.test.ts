@@ -1,17 +1,12 @@
 import { afterAll, beforeAll, expect, test } from "vitest";
-import { Pool } from "pg";
-import { Store } from "../src/db/index.js";
+import { createTestDatabase } from "./database.js";
 
-const pool = new Pool({
-  connectionString:
-    process.env.DATABASE_URL ??
-    "postgres://messenger:messenger@localhost:55432/messenger",
-});
-const store = new Store(pool);
+const database = createTestDatabase();
+const store = database.store;
 const suffix = Date.now().toString(36);
 
-beforeAll(() => store.migrate());
-afterAll(() => pool.end());
+beforeAll(() => database.start());
+afterAll(() => database.close());
 
 test("a confirmed command has one durable result and one conversation sequence across retries", async () => {
   const alice = (
@@ -204,4 +199,98 @@ test("outbox metrics expose pending and failed publication work", async () => {
   expect(retried.some((row) => row.id === event.id)).toBe(true);
   for (const row of retried)
     await store.completeOutbox(`test-relay-${suffix}`, row.id);
+});
+
+test("failed session creation does not consume a username", async () => {
+  const username = `retry_${suffix}`;
+  await database.pool
+    .query(`CREATE FUNCTION reject_test_session() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN RAISE EXCEPTION 'injected session failure'; END $$`);
+  await database.pool
+    .query(`CREATE TRIGGER reject_test_session BEFORE INSERT ON sessions
+    FOR EACH ROW EXECUTE FUNCTION reject_test_session()`);
+  try {
+    await expect(
+      store.register({
+        username,
+        name: "Retry User",
+        password: "test-password",
+        deviceId: "phone",
+      }),
+    ).rejects.toThrow("injected session failure");
+  } finally {
+    await database.pool.query("DROP TRIGGER reject_test_session ON sessions");
+    await database.pool.query("DROP FUNCTION reject_test_session()");
+  }
+  const created = await store.register({
+    username,
+    name: "Retry User",
+    password: "test-password",
+    deviceId: "phone",
+  });
+  expect(await store.session(created.token)).toEqual(created.session);
+});
+
+test("permanent message constraint failure records rejection without consuming sequence", async () => {
+  const alice = (
+    await store.register({
+      username: `constraint_${suffix}`,
+      name: "Constraint Alice",
+      password: "test-password",
+      deviceId: "phone",
+    })
+  ).session.user;
+  const bob = (
+    await store.register({
+      username: `constraint_peer_${suffix}`,
+      name: "Constraint Bob",
+      password: "test-password",
+      deviceId: "phone",
+    })
+  ).session.user;
+  const conversation = await store.createConversation(alice.id, {
+    kind: "direct",
+    memberIds: [bob.id],
+  });
+  await database.pool
+    .query(`CREATE FUNCTION reject_test_message() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN RAISE EXCEPTION 'injected message constraint' USING ERRCODE = '23514'; END $$`);
+  await database.pool
+    .query(`CREATE TRIGGER reject_test_message BEFORE INSERT ON messages
+    FOR EACH ROW EXECUTE FUNCTION reject_test_message()`);
+  const command = {
+    conversationId: conversation.id,
+    senderId: alice.id,
+    deviceId: "phone",
+    requestId: `failed_${suffix}`,
+    body: "Rejected by storage",
+  };
+  try {
+    expect(await store.processCommand(command)).toEqual({
+      status: "rejected",
+      reason: "storage_validation_failed",
+    });
+    expect(
+      await store.sendStatus(alice.id, conversation.id, command.requestId),
+    ).toEqual({ status: "rejected", reason: "storage_validation_failed" });
+    expect(
+      (await store.history(bob.id, conversation.id, 0, 20)).messages,
+    ).toEqual([]);
+  } finally {
+    await database.pool.query("DROP TRIGGER reject_test_message ON messages");
+    await database.pool.query("DROP FUNCTION reject_test_message()");
+  }
+  expect(await store.processCommand(command)).toEqual({
+    status: "rejected",
+    reason: "storage_validation_failed",
+  });
+  const next = await store.processCommand({
+    ...command,
+    requestId: `after_failed_${suffix}`,
+    body: "Accepted after failure",
+  });
+  expect(next).toMatchObject({
+    status: "saved",
+    message: { sequence: 1, body: "Accepted after failure" },
+  });
 });

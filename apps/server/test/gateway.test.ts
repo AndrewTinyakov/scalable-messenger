@@ -1,24 +1,22 @@
+import amqp from "amqplib";
 import { beforeAll, afterAll, test, expect } from "vitest";
-import { Pool } from "pg";
 import { randomUUID } from "node:crypto";
 import WebSocket from "ws";
+import Redis from "ioredis";
 import { serverFrameSchema, type ServerFrame } from "@messenger/contracts";
-import { Store } from "../src/db/index.js";
+import { createTestDatabase } from "./database.js";
 import { CommandBroker, RedisRooms } from "../src/brokers/index.js";
 import { createGateway } from "../src/gateway.js";
 import { config } from "../src/config.js";
-const pool = new Pool({ connectionString: config.databaseUrl });
-const store = new Store(pool);
+const queuePrefix = `messenger.test.gateway.${randomUUID()}.`;
+const database = createTestDatabase();
+const store = database.store;
 let broker: CommandBroker,
   rooms: RedisRooms,
   app: ReturnType<typeof createGateway>;
 beforeAll(async () => {
-  await store.migrate();
-  broker = await CommandBroker.connect(
-    config.rabbitUrl,
-    1,
-    `messenger.test.gateway.${randomUUID()}.`,
-  );
+  await database.start();
+  broker = await CommandBroker.connect(config.rabbitUrl, 1, queuePrefix);
   rooms = await RedisRooms.connect(config.redisUrl);
   app = createGateway(store, broker, rooms, {
     origin: config.origin,
@@ -29,8 +27,13 @@ beforeAll(async () => {
 afterAll(async () => {
   await app.close();
   await broker.close();
+  const cleanup = await amqp.connect(config.rabbitUrl);
+  const channel = await cleanup.createChannel();
+  await channel.deleteQueue(`${queuePrefix}0`);
+  await channel.deleteQueue(`${queuePrefix}quarantine`);
+  await cleanup.close();
   await rooms.close();
-  await pool.end();
+  await database.close();
 });
 test("a socket authenticates, receives a confirmed queued state, and replays a saved room event", async () => {
   const account = await store.register({
@@ -112,3 +115,78 @@ test("a socket authenticates, receives a confirmed queued state, and replays a s
     socket.terminate();
   }
 });
+
+test("a quiet socket receives a missed final room event from the periodic position check", async () => {
+  const account = await store.register({
+    username: `ws${randomUUID().replaceAll("-", "").slice(0, 16)}`,
+    password: "password123",
+    name: "Position tester",
+    deviceId: randomUUID(),
+  });
+  const room = `user:${account.session.user.id}`;
+  const address = app.server.address();
+  if (!address || typeof address === "string") throw new Error("No address");
+  const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`, {
+    headers: {
+      cookie: `messenger_session=${account.token}`,
+      origin: config.origin,
+    },
+  });
+  const redis = new Redis(config.redisUrl);
+  const frames: ServerFrame[] = [];
+  socket.on("message", (data) =>
+    frames.push(serverFrameSchema.parse(JSON.parse(data.toString()))),
+  );
+  const wait = async (
+    predicate: (frame: ServerFrame) => boolean,
+    timeout = 5_000,
+  ) => {
+    await expect
+      .poll(() => frames.some(predicate), { timeout, interval: 100 })
+      .toBe(true);
+  };
+  const conversationId = randomUUID();
+  const event = (body: string) => ({
+    type: "message" as const,
+    eventId: randomUUID(),
+    message: {
+      id: randomUUID(),
+      conversationId,
+      sequence: body === "first" ? 1 : 2,
+      senderId: account.session.user.id,
+      requestId: randomUUID(),
+      body,
+      createdAt: new Date().toISOString(),
+    },
+  });
+  try {
+    await wait((frame) => frame.type === "ready");
+    socket.send(JSON.stringify({ type: "subscribe", room }));
+    await wait((frame) => frame.type === "subscribed" && frame.room === room);
+    const first = await rooms.publish(room, event("first"));
+    await wait(
+      (frame) =>
+        frame.type === "event" &&
+        frame.publication.event.eventId === first.event.eventId,
+    );
+
+    // The history advances while sharded Pub/Sub stays silent: a lost final live event.
+    const second = event("second");
+    await redis.xadd(
+      `room:{${room}}:events`,
+      "*",
+      "event",
+      JSON.stringify(second),
+    );
+    await wait(
+      (frame) =>
+        frame.type === "event" &&
+        frame.publication.event.eventId === second.eventId,
+      20_000,
+    );
+  } finally {
+    socket.terminate();
+    await redis.del(`room:{${room}}:events`, `room:{${room}}:epoch`);
+    await redis.quit();
+  }
+}, 25_000);

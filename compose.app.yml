@@ -2,7 +2,7 @@ x-application: &application
   build:
     context: .
     target: application
-  environment: &environment
+  environment:
     DATABASE_URL: postgres://messenger:messenger@postgres:5432/messenger
     RABBIT_URL: amqp://guest:guest@rabbitmq:5672
     REDIS_URL: redis://redis:6379
@@ -17,19 +17,16 @@ services:
     <<: *application
     command: npm run db:migrate
     restart: "no"
-  api:
+  api-gateway:
     <<: *application
-    command: npm run start:api
+    command: npm run start:api-gateway
+    deploy: { replicas: 3 }
     depends_on:
       migrate: { condition: service_completed_successfully }
-  gateway:
+  ws-gateway:
     <<: *application
-    command: npm run start:gateway
-    depends_on:
-      migrate: { condition: service_completed_successfully }
-  gateway-two:
-    <<: *application
-    command: npm run start:gateway
+    command: npm run start:ws-gateway
+    deploy: { replicas: 3 }
     depends_on:
       migrate: { condition: service_completed_successfully }
   worker:
@@ -47,4 +44,4 @@ services:
       context: .
       target: web
     ports: ["127.0.0.1:8080:80"]
-    depends_on: [api, gateway, gateway-two]
+    depends_on: [api-gateway, ws-gateway]

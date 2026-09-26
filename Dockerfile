@@ -7,7 +7,7 @@ COPY packages/contracts/package.json packages/contracts/package.json
 RUN npm ci
 COPY . .
 RUN npm run build
-CMD ["npm", "run", "start:api"]
+CMD ["npm", "run", "start:api-gateway"]
 
 FROM nginx:alpine AS web
 COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf

@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 const tasks = [
-  "start:api",
-  "start:gateway",
+  "start:api-gateway",
+  "start:ws-gateway",
   "start:worker",
   "start:relay",
   "dev:client",

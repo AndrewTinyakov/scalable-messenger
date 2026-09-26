@@ -10,7 +10,12 @@ import {
 } from "@messenger/contracts";
 import type { Store } from "./db/index.js";
 import type { CommandBroker, RedisRooms } from "./brokers/index.js";
-import { createHttp, requireSession, sessionCookie } from "./http.js";
+import {
+  instanceId,
+  createHttp,
+  requireSession,
+  sessionCookie,
+} from "./http.js";
 type Listener = {
   socket: WebSocket;
   session: Session;
@@ -151,7 +156,8 @@ export function createGateway(
   }
   app.get("/health", async () => ({
     status: "ok",
-    service: "gateway",
+    service: "ws-gateway",
+    instanceId,
     sockets: clients.size,
     rooms: liveRooms.size,
   }));
@@ -188,6 +194,7 @@ export function createGateway(
           client.session = await requireSession(store, token);
           send(client, {
             type: "ready",
+            instanceId,
             ...client.session,
             rooms: await store.rooms(client.session.user.id),
           });
@@ -311,15 +318,30 @@ export function createGateway(
           client.socket.close(1008, "Session expired");
       }
       for (const [room, state] of liveRooms) {
+        const previous = state.cursor;
         const tail = await redis.tail(room);
         if (
-          tail &&
-          (tail.epoch !== state.cursor?.epoch ||
-            tail.streamId !== state.cursor?.streamId)
+          tail?.epoch !== previous?.epoch ||
+          tail?.streamId !== previous?.streamId
         ) {
-          for (const client of state.listeners)
-            send(client, { type: "recovery_failed", room });
-          state.cursor = tail;
+          const replay = await redis.replay(room, previous ?? undefined);
+          if (replay.recovered) {
+            for (const publication of replay.publications) {
+              for (const client of state.listeners) {
+                const buffer = client.buffers.get(room);
+                if (buffer) {
+                  if (buffer.length >= 1000)
+                    client.socket.close(1013, "Recovery buffer full");
+                  else buffer.push(publication);
+                } else enqueue(client, () => deliver(client, publication));
+              }
+            }
+          } else {
+            for (const client of state.listeners)
+              send(client, { type: "recovery_failed", room });
+          }
+          // Do not overwrite a newer publication received while the check yielded.
+          if (state.cursor === previous) state.cursor = tail;
         }
         for (const client of state.listeners) await authorized(client, room);
       }

@@ -165,7 +165,13 @@ beforeAll(async () => {
     gatewayA.listen({ port: 0, host: "127.0.0.1" }),
     gatewayB.listen({ port: 0, host: "127.0.0.1" }),
   ]);
-  await broker.consume((command) => store.processCommand(command));
+  await broker.consume(async (command) => {
+    await store.processCommand(command);
+    processedRequests.set(
+      command.requestId,
+      (processedRequests.get(command.requestId) ?? 0) + 1,
+    );
+  });
   relayTimer = setInterval(() => {
     if (relaying) return;
     relaying = true;
@@ -200,6 +206,7 @@ afterAll(async () => {
   const connection = await amqp.connect(config.rabbitUrl);
   const channel = await connection.createChannel();
   await channel.deleteQueue(`${prefix}0`);
+  await channel.deleteQueue(`${prefix}quarantine`);
   await channel.close();
   await connection.close();
   await pool.end();

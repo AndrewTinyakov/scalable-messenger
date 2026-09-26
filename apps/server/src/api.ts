@@ -8,6 +8,7 @@ import {
 } from "@messenger/contracts";
 import type { Store } from "./db/index.js";
 import {
+  instanceId,
   createHttp,
   httpError,
   requireSession,
@@ -29,7 +30,16 @@ export function createApi(
     path: "/",
     maxAge: 60 * 60 * 24 * 30,
   };
-  app.get("/health", async () => ({ status: "ok", service: "api" }));
+  app.get("/health", async () => ({
+    status: "ok",
+    service: "api-gateway",
+    instanceId,
+  }));
+  app.get("/api/health", async () => ({
+    status: "ok",
+    service: "api-gateway",
+    instanceId,
+  }));
   app.get("/metrics", async () => store.metrics());
   app.post("/api/auth/register", async (request, reply) => {
     if (options.rateLimit && !(await options.rateLimit(`auth:${request.ip}`)))

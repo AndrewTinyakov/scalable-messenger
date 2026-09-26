@@ -40,6 +40,7 @@ const messageRow = (row: Record<string, unknown>): Message => ({
   createdAt: new Date(String(row.created_at)).toISOString(),
 });
 const ID = () => ulid();
+const permanentStorageCodes = new Set(["22001", "22003", "23502", "23514"]);
 
 export class StoreError extends Error {
   constructor(
@@ -98,12 +99,19 @@ export class Store {
     const hash = await hashPassword(data.password);
     const id = ID();
     try {
-      await this.pool.query(
-        "INSERT INTO users(id,username,name,password_hash) VALUES($1,$2,$3,$4)",
-        [id, data.username, data.name, hash],
-      );
+      return await this.transact(async (client) => {
+        await client.query(
+          "INSERT INTO users(id,username,name,password_hash) VALUES($1,$2,$3,$4)",
+          [id, data.username, data.name, hash],
+        );
+        return this.createSession(
+          { id, username: data.username, name: data.name },
+          data.deviceId,
+          client,
+        );
+      });
     } catch (error) {
-      if ((error as { code?: string }).code === "23505")
+      if (error instanceof Error && "code" in error && error.code === "23505")
         throw new StoreError(
           "Username is already taken",
           409,
@@ -111,10 +119,6 @@ export class Store {
         );
       throw error;
     }
-    return this.createSession(
-      { id, username: data.username, name: data.name },
-      data.deviceId,
-    );
   }
 
   async login(input: unknown): Promise<{ token: string; session: Session }> {
@@ -135,9 +139,10 @@ export class Store {
   private async createSession(
     user: User,
     deviceId: string,
+    database: Pool | PoolClient = this.pool,
   ): Promise<{ token: string; session: Session }> {
     const token = randomBytes(32).toString("base64url");
-    await this.pool.query(
+    await database.query(
       "INSERT INTO sessions(token_hash,user_id,device_id,expires_at) VALUES($1,$2,$3,now() + interval '30 days')",
       [tokenHash(token), user.id, deviceId],
     );
@@ -328,6 +333,121 @@ export class Store {
   async processCommand(input: SendCommand): Promise<SendResult> {
     const parsed = commandSchema.safeParse(input);
     const command = parsed.success ? parsed.data : input;
+    try {
+      return await this.transact(async (client) => {
+        await client.query(
+          "INSERT INTO send_requests(conversation_id,sender_id,request_id,status) VALUES($1,$2,$3,'processing') ON CONFLICT DO NOTHING",
+          [command.conversationId, command.senderId, command.requestId],
+        );
+        const existing = await client.query(
+          "SELECT status,reason,message_id FROM send_requests WHERE conversation_id=$1 AND sender_id=$2 AND request_id=$3 FOR UPDATE",
+          [command.conversationId, command.senderId, command.requestId],
+        );
+        const row = existing.rows[0] as
+          | { status: string; reason: string | null; message_id: string | null }
+          | undefined;
+        if (!row) throw new Error("Request was not inserted");
+        if (row.status === "saved" && row.message_id) {
+          const saved = await client.query(
+            "SELECT id,conversation_id,sequence,sender_id,request_id,body,created_at FROM messages WHERE id=$1",
+            [row.message_id],
+          );
+          return { status: "saved", message: messageRow(saved.rows[0]) };
+        }
+        if (row.status === "rejected")
+          return { status: "rejected", reason: String(row.reason) };
+        const conversation = await client.query(
+          "SELECT kind FROM conversations WHERE id=$1 FOR UPDATE",
+          [command.conversationId],
+        );
+        const member = await client.query(
+          "SELECT active FROM memberships WHERE conversation_id=$1 AND user_id=$2 FOR SHARE",
+          [command.conversationId, command.senderId],
+        );
+        const reason = !parsed.success
+          ? "invalid_message"
+          : !conversation.rows[0] || member.rows[0]?.active !== true
+            ? "not_a_member"
+            : null;
+        if (reason) {
+          await client.query(
+            "UPDATE send_requests SET status='rejected',reason=$4 WHERE conversation_id=$1 AND sender_id=$2 AND request_id=$3",
+            [
+              command.conversationId,
+              command.senderId,
+              command.requestId,
+              reason,
+            ],
+          );
+          await this.insertOutbox(client, `user:${command.senderId}`, {
+            type: "rejected",
+            eventId: ID(),
+            conversationId: command.conversationId,
+            requestId: command.requestId,
+            reason,
+          });
+          await client.query("SELECT pg_notify('outbox_changed',$1)", [
+            command.conversationId,
+          ]);
+          return { status: "rejected", reason };
+        }
+        const counter = await client.query(
+          "UPDATE conversations SET last_sequence=last_sequence+1 WHERE id=$1 RETURNING last_sequence,kind",
+          [command.conversationId],
+        );
+        const sequence = Number(counter.rows[0].last_sequence);
+        const id = ID();
+        const inserted = await client.query(
+          "INSERT INTO messages(id,conversation_id,sequence,sender_id,request_id,body) VALUES($1,$2,$3,$4,$5,$6) RETURNING id,conversation_id,sequence,sender_id,request_id,body,created_at",
+          [
+            id,
+            command.conversationId,
+            sequence,
+            command.senderId,
+            command.requestId,
+            command.body.trim(),
+          ],
+        );
+        const message = messageRow(inserted.rows[0]);
+        await client.query(
+          "UPDATE send_requests SET status='saved',message_id=$4 WHERE conversation_id=$1 AND sender_id=$2 AND request_id=$3",
+          [command.conversationId, command.senderId, command.requestId, id],
+        );
+        const event: RoomEvent = { type: "message", eventId: ID(), message };
+        if (counter.rows[0].kind === "group")
+          await this.insertOutbox(
+            client,
+            `group:${command.conversationId}`,
+            event,
+          );
+        else {
+          const members = await client.query(
+            "SELECT user_id FROM memberships WHERE conversation_id=$1 AND active=true",
+            [command.conversationId],
+          );
+          for (const memberRow of members.rows)
+            await this.insertOutbox(client, `user:${memberRow.user_id}`, event);
+        }
+        await client.query("SELECT pg_notify('outbox_changed',$1)", [
+          command.conversationId,
+        ]);
+        return { status: "saved", message };
+      });
+    } catch (error) {
+      const code =
+        error && typeof error === "object" && "code" in error
+          ? error.code
+          : undefined;
+      if (typeof code !== "string" || !permanentStorageCodes.has(code))
+        throw error;
+      return this.recordStorageRejection(command);
+    }
+  }
+
+  private async recordStorageRejection(
+    command: SendCommand,
+  ): Promise<SendResult> {
+    const reason = "storage_validation_failed";
     return this.transact(async (client) => {
       await client.query(
         "INSERT INTO send_requests(conversation_id,sender_id,request_id,status) VALUES($1,$2,$3,'processing') ON CONFLICT DO NOTHING",
@@ -350,77 +470,21 @@ export class Store {
       }
       if (row.status === "rejected")
         return { status: "rejected", reason: String(row.reason) };
-      const conversation = await client.query(
-        "SELECT kind FROM conversations WHERE id=$1 FOR UPDATE",
-        [command.conversationId],
-      );
-      const member = await client.query(
-        "SELECT active FROM memberships WHERE conversation_id=$1 AND user_id=$2 FOR SHARE",
-        [command.conversationId, command.senderId],
-      );
-      const reason = !parsed.success
-        ? "invalid_message"
-        : !conversation.rows[0] || member.rows[0]?.active !== true
-          ? "not_a_member"
-          : null;
-      if (reason) {
-        await client.query(
-          "UPDATE send_requests SET status='rejected',reason=$4 WHERE conversation_id=$1 AND sender_id=$2 AND request_id=$3",
-          [command.conversationId, command.senderId, command.requestId, reason],
-        );
-        await this.insertOutbox(client, `user:${command.senderId}`, {
-          type: "rejected",
-          eventId: ID(),
-          conversationId: command.conversationId,
-          requestId: command.requestId,
-          reason,
-        });
-        await client.query("SELECT pg_notify('outbox_changed',$1)", [
-          command.conversationId,
-        ]);
-        return { status: "rejected", reason };
-      }
-      const counter = await client.query(
-        "UPDATE conversations SET last_sequence=last_sequence+1 WHERE id=$1 RETURNING last_sequence,kind",
-        [command.conversationId],
-      );
-      const sequence = Number(counter.rows[0].last_sequence);
-      const id = ID();
-      const inserted = await client.query(
-        "INSERT INTO messages(id,conversation_id,sequence,sender_id,request_id,body) VALUES($1,$2,$3,$4,$5,$6) RETURNING id,conversation_id,sequence,sender_id,request_id,body,created_at",
-        [
-          id,
-          command.conversationId,
-          sequence,
-          command.senderId,
-          command.requestId,
-          command.body.trim(),
-        ],
-      );
-      const message = messageRow(inserted.rows[0]);
       await client.query(
-        "UPDATE send_requests SET status='saved',message_id=$4 WHERE conversation_id=$1 AND sender_id=$2 AND request_id=$3",
-        [command.conversationId, command.senderId, command.requestId, id],
+        "UPDATE send_requests SET status='rejected',reason=$4 WHERE conversation_id=$1 AND sender_id=$2 AND request_id=$3",
+        [command.conversationId, command.senderId, command.requestId, reason],
       );
-      const event: RoomEvent = { type: "message", eventId: ID(), message };
-      if (counter.rows[0].kind === "group")
-        await this.insertOutbox(
-          client,
-          `group:${command.conversationId}`,
-          event,
-        );
-      else {
-        const members = await client.query(
-          "SELECT user_id FROM memberships WHERE conversation_id=$1 AND active=true",
-          [command.conversationId],
-        );
-        for (const memberRow of members.rows)
-          await this.insertOutbox(client, `user:${memberRow.user_id}`, event);
-      }
+      await this.insertOutbox(client, `user:${command.senderId}`, {
+        type: "rejected",
+        eventId: ID(),
+        conversationId: command.conversationId,
+        requestId: command.requestId,
+        reason,
+      });
       await client.query("SELECT pg_notify('outbox_changed',$1)", [
         command.conversationId,
       ]);
-      return { status: "saved", message };
+      return { status: "rejected", reason };
     });
   }
 

@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
-if (existsSync(".env")) process.loadEnvFile(".env");
 import { z } from "zod";
+if (existsSync(".env")) process.loadEnvFile(".env");
 const env = z
   .object({
     DATABASE_URL: z

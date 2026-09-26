@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  serverFrameSchema,
-  type ClientFrame,
   type Conversation,
   type RoomCursor,
   type Session,
@@ -19,7 +17,7 @@ import {
 } from "../../../entities/message";
 
 import { clearCache, loadCache, saveCache } from "./cache";
-type Connection = "connecting" | "live" | "reconnecting" | "offline";
+import { useConnection } from "./useConnection";
 
 export function useMessenger(session: Session) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -28,22 +26,15 @@ export function useMessenger(session: Session) {
     initialCache.states,
   );
   const cursorsRef = useRef<Record<string, RoomCursor>>(initialCache.cursors);
-  const joinedRooms = useRef(new Set<string>());
   const blockedRooms = useRef(new Set<string>());
   const cursorReady = useRef(false);
   const syncs = useRef(new Map<string, Promise<boolean>>());
-  const [connection, setConnection] = useState<Connection>("connecting");
   const [error, setError] = useState("");
-  const socket = useRef<WebSocket | null>(null);
   const statesRef = useRef(states);
   const activeRef = useRef(true);
   const refreshRef = useRef<() => Promise<boolean>>(async () => false);
   const syncRef = useRef<(id: string) => Promise<boolean>>(async () => false);
-  const sendFrame = useCallback((frame: ClientFrame) => {
-    if (socket.current?.readyState !== WebSocket.OPEN) return false;
-    socket.current.send(JSON.stringify(frame));
-    return true;
-  }, []);
+  const reconcileRef = useRef<() => Promise<void>>(async () => {});
   const persist = useCallback(
     (next: Record<string, ConversationState> = statesRef.current) => {
       return (
@@ -52,16 +43,6 @@ export function useMessenger(session: Session) {
       );
     },
     [session],
-  );
-  const subscribe = useCallback(
-    (room: string) => {
-      if (joinedRooms.current.has(room)) return;
-      if (
-        sendFrame({ type: "subscribe", room, cursor: cursorsRef.current[room] })
-      )
-        joinedRooms.current.add(room);
-    },
-    [sendFrame],
   );
   const updateState = useCallback(
     (
@@ -79,6 +60,90 @@ export function useMessenger(session: Session) {
     },
     [persist],
   );
+  const { connection, sendFrame, subscribe, close } = useConnection({
+    cursorForRoom: (room) => cursorsRef.current[room],
+    onOpen: () => {
+      cursorReady.current = false;
+      void reconcileRef.current();
+    },
+    onReady: () => {
+      void reconcileRef.current();
+    },
+    onQueued: (conversationId, requestId) => {
+      updateState(conversationId, (state) => applyQueued(state, requestId));
+    },
+    onEvent: (publication) => {
+      const event = publication.event;
+      if (event.type === "message") {
+        const message = event.message;
+        const before =
+          statesRef.current[message.conversationId]?.lastAppliedSequence ?? 0;
+        const messageStored = updateState(message.conversationId, (state) =>
+          applyMessage(state, message),
+        );
+        const after =
+          statesRef.current[message.conversationId]?.lastAppliedSequence ?? 0;
+        if (message.sequence > after) {
+          blockedRooms.current.add(publication.room);
+          const { [publication.room]: _oldCursor, ...safeCursors } =
+            cursorsRef.current;
+          cursorsRef.current = safeCursors;
+          persist();
+          void syncRef.current(message.conversationId);
+        }
+        if (
+          message.sequence <= after &&
+          cursorReady.current &&
+          !blockedRooms.current.has(publication.room)
+        ) {
+          cursorsRef.current = {
+            ...cursorsRef.current,
+            [publication.room]: publication.cursor,
+          };
+          const cursorStored = persist();
+          if (messageStored && cursorStored && after > before)
+            sendFrame({
+              type: "applied",
+              conversationId: message.conversationId,
+              sequence: after,
+              room: publication.room,
+              cursor: publication.cursor,
+            });
+        }
+        void refreshRef.current();
+      } else if (event.type === "rejected") {
+        updateState(event.conversationId, (state) =>
+          applyRejected(state, event.requestId, event.reason),
+        );
+      } else void refreshRef.current();
+    },
+    onRecoveryFailed: () => {
+      void reconcileRef.current();
+    },
+    onError: (frame) => {
+      if (frame.conversationId && frame.requestId)
+        updateState(frame.conversationId, (state) =>
+          frame.retryable
+            ? applyRetryable(state, frame.requestId!, frame.message)
+            : applyRejected(state, frame.requestId!, frame.message),
+        );
+      else setError(frame.message);
+    },
+    onDisconnect: () => {
+      cursorReady.current = false;
+      for (const [id, state] of Object.entries(statesRef.current))
+        for (const item of state.pending) {
+          if (item.status === "sending" || item.status === "queued")
+            updateState(id, (current) =>
+              applyRetryable(
+                current,
+                item.requestId,
+                "Connection lost. Check status or retry.",
+              ),
+            );
+        }
+    },
+  });
   const refresh = useCallback(async (): Promise<boolean> => {
     try {
       const next = await api.conversations();
@@ -91,7 +156,9 @@ export function useMessenger(session: Session) {
       const results = await Promise.all(
         next.map((conversation) => syncRef.current(conversation.id)),
       );
-      return results.every(Boolean);
+      const recovered = results.every(Boolean);
+      if (recovered) setError("");
+      return recovered;
     } catch (cause) {
       if (activeRef.current)
         setError(
@@ -189,137 +256,24 @@ export function useMessenger(session: Session) {
       }
     }
   }, [updateState]);
+  reconcileRef.current = reconcile;
   useEffect(() => {
     activeRef.current = true;
-    let attempt = 0;
-    let retryTimer: number | undefined;
-    let stopped = false;
-    const connect = () => {
-      if (stopped || !activeRef.current) return;
-      setConnection(attempt ? "reconnecting" : "connecting");
-      const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-      joinedRooms.current.clear();
-      cursorReady.current = false;
-      const ws = new WebSocket(`${protocol}//${location.host}/ws`);
-      socket.current = ws;
-      ws.onopen = () => {
-        attempt = 0;
-        setConnection("live");
-        void reconcile();
-      };
-      ws.onmessage = (event) => {
-        let raw: unknown;
-        try {
-          raw = JSON.parse(String(event.data));
-        } catch {
-          return;
-        }
-        const parsed = serverFrameSchema.safeParse(raw);
-        if (!parsed.success) return;
-        const frame = parsed.data;
-        if (frame.type === "ready") {
-          for (const room of frame.rooms) subscribe(room);
-          void reconcile();
-        } else if (frame.type === "queued") {
-          updateState(frame.conversationId, (state) =>
-            applyQueued(state, frame.requestId),
-          );
-        } else if (frame.type === "event") {
-          const event = frame.publication.event;
-          if (event.type === "message") {
-            const message = event.message;
-            const before =
-              statesRef.current[message.conversationId]?.lastAppliedSequence ??
-              0;
-            const messageStored = updateState(message.conversationId, (state) =>
-              applyMessage(state, message),
-            );
-            const after =
-              statesRef.current[message.conversationId]?.lastAppliedSequence ??
-              0;
-            if (message.sequence > after) {
-              blockedRooms.current.add(frame.publication.room);
-              const { [frame.publication.room]: _oldCursor, ...safeCursors } =
-                cursorsRef.current;
-              cursorsRef.current = safeCursors;
-              persist();
-              void syncRef.current(message.conversationId);
-            }
-            if (
-              message.sequence <= after &&
-              cursorReady.current &&
-              !blockedRooms.current.has(frame.publication.room)
-            ) {
-              cursorsRef.current = {
-                ...cursorsRef.current,
-                [frame.publication.room]: frame.publication.cursor,
-              };
-              const cursorStored = persist();
-              if (messageStored && cursorStored && after > before)
-                sendFrame({
-                  type: "applied",
-                  conversationId: message.conversationId,
-                  sequence: after,
-                  room: frame.publication.room,
-                  cursor: frame.publication.cursor,
-                });
-            }
-            void refreshRef.current();
-          } else if (event.type === "rejected")
-            updateState(event.conversationId, (state) =>
-              applyRejected(state, event.requestId, event.reason),
-            );
-          else void refreshRef.current();
-        } else if (frame.type === "recovery_failed") void reconcile();
-        else if (frame.type === "error") {
-          if (frame.conversationId && frame.requestId)
-            updateState(frame.conversationId, (state) =>
-              frame.retryable
-                ? applyRetryable(state, frame.requestId!, frame.message)
-                : applyRejected(state, frame.requestId!, frame.message),
-            );
-          else setError(frame.message);
-        }
-      };
-      ws.onclose = () => {
-        if (stopped || !activeRef.current) return;
-        setConnection("offline");
-        cursorReady.current = false;
-        for (const [id, state] of Object.entries(statesRef.current))
-          for (const item of state.pending) {
-            if (item.status === "sending" || item.status === "queued")
-              updateState(id, (current) =>
-                applyRetryable(
-                  current,
-                  item.requestId,
-                  "Connection lost. Check status or retry.",
-                ),
-              );
-          }
-        retryTimer = window.setTimeout(
-          connect,
-          Math.min(1000 * 2 ** attempt++, 15000),
-        );
-      };
-      ws.onerror = () => ws.close();
-    };
-    connect();
     const interval = window.setInterval(() => {
-      if (!document.hidden) void reconcile();
+      if (!document.hidden) void reconcileRef.current();
     }, 15000);
-    const onFocus = () => void reconcile();
+    const onFocus = () => {
+      if (!document.hidden) void reconcileRef.current();
+    };
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onFocus);
     return () => {
-      stopped = true;
       activeRef.current = false;
-      clearTimeout(retryTimer);
       clearInterval(interval);
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onFocus);
-      socket.current?.close();
     };
-  }, [persist, reconcile, sendFrame, subscribe, updateState]);
+  }, []);
   const send = useCallback(
     (
       conversationId: string,
@@ -369,8 +323,8 @@ export function useMessenger(session: Session) {
     statesRef.current = {};
     cursorsRef.current = {};
     setStates({});
-    socket.current?.close();
-  }, [session]);
+    close();
+  }, [close, session]);
   return {
     conversations,
     states,

@@ -53,6 +53,15 @@ export class CommandBroker {
           },
         });
       }
+      await publisher.assertQueue(`${queuePrefix}quarantine`, {
+        durable: true,
+        arguments: {
+          "x-queue-type": "quorum",
+          "x-max-length": MAX_BACKLOG,
+          "x-overflow": "reject-publish",
+          "x-delivery-limit": -1,
+        },
+      });
       return new CommandBroker(connection, publisher, partitions, queuePrefix);
     } catch (error) {
       await connection.close().catch(() => undefined);
@@ -66,6 +75,14 @@ export class CommandBroker {
     const partition = hash.readUInt32BE(0) % this.partitions;
     const queue = `${this.queuePrefix}${partition}`;
     const body = Buffer.from(JSON.stringify(command));
+    await this.publishRaw(queue, body, command.requestId);
+  }
+
+  private async publishRaw(
+    queue: string,
+    body: Buffer,
+    messageId: string,
+  ): Promise<void> {
     const correlationId = randomUUID();
     await new Promise<void>((resolve, reject) => {
       let settled = false;
@@ -93,7 +110,7 @@ export class CommandBroker {
           {
             persistent: true,
             mandatory: true,
-            messageId: command.requestId,
+            messageId,
             correlationId,
             contentType: "application/json",
           },
@@ -115,6 +132,20 @@ export class CommandBroker {
       console.error("RabbitMQ consumer error:", error),
     );
     const attempts = new Map<string, number>();
+    const requeue = async (message: ConsumeMessage, error: unknown) => {
+      console.error("Command processing failed; requeueing:", error);
+      const key =
+        message.properties.messageId ?? message.content.toString("base64");
+      const count = (attempts.get(key) ?? 0) + 1;
+      attempts.set(key, count);
+      const backoff = Math.min(30_000, 1_000 * 2 ** Math.min(count - 1, 5));
+      await new Promise((resolve) => setTimeout(resolve, backoff));
+      try {
+        channel.nack(message, false, true);
+      } catch {
+        /* Connection loss requeues unacked deliveries. */
+      }
+    };
     await channel.prefetch(PREFETCH);
     for (let index = 0; index < this.partitions; index++) {
       await channel.consume(
@@ -122,31 +153,31 @@ export class CommandBroker {
         (message) => {
           if (!message) return;
           void (async () => {
+            let command: SendCommand;
             try {
-              const command = commandSchema.parse(
+              command = commandSchema.parse(
                 JSON.parse(message.content.toString("utf8")),
               );
+            } catch (error) {
+              try {
+                await this.publishRaw(
+                  `${this.queuePrefix}quarantine`,
+                  message.content,
+                  message.properties.messageId ?? randomUUID(),
+                );
+                channel.ack(message);
+                console.error("Malformed command quarantined:", error);
+              } catch (quarantineError) {
+                await requeue(message, quarantineError);
+              }
+              return;
+            }
+            try {
               await handler(command);
               attempts.delete(command.requestId);
               channel.ack(message);
             } catch (error) {
-              console.error("Command processing failed; requeueing:", error);
-              // Retain confirmed commands on malformed input and transient SQL errors alike.
-              const key =
-                message.properties.messageId ??
-                message.content.toString("base64");
-              const count = (attempts.get(key) ?? 0) + 1;
-              attempts.set(key, count);
-              const backoff = Math.min(
-                30_000,
-                1_000 * 2 ** Math.min(count - 1, 5),
-              );
-              await new Promise((resolve) => setTimeout(resolve, backoff));
-              try {
-                channel.nack(message, false, true);
-              } catch {
-                /* Connection loss requeues unacked deliveries. */
-              }
+              await requeue(message, error);
             }
           })();
         },

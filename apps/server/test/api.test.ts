@@ -1,25 +1,20 @@
 import { beforeAll, afterAll, expect, test } from "vitest";
-import { Pool } from "pg";
 import { randomUUID } from "node:crypto";
 import { createApi } from "../src/api.js";
-import { Store } from "../src/db/index.js";
-const pool = new Pool({
-  connectionString:
-    process.env.DATABASE_URL ??
-    "postgres://messenger:messenger@localhost:55432/messenger",
-});
-const store = new Store(pool);
+import { createTestDatabase } from "./database.js";
+const database = createTestDatabase();
+const store = database.store;
 const app = createApi(store, {
   origin: "http://localhost:5173",
   production: false,
 });
 beforeAll(async () => {
-  await store.migrate();
+  await database.start();
   await app.ready();
 });
 afterAll(async () => {
   await app.close();
-  await pool.end();
+  await database.close();
 });
 test("an authenticated device can create a conversation and recover saved sends without exposing history to other users", async () => {
   async function register() {

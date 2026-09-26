@@ -20,25 +20,37 @@ The seed is optional and idempotent. It creates a direct conversation, a group, 
 
 ## Processes
 
-| Process        | Command                 | Default address                |
-| -------------- | ----------------------- | ------------------------------ |
-| Client         | `npm run dev:client`    | localhost:5180                 |
-| HTTP API       | `npm run start:api`     | localhost:3001                 |
-| Socket gateway | `npm run start:gateway` | localhost:3002                 |
-| Command worker | `npm run start:worker`  | RabbitMQ consumer              |
-| Outbox relay   | `npm run start:relay`   | SQL poller and Redis publisher |
+| Process        | Command                     | Default address                |
+| -------------- | --------------------------- | ------------------------------ |
+| Client         | `npm run dev:client`        | localhost:5180                 |
+| HTTP API       | `npm run start:api-gateway` | localhost:3001                 |
+| WS gateway     | `npm run start:ws-gateway`  | localhost:3002                 |
+| Command worker | `npm run start:worker`      | RabbitMQ consumer              |
+| Outbox relay   | `npm run start:relay`       | SQL poller and Redis publisher |
 
 PostgreSQL listens on localhost:55432, RabbitMQ on localhost:5673, and Redis on localhost:6380. Rabbit management is localhost:15673 with the local guest credentials. `npm run infra:down` stops infrastructure while preserving volumes.
 
-For a built client behind an nginx proxy with two socket gateways:
+For a built client behind an nginx proxy with three API gateway and three WS gateway replicas:
 
 ```sh
 docker compose -f compose.yml -f compose.app.yml up -d --build
 # Optional demo accounts:
-docker compose -f compose.yml -f compose.app.yml exec api npm run db:seed
+docker compose -f compose.yml -f compose.app.yml exec api-gateway npm run db:seed
 ```
 
-Open http://localhost:8080. This configuration is a local deployment example with development credentials and HTTP. For public hosting, configure TLS, private service networks, real broker credentials, `NODE_ENV=production`, and an HTTPS `APP_ORIGIN`; production cookies are Secure.
+Open http://localhost:8080. nginx balances HTTP requests over all three `api-gateway` instances and WebSocket upgrades over all three `ws-gateway` instances. Sessions live in PostgreSQL and rate limits in Redis, so the proxy needs no sticky sessions. DNS refresh follows replica replacements.
+
+```sh
+npm run cluster:up
+npm run test:cluster
+CLUSTER_FAILURE_DRILL=1 npm run test:cluster
+```
+
+The cluster check requires three distinct API instance IDs and three distinct WS instance IDs. It checks cross-instance live group messages, the sender's second socket, duplicate request handling, and SQL history. The optional failure drill stops one API container and one recipient WS container, checks continued sending and reconnect/catch-up on the surviving replicas, then restarts both containers even if an assertion fails. It only stops containers with the expected Messenger Compose labels. Use `CLUSTER_URL` to target a different base URL; the stop drill is for this local Docker project.
+
+For another local size, run `docker compose -f compose.yml -f compose.app.yml up -d --scale api-gateway=5 --scale ws-gateway=5`. The check requires at least three instances. `npm run cluster:down` stops the complete stack without removing database volumes.
+
+This configuration is a local deployment example with development credentials and HTTP. For public hosting, configure TLS, private service networks, real broker credentials, `NODE_ENV=production`, and an HTTPS `APP_ORIGIN`; production cookies are Secure.
 
 ## Message and recovery behavior
 
@@ -46,9 +58,9 @@ The gateway validates a send and applies local and Redis-backed sender limits. A
 
 The worker rechecks membership and commits the sequence, ULID message, request result, and room outbox events together. Duplicate requests return the original result. Only then does it acknowledge RabbitMQ. `saved` means SQL committed; `rejected` is a recorded final result.
 
-The relay leases committed outbox rows, appends bounded Redis Stream history and publishes with sharded Pub/Sub through one Lua script. Failed rows retry with backoff. A crash after publication can repeat events. Clients deduplicate messages and apply contiguous SQL sequences before acknowledging them.
+The relay leases committed outbox rows, appends bounded Redis Stream history and publishes with sharded Pub/Sub through one Lua script. Failed rows retry with backoff. Malformed broker commands move to a bounded quorum quarantine queue only after a publisher confirm, preserving the original on quarantine failure. A crash after publication can repeat events. Clients deduplicate messages and apply contiguous SQL sequences before acknowledging them.
 
-A gateway shares one subscription per locally active room. It buffers live events while replaying a retained same-epoch cursor. Missing history requires SQL catch-up. Clients also reconcile on reconnect, focus, conversation open, and every 15 seconds while visible. Gateway tail checks and Redis disconnect notifications detect missed live traffic. These intervals are implementation defaults, not measured latency guarantees.
+A gateway shares one subscription per locally active room. It buffers live events while replaying a retained same-epoch cursor. Missing history requires SQL catch-up. Clients also reconcile on reconnect, focus, conversation open, and every 15 seconds while visible. Gateway tail checks replay retained missed events, including a quiet final event; Redis disconnect notifications also request reconciliation. These intervals are implementation defaults, not measured latency guarantees.
 
 Group membership is rechecked before socket publication and on periodic checks; removal also produces conversation-change notifications. Passwords use scrypt; session tokens are random, hashed in SQL, and sent in HttpOnly SameSite cookies. Mutation origins and WebSocket origins are checked.
 
@@ -68,7 +80,7 @@ npm run build
 npm run format:check
 ```
 
-Integration tests require the local services and apply migrations. Tests create unique accounts and isolated command queues. `/health` identifies API/gateway processes; the API's `/metrics` exposes saved-message count, pending outbox count, oldest pending age, and failed outbox count for local inspection.
+Integration tests require the local services and apply migrations. The suite also injects a missed final Pub/Sub event and verifies periodic Redis replay. Tests create unique accounts and isolated command queues. `/health` identifies API/gateway processes; the API's `/metrics` exposes saved-message count, pending outbox count, oldest pending age, and failed outbox count for local inspection.
 
 ## Deployment limits
 

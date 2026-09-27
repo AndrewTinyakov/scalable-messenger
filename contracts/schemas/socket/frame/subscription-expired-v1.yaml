@@ -1,0 +1,14 @@
+$schema: http://json-schema.org/draft-07/schema#
+title: SocketSubscriptionExpiredV1
+type: object
+additionalProperties: false
+required: [type, version, chatId]
+properties:
+  type:
+    const: subscription_expired
+  version:
+    type: integer
+    const: 1
+  chatId:
+    type: string
+    pattern: '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'

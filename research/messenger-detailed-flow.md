@@ -1,11 +1,11 @@
 # Messenger: exact send, fanout, and recovery flow
 
-This is the selected design for the Messenger example, not an implemented system. It assumes server-stored chat history, direct chats and bounded group chats, multiple devices per user, and asynchronous send commands. SQL is the authority for saved messages. Redis carries live events and keeps a short replay cache. RabbitMQ quorum queues accept send commands before SQL has a copy. The [decision record](../docs/adr/0001-messenger-broker-split.md) explains the broker split. Timeouts and capacity limits still require load and failure tests.
+This describes the implemented local path and explores possible later deployments. The local stack uses PostgreSQL, RabbitMQ 4.3, one Redis instance, and a polling outbox relay. It assumes server-stored chat history, direct chats and bounded group chats, multiple devices per user, and asynchronous send commands. SQL is the authority for saved messages. Redis carries live events and keeps a short replay cache. RabbitMQ quorum queues accept send commands before SQL has a copy. The [decision record](../docs/adr/0001-messenger-broker-split.md) explains the broker split. Timeouts and capacity limits still require load and failure tests.
 
 ## Terms and promises
 
 - A **room** is a logical destination. `user:alice` reaches Alice's connected devices. `group:42` reaches connected devices of members of group 42. A WS node maintains `room -> local sockets` and has one Redis subscription per locally active room, not one Redis subscription per socket. In this design, connected group members join their group rooms even if that chat is not open. For very large numbers of memberships, use per-user inbox notifications plus DB fetch instead.
-- `requestId` identifies a send attempt across client retries. `messageId` is the stable message identity (ULID). `(conversationId, sequence)` is the authoritative ordered history cursor. `(room, epoch, streamId)` is only the short Redis recovery cursor. These are different identifiers.
+- `requestId` identifies a send attempt across client retries. `messageId` is the stable message identity (ULID). `(chatId, sequence)` is the authoritative ordered history cursor. `(room, epoch, streamId)` is only the short Redis recovery cursor. These are different identifiers.
 - `queued` means a RabbitMQ quorum queue confirmed the command. `saved` means the SQL transaction committed. `applied` means one device acknowledged incorporating the event. Avoid the unqualified word `delivered`; neither `queued` nor `saved` proves device application.
 - The application guarantees eventual recovery of **committed** messages while the SQL history is retained, provided clients reconnect or run a catch-up check. It does not promise zero duplicates or bounded live delivery during every network fault. Client and relay retries are expected.
 
@@ -55,7 +55,7 @@ sequenceDiagram
   WS-->>App: WebSocket established
   App->>WS: subscribe group:42 + lastApplied cursor
   WS->>API: authorize Alice for group 42
-  API->>DB: SELECT membership WHERE user=Alice AND conversation=42
+  API->>DB: SELECT membership WHERE user=Alice AND chat=42
   DB-->>API: active member + membership version
   API-->>WS: allow + version
   WS->>WS: register local socket; mark room catching-up
@@ -71,112 +71,63 @@ sequenceDiagram
     WS-->>App: replay entries in stream order
   else Cursor absent or epoch changed
     WS-->>App: recovery_failed; request DB catch-up
-    App->>API: GET /conversations/42/messages?afterSeq=N
-    API->>DB: SELECT ... WHERE conversation_id=42 AND seq>N ORDER BY seq LIMIT ...
+    App->>API: GET /chats/42/messages?afterSeq=N
+    API->>DB: SELECT ... WHERE chat_id=42 AND seq>N ORDER BY seq LIMIT ...
     DB-->>API: committed rows
     API-->>App: messages + next cursor
   end
   WS-->>App: buffered live events after replay (dedupe by messageId)
-  App->>App: apply in conversation sequence; persist cursor
+  App->>App: apply in chat sequence; persist cursor
   App-->>WS: applied ACK with last DB sequence and Redis cursor
 ```
 
 Subscribe **before** reading history and buffer live traffic while replaying. Otherwise an event can fall between the history read and the live subscription. The API must also reject or end a subscription when membership is revoked; a long-lived authorization decision is not sufficient. A fresh client without a valid Redis cursor starts from SQL. Redis stream IDs are monotonic but not gapless; check that the previous stream entry itself is retained, not whether IDs differ by one.
 
-## Sending one direct message: successful path
+## Sending the first direct message
 
-The example sends one logical direct-chat message to Alice's and Bob's personal rooms. A group message has one `group:42` outbox destination in this design; all connected members, including Alice's other devices, subscribe to that group. The two personal-room publications for a direct chat are separately retryable. Room events contain `conversationId`, `sequence`, `messageId`, and `requestId` for Alice's status. A recipient must still be authorized when subscribing or fetching history.
+Selecting Bob opens a local draft in Alice's client. No chat row exists yet. Alice sends a command addressed to `recipientId=Bob`; the WS node hashes the sorted Alice/Bob pair into one of four RabbitMQ quorum queues and returns `queued` after publisher confirmation. A later send to the committed chat uses `chatId` as its target.
 
 ```mermaid
 sequenceDiagram
   autonumber
   participant A as Alice app
-  participant P as WS proxy
-  participant W as WS node A
+  participant W as WS node
   participant Q as RabbitMQ
-  participant C as Command worker / API
-  participant D as SQL primary
+  participant C as Command worker
+  participant D as PostgreSQL
   participant R as Outbox relay
   participant X as Redis
-  participant WB as WS node B
   participant B as Bob app
-  A->>P: WS send {conversationId=7, requestId=r9, body}
-  P->>W: forward frame
-  W->>W: validate size/shape; authenticate socket; rate-limit sender
-  W->>Q: basic.publish persistent command to hash(conversationId) queue
-  Q-->>W: publisher confirm (command accepted by broker)
-  W-->>P: queued(r9)
-  P-->>A: queued(r9)
-  Q->>C: basic.deliver command r9
-  C->>D: BEGIN
-  C->>D: INSERT send_requests(7,Alice,r9,status=processing) ON CONFLICT DO NOTHING
-  alt Request already has final result
-    C->>D: SELECT status,messageId,seq FROM send_requests WHERE key=(7,Alice,r9)
-    D-->>C: existing saved/rejected result
-    C->>D: ROLLBACK or COMMIT read-only path
-    C->>Q: basic.ack duplicate command
-  else First processing attempt
-    C->>D: SELECT membership for Alice in 7 FOR SHARE
-    alt Membership inactive or command invalid
-      C->>D: UPDATE send_requests SET status=rejected,reason WHERE key=(7,Alice,r9)
-      C->>D: INSERT outbox(rejectionEventId,room=user:Alice,payload)
-    else Membership active and command valid
-      C->>D: UPDATE conversation_counter SET next_seq=next_seq+1 WHERE id=7 RETURNING assigned seq
-      D-->>C: seq=104 (row lock serializes sends to conversation 7)
-      C->>D: INSERT messages(7,104,messageId,Alice,body)
-      C->>D: UPDATE send_requests SET status=saved,messageId,seq WHERE key=(7,Alice,r9)
-      C->>D: INSERT outbox(eventId,room=user:Alice,payload)
-      C->>D: INSERT outbox(eventId,room=user:Bob,payload)
-    end
-    opt PostgreSQL wakeup mode
-      C->>D: SELECT pg_notify('outbox_changed','7')
-    end
-    C->>D: COMMIT
-    D-->>C: commit succeeded: saved or rejected result is durable
-    D-->>R: NOTIFY wakeup after commit (PostgreSQL only)
-    C->>Q: basic.ack command
-    R->>D: BEGIN
-    R->>D: SELECT pending outbox rows FOR UPDATE SKIP LOCKED LIMIT batch
-    D-->>R: claimable committed rows
-    R->>D: UPDATE outbox SET lease_owner, lease_until for claimed IDs
-    R->>D: COMMIT (release row locks)
-    loop Once for each room event
-      R->>X: FCALL publish_room(room,eventId,payload)
-      X->>X: XADD bounded room stream; obtain stream ID
-      X->>X: SPUBLISH room channel with epoch, stream ID, payload
-      X-->>R: stream ID / operation result
-      R->>D: UPDATE outbox SET delivered_at=now WHERE id=? AND lease_owner=?
-    end
-    X-->>W: Alice room result event (if node A is subscribed)
-    alt Accepted message
-      X-->>WB: Bob room event (if node B is subscribed)
-      W-->>P: message_saved(r9,messageId,seq=104)
-      P-->>A: message_saved(r9,messageId,seq=104)
-      WB-->>B: message(messageId,conversation=7,seq=104)
-      A->>A: dedupe and apply; pending -> saved
-      B->>B: dedupe and apply to local history
-      A-->>W: applied ACK(seq=104, room cursor)
-      B-->>WB: applied ACK(seq=104, room cursor)
-    else Rejected command
-      W-->>P: send_rejected(r9,reason)
-      P-->>A: send_rejected(r9,reason)
-    end
-  end
+  A->>W: send(recipientId=Bob, requestId=r9, body)
+  W->>Q: publish persistent command to hash(sorted pair) queue
+  Q-->>W: publisher confirm
+  W-->>A: queued(r9)
+  Q->>C: deliver r9
+  C->>D: BEGIN; lock sender/request ID
+  C->>D: validate Bob and lock direct pair
+  C->>D: insert chat and members if absent
+  C->>D: lock chat; allocate sequence; insert message and saved result
+  C->>D: enqueue chat_created for Alice and Bob
+  C->>D: enqueue message_saved for Alice and Bob
+  C->>D: COMMIT
+  C->>Q: ACK command
+  R->>D: claim committed outbox rows
+  R->>X: XADD bounded room Stream and SPUBLISH in one script
+  X-->>A: chat_created and message_saved
+  X-->>B: chat_created and message_saved
+  A->>A: refresh chat list and apply message
+  B->>B: refresh chat list and apply message
 ```
 
-`COMMIT` and outbox publication are intentionally separate. The relay exists because a process can crash between SQL commit and Redis publish. It continuously drains the *committed* outbox until no work remains. `NOTIFY` only wakes it sooner; the table is the record of work. The relay also polls on a timer after startup and while idle, because notification receipt and process uptime are not durable. First establish `LISTEN`, then scan pending rows to close the startup race. [PostgreSQL NOTIFY](https://www.postgresql.org/docs/current/sql-notify.html), [LISTEN](https://www.postgresql.org/docs/current/sql-listen.html).
+The chat, membership, first message, sequence, saved result, and outbox rows commit together. The sorted pair has a unique SQL key and an advisory transaction lock, so opposite first sends resolve to one chat. An invalid recipient records a rejection against the sender and request ID without creating a chat. Repeating the command with the same request ID reads the stored result and does not save a second message.
 
-The diagram shows a readable ordering, but Rabbit delivery, publisher confirmation, `queued`, and `saved` are asynchronous. Alice could see `saved` before `queued`. The client uses `requestId` and a monotone status rule so a late `queued` response never changes `saved` back to `queued`. The relay's final outbox update is its own short SQL transaction (or autocommit statement), not part of the earlier message transaction.
+Group creation commits the group and its members immediately, with one `chat_created` outbox event to each member's user room. Group messages later use the group room. Every connected device joins its user's room, so chat list changes reach users before they open the new chat. The client also fetches the chat list and SQL history on reconnect because Redis live publication is temporary.
 
-The WS node should apply a cheap local limit before enqueueing; a shared per-user limit prevents the sender from bypassing it by reconnecting to another node. The command queues need a bounded backlog with `reject-publish` overflow. RabbitMQ's default queue length limit can drop the oldest entry, which would violate the meaning of `queued`. If publish is rejected or no confirmation arrives, the WS node must not say `queued`. Queueing buys time during a short API outage or scale-up, but it does not create infinite capacity. After a confirmed command, the sender needs a `GET /send-status/{requestId}` path because its WebSocket may disconnect before the saved or rejected event arrives. [RabbitMQ queue limits](https://www.rabbitmq.com/docs/maxlength).
+The publisher claims indexed outbox batches with `FOR UPDATE SKIP LOCKED` and deletes successfully published rows after Redis publication. A crash between Redis publication and the delete can publish the same event again; clients deduplicate messages by ID. The Redis script appends to a bounded Stream and publishes to sharded Pub/Sub in the same hash slot. SQL history remains the complete catch-up path. Send status is available at `GET /v1/sends/{requestId}` for the authenticated sender, including a direct request that has no chat ID yet.
 
-For a production implementation, the outbox claim and completion statements need indexes, bounded batches, expired-lease reclamation, and a poison-event policy. A relay can crash **after** Redis publication but **before** marking `delivered_at`; it will publish again after the lease expires. The WS app deduplicates on stable `messageId` (or event ID for non-message events). Redis script execution serializes its steps from other clients' viewpoint, but a script is not a SQL transaction and runtime errors after a write do not roll back prior Redis writes. Keep the function short and prevalidate its inputs. [Redis scripting](https://redis.io/docs/latest/develop/programmability/eval-intro/), [Redis on rollbacks](https://redis.io/blog/you-dont-need-transaction-rollbacks-in-redis/).
+## PostgreSQL wakeup
 
-The SQL sequence counter and idempotency state must be updated in one transaction. A lock on a single counter row makes accepted messages for that conversation commit in sequence; it also limits the maximum throughput of one extremely hot conversation. The relay might publish sequence 105 before 104 if separate workers claim rows out of order. Clients therefore use SQL `sequence` to order messages and fetch a missing sequence; Redis stream order only describes publication order. An alternative is partitioning the relay by conversation and processing each partition in sequence, at the cost of more coordination.
-
-## What the PostgreSQL wakeup actually does
-
-`LISTEN outbox_changed` registers the relay's dedicated DB connection. `pg_notify('outbox_changed', '7')` inside the worker transaction sends a small signal only **after commit**. The payload `7` can mean "conversation 7 has work"; it is not the message and should not be treated as durable delivery. A transaction that rolls back emits no signal. If the relay is disconnected when the signal is sent, it later finds the row by scanning `outbox`. Multiple notifications can be coalesced in one transaction. At very high message rates, a notification per message may add avoidable overhead; batch notifications or use adaptive polling / change data capture after measuring it. [PostgreSQL NOTIFY](https://www.postgresql.org/docs/current/sql-notify.html).
+An `AFTER INSERT FOR EACH STATEMENT` trigger sends a payload-free `messenger_outbox` notification after commit. The publisher holds a dedicated `LISTEN` connection and drains claimable batches when signaled. It also scans each second, so a missed notification or expired lease does not leave work stranded. The notification is only a wakeup; the SQL rows hold the durable events. [PostgreSQL NOTIFY](https://www.postgresql.org/docs/current/sql-notify.html).
 
 ## Redis history, periodic checks and recovery
 
@@ -208,7 +159,7 @@ sequenceDiagram
   else Cursor absent, stream trimmed, or epoch changed
     W-->>B: recovery_failed / sync from SQL
     B->>API: GET messages after DB seq104
-    API->>DB: SELECT ... WHERE conversation_id=? AND seq>104 ORDER BY seq
+    API->>DB: SELECT ... WHERE chat_id=? AND seq>104 ORDER BY seq
     DB-->>API: seq105 and any later rows
     API-->>B: durable history page(s)
     B->>B: apply, dedupe, persist new DB cursor
@@ -231,29 +182,29 @@ Even a room-node check only says the node saw the room's latest broker position.
 | SQL commits but relay/Redis is down | Message is saved but not yet live. | Pending outbox row stays in SQL and is retried. Clients can also fetch SQL history. |
 | Relay publishes then crashes before marking outbox done | Redis may receive the event again. | Client deduplicates `messageId` / event ID. Mark outbox complete only after publish returns. |
 | Redis publication reaches Alice's node but not Bob's | Alice sees it; Bob's socket may appear healthy. | Node detects broker disconnection, or position check finds newer Redis tail; if history gone, Bob fetches SQL. |
-| Redis history trimmed or failover loses it | Broker cursor cannot prove complete replay. | Return `recovery_failed`; client uses SQL `(conversationId, sequence)` cursor. |
+| Redis history trimmed or failover loses it | Broker cursor cannot prove complete replay. | Return `recovery_failed`; client uses SQL `(chatId, sequence)` cursor. |
 | WS node sends to Bob but Bob does not apply | Node's bounded pending ACK times out or socket breaks. | Retry if safely bounded, otherwise force resync; Bob fetches SQL. |
-| Bob is offline | No live WS delivery exists. | On reconnect/open, fetch SQL history from last persisted conversation sequence. Push notification is a separate best-effort wakeup path. |
+| Bob is offline | No live WS delivery exists. | On reconnect/open, fetch SQL history from last persisted chat sequence. Push notification is a separate best-effort wakeup path. |
 | Group membership revoked | Existing socket could otherwise keep receiving group room traffic. | Versioned authorization/revocation event removes socket from room; DB history endpoint enforces membership. The revocation path needs its own recovery check; do not rely solely on a lossy Pub/Sub revocation. |
 
 ## MySQL, then Vitess
 
-The core transaction works with InnoDB too: `START TRANSACTION`; insert/lock the idempotency key; check membership with a locking read; update one conversation counter row; insert message and outbox rows; `COMMIT`. MySQL 8.4 supports `SELECT ... FOR UPDATE SKIP LOCKED` for queue-like outbox tables. The SQL syntax and lock behavior differ slightly, but the *same-database outbox* principle does not depend on PostgreSQL. [MySQL locking reads](https://dev.mysql.com/doc/refman/8.4/en/innodb-locking-reads.html), [MySQL SELECT](https://dev.mysql.com/doc/refman/8.4/en/select.html).
+The core transaction works with InnoDB too: `START TRANSACTION`; insert/lock the idempotency key; check membership with a locking read; update one chat counter row; insert message and outbox rows; `COMMIT`. MySQL 8.4 supports `SELECT ... FOR UPDATE SKIP LOCKED` for queue-like outbox tables. The SQL syntax and lock behavior differ slightly, but the *same-database outbox* principle does not depend on PostgreSQL. [MySQL locking reads](https://dev.mysql.com/doc/refman/8.4/en/innodb-locking-reads.html), [MySQL SELECT](https://dev.mysql.com/doc/refman/8.4/en/select.html).
 
 MySQL has no PostgreSQL `LISTEN/NOTIFY` equivalent. Use a short-interval indexed outbox poller, or consume committed outbox inserts from MySQL's row-based binlog. In Vitess, `VStream` exposes row change streams through `vtgate`, including across shards, and supports resumable CDC workflows. Keep the outbox table as the durable fallback if CDC checkpoints or retention fail. A VStream relay checkpoints only after downstream publication; a crash between publication and checkpoint can duplicate events. [MySQL replication/binlog](https://dev.mysql.com/doc/refman/8.4/en/replication.html), [Vitess VStream](https://vitess.io/docs/25.0/reference/vreplication/vstream/).
 
-For Vitess, shard `conversations`, `memberships`, `conversation_counters`, `messages`, `send_requests`, and `outbox` by `conversation_id`, with matching Vindex placement. One send transaction then stays on one shard. A user-centric conversation list, unread count, or search index can be a separate projection updated asynchronously from committed events. Updating a user-sharded inbox in the same transaction as a conversation-sharded message would cross shards. Vitess supports cross-shard 2PC, but documents its latency and isolation costs; prefer single-shard writes for this path. A single very hot conversation still contends on its counter row; Vitess adds shards for many conversations, not unlimited writes to one conversation. [Vitess sharding guidelines](https://vitess.io/docs/25.0/user-guides/vschema-guide/sharding-guidelines/), [distributed transactions](https://vitess.io/docs/24.0/reference/features/distributed-transaction/), [shared Vindexes](https://vitess.io/docs/23.0/user-guides/vschema-guide/shared-vindexes/).
+For Vitess, shard `chats`, `memberships`, `chat_counters`, `messages`, `send_requests`, and `outbox` by `chat_id`, with matching Vindex placement. One send transaction then stays on one shard. A user-centric chat list, unread count, or search index can be a separate projection updated asynchronously from committed events. Updating a user-sharded inbox in the same transaction as a chat-sharded message would cross shards. Vitess supports cross-shard 2PC, but documents its latency and isolation costs; prefer single-shard writes for this path. A single very hot chat still contends on its counter row; Vitess adds shards for many chats, not unlimited writes to one chat. [Vitess sharding guidelines](https://vitess.io/docs/25.0/user-guides/vschema-guide/sharding-guidelines/), [distributed transactions](https://vitess.io/docs/24.0/reference/features/distributed-transaction/), [shared Vindexes](https://vitess.io/docs/23.0/user-guides/vschema-guide/shared-vindexes/).
 
 ```mermaid
 sequenceDiagram
   autonumber
   participant C as Command worker
   participant G as vtgate
-  participant T as vttablet for conversation shard
+  participant T as vttablet for chat shard
   participant M as MySQL primary for shard
   participant V as VStream relay
   participant X as Redis
-  C->>G: START TRANSACTION; all statements carry conversation_id
+  C->>G: START TRANSACTION; all statements carry chat_id
   G->>T: route transaction to one shard
   T->>M: START TRANSACTION
   C->>G: idempotency + membership + counter + message + outbox SQL
@@ -272,7 +223,7 @@ sequenceDiagram
   V->>V: persist CDC checkpoint after publication
 ```
 
-Vitess can combine changes from shards in a VStream, but it cannot provide exact global ordering across shards. That is fine here because ordering is per conversation and each conversation is on one shard. [Vitess VStream skew detection](https://vitess.io/docs/25.0/reference/vreplication/internal/vstream-skew-detection/).
+Vitess can combine changes from shards in a VStream, but it cannot provide exact global ordering across shards. That is fine here because ordering is per chat and each chat is on one shard. [Vitess VStream skew detection](https://vitess.io/docs/25.0/reference/vreplication/internal/vstream-skew-detection/).
 
 ## Could Redis Streams replace RabbitMQ too?
 
@@ -298,6 +249,6 @@ Using Streams for **live room fanout** is also possible. WS nodes independently 
 
 The selected design uses RabbitMQ quorum queues for send commands and Redis sharded Pub/Sub plus short room Streams after SQL commit. `queued` is meant to survive Alice going offline before SQL saves the message, under the quorum queue's documented majority-survival assumption. Redis-only commands remain a valid alternative with a weaker `queued` promise and client retries. Redis Streams do not inherently scale worse; the difference is the safety of the only pre-SQL command copy. [RabbitMQ quorum queues](https://www.rabbitmq.com/docs/quorum-queues), [Redis replication](https://redis.io/docs/latest/operate/oss_and_stack/management/replication/).
 
-Use a fixed pool of command queues selected by `hash(conversationId)`, not one global queue and not one queue per room or socket. RabbitMQ says a single queue replica has one CPU core on its hot path. Workers use bounded prefetch. Add workers until SQL commit throughput or one hot conversation's sequence row becomes the limit. Set a maximum queue length or byte budget and `reject-publish`, then measure publisher-confirm latency and queue age during bursts. RabbitMQ applies publisher flow control when the queue cannot keep up, and its quorum-queue guide discourages very long backlogs. [RabbitMQ queues](https://www.rabbitmq.com/docs/queues), [prefetch](https://www.rabbitmq.com/docs/consumer-prefetch), [flow control](https://www.rabbitmq.com/docs/flow-control), [queue limits](https://www.rabbitmq.com/docs/maxlength), [quorum queue limits](https://www.rabbitmq.com/docs/quorum-queues).
+Use a fixed pool of command queues selected by `hash(chatId)` for existing chats or `hash(sorted user pair)` for first direct sends, not one global queue and not one queue per room or socket. RabbitMQ says a single queue replica has one CPU core on its hot path. Workers use bounded prefetch. Add workers until SQL commit throughput or one hot chat's sequence row becomes the limit. Set a maximum queue length or byte budget and `reject-publish`, then measure publisher-confirm latency and queue age during bursts. RabbitMQ applies publisher flow control when the queue cannot keep up, and its quorum-queue guide discourages very long backlogs. [RabbitMQ queues](https://www.rabbitmq.com/docs/queues), [prefetch](https://www.rabbitmq.com/docs/consumer-prefetch), [flow control](https://www.rabbitmq.com/docs/flow-control), [queue limits](https://www.rabbitmq.com/docs/maxlength), [quorum queue limits](https://www.rabbitmq.com/docs/quorum-queues).
 
 Measure Redis room-node subscriptions, publish-to-device-ACK latency, Stream memory, recent replay rate, and SQL fallback rate separately from the command queue. Test Rabbit failover immediately after `queued`, a worker crash before ACK, a reconnect storm, the quiet missed-final-event case, and a hot group with many WS-node readers. The result should set partition count, backlog budget, Stream retention, and position-check interval.

@@ -4,17 +4,17 @@
 package com.andrewtinyakov.messenger.infrastructure.database.generated;
 
 
-import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.ConversationMembers;
-import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Conversations;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.ChatMembers;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Chats;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Messages;
-import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.OutboxEvents;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.MessengerOutboxEvents;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.SendRequests;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Sessions;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Users;
-import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.ConversationMembersRecord;
-import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.ConversationsRecord;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.ChatMembersRecord;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.ChatsRecord;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.MessagesRecord;
-import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.OutboxEventsRecord;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.MessengerOutboxEventsRecord;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.SendRequestsRecord;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.SessionsRecord;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.UsersRecord;
@@ -38,13 +38,13 @@ public class Keys {
     // UNIQUE and PRIMARY KEY definitions
     // -------------------------------------------------------------------------
 
-    public static final UniqueKey<ConversationMembersRecord> CONVERSATION_MEMBERS_PKEY = Internal.createUniqueKey(ConversationMembers.CONVERSATION_MEMBERS, DSL.name("conversation_members_pkey"), new TableField[] { ConversationMembers.CONVERSATION_MEMBERS.CONVERSATION_ID, ConversationMembers.CONVERSATION_MEMBERS.USER_ID }, true);
-    public static final UniqueKey<ConversationsRecord> CONVERSATIONS_DIRECT_PAIR_KEY_KEY = Internal.createUniqueKey(Conversations.CONVERSATIONS, DSL.name("conversations_direct_pair_key_key"), new TableField[] { Conversations.CONVERSATIONS.DIRECT_PAIR_KEY }, true);
-    public static final UniqueKey<ConversationsRecord> CONVERSATIONS_PKEY = Internal.createUniqueKey(Conversations.CONVERSATIONS, DSL.name("conversations_pkey"), new TableField[] { Conversations.CONVERSATIONS.ID }, true);
-    public static final UniqueKey<MessagesRecord> MESSAGES_CONVERSATION_SEQUENCE_UNIQUE = Internal.createUniqueKey(Messages.MESSAGES, DSL.name("messages_conversation_sequence_unique"), new TableField[] { Messages.MESSAGES.CONVERSATION_ID, Messages.MESSAGES.SEQUENCE }, true);
+    public static final UniqueKey<ChatMembersRecord> CHAT_MEMBERS_PKEY = Internal.createUniqueKey(ChatMembers.CHAT_MEMBERS, DSL.name("chat_members_pkey"), new TableField[] { ChatMembers.CHAT_MEMBERS.CHAT_ID, ChatMembers.CHAT_MEMBERS.USER_ID }, true);
+    public static final UniqueKey<ChatsRecord> CHATS_DIRECT_PAIR_KEY_KEY = Internal.createUniqueKey(Chats.CHATS, DSL.name("chats_direct_pair_key_key"), new TableField[] { Chats.CHATS.DIRECT_PAIR_KEY }, true);
+    public static final UniqueKey<ChatsRecord> CHATS_PKEY = Internal.createUniqueKey(Chats.CHATS, DSL.name("chats_pkey"), new TableField[] { Chats.CHATS.ID }, true);
+    public static final UniqueKey<MessagesRecord> MESSAGES_CONVERSATION_SEQUENCE_UNIQUE = Internal.createUniqueKey(Messages.MESSAGES, DSL.name("messages_conversation_sequence_unique"), new TableField[] { Messages.MESSAGES.CHAT_ID, Messages.MESSAGES.SEQUENCE }, true);
     public static final UniqueKey<MessagesRecord> MESSAGES_PKEY = Internal.createUniqueKey(Messages.MESSAGES, DSL.name("messages_pkey"), new TableField[] { Messages.MESSAGES.ID }, true);
-    public static final UniqueKey<OutboxEventsRecord> OUTBOX_EVENTS_PKEY = Internal.createUniqueKey(OutboxEvents.OUTBOX_EVENTS, DSL.name("outbox_events_pkey"), new TableField[] { OutboxEvents.OUTBOX_EVENTS.ID }, true);
-    public static final UniqueKey<SendRequestsRecord> SEND_REQUESTS_PKEY = Internal.createUniqueKey(SendRequests.SEND_REQUESTS, DSL.name("send_requests_pkey"), new TableField[] { SendRequests.SEND_REQUESTS.CONVERSATION_ID, SendRequests.SEND_REQUESTS.SENDER_ID, SendRequests.SEND_REQUESTS.REQUEST_ID }, true);
+    public static final UniqueKey<MessengerOutboxEventsRecord> MESSENGER_OUTBOX_EVENTS_PKEY = Internal.createUniqueKey(MessengerOutboxEvents.MESSENGER_OUTBOX_EVENTS, DSL.name("messenger_outbox_events_pkey"), new TableField[] { MessengerOutboxEvents.MESSENGER_OUTBOX_EVENTS.ID }, true);
+    public static final UniqueKey<SendRequestsRecord> SEND_REQUESTS_PKEY = Internal.createUniqueKey(SendRequests.SEND_REQUESTS, DSL.name("send_requests_pkey"), new TableField[] { SendRequests.SEND_REQUESTS.SENDER_ID, SendRequests.SEND_REQUESTS.REQUEST_ID }, true);
     public static final UniqueKey<SessionsRecord> SESSIONS_PKEY = Internal.createUniqueKey(Sessions.SESSIONS, DSL.name("sessions_pkey"), new TableField[] { Sessions.SESSIONS.TOKEN_HASH }, true);
     public static final UniqueKey<UsersRecord> USERS_PKEY = Internal.createUniqueKey(Users.USERS, DSL.name("users_pkey"), new TableField[] { Users.USERS.ID }, true);
     public static final UniqueKey<UsersRecord> USERS_USERNAME_UNIQUE = Internal.createUniqueKey(Users.USERS, DSL.name("users_username_unique"), new TableField[] { Users.USERS.USERNAME }, true);
@@ -53,10 +53,10 @@ public class Keys {
     // FOREIGN KEY definitions
     // -------------------------------------------------------------------------
 
-    public static final ForeignKey<ConversationMembersRecord, ConversationsRecord> CONVERSATION_MEMBERS__CONVERSATION_MEMBERS_CONVERSATION_ID_FKEY = Internal.createForeignKey(ConversationMembers.CONVERSATION_MEMBERS, DSL.name("conversation_members_conversation_id_fkey"), new TableField[] { ConversationMembers.CONVERSATION_MEMBERS.CONVERSATION_ID }, Keys.CONVERSATIONS_PKEY, new TableField[] { Conversations.CONVERSATIONS.ID }, true, ForeignKeyRule.CASCADE, ForeignKeyRule.NO_ACTION);
-    public static final ForeignKey<ConversationMembersRecord, UsersRecord> CONVERSATION_MEMBERS__CONVERSATION_MEMBERS_USER_ID_FKEY = Internal.createForeignKey(ConversationMembers.CONVERSATION_MEMBERS, DSL.name("conversation_members_user_id_fkey"), new TableField[] { ConversationMembers.CONVERSATION_MEMBERS.USER_ID }, Keys.USERS_PKEY, new TableField[] { Users.USERS.ID }, true, ForeignKeyRule.NO_ACTION, ForeignKeyRule.NO_ACTION);
-    public static final ForeignKey<ConversationsRecord, UsersRecord> CONVERSATIONS__CONVERSATIONS_OWNER_FK = Internal.createForeignKey(Conversations.CONVERSATIONS, DSL.name("conversations_owner_fk"), new TableField[] { Conversations.CONVERSATIONS.OWNER_ID }, Keys.USERS_PKEY, new TableField[] { Users.USERS.ID }, true, ForeignKeyRule.NO_ACTION, ForeignKeyRule.NO_ACTION);
-    public static final ForeignKey<MessagesRecord, ConversationsRecord> MESSAGES__MESSAGES_CONVERSATION_ID_FKEY = Internal.createForeignKey(Messages.MESSAGES, DSL.name("messages_conversation_id_fkey"), new TableField[] { Messages.MESSAGES.CONVERSATION_ID }, Keys.CONVERSATIONS_PKEY, new TableField[] { Conversations.CONVERSATIONS.ID }, true, ForeignKeyRule.NO_ACTION, ForeignKeyRule.NO_ACTION);
+    public static final ForeignKey<ChatMembersRecord, ChatsRecord> CHAT_MEMBERS__CHAT_MEMBERS_CHAT_ID_FKEY = Internal.createForeignKey(ChatMembers.CHAT_MEMBERS, DSL.name("chat_members_chat_id_fkey"), new TableField[] { ChatMembers.CHAT_MEMBERS.CHAT_ID }, Keys.CHATS_PKEY, new TableField[] { Chats.CHATS.ID }, true, ForeignKeyRule.CASCADE, ForeignKeyRule.NO_ACTION);
+    public static final ForeignKey<ChatMembersRecord, UsersRecord> CHAT_MEMBERS__CHAT_MEMBERS_USER_ID_FKEY = Internal.createForeignKey(ChatMembers.CHAT_MEMBERS, DSL.name("chat_members_user_id_fkey"), new TableField[] { ChatMembers.CHAT_MEMBERS.USER_ID }, Keys.USERS_PKEY, new TableField[] { Users.USERS.ID }, true, ForeignKeyRule.NO_ACTION, ForeignKeyRule.NO_ACTION);
+    public static final ForeignKey<ChatsRecord, UsersRecord> CHATS__CHATS_OWNER_ID_FKEY = Internal.createForeignKey(Chats.CHATS, DSL.name("chats_owner_id_fkey"), new TableField[] { Chats.CHATS.OWNER_ID }, Keys.USERS_PKEY, new TableField[] { Users.USERS.ID }, true, ForeignKeyRule.NO_ACTION, ForeignKeyRule.NO_ACTION);
+    public static final ForeignKey<MessagesRecord, ChatsRecord> MESSAGES__MESSAGES_CHAT_ID_FKEY = Internal.createForeignKey(Messages.MESSAGES, DSL.name("messages_chat_id_fkey"), new TableField[] { Messages.MESSAGES.CHAT_ID }, Keys.CHATS_PKEY, new TableField[] { Chats.CHATS.ID }, true, ForeignKeyRule.NO_ACTION, ForeignKeyRule.NO_ACTION);
     public static final ForeignKey<MessagesRecord, UsersRecord> MESSAGES__MESSAGES_SENDER_ID_FKEY = Internal.createForeignKey(Messages.MESSAGES, DSL.name("messages_sender_id_fkey"), new TableField[] { Messages.MESSAGES.SENDER_ID }, Keys.USERS_PKEY, new TableField[] { Users.USERS.ID }, true, ForeignKeyRule.NO_ACTION, ForeignKeyRule.NO_ACTION);
     public static final ForeignKey<SessionsRecord, UsersRecord> SESSIONS__SESSIONS_USER_ID_FKEY = Internal.createForeignKey(Sessions.SESSIONS, DSL.name("sessions_user_id_fkey"), new TableField[] { Sessions.SESSIONS.USER_ID }, Keys.USERS_PKEY, new TableField[] { Users.USERS.ID }, true, ForeignKeyRule.NO_ACTION, ForeignKeyRule.NO_ACTION);
 }

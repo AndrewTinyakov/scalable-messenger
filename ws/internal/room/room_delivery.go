@@ -12,14 +12,14 @@ type Recipient interface{ Enqueue(protocol.Event) bool }
 // Room membership is guarded by Rooms.mu. Delivery state has its own lock so a
 // replay drain cannot be overtaken by a live fanout after the registry lock is released.
 type roomMember struct {
-	conversationIDs map[string]bool
-	catching        atomic.Bool
-	deliveryMu      sync.Mutex
-	buffer          []protocol.Event
+	chatIDs    map[string]bool
+	catching   atomic.Bool
+	deliveryMu sync.Mutex
+	buffer     []protocol.Event
 }
 
 func newRoomMember() *roomMember {
-	m := &roomMember{conversationIDs: make(map[string]bool)}
+	m := &roomMember{chatIDs: make(map[string]bool)}
 	m.catching.Store(true)
 	return m
 }
@@ -56,7 +56,7 @@ func (m *roomMember) finish(sink Recipient, room string, ids []string, replay []
 	}
 	m.buffer = nil
 	for _, id := range ids {
-		sink.Enqueue(protocol.Event{Type: "subscribed", Version: 1, Room: room, ConversationID: id})
+		sink.Enqueue(protocol.Event{Type: "subscribed", Version: 1, Room: room, ChatID: id})
 	}
 	m.catching.Store(false)
 }

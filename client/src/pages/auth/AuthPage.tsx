@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { ArrowRight, LockKeyhole, Radio, ShieldCheck } from 'lucide-react'
+import { ArrowRight } from 'lucide-react'
 import type { Session } from '../../entities/session/model'
 import { api } from '../../shared/api/http'
 import { createUlid } from '../../shared/lib/id'
@@ -40,29 +40,10 @@ export function AuthPage({ onSession }: { onSession: (session: Session) => void 
 
   return (
     <main className="auth-layout">
-      <section className="auth-story">
+      <section className="auth-form-card">
         <Brand />
-        <div className="auth-story-content">
-          <div className="eyebrow"><span className="eyebrow-line" /> A clearer way to keep in touch</div>
-          <h1>Good conversations<br /><em>stay with you.</em></h1>
-          <p>Pick up where you left off, on any device. Every message has its place.</p>
-          <div className="story-thread" aria-hidden="true">
-            <div className="story-thread-top"><span className="thread-avatar">M</span><span>Maya <small>now</small></span><span className="thread-dots">···</span></div>
-            <div className="story-bubble story-bubble-left">Are we still on for Sunday?</div>
-            <div className="story-bubble story-bubble-right">Absolutely. Coffee at ten?</div>
-            <div className="story-bubble story-bubble-left">Perfect ☕</div>
-            <div className="story-thread-foot"><span className="live-dot" /> Conversation saved</div>
-          </div>
-        </div>
-        <div className="story-footer"><Radio size={15} /> Connected by the moments in between</div>
-      </section>
-
-      <section className="auth-form-wrap">
-        <div className="auth-form-card">
-          <div className="auth-form-icon"><LockKeyhole size={22} strokeWidth={1.6} /></div>
-          <div className="form-kicker">Your space, ready when you are</div>
-          <h2>{mode === 'login' ? 'Welcome back.' : 'Join the conversation.'}</h2>
-          <p className="form-intro">{mode === 'login' ? 'Sign in to find your conversations.' : 'Create an account to start talking.'}</p>
+        <div className="auth-form-content">
+          <h1>{mode === 'login' ? 'Sign in' : 'Create account'}</h1>
           <form onSubmit={submit}>
             <label htmlFor="username">Username</label>
             <input id="username" name="username" autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} minLength={3} maxLength={40} pattern="[A-Za-z0-9_]+" title="Use letters, digits, or underscore" required placeholder="yourname" />
@@ -74,12 +55,11 @@ export function AuthPage({ onSession }: { onSession: (session: Session) => void 
             </button>
           </form>
           <div className="auth-switch">
-            {mode === 'login' ? 'New to Relay?' : 'Already have an account?'}{' '}
+            {mode === 'login' ? 'No account?' : 'Already have an account?'}{' '}
             <button type="button" onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(null) }}>
               {mode === 'login' ? 'Create an account' : 'Sign in'}
             </button>
           </div>
-          <div className="auth-note"><ShieldCheck size={16} /> Your history follows your account across devices.</div>
         </div>
       </section>
     </main>

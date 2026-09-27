@@ -13,10 +13,10 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/prometheus/client_golang/prometheus"
-	"messenger/ws/internal/apiclient"
 	"messenger/ws/internal/config"
 	"messenger/ws/internal/monitoring"
 	roomregistry "messenger/ws/internal/room"
+	"messenger/ws/internal/ticket"
 )
 
 func TestMissingAppliedACKClosesSocketForRecovery(t *testing.T) {
@@ -45,11 +45,11 @@ func TestMissingAppliedACKClosesSocketForRecovery(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("server did not accept socket")
 	}
-	connection := newConnection(server, socket, apiclient.Session{}, "token")
+	connection := newConnection(server, socket, ticket.Identity{}, "token")
 	server.connections[connection] = struct{}{}
 	writerDone := make(chan struct{})
 	go func() { connection.writeLoop(); close(writerDone) }()
-	if !connection.Enqueue(savedEvent("conversation", "1")) {
+	if !connection.Enqueue(savedEvent("chat", "1")) {
 		t.Fatal("message was not queued")
 	}
 	_ = client.SetReadDeadline(time.Now().Add(2 * time.Second))

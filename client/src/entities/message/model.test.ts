@@ -2,11 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { advanceSend, mergeMessages, type Message, type PendingSend } from './model'
 
 const pending: PendingSend = {
-  conversationId: 'conversation', requestId: 'request', body: 'Hi', createdAt: '2026-09-26T10:00:00Z', status: 'sending',
+  chatId: 'chat', requestId: 'request', body: 'Hi', createdAt: '2026-09-26T10:00:00Z', status: 'sending',
 }
 
 function message(id: string, sequence: string): Message {
-  return { id, conversationId: 'conversation', sequence, senderId: 'user', body: id, createdAt: '2026-09-26T10:00:00Z' }
+  return { id, chatId: 'chat', sequence, senderId: 'user', body: id, createdAt: '2026-09-26T10:00:00Z' }
 }
 
 describe('message state', () => {

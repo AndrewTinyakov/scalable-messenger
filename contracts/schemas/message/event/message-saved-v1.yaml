@@ -2,7 +2,7 @@ $schema: http://json-schema.org/draft-07/schema#
 title: MessageSavedEventV1
 type: object
 additionalProperties: false
-required: [type, version, eventId, room, conversationId, requestId, messageId, sequence, senderId, body, createdAt]
+required: [type, version, eventId, room, chatId, requestId, messageId, sequence, senderId, body, createdAt]
 properties:
   type:
     const: message_saved
@@ -15,7 +15,7 @@ properties:
   room:
     type: string
     pattern: '^(user|group):[0-7][0-9A-HJKMNP-TV-Z]{25}$'
-  conversationId:
+  chatId:
     type: string
     pattern: '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'
   requestId:

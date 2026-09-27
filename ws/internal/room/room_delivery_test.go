@@ -33,7 +33,7 @@ func TestReplayDrainPrecedesConcurrentLiveFanout(t *testing.T) {
 	m.deliver(sink, protocol.Event{Type: "message_saved", EventID: "buffered"}, 8)
 	finishDone := make(chan struct{})
 	go func() {
-		m.finish(sink, "group:room", []string{"conversation"}, []protocol.Event{{EventID: "duplicate"}})
+		m.finish(sink, "group:room", []string{"chat"}, []protocol.Event{{EventID: "duplicate"}})
 		close(finishDone)
 	}()
 	select {

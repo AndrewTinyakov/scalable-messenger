@@ -4,10 +4,9 @@
 package com.andrewtinyakov.messenger.infrastructure.database.generated.tables;
 
 
-import com.andrewtinyakov.messenger.infrastructure.database.generated.Indexes;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Keys;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Public;
-import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Conversations.ConversationsPath;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Chats.ChatsPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Users.UsersPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.MessagesRecord;
 
@@ -20,7 +19,6 @@ import org.jooq.Check;
 import org.jooq.Condition;
 import org.jooq.Field;
 import org.jooq.ForeignKey;
-import org.jooq.Index;
 import org.jooq.InverseForeignKey;
 import org.jooq.Name;
 import org.jooq.Path;
@@ -68,9 +66,9 @@ public class Messages extends TableImpl<MessagesRecord> {
     public final TableField<MessagesRecord, String> ID = createField(DSL.name("id"), SQLDataType.VARCHAR(26).nullable(false), this, "");
 
     /**
-     * The column <code>public.messages.conversation_id</code>.
+     * The column <code>public.messages.chat_id</code>.
      */
-    public final TableField<MessagesRecord, String> CONVERSATION_ID = createField(DSL.name("conversation_id"), SQLDataType.VARCHAR(26).nullable(false), this, "");
+    public final TableField<MessagesRecord, String> CHAT_ID = createField(DSL.name("chat_id"), SQLDataType.VARCHAR(26).nullable(false), this, "");
 
     /**
      * The column <code>public.messages.sequence</code>.
@@ -160,11 +158,6 @@ public class Messages extends TableImpl<MessagesRecord> {
     }
 
     @Override
-    public List<Index> getIndexes() {
-        return Arrays.asList(Indexes.MESSAGES_HISTORY_IDX);
-    }
-
-    @Override
     public UniqueKey<MessagesRecord> getPrimaryKey() {
         return Keys.MESSAGES_PKEY;
     }
@@ -176,20 +169,19 @@ public class Messages extends TableImpl<MessagesRecord> {
 
     @Override
     public List<ForeignKey<MessagesRecord, ?>> getReferences() {
-        return Arrays.asList(Keys.MESSAGES__MESSAGES_CONVERSATION_ID_FKEY, Keys.MESSAGES__MESSAGES_SENDER_ID_FKEY);
+        return Arrays.asList(Keys.MESSAGES__MESSAGES_CHAT_ID_FKEY, Keys.MESSAGES__MESSAGES_SENDER_ID_FKEY);
     }
 
-    private transient ConversationsPath _conversations;
+    private transient ChatsPath _chats;
 
     /**
-     * Get the implicit join path to the <code>public.conversations</code>
-     * table.
+     * Get the implicit join path to the <code>public.chats</code> table.
      */
-    public ConversationsPath conversations() {
-        if (_conversations == null)
-            _conversations = new ConversationsPath(this, Keys.MESSAGES__MESSAGES_CONVERSATION_ID_FKEY, null);
+    public ChatsPath chats() {
+        if (_chats == null)
+            _chats = new ChatsPath(this, Keys.MESSAGES__MESSAGES_CHAT_ID_FKEY, null);
 
-        return _conversations;
+        return _chats;
     }
 
     private transient UsersPath _users;

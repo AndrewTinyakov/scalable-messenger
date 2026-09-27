@@ -1,0 +1,45 @@
+server:
+  port: 8082
+spring:
+  application:
+    name: messenger-command-processor
+  security:
+    user:
+      name: ${METRICS_USERNAME:metrics}
+      password: ${METRICS_PASSWORD:${random.uuid}}
+  jackson:
+    deserialization:
+      accept-float-as-int: false
+      fail-on-unknown-properties: true
+      fail-on-null-for-primitives: true
+      fail-on-trailing-tokens: true
+    mapper:
+      allow-coercion-of-scalars: false
+    default-property-inclusion: non_null
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/messenger}
+    username: ${DATABASE_USER:messenger}
+    password: ${DATABASE_PASSWORD:messenger}
+  flyway:
+    enabled: true
+  jooq:
+    sql-dialect: postgres
+  rabbitmq:
+    host: ${RABBIT_HOST:localhost}
+    port: ${RABBIT_PORT:5672}
+    username: ${RABBIT_USER:guest}
+    password: ${RABBIT_PASSWORD:guest}
+    listener:
+      simple:
+        acknowledge-mode: manual
+        prefetch: 20
+management:
+  metrics:
+    distribution:
+      percentiles-histogram:
+        messenger.command.processing: true
+        messenger.command.queue.delay: true
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus

@@ -6,7 +6,8 @@ data class SendRejectedEventV1(
     val version: Int,
     val eventId: String,
     val room: String,
-    val conversationId: String,
+    val chatId: String? = null,
+    val recipientId: String? = null,
     val requestId: String,
     val reason: SendRejectionReason,
 )

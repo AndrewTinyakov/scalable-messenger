@@ -1,0 +1,46 @@
+syntax = "proto3";
+
+package messenger.authorization.v1;
+
+option java_package = "com.andrewtinyakov.messenger.generated.grpc";
+option java_multiple_files = true;
+option go_package = "messenger/ws/internal/generated/grpc;authorization";
+
+service ChatAuthorization {
+  // Called after the WS node subscribes to the user's room. SQL session state
+  // is checked on every connection, including reconnects.
+  rpc ValidateSession(ValidateSessionRequest) returns (ValidateSessionResponse);
+  // The ticket is issued by the API for this user and device. The API verifies
+  // it against current SQL session state before checking group membership.
+  rpc AuthorizeGroup(AuthorizeGroupRequest) returns (AuthorizeGroupResponse);
+  // One current-session check and one membership lookup for a bounded group batch.
+  rpc AuthorizeGroups(AuthorizeGroupsRequest) returns (AuthorizeGroupsResponse);
+}
+
+message ValidateSessionRequest {
+  string ws_ticket = 1;
+}
+
+message ValidateSessionResponse {
+  string user_id = 1;
+  string device_id = 2;
+  string session_id = 3;
+}
+
+message AuthorizeGroupRequest {
+  string chat_id = 1;
+  string ws_ticket = 2;
+}
+
+message AuthorizeGroupResponse {
+  string room = 1;
+}
+
+message AuthorizeGroupsRequest {
+  repeated string chat_ids = 1;
+  string ws_ticket = 2;
+}
+
+message AuthorizeGroupsResponse {
+  repeated string authorized_chat_ids = 1;
+}

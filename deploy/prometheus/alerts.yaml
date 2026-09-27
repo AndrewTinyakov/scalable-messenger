@@ -1,0 +1,286 @@
+groups:
+  - name: messenger-availability
+    rules:
+      - alert: MessengerTargetDown
+        expr: up{job=~"api|command-processor|outbox-publisher|ws|rabbitmq|rabbitmq-queues|redis|postgres|ingress|alertmanager"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.job }} target is down"
+          description: "Prometheus cannot scrape {{ $labels.instance }}."
+
+      - alert: MessengerReplicaMissing
+        expr: (count(up{job="api"}) or vector(0)) < 2 or (count(up{job="ws"}) or vector(0)) < 2 or (count(up{job="command-processor"}) or vector(0)) < 2 or (count(up{job="outbox-publisher"}) or vector(0)) < 2
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: A Messenger application replica is missing
+          description: Check the Prometheus targets page and Docker Compose replica counts.
+
+      - alert: MessengerBrokerNodeMissing
+        expr: (count(up{job="rabbitmq"}) or vector(0)) < 3 or (count(up{job="redis"}) or vector(0)) < 6
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: A RabbitMQ or Redis node is missing
+          description: Check cluster membership and the Prometheus targets page.
+
+      - alert: MessengerIngressMissing
+        expr: (count(up{job="ingress"}) or vector(0)) < 3
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: A Messenger NGINX exporter is missing
+          description: Check client, API proxy, and WS proxy status.
+
+  - name: messenger-api-and-ws
+    rules:
+      - alert: MessengerApiServerErrors
+        expr: (sum(rate(http_server_requests_seconds_count{job="api",status=~"5.."}[5m])) / clamp_min(sum(rate(http_server_requests_seconds_count{job="api"}[5m])), 0.001)) > 0.05 and sum(increase(http_server_requests_seconds_count{job="api"}[5m])) >= 20
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: API 5xx rate exceeds 5 percent
+          description: Check API logs and request latency.
+
+      - alert: MessengerWsSlowClients
+        expr: sum(increase(messenger_ws_slow_closes_total[5m])) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Many WebSocket clients are being closed for backpressure
+          description: Check outbound queue bytes, fanout rate, and client network speed.
+
+      - alert: MessengerWsNodeNearCapacity
+        expr: messenger_ws_connections > 8000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: A WS node is above 80 percent of its 10,000-connection local cap
+          description: Add WS capacity before new handshakes are rejected.
+
+      - alert: MessengerWsProxyConnectionsHigh
+        expr: nginx_connections_active{tier="ws"} > 8000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: The WS proxy has more than 8000 active connections
+          description: Check NGINX worker limits and client distribution.
+
+      - alert: MessengerWsPositionStale
+        expr: messenger_ws_oldest_room_position_seconds > 90
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: A WS room has not had a position check or live event for 90 seconds
+          description: Check Redis latency and position sweep duration on {{ $labels.instance }}.
+
+      - alert: MessengerWsPositionSweepSlow
+        expr: histogram_quantile(0.95, sum by (le, instance) (rate(messenger_ws_position_sweep_seconds_bucket[5m]))) > 30
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: A WS node's position sweep exceeds its 30-second target
+          description: Quiet-room checks may detect missed events late.
+
+      - alert: MessengerWsRecoverySpike
+        expr: sum(increase(messenger_ws_sql_fallback_total[5m])) > 20
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: WebSocket recovery is sending many clients to SQL history
+          description: Check Redis history retention, Pub/Sub gaps, and database load.
+
+      - alert: MessengerWsDependencyErrors
+        expr: sum(increase(messenger_ws_error_frames_total{code=~"dependency_unavailable|publish_failed|publish_unknown"}[5m])) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: WebSocket sends or subscriptions are failing on dependencies
+          description: Check RabbitMQ, Redis, and gRPC authorization health.
+
+  - name: messenger-processing
+    rules:
+      - alert: MessengerCommandRetries
+        expr: sum(increase(messenger_command_consumed_total{outcome="retry"}[10m])) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Command processors are retrying sends
+          description: Check dependency errors and command processor logs.
+
+      - alert: MessengerDeadLetterBacklog
+        expr: max by (queue) (rabbitmq_detailed_queue_messages_ready{queue="messenger.send.dead"}) > 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: The send dead-letter queue has messages
+          description: Inspect malformed or exhausted commands and the terminal rejection path.
+
+      - alert: MessengerSendQueueBacklog
+        expr: sum(max by (queue) (rabbitmq_detailed_queue_messages_ready{queue=~"messenger.send.[0-3]"})) > 1000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Send command queues have more than 1000 ready messages
+          description: Check processor throughput, consumers, and PostgreSQL latency.
+
+      - alert: MessengerSendQueueDelay
+        expr: histogram_quantile(0.95, sum by (le) (rate(messenger_command_queue_delay_seconds_bucket[5m]))) > 60
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Processed send commands have waited over one minute at p95
+          description: Check send queue depth, processor throughput, and PostgreSQL contention.
+
+      - alert: MessengerSendQueueUnackedHigh
+        expr: sum(max by (queue) (rabbitmq_detailed_queue_messages_unacked{queue=~"messenger.send.[0-3]"})) > 100
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: More than 100 send commands remain unacknowledged
+          description: Check slow transactions and consumer prefetch across replicas.
+
+      - alert: MessengerSendQueueNoConsumer
+        expr: max by (queue) (rabbitmq_detailed_queue_consumers{queue=~"messenger.send.[0-3]"}) == 0 and on (queue) max by (queue) (rabbitmq_detailed_queue_messages_ready{queue=~"messenger.send.[0-3]"}) > 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.queue }} has waiting commands and no consumer"
+          description: Check command processor replicas and RabbitMQ connectivity.
+
+      - alert: MessengerOutboxOldestEvent
+        expr: max(messenger_outbox_oldest_age_seconds) > 60
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: The oldest unpublished Messenger event is over one minute old
+          description: Check publisher replicas, Redis errors, and outbox backlog.
+
+      - alert: MessengerOutboxPublicationFailures
+        expr: sum(increase(messenger_outbox_publish_total{result="failure"}[5m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Outbox publishers are repeatedly failing to publish
+          description: Check Redis health and publisher logs.
+
+      - alert: MessengerOutboxSamplerFailed
+        expr: messenger_outbox_backlog_sample_healthy == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: A publisher cannot read outbox backlog
+          description: The outbox pending and age gauges on {{ $labels.instance }} may be stale.
+
+  - name: messenger-infrastructure
+    rules:
+      - alert: MessengerPostgresUnavailable
+        expr: pg_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: PostgreSQL exporter cannot connect to the database
+          description: Check PostgreSQL and the exporter credentials.
+
+      - alert: MessengerRedisUnavailable
+        expr: redis_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: A Redis Cluster node is unavailable
+          description: Check Redis Cluster membership and replica promotion.
+
+      - alert: MessengerRedisMemoryHigh
+        expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.8 and redis_memory_max_bytes > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Redis memory use exceeds 80 percent of its configured limit
+          description: Inspect stream retention, evictions, and memory growth on {{ $labels.instance }}.
+
+      - alert: MessengerRedisClusterDegraded
+        expr: redis_cluster_state == 0 or redis_cluster_slots_fail > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Redis Cluster is degraded
+          description: A node reports failed slots or an unhealthy cluster state.
+
+      - alert: MessengerRabbitAlarm
+        expr: rabbitmq_alarms_memory_used_watermark > 0 or rabbitmq_alarms_free_disk_space_watermark > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: RabbitMQ resource alarm is active
+          description: RabbitMQ may block publishers until memory or disk pressure clears.
+
+      - alert: MessengerRabbitPeerUnreachable
+        expr: rabbitmq_unreachable_cluster_peers_count > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: A RabbitMQ node cannot reach a cluster peer
+          description: Check cluster network connectivity and quorum availability.
+
+      - alert: MessengerIngressUnavailable
+        expr: nginx_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: An NGINX exporter cannot reach its proxy
+          description: Check the corresponding client or proxy container.
+
+      - alert: MessengerPostgresConnectionsHigh
+        expr: sum(pg_stat_activity_count) / max(pg_settings_max_connections) > 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: PostgreSQL connections exceed 80 percent of max_connections
+          description: Check Hikari pool sizes and connection leaks across all replicas.
+
+      - alert: MessengerJdbcPoolPending
+        expr: hikaricp_connections_pending{job=~"api|command-processor|outbox-publisher"} > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.job }} has requests waiting for a JDBC connection"
+          description: Check slow SQL, transaction length, and pool sizing.
+
+      - alert: MessengerRedisEvictions
+        expr: sum(increase(redis_evicted_keys_total[5m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: Redis has evicted keys
+          description: Short history may disappear early and force SQL recovery.

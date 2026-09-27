@@ -7,25 +7,25 @@ servers:
 security:
 - bearerAuth: []
 paths:
-  /v1/conversations/groups:
+  /v1/sends/status:
     post:
       tags:
-      - conversation-controller
-      operationId: group
+      - send-status-controller
+      operationId: statuses
       parameters: []
       requestBody:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/GroupRequest"
+              $ref: "#/components/schemas/SendStatusesRequest"
         required: true
       responses:
-        "201":
-          description: Created
+        "200":
+          description: OK
           content:
             '*/*':
               schema:
-                $ref: "#/components/schemas/ConversationView"
+                $ref: "#/components/schemas/SendStatusesResponse"
         "401":
           description: Unauthorized
           content:
@@ -50,17 +50,61 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/ApiProblem"
-  /v1/conversations/direct:
+  /v1/chats/{id}/members:
     post:
       tags:
-      - conversation-controller
-      operationId: direct
+      - chat-controller
+      operationId: addMembers
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddGroupMembersRequest"
+        required: true
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+  /v1/chats/groups:
+    post:
+      tags:
+      - chat-controller
+      operationId: group
       parameters: []
       requestBody:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/DirectRequest"
+              $ref: "#/components/schemas/CreateGroupChatRequest"
         required: true
       responses:
         "201":
@@ -68,7 +112,44 @@ paths:
           content:
             '*/*':
               schema:
-                $ref: "#/components/schemas/ConversationView"
+                $ref: "#/components/schemas/ChatResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+  /v1/auth/ws-ticket:
+    post:
+      tags:
+      - auth-controller
+      operationId: wsTicket
+      parameters: []
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/WsTicketResponse"
         "401":
           description: Unauthorized
           content:
@@ -102,7 +183,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/Credentials"
+              $ref: "#/components/schemas/AuthRequest"
         required: true
       responses:
         "201":
@@ -110,7 +191,7 @@ paths:
           content:
             '*/*':
               schema:
-                $ref: "#/components/schemas/AuthView"
+                $ref: "#/components/schemas/AuthResponse"
         "400":
           description: Invalid request
           content:
@@ -124,6 +205,39 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiProblem"
       security: []
+  /v1/auth/logout:
+    post:
+      tags:
+      - auth-controller
+      operationId: logout
+      parameters: []
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
   /v1/auth/login:
     post:
       tags:
@@ -133,7 +247,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/Credentials"
+              $ref: "#/components/schemas/AuthRequest"
         required: true
       responses:
         "200":
@@ -141,7 +255,7 @@ paths:
           content:
             '*/*':
               schema:
-                $ref: "#/components/schemas/AuthView"
+                $ref: "#/components/schemas/AuthResponse"
         "400":
           description: Invalid request
           content:
@@ -158,7 +272,7 @@ paths:
   /v1/users:
     get:
       tags:
-      - users-controller
+      - user-controller
       operationId: search
       parameters:
       - name: query
@@ -175,7 +289,7 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/UserView"
+                  $ref: "#/components/schemas/UserResponse"
         "401":
           description: Unauthorized
           content:
@@ -200,56 +314,12 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/ApiProblem"
-  /v1/conversations:
+  /v1/sends/{requestId}:
     get:
       tags:
-      - conversation-controller
-      operationId: list
-      parameters: []
-      responses:
-        "200":
-          description: OK
-          content:
-            '*/*':
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/ConversationView"
-        "401":
-          description: Unauthorized
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ApiProblem"
-        "403":
-          description: Forbidden
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ApiProblem"
-        "400":
-          description: Invalid request
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ApiProblem"
-        "500":
-          description: Internal server error
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ApiProblem"
-  /v1/conversations/{id}/send-status/{requestId}:
-    get:
-      tags:
-      - conversation-controller
+      - send-status-controller
       operationId: status
       parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
       - name: requestId
         in: path
         required: true
@@ -261,7 +331,7 @@ paths:
           content:
             '*/*':
               schema:
-                $ref: "#/components/schemas/SendStatusView"
+                $ref: "#/components/schemas/SendStatusResponse"
         "401":
           description: Unauthorized
           content:
@@ -286,23 +356,17 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/ApiProblem"
-  /v1/conversations/{id}/messages:
+  /v1/chats:
     get:
       tags:
-      - conversation-controller
-      operationId: messages
+      - chat-controller
+      operationId: list
       parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-      - name: afterSeq
+      - name: cursor
         in: query
         required: false
         schema:
           type: string
-          default: "0"
       - name: limit
         in: query
         required: false
@@ -316,7 +380,7 @@ paths:
           content:
             '*/*':
               schema:
-                $ref: "#/components/schemas/HistoryView"
+                $ref: "#/components/schemas/ChatPageResponse"
         "401":
           description: Unauthorized
           content:
@@ -341,11 +405,11 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/ApiProblem"
-  /v1/conversations/{id}/authorization:
+  /v1/chats/{id}:
     get:
       tags:
-      - conversation-controller
-      operationId: authorize
+      - chat-controller
+      operationId: get
       parameters:
       - name: id
         in: path
@@ -358,7 +422,66 @@ paths:
           content:
             '*/*':
               schema:
-                $ref: "#/components/schemas/AuthorizationView"
+                $ref: "#/components/schemas/ChatResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+  /v1/chats/{id}/messages:
+    get:
+      tags:
+      - message-controller
+      operationId: messages
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: afterSeq
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: beforeSeq
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 50
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/MessageHistoryResponse"
         "401":
           description: Unauthorized
           content:
@@ -395,7 +518,7 @@ paths:
           content:
             '*/*':
               schema:
-                $ref: "#/components/schemas/SessionView"
+                $ref: "#/components/schemas/SessionResponse"
         "401":
           description: Unauthorized
           content:
@@ -420,10 +543,10 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/ApiProblem"
-  /v1/conversations/{id}/members/{userId}:
+  /v1/chats/{id}/members/{userId}:
     delete:
       tags:
-      - conversation-controller
+      - chat-controller
       operationId: removeMember
       parameters:
       - name: id
@@ -465,7 +588,71 @@ paths:
                 $ref: "#/components/schemas/ApiProblem"
 components:
   schemas:
-    GroupRequest:
+    SendStatusesRequest:
+      type: object
+      properties:
+        requestIds:
+          type: array
+          items:
+            type: string
+          maxItems: 100
+          minItems: 1
+      required:
+      - requestIds
+    SendStatusEntry:
+      type: object
+      properties:
+        requestId:
+          type: string
+        result:
+          $ref: "#/components/schemas/SendStatusResponse"
+      required:
+      - requestId
+      - result
+    SendStatusResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        chatId:
+          type:
+          - string
+          - "null"
+        messageId:
+          type:
+          - string
+          - "null"
+        sequence:
+          type:
+          - string
+          - "null"
+        reason:
+          type:
+          - string
+          - "null"
+      required:
+      - status
+    SendStatusesResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/SendStatusEntry"
+      required:
+      - results
+    AddGroupMembersRequest:
+      type: object
+      properties:
+        memberIds:
+          type: array
+          items:
+            type: string
+          maxItems: 1000
+          minItems: 1
+      required:
+      - memberIds
+    CreateGroupChatRequest:
       type: object
       properties:
         name:
@@ -476,12 +663,12 @@ components:
           type: array
           items:
             type: string
-          maxItems: 49
+          maxItems: 999
           minItems: 1
       required:
       - memberIds
       - name
-    ConversationView:
+    ChatResponse:
       type: object
       properties:
         id:
@@ -495,15 +682,19 @@ components:
         members:
           type: array
           items:
-            $ref: "#/components/schemas/UserView"
+            $ref: "#/components/schemas/UserResponse"
+        memberCount:
+          type: integer
+          format: int32
         lastSequence:
           type: string
       required:
       - id
       - kind
       - lastSequence
+      - memberCount
       - members
-    UserView:
+    UserResponse:
       type: object
       properties:
         id:
@@ -513,15 +704,18 @@ components:
       required:
       - id
       - username
-    DirectRequest:
+    WsTicketResponse:
       type: object
       properties:
-        userId:
+        token:
           type: string
-          pattern: "[0-7][0-9A-HJKMNP-TV-Z]{25}"
+        expiresAt:
+          type: integer
+          format: int64
       required:
-      - userId
-    Credentials:
+      - expiresAt
+      - token
+    AuthRequest:
       type: object
       properties:
         username:
@@ -539,56 +733,53 @@ components:
       required:
       - password
       - username
-    AuthView:
+    AuthResponse:
       type: object
       properties:
         token:
           type: string
         user:
-          $ref: "#/components/schemas/UserView"
+          $ref: "#/components/schemas/UserResponse"
         deviceId:
           type: string
       required:
       - deviceId
       - token
       - user
-    SendStatusView:
+    ChatPageResponse:
       type: object
       properties:
-        status:
-          type: string
-        messageId:
-          type:
-          - string
-          - "null"
-        sequence:
-          type:
-          - string
-          - "null"
-        reason:
+        chats:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChatResponse"
+        nextCursor:
           type:
           - string
           - "null"
       required:
-      - status
-    HistoryView:
+      - chats
+    MessageHistoryResponse:
       type: object
       properties:
         messages:
           type: array
           items:
-            $ref: "#/components/schemas/MessageView"
+            $ref: "#/components/schemas/MessageResponse"
         nextSequence:
           type: string
+        hasMore:
+          type: boolean
       required:
+      - hasMore
       - messages
       - nextSequence
-    MessageView:
+    MessageResponse:
       type: object
       properties:
         id:
           type: string
-        conversationId:
+        chatId:
           type: string
         sequence:
           type: string
@@ -601,26 +792,12 @@ components:
           format: date-time
       required:
       - body
-      - conversationId
+      - chatId
       - createdAt
       - id
       - senderId
       - sequence
-    AuthorizationView:
-      type: object
-      properties:
-        allowed:
-          type: boolean
-        room:
-          type: string
-        version:
-          type: integer
-          format: int32
-      required:
-      - allowed
-      - room
-      - version
-    SessionView:
+    SessionResponse:
       type: object
       properties:
         userId:

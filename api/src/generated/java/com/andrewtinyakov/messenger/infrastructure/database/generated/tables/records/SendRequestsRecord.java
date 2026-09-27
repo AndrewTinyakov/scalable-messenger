@@ -8,7 +8,7 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Sen
 
 import java.time.OffsetDateTime;
 
-import org.jooq.Record3;
+import org.jooq.Record2;
 import org.jooq.impl.UpdatableRecordImpl;
 
 
@@ -21,129 +21,143 @@ public class SendRequestsRecord extends UpdatableRecordImpl<SendRequestsRecord> 
     private static final long serialVersionUID = 1L;
 
     /**
-     * Setter for <code>public.send_requests.conversation_id</code>.
+     * Setter for <code>public.send_requests.chat_id</code>.
      */
-    public void setConversationId(String value) {
+    public void setChatId(String value) {
         set(0, value);
     }
 
     /**
-     * Getter for <code>public.send_requests.conversation_id</code>.
+     * Getter for <code>public.send_requests.chat_id</code>.
      */
-    public String getConversationId() {
+    public String getChatId() {
         return (String) get(0);
+    }
+
+    /**
+     * Setter for <code>public.send_requests.recipient_id</code>.
+     */
+    public void setRecipientId(String value) {
+        set(1, value);
+    }
+
+    /**
+     * Getter for <code>public.send_requests.recipient_id</code>.
+     */
+    public String getRecipientId() {
+        return (String) get(1);
     }
 
     /**
      * Setter for <code>public.send_requests.sender_id</code>.
      */
     public void setSenderId(String value) {
-        set(1, value);
+        set(2, value);
     }
 
     /**
      * Getter for <code>public.send_requests.sender_id</code>.
      */
     public String getSenderId() {
-        return (String) get(1);
+        return (String) get(2);
     }
 
     /**
      * Setter for <code>public.send_requests.request_id</code>.
      */
     public void setRequestId(String value) {
-        set(2, value);
+        set(3, value);
     }
 
     /**
      * Getter for <code>public.send_requests.request_id</code>.
      */
     public String getRequestId() {
-        return (String) get(2);
+        return (String) get(3);
     }
 
     /**
      * Setter for <code>public.send_requests.fingerprint</code>.
      */
     public void setFingerprint(String value) {
-        set(3, value);
+        set(4, value);
     }
 
     /**
      * Getter for <code>public.send_requests.fingerprint</code>.
      */
     public String getFingerprint() {
-        return (String) get(3);
+        return (String) get(4);
     }
 
     /**
      * Setter for <code>public.send_requests.status</code>.
      */
     public void setStatus(String value) {
-        set(4, value);
+        set(5, value);
     }
 
     /**
      * Getter for <code>public.send_requests.status</code>.
      */
     public String getStatus() {
-        return (String) get(4);
+        return (String) get(5);
     }
 
     /**
      * Setter for <code>public.send_requests.message_id</code>.
      */
     public void setMessageId(String value) {
-        set(5, value);
+        set(6, value);
     }
 
     /**
      * Getter for <code>public.send_requests.message_id</code>.
      */
     public String getMessageId() {
-        return (String) get(5);
+        return (String) get(6);
     }
 
     /**
      * Setter for <code>public.send_requests.sequence</code>.
      */
     public void setSequence(Long value) {
-        set(6, value);
+        set(7, value);
     }
 
     /**
      * Getter for <code>public.send_requests.sequence</code>.
      */
     public Long getSequence() {
-        return (Long) get(6);
+        return (Long) get(7);
     }
 
     /**
      * Setter for <code>public.send_requests.reason</code>.
      */
     public void setReason(String value) {
-        set(7, value);
+        set(8, value);
     }
 
     /**
      * Getter for <code>public.send_requests.reason</code>.
      */
     public String getReason() {
-        return (String) get(7);
+        return (String) get(8);
     }
 
     /**
      * Setter for <code>public.send_requests.created_at</code>.
      */
     public void setCreatedAt(OffsetDateTime value) {
-        set(8, value);
+        set(9, value);
     }
 
     /**
      * Getter for <code>public.send_requests.created_at</code>.
      */
     public OffsetDateTime getCreatedAt() {
-        return (OffsetDateTime) get(8);
+        return (OffsetDateTime) get(9);
     }
 
     // -------------------------------------------------------------------------
@@ -151,8 +165,8 @@ public class SendRequestsRecord extends UpdatableRecordImpl<SendRequestsRecord> 
     // -------------------------------------------------------------------------
 
     @Override
-    public Record3<String, String, String> key() {
-        return (Record3) super.key();
+    public Record2<String, String> key() {
+        return (Record2) super.key();
     }
 
     // -------------------------------------------------------------------------
@@ -169,10 +183,11 @@ public class SendRequestsRecord extends UpdatableRecordImpl<SendRequestsRecord> 
     /**
      * Create a detached, initialised SendRequestsRecord
      */
-    public SendRequestsRecord(String conversationId, String senderId, String requestId, String fingerprint, String status, String messageId, Long sequence, String reason, OffsetDateTime createdAt) {
+    public SendRequestsRecord(String chatId, String recipientId, String senderId, String requestId, String fingerprint, String status, String messageId, Long sequence, String reason, OffsetDateTime createdAt) {
         super(SendRequests.SEND_REQUESTS);
 
-        setConversationId(conversationId);
+        setChatId(chatId);
+        setRecipientId(recipientId);
         setSenderId(senderId);
         setRequestId(requestId);
         setFingerprint(fingerprint);

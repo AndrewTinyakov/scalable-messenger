@@ -1,8 +1,14 @@
 package room
 
-import "messenger/ws/internal/protocol"
+import (
+	"strings"
+	"time"
+
+	"messenger/ws/internal/protocol"
+)
 
 func (r *Rooms) dispatch(room string, event protocol.Event) {
+	started := time.Now()
 	type target struct {
 		connection Recipient
 		member     *roomMember
@@ -14,16 +20,21 @@ func (r *Rooms) dispatch(room string, event protocol.Event) {
 		r.mu.Unlock()
 		return
 	}
+	if entry.epoch == event.Epoch && entry.lastID != "" && !streamAfter(event.StreamID, entry.lastID) {
+		r.mu.Unlock()
+		return
+	}
 	epochChanged := entry.epoch != event.Epoch
 	needsRecovery := entry.epoch != "" && epochChanged
 	if epochChanged || streamAfter(event.StreamID, entry.lastID) {
 		entry.lastID = event.StreamID
 	}
 	entry.epoch = event.Epoch
+	entry.lastLiveAt = time.Now()
 	recipients := make([]target, 0, len(entry.members))
 	for connection, member := range entry.members {
-		ids := make([]string, 0, len(member.conversationIDs))
-		for id := range member.conversationIDs {
+		ids := make([]string, 0, len(member.chatIDs))
+		for id := range member.chatIDs {
 			if id != "" {
 				ids = append(ids, id)
 			}
@@ -31,6 +42,7 @@ func (r *Rooms) dispatch(room string, event protocol.Event) {
 		recipients = append(recipients, target{connection, member, ids})
 	}
 	r.mu.Unlock()
+	r.metrics.FanoutRecipients.Observe(float64(len(recipients)))
 	for _, recipient := range recipients {
 		if needsRecovery {
 			for _, id := range recipient.ids {
@@ -43,6 +55,7 @@ func (r *Rooms) dispatch(room string, event protocol.Event) {
 			}
 		}
 	}
+	r.metrics.FanoutSeconds.Observe(time.Since(started).Seconds())
 }
 
 func (r *Rooms) finish(connection Recipient, room string, replay []protocol.Event) {
@@ -57,8 +70,8 @@ func (r *Rooms) finish(connection Recipient, room string, replay []protocol.Even
 		r.mu.Unlock()
 		return
 	}
-	ids := make([]string, 0, len(member.conversationIDs))
-	for id := range member.conversationIDs {
+	ids := make([]string, 0, len(member.chatIDs))
+	for id := range member.chatIDs {
 		if id != "" {
 			ids = append(ids, id)
 		}
@@ -67,9 +80,9 @@ func (r *Rooms) finish(connection Recipient, room string, replay []protocol.Even
 	member.finish(connection, room, ids, replay)
 }
 
-func (r *Rooms) failMember(c Recipient, room, conversationID string) {
+func (r *Rooms) failMember(c Recipient, room, chatID string) {
 	r.metrics.SQLFallback.Inc()
-	c.Enqueue(protocol.Event{Type: "recovery_failed", Version: 1, Room: room, ConversationID: conversationID})
+	c.Enqueue(protocol.Event{Type: "recovery_failed", Version: 1, Room: room, ChatID: chatID})
 }
 
 func (r *Rooms) failRoom(room string) {
@@ -85,14 +98,26 @@ func (r *Rooms) failRoom(room string) {
 		id string
 	}
 	var targets []target
+	connections := make(map[interface{ Close() }]struct{})
 	for c, m := range entry.members {
-		for id := range m.conversationIDs {
+		if closer, ok := c.(interface{ Close() }); ok {
+			connections[closer] = struct{}{}
+		}
+		for id := range m.chatIDs {
 			if id != "" {
 				targets = append(targets, target{c, id})
 			}
 		}
 	}
 	r.mu.Unlock()
+	if strings.HasPrefix(room, "user:") {
+		// A missed personal-room revocation must not leave a group subscription
+		// alive indefinitely. Reconnect forces current SQL authorization.
+		for connection := range connections {
+			connection.Close()
+		}
+		return
+	}
 	for _, target := range targets {
 		r.failMember(target.c, room, target.id)
 	}

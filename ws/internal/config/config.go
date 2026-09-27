@@ -2,22 +2,29 @@ package config
 
 import (
 	"fmt"
-	"os"
-	"strconv"
+	"strings"
 	"time"
 )
 
 type Config struct {
 	Address               string
-	APIURL                string
-	RabbitURL             string
+	APIGrpcAddress        string
+	WSTicketSecret        string
+	RabbitURLs            []string
 	RedisURL              string
+	RedisClusterNodes     []string
 	AllowedOrigin         string
 	MaxFrameBytes         int64
 	QueueItems            int
 	QueueBytes            int
 	PendingACKLimit       int
 	MaxConnections        int
+	MaxPendingUpgrades    int
+	HandshakeRate         int
+	HandshakeWindow       time.Duration
+	MaxGroupAuths         int
+	SubscribeRate         int
+	SubscribeWindow       time.Duration
 	MaxRoomsPerConnection int
 	PublishConcurrency    int
 	ReplayLimit           int64
@@ -28,7 +35,7 @@ type Config struct {
 	PongTimeout           time.Duration
 	PingInterval          time.Duration
 	PositionCheckInterval time.Duration
-	ReauthorizeInterval   time.Duration
+	GroupLease            time.Duration
 	ShutdownTimeout       time.Duration
 }
 
@@ -36,9 +43,25 @@ func Load() (Config, error) {
 	c := Config{}
 	var err error
 	c.Address = stringEnv("WS_ADDRESS", ":8081")
-	c.APIURL = stringEnv("API_URL", "http://api-proxy:8080")
-	c.RabbitURL = stringEnv("RABBITMQ_URL", "amqp://guest:guest@rabbitmq:5672/")
+	c.APIGrpcAddress = stringEnv("API_GRPC_ADDRESS", "api-proxy:9090")
+	c.WSTicketSecret = stringEnv("WS_TICKET_SECRET", "")
+	for _, url := range strings.Split(stringEnv("RABBITMQ_URLS", stringEnv("RABBITMQ_URL", "amqp://guest:guest@rabbitmq:5672/")), ",") {
+		url = strings.TrimSpace(url)
+		if url == "" {
+			return c, fmt.Errorf("RABBITMQ_URLS contains an empty address")
+		}
+		c.RabbitURLs = append(c.RabbitURLs, url)
+	}
 	c.RedisURL = stringEnv("REDIS_URL", "redis://redis:6379/0")
+	if nodes := strings.TrimSpace(stringEnv("REDIS_CLUSTER_NODES", "")); nodes != "" {
+		for _, node := range strings.Split(nodes, ",") {
+			node = strings.TrimSpace(node)
+			if node == "" {
+				return c, fmt.Errorf("REDIS_CLUSTER_NODES contains an empty address")
+			}
+			c.RedisClusterNodes = append(c.RedisClusterNodes, node)
+		}
+	}
 	c.AllowedOrigin = stringEnv("WS_ALLOWED_ORIGIN", "http://localhost:8080")
 	if c.MaxFrameBytes, err = int64Env("WS_MAX_FRAME_BYTES", 32768); err != nil {
 		return c, err
@@ -55,7 +78,25 @@ func Load() (Config, error) {
 	if c.MaxConnections, err = intEnv("WS_MAX_CONNECTIONS", 10000); err != nil {
 		return c, err
 	}
-	if c.MaxRoomsPerConnection, err = intEnv("WS_MAX_ROOMS_PER_CONNECTION", 100); err != nil {
+	if c.MaxPendingUpgrades, err = intEnv("WS_MAX_PENDING_UPGRADES", 16); err != nil {
+		return c, err
+	}
+	if c.HandshakeRate, err = intEnv("WS_HANDSHAKE_RATE", 30); err != nil {
+		return c, err
+	}
+	if c.HandshakeWindow, err = durationEnv("WS_HANDSHAKE_WINDOW", time.Minute); err != nil {
+		return c, err
+	}
+	if c.MaxGroupAuths, err = intEnv("WS_MAX_GROUP_AUTHS", 16); err != nil {
+		return c, err
+	}
+	if c.SubscribeRate, err = intEnv("WS_SUBSCRIBE_RATE", 10); err != nil {
+		return c, err
+	}
+	if c.SubscribeWindow, err = durationEnv("WS_SUBSCRIBE_WINDOW", time.Second); err != nil {
+		return c, err
+	}
+	if c.MaxRoomsPerConnection, err = intEnv("WS_MAX_ROOMS_PER_CONNECTION", 200); err != nil {
 		return c, err
 	}
 	if c.PublishConcurrency, err = intEnv("WS_PUBLISH_CONCURRENCY", 64); err != nil {
@@ -85,51 +126,14 @@ func Load() (Config, error) {
 	if c.PositionCheckInterval, err = durationEnv("WS_POSITION_CHECK_INTERVAL", 30*time.Second); err != nil {
 		return c, err
 	}
-	if c.ReauthorizeInterval, err = durationEnv("WS_REAUTHORIZE_INTERVAL", 60*time.Second); err != nil {
+	if c.GroupLease, err = durationEnv("WS_GROUP_LEASE", 10*time.Minute); err != nil {
 		return c, err
 	}
 	if c.ShutdownTimeout, err = durationEnv("WS_SHUTDOWN_TIMEOUT", 10*time.Second); err != nil {
 		return c, err
 	}
-	if c.MaxFrameBytes <= 0 || c.QueueItems <= 0 || c.QueueBytes <= 0 || c.PendingACKLimit <= 0 || c.MaxConnections <= 0 || c.MaxRoomsPerConnection <= 0 || c.PublishConcurrency <= 0 || c.ReplayLimit <= 0 || c.ConfirmTimeout <= 0 || c.APITimeout <= 0 || c.WriteTimeout <= 0 || c.ACKTimeout <= 0 || c.PongTimeout <= 0 || c.PingInterval <= 0 || c.PositionCheckInterval <= 0 || c.ReauthorizeInterval <= 0 || c.ShutdownTimeout <= 0 || c.PingInterval >= c.PongTimeout {
+	if len(c.WSTicketSecret) < 32 || c.APIGrpcAddress == "" || c.MaxFrameBytes <= 0 || c.QueueItems <= 0 || c.QueueBytes <= 0 || c.PendingACKLimit <= 0 || c.MaxConnections <= 0 || c.MaxPendingUpgrades <= 0 || c.HandshakeRate <= 0 || c.HandshakeWindow < time.Millisecond || c.HandshakeWindow/time.Microsecond < time.Duration(c.HandshakeRate) || c.MaxGroupAuths <= 0 || c.SubscribeRate <= 0 || c.SubscribeWindow < time.Millisecond || c.SubscribeWindow/time.Microsecond < time.Duration(c.SubscribeRate) || c.MaxRoomsPerConnection <= 0 || c.PublishConcurrency <= 0 || c.ReplayLimit <= 0 || c.ConfirmTimeout <= 0 || c.APITimeout <= 0 || c.WriteTimeout <= 0 || c.ACKTimeout <= 0 || c.PongTimeout <= 0 || c.PingInterval <= 0 || c.PositionCheckInterval <= 0 || c.GroupLease <= 0 || c.ShutdownTimeout <= 0 || c.PingInterval >= c.PongTimeout {
 		return c, fmt.Errorf("invalid WS capacity or timeout")
 	}
 	return c, nil
-}
-
-func stringEnv(key, fallback string) string {
-	if v, ok := os.LookupEnv(key); ok {
-		return v
-	}
-	return fallback
-}
-func intEnv(key string, fallback int) (int, error) {
-	if v, ok := os.LookupEnv(key); ok {
-		n, e := strconv.Atoi(v)
-		if e != nil {
-			return 0, fmt.Errorf("%s: %w", key, e)
-		}
-		return n, nil
-	}
-	return fallback, nil
-}
-func int64Env(key string, fallback int64) (int64, error) {
-	if v, ok := os.LookupEnv(key); ok {
-		n, e := strconv.ParseInt(v, 10, 64)
-		if e != nil {
-			return 0, fmt.Errorf("%s: %w", key, e)
-		}
-		return n, nil
-	}
-	return fallback, nil
-}
-func durationEnv(key string, fallback time.Duration) (time.Duration, error) {
-	if v, ok := os.LookupEnv(key); ok {
-		n, e := time.ParseDuration(v)
-		if e != nil {
-			return 0, fmt.Errorf("%s: %w", key, e)
-		}
-		return n, nil
-	}
-	return fallback, nil
 }

@@ -16,6 +16,21 @@ messages:
       $ref: '#/correlationIds/SendRequestId'
     payload:
       $ref: ./schemas/message/event/message-saved-v1.yaml
+  ChatCreatedEventV1:
+    name: ChatCreatedEventV1
+    contentType: application/json
+    payload:
+      $ref: ./schemas/message/event/chat-created-v1.yaml
+  MemberRemovedEventV1:
+    name: MemberRemovedEventV1
+    contentType: application/json
+    payload:
+      $ref: ./schemas/message/event/member-removed-v1.yaml
+  SessionRevokedEventV1:
+    name: SessionRevokedEventV1
+    contentType: application/json
+    payload:
+      $ref: ./schemas/message/event/session-revoked-v1.yaml
   SendRejectedEventV1:
     name: SendRejectedEventV1
     contentType: application/json
@@ -33,11 +48,31 @@ messages:
     contentType: application/json
     payload:
       $ref: ./schemas/socket/frame/subscribe-v1.yaml
+  SocketSubscribeManyV1:
+    name: SocketSubscribeManyV1
+    contentType: application/json
+    payload:
+      $ref: ./schemas/socket/frame/subscribe-many-v1.yaml
+  SocketUnsubscribeV1:
+    name: SocketUnsubscribeV1
+    contentType: application/json
+    payload:
+      $ref: ./schemas/socket/frame/unsubscribe-v1.yaml
   SocketAppliedV1:
     name: SocketAppliedV1
     contentType: application/json
     payload:
       $ref: ./schemas/socket/frame/applied-v1.yaml
+  SocketDismissedV1:
+    name: SocketDismissedV1
+    contentType: application/json
+    payload:
+      $ref: ./schemas/socket/frame/dismissed-v1.yaml
+  SocketReceivedMessageV1:
+    name: SocketReceivedMessageV1
+    contentType: application/json
+    payload:
+      $ref: ./schemas/socket/frame/received-message-v1.yaml
   SocketQueuedV1:
     name: SocketQueuedV1
     contentType: application/json
@@ -53,6 +88,21 @@ messages:
     contentType: application/json
     payload:
       $ref: ./schemas/socket/frame/message-saved-v1.yaml
+  SocketChatCreatedV1:
+    name: SocketChatCreatedV1
+    contentType: application/json
+    payload:
+      $ref: ./schemas/socket/frame/chat-created-v1.yaml
+  SocketMemberRemovedV1:
+    name: SocketMemberRemovedV1
+    contentType: application/json
+    payload:
+      $ref: ./schemas/socket/frame/member-removed-v1.yaml
+  SocketSubscriptionExpiredV1:
+    name: SocketSubscriptionExpiredV1
+    contentType: application/json
+    payload:
+      $ref: ./schemas/socket/frame/subscription-expired-v1.yaml
   SocketSendRejectedV1:
     name: SocketSendRejectedV1
     contentType: application/json

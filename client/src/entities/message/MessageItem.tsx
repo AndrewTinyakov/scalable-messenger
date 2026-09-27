@@ -21,7 +21,7 @@ function SendStateIcon({ state }: { state: PendingSend['status'] }) {
 
 export function MessageItem({ message, send, mine, sender, group, connected, onRetry }: Props) {
   const state = send?.status || (mine ? 'saved' : undefined)
-  return <div className={`message-row ${mine ? 'mine' : ''}`}>
+  return <div className={`message-row ${mine ? 'mine' : ''}`} data-message-id={message?.id}>
     {!mine && <span className="message-avatar">{sender[0]?.toUpperCase()}</span>}
     <div className="message-stack">
       {group && !mine && <span className="message-sender">{sender}</span>}

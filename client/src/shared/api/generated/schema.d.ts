@@ -4,7 +4,39 @@
  */
 
 export interface paths {
-    "/v1/conversations/groups": {
+    "/v1/sends/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["statuses"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/chats/{id}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["addMembers"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/chats/groups": {
         parameters: {
             query?: never;
             header?: never;
@@ -20,7 +52,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/conversations/direct": {
+    "/v1/auth/ws-ticket": {
         parameters: {
             query?: never;
             header?: never;
@@ -29,7 +61,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["direct"];
+        post: operations["wsTicket"];
         delete?: never;
         options?: never;
         head?: never;
@@ -46,6 +78,22 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["register"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["logout"];
         delete?: never;
         options?: never;
         head?: never;
@@ -84,23 +132,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/conversations": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["list"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/conversations/{id}/send-status/{requestId}": {
+    "/v1/sends/{requestId}": {
         parameters: {
             query?: never;
             header?: never;
@@ -116,14 +148,14 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/conversations/{id}/messages": {
+    "/v1/chats": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get: operations["messages"];
+        get: operations["list"];
         put?: never;
         post?: never;
         delete?: never;
@@ -132,14 +164,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/conversations/{id}/authorization": {
+    "/v1/chats/{id}": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get: operations["authorize"];
+        get: operations["get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/chats/{id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["messages"];
         put?: never;
         post?: never;
         delete?: never;
@@ -164,7 +212,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/conversations/{id}/members/{userId}": {
+    "/v1/chats/{id}/members/{userId}": {
         parameters: {
             query?: never;
             header?: never;
@@ -184,60 +232,77 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        GroupRequest: {
-            name: string;
-            memberIds: string[];
+        SendStatusesRequest: {
+            requestIds: string[];
         };
-        ConversationView: {
-            id: string;
-            kind: string;
-            name?: string | null;
-            members: components["schemas"]["UserView"][];
-            lastSequence: string;
+        SendStatusEntry: {
+            requestId: string;
+            result: components["schemas"]["SendStatusResponse"];
         };
-        UserView: {
-            id: string;
-            username: string;
-        };
-        DirectRequest: {
-            userId: string;
-        };
-        Credentials: {
-            username: string;
-            password: string;
-            deviceId?: string | null;
-        };
-        AuthView: {
-            token: string;
-            user: components["schemas"]["UserView"];
-            deviceId: string;
-        };
-        SendStatusView: {
+        SendStatusResponse: {
             status: string;
+            chatId?: string | null;
             messageId?: string | null;
             sequence?: string | null;
             reason?: string | null;
         };
-        HistoryView: {
-            messages: components["schemas"]["MessageView"][];
-            nextSequence: string;
+        SendStatusesResponse: {
+            results: components["schemas"]["SendStatusEntry"][];
         };
-        MessageView: {
+        AddGroupMembersRequest: {
+            memberIds: string[];
+        };
+        CreateGroupChatRequest: {
+            name: string;
+            memberIds: string[];
+        };
+        ChatResponse: {
             id: string;
-            conversationId: string;
+            kind: string;
+            name?: string | null;
+            members: components["schemas"]["UserResponse"][];
+            /** Format: int32 */
+            memberCount: number;
+            lastSequence: string;
+        };
+        UserResponse: {
+            id: string;
+            username: string;
+        };
+        WsTicketResponse: {
+            token: string;
+            /** Format: int64 */
+            expiresAt: number;
+        };
+        AuthRequest: {
+            username: string;
+            password: string;
+            deviceId?: string | null;
+        };
+        AuthResponse: {
+            token: string;
+            user: components["schemas"]["UserResponse"];
+            deviceId: string;
+        };
+        ChatPageResponse: {
+            chats: components["schemas"]["ChatResponse"][];
+            nextCursor?: string | null;
+        };
+        MessageHistoryResponse: {
+            messages: components["schemas"]["MessageResponse"][];
+            nextSequence: string;
+            hasMore: boolean;
+        };
+        MessageResponse: {
+            id: string;
+            chatId: string;
             sequence: string;
             senderId: string;
             body: string;
             /** Format: date-time */
             createdAt: string;
         };
-        AuthorizationView: {
-            allowed: boolean;
-            room: string;
-            /** Format: int32 */
-            version: number;
-        };
-        SessionView: {
+        SessionResponse: {
             userId: string;
             username: string;
             deviceId: string;
@@ -257,7 +322,7 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    group: {
+    statuses: {
         parameters: {
             query?: never;
             header?: never;
@@ -266,17 +331,17 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["GroupRequest"];
+                "application/json": components["schemas"]["SendStatusesRequest"];
             };
         };
         responses: {
-            /** @description Created */
-            201: {
+            /** @description OK */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["ConversationView"];
+                    "*/*": components["schemas"]["SendStatusesResponse"];
                 };
             };
             /** @description Invalid request */
@@ -317,7 +382,67 @@ export interface operations {
             };
         };
     };
-    direct: {
+    addMembers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddGroupMembersRequest"];
+            };
+        };
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    group: {
         parameters: {
             query?: never;
             header?: never;
@@ -326,7 +451,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["DirectRequest"];
+                "application/json": components["schemas"]["CreateGroupChatRequest"];
             };
         };
         responses: {
@@ -336,7 +461,63 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["ConversationView"];
+                    "*/*": components["schemas"]["ChatResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    wsTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["WsTicketResponse"];
                 };
             };
             /** @description Invalid request */
@@ -386,7 +567,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["Credentials"];
+                "application/json": components["schemas"]["AuthRequest"];
             };
         };
         responses: {
@@ -396,7 +577,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["AuthView"];
+                    "*/*": components["schemas"]["AuthResponse"];
                 };
             };
             /** @description Invalid request */
@@ -419,67 +600,21 @@ export interface operations {
             };
         };
     };
-    login: {
+    logout: {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["Credentials"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["AuthView"];
-                };
-            };
-            /** @description Invalid request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ApiProblem"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ApiProblem"];
-                };
-            };
-        };
-    };
-    search: {
-        parameters: {
-            query?: {
-                query?: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
         requestBody?: never;
         responses: {
-            /** @description OK */
-            200: {
+            /** @description No Content */
+            204: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "*/*": components["schemas"]["UserView"][];
-                };
+                content?: never;
             };
             /** @description Invalid request */
             400: {
@@ -519,9 +654,53 @@ export interface operations {
             };
         };
     };
-    list: {
+    login: {
         parameters: {
             query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AuthRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["AuthResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    search: {
+        parameters: {
+            query?: {
+                query?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -534,7 +713,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["ConversationView"][];
+                    "*/*": components["schemas"]["UserResponse"][];
                 };
             };
             /** @description Invalid request */
@@ -580,7 +759,6 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: string;
                 requestId: string;
             };
             cookie?: never;
@@ -593,7 +771,124 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["SendStatusView"];
+                    "*/*": components["schemas"]["SendStatusResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    list: {
+        parameters: {
+            query?: {
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ChatPageResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ChatResponse"];
                 };
             };
             /** @description Invalid request */
@@ -638,6 +933,7 @@ export interface operations {
         parameters: {
             query?: {
                 afterSeq?: string;
+                beforeSeq?: string;
                 limit?: number;
             };
             header?: never;
@@ -654,65 +950,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["HistoryView"];
-                };
-            };
-            /** @description Invalid request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ApiProblem"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ApiProblem"];
-                };
-            };
-            /** @description Forbidden */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ApiProblem"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ApiProblem"];
-                };
-            };
-        };
-    };
-    authorize: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["AuthorizationView"];
+                    "*/*": components["schemas"]["MessageHistoryResponse"];
                 };
             };
             /** @description Invalid request */
@@ -768,7 +1006,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["SessionView"];
+                    "*/*": components["schemas"]["SessionResponse"];
                 };
             };
             /** @description Invalid request */

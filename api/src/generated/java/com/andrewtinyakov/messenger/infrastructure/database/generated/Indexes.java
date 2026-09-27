@@ -4,9 +4,8 @@
 package com.andrewtinyakov.messenger.infrastructure.database.generated;
 
 
-import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.ConversationMembers;
-import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Messages;
-import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.OutboxEvents;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.ChatMembers;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.MessengerOutboxEvents;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Sessions;
 
 import org.jooq.Index;
@@ -25,8 +24,7 @@ public class Indexes {
     // INDEX definitions
     // -------------------------------------------------------------------------
 
-    public static final Index CONVERSATION_MEMBERS_USER_IDX = Internal.createIndex(DSL.name("conversation_members_user_idx"), ConversationMembers.CONVERSATION_MEMBERS, new OrderField[] { ConversationMembers.CONVERSATION_MEMBERS.USER_ID, ConversationMembers.CONVERSATION_MEMBERS.CONVERSATION_ID }, false);
-    public static final Index MESSAGES_HISTORY_IDX = Internal.createIndex(DSL.name("messages_history_idx"), Messages.MESSAGES, new OrderField[] { Messages.MESSAGES.CONVERSATION_ID, Messages.MESSAGES.SEQUENCE }, false);
-    public static final Index OUTBOX_EVENTS_PENDING_IDX = Internal.createIndex(DSL.name("outbox_events_pending_idx"), OutboxEvents.OUTBOX_EVENTS, new OrderField[] { OutboxEvents.OUTBOX_EVENTS.CREATED_AT, OutboxEvents.OUTBOX_EVENTS.ID }, false);
+    public static final Index CHAT_MEMBERS_USER_JOINED_IDX = Internal.createIndex(DSL.name("chat_members_user_joined_idx"), ChatMembers.CHAT_MEMBERS, new OrderField[] { ChatMembers.CHAT_MEMBERS.USER_ID, ChatMembers.CHAT_MEMBERS.JOINED_AT.desc(), ChatMembers.CHAT_MEMBERS.CHAT_ID.desc() }, false);
+    public static final Index MESSENGER_OUTBOX_EVENTS_PENDING_IDX = Internal.createIndex(DSL.name("messenger_outbox_events_pending_idx"), MessengerOutboxEvents.MESSENGER_OUTBOX_EVENTS, new OrderField[] { MessengerOutboxEvents.MESSENGER_OUTBOX_EVENTS.CREATED_AT, MessengerOutboxEvents.MESSENGER_OUTBOX_EVENTS.ID }, false);
     public static final Index SESSIONS_USER_IDX = Internal.createIndex(DSL.name("sessions_user_idx"), Sessions.SESSIONS, new OrderField[] { Sessions.SESSIONS.USER_ID }, false);
 }

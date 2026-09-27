@@ -1,6 +1,6 @@
 # Reliability and recovery for the WebSocket projects
 
-These are transport and recovery findings for the teaching projects, based on primary documentation. The [Messenger architecture](messenger-architecture.md) is the current Messenger decision: RabbitMQ quorum queues accept send commands, SQL stores saved messages and exact conversation sequence, and Redis handles live room delivery plus short replay. Distinguish a WS node losing its broker connection while clients remain connected from a client losing its WebSocket connection. Both can create a gap.
+These are transport and recovery findings for the teaching projects, based on primary documentation. The [Messenger architecture](messenger-architecture.md) is the current Messenger decision: RabbitMQ quorum queues accept send commands, SQL stores saved messages and exact chat sequence, and Redis handles live room delivery plus short replay. Distinguish a WS node losing its broker connection while clients remain connected from a client losing its WebSocket connection. Both can create a gap.
 
 ## If a WS node loses Redis Pub/Sub
 

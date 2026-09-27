@@ -12,7 +12,7 @@ Keep Go modules, standard-library `context`, `net/http`, `encoding/json`, `log/s
 
 Use `ws/` for the Go module and `cmd/ws-server` for the executable. Keep the repository-level Go workspace pattern if a `go.work` file is used. Do not carry over the `workers` name or the document/image processing dependencies into the socket application.
 
-The Go application owns connections, authenticated session context, local rooms, rate-limit enforcement before enqueueing, confirmed command publication, live fanout, and bounded replay. The Kotlin API owns durable conversation state, final membership validation, messages, request results, and SQL outbox processing. Go calls the API for authorization and publishes send commands; it does not become a second SQL writer.
+The Go application owns connections, authenticated session context, local rooms, rate-limit enforcement before enqueueing, confirmed command publication, live fanout, and bounded replay. The Kotlin API owns durable chat state, final membership validation, messages, request results, and SQL outbox processing. Go calls the API for authorization and publishes send commands; it does not become a second SQL writer.
 
 ## Package and file layout
 

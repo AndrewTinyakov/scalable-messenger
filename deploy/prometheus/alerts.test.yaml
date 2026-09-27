@@ -1,0 +1,43 @@
+rule_files:
+  - alerts.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'rabbitmq_detailed_queue_consumers{queue="messenger.send.0"}'
+        values: '0+0x10'
+      - series: 'rabbitmq_detailed_queue_messages_ready{queue="messenger.send.0"}'
+        values: '1+0x10'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: MessengerSendQueueNoConsumer
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: MessengerSendQueueNoConsumer
+        exp_alerts:
+          - exp_labels:
+              queue: messenger.send.0
+              severity: critical
+            exp_annotations:
+              summary: messenger.send.0 has waiting commands and no consumer
+              description: Check command processor replicas and RabbitMQ connectivity.
+
+  - interval: 1m
+    input_series:
+      - series: 'messenger_command_queue_delay_seconds_bucket{le="30"}'
+        values: '0+0x15'
+      - series: 'messenger_command_queue_delay_seconds_bucket{le="120"}'
+        values: '0+1x15'
+      - series: 'messenger_command_queue_delay_seconds_bucket{le="+Inf"}'
+        values: '0+1x15'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MessengerSendQueueDelay
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: Processed send commands have waited over one minute at p95
+              description: Check send queue depth, processor throughput, and PostgreSQL contention.

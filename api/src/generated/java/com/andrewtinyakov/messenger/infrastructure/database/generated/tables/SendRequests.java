@@ -55,9 +55,14 @@ public class SendRequests extends TableImpl<SendRequestsRecord> {
     }
 
     /**
-     * The column <code>public.send_requests.conversation_id</code>.
+     * The column <code>public.send_requests.chat_id</code>.
      */
-    public final TableField<SendRequestsRecord, String> CONVERSATION_ID = createField(DSL.name("conversation_id"), SQLDataType.VARCHAR(26).nullable(false), this, "");
+    public final TableField<SendRequestsRecord, String> CHAT_ID = createField(DSL.name("chat_id"), SQLDataType.VARCHAR(26), this, "");
+
+    /**
+     * The column <code>public.send_requests.recipient_id</code>.
+     */
+    public final TableField<SendRequestsRecord, String> RECIPIENT_ID = createField(DSL.name("recipient_id"), SQLDataType.VARCHAR(26), this, "");
 
     /**
      * The column <code>public.send_requests.sender_id</code>.
@@ -142,7 +147,8 @@ public class SendRequests extends TableImpl<SendRequestsRecord> {
     public List<Check<SendRequestsRecord>> getChecks() {
         return Arrays.asList(
             Internal.createCheck(this, DSL.name("send_requests_result_shape"), "(((((status)::text = 'saved'::text) AND (message_id IS NOT NULL) AND (sequence IS NOT NULL) AND (reason IS NULL)) OR (((status)::text = 'rejected'::text) AND (message_id IS NULL) AND (sequence IS NULL) AND (reason IS NOT NULL))))", true),
-            Internal.createCheck(this, DSL.name("send_requests_status_check"), "(((status)::text = ANY ((ARRAY['saved'::character varying, 'rejected'::character varying])::text[])))", true)
+            Internal.createCheck(this, DSL.name("send_requests_status_check"), "(((status)::text = ANY ((ARRAY['saved'::character varying, 'rejected'::character varying])::text[])))", true),
+            Internal.createCheck(this, DSL.name("send_requests_target_shape"), "(((chat_id IS NOT NULL) OR (recipient_id IS NOT NULL)))", true)
         );
     }
 

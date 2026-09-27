@@ -1,10 +1,10 @@
 import type { components } from '../../shared/api/generated/schema'
 
-export type User = components['schemas']['UserView']
+export type User = components['schemas']['UserResponse']
 
-export type Session = components['schemas']['AuthView']
+export type Session = components['schemas']['AuthResponse']
 
-const storageKey = 'relay.session.v1'
+const storageKey = 'messenger.session.v1'
 
 export function readSession(): Session | null {
   try {

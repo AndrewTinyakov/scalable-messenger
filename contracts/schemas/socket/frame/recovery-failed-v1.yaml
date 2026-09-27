@@ -2,14 +2,14 @@ $schema: http://json-schema.org/draft-07/schema#
 title: SocketRecoveryFailedV1
 type: object
 additionalProperties: false
-required: [type, version, conversationId]
+required: [type, version, chatId]
 properties:
   type:
     const: recovery_failed
   version:
     type: integer
     const: 1
-  conversationId:
+  chatId:
     type: string
     pattern: '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'
   room:

@@ -12,6 +12,18 @@ components:
       name: MessageSavedEventV1
       payload:
         $ref: ./schemas/message/event/message-saved-v1.yaml
+    ChatCreatedEventV1:
+      name: ChatCreatedEventV1
+      payload:
+        $ref: ./schemas/message/event/chat-created-v1.yaml
+    MemberRemovedEventV1:
+      name: MemberRemovedEventV1
+      payload:
+        $ref: ./schemas/message/event/member-removed-v1.yaml
+    SessionRevokedEventV1:
+      name: SessionRevokedEventV1
+      payload:
+        $ref: ./schemas/message/event/session-revoked-v1.yaml
     SendRejectedEventV1:
       name: SendRejectedEventV1
       payload:

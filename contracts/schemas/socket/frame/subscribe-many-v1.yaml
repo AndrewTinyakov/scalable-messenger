@@ -1,0 +1,34 @@
+$schema: http://json-schema.org/draft-07/schema#
+title: SocketSubscribeManyV1
+type: object
+additionalProperties: false
+required: [type, version, subscriptions]
+properties:
+  type:
+    const: subscribe_many
+  version:
+    type: integer
+    const: 1
+  subscriptions:
+    type: array
+    description: Chat IDs must be distinct within the frame. The server rejects duplicates.
+    minItems: 1
+    maxItems: 10
+    uniqueItems: true
+    items:
+      type: object
+      additionalProperties: false
+      required: [chatId, kind]
+      properties:
+        chatId:
+          type: string
+          pattern: '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'
+        kind:
+          enum: [direct, group]
+        epoch:
+          type: string
+        streamId:
+          type: string
+        lastAppliedSequence:
+          type: string
+          pattern: '^(0|[1-9][0-9]*)$'

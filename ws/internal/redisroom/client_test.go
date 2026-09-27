@@ -14,3 +14,16 @@ func TestRoomKeysShareClusterSlot(t *testing.T) {
 		t.Fatalf("channel = %q, want %q", got, want)
 	}
 }
+
+func TestDecodeLivePreservesPreviousStreamID(t *testing.T) {
+	const id = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+	room := "user:" + id
+	payload := `{"epoch":"epoch","streamId":"3-0","previousStreamId":"2-0","event":{"type":"chat_created","version":1,"eventId":"` + id + `","room":"` + room + `","chatId":"` + id + `"}}`
+	live, err := decodeLive(room, payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !live.HasPrevious || live.PreviousStreamID != "2-0" {
+		t.Fatalf("previous Stream ID = %q (present=%v), want 2-0", live.PreviousStreamID, live.HasPrevious)
+	}
+}

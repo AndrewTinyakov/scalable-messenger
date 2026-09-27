@@ -1,4 +1,4 @@
-import type { Conversation } from '../../entities/conversation/model'
+import type { Chat } from '../../entities/chat/model'
 import type { Session, User } from '../../entities/session/model'
 import type { components, paths } from './generated/schema'
 
@@ -7,12 +7,16 @@ const routes = {
   login: '/v1/auth/login',
   register: '/v1/auth/register',
   session: '/v1/auth/session',
+  logout: '/v1/auth/logout',
+  wsTicket: '/v1/auth/ws-ticket',
   users: '/v1/users',
-  conversations: '/v1/conversations',
-  direct: '/v1/conversations/direct',
-  groups: '/v1/conversations/groups',
-  messages: '/v1/conversations/{id}/messages',
-  sendStatus: '/v1/conversations/{id}/send-status/{requestId}',
+  chats: '/v1/chats',
+  chat: '/v1/chats/{id}',
+  groups: '/v1/chats/groups',
+  addGroupMembers: '/v1/chats/{id}/members',
+  messages: '/v1/chats/{id}/messages',
+  sendStatus: '/v1/sends/{requestId}',
+  sendStatuses: '/v1/sends/status',
 } as const satisfies Record<string, keyof paths>
 
 function endpoint(path: keyof paths, params: Record<string, string> = {}, query?: Record<string, string | number>): string {
@@ -52,56 +56,88 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
 
 export const api = {
   login(username: string, password: string, deviceId: string) {
-    const body: components['schemas']['Credentials'] = { username, password, deviceId }
+    const body: components['schemas']['AuthRequest'] = { username, password, deviceId }
     return request<Session>(endpoint(routes.login), { method: 'POST', body: JSON.stringify(body) })
   },
   register(username: string, password: string, deviceId: string) {
-    const body: components['schemas']['Credentials'] = { username, password, deviceId }
+    const body: components['schemas']['AuthRequest'] = { username, password, deviceId }
     return request<Session>(endpoint(routes.register), { method: 'POST', body: JSON.stringify(body) })
   },
   session(token: string) {
-    return request<components['schemas']['SessionView']>(endpoint(routes.session), {}, token)
+    return request<components['schemas']['SessionResponse']>(endpoint(routes.session), {}, token)
+  },
+  async logout(token: string): Promise<void> {
+    const response = await fetch(`${apiBase}${endpoint(routes.logout)}`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}` },
+    })
+    if (!response.ok) throw new ApiError(response.status, `Could not sign out (${response.status})`)
+  },
+  wsTicket(token: string) {
+    return request<components['schemas']['WsTicketResponse']>(endpoint(routes.wsTicket), { method: 'POST' }, token)
+  },
+  addGroupMembers(token: string, chatId: string, memberIds: string[]) {
+    const body: components['schemas']['AddGroupMembersRequest'] = { memberIds }
+    return fetch(`${apiBase}${endpoint(routes.addGroupMembers, { id: chatId })}`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    }).then((response) => { if (!response.ok) throw new ApiError(response.status, `Could not add members (${response.status})`) })
   },
   users(token: string, query: string) {
     return request<User[]>(endpoint(routes.users, {}, { query }), {}, token)
   },
-  conversations(token: string) {
-    return request<components['schemas']['ConversationView'][]>(endpoint(routes.conversations), {}, token).then(normalizeConversations)
+  chats(token: string, cursor?: string) {
+    return request<components['schemas']['ChatPageResponse']>(
+      endpoint(routes.chats, {}, { limit: 100, ...(cursor ? { cursor } : {}) }), {}, token,
+    ).then((page) => ({ chats: normalizeChats(page.chats), nextCursor: page.nextCursor ?? null }))
   },
-  createDirect(token: string, userId: string) {
-    const body: components['schemas']['DirectRequest'] = { userId }
-    return request<components['schemas']['ConversationView']>(endpoint(routes.direct), { method: 'POST', body: JSON.stringify(body) }, token).then(normalizeConversation)
+  chat(token: string, chatId: string) {
+    return request<components['schemas']['ChatResponse']>(endpoint(routes.chat, { id: chatId }), {}, token).then(normalizeChat)
   },
   createGroup(token: string, name: string, memberIds: string[]) {
-    const body: components['schemas']['GroupRequest'] = { name, memberIds }
-    return request<components['schemas']['ConversationView']>(endpoint(routes.groups), { method: 'POST', body: JSON.stringify(body) }, token).then(normalizeConversation)
+    const body: components['schemas']['CreateGroupChatRequest'] = { name, memberIds }
+    return request<components['schemas']['ChatResponse']>(endpoint(routes.groups), { method: 'POST', body: JSON.stringify(body) }, token).then(normalizeChat)
   },
-  messages(token: string, conversationId: string, afterSeq: string, limit = 50) {
-    return request<components['schemas']['HistoryView']>(
-      endpoint(routes.messages, { id: conversationId }, { afterSeq, limit }),
+  messages(token: string, chatId: string, afterSeq: string, limit = 50) {
+    return request<components['schemas']['MessageHistoryResponse']>(
+      endpoint(routes.messages, { id: chatId }, { afterSeq, limit }),
       {}, token,
     )
   },
-  sendStatus(token: string, conversationId: string, requestId: string) {
-    return request<components['schemas']['SendStatusView']>(
-      endpoint(routes.sendStatus, { id: conversationId, requestId }), {}, token,
+  latestMessages(token: string, chatId: string, limit = 50) {
+    return request<components['schemas']['MessageHistoryResponse']>(
+      endpoint(routes.messages, { id: chatId }, { limit }), {}, token,
+    )
+  },
+  olderMessages(token: string, chatId: string, beforeSeq: string, limit = 50) {
+    return request<components['schemas']['MessageHistoryResponse']>(
+      endpoint(routes.messages, { id: chatId }, { beforeSeq, limit }), {}, token,
+    )
+  },
+  sendStatus(token: string, requestId: string) {
+    return request<components['schemas']['SendStatusResponse']>(
+      endpoint(routes.sendStatus, { requestId }), {}, token,
     ).then(normalizeSendStatus)
+  },
+  sendStatuses(token: string, requestIds: string[]) {
+    const body: components['schemas']['SendStatusesRequest'] = { requestIds }
+    return request<components['schemas']['SendStatusesResponse']>(
+      endpoint(routes.sendStatuses), { method: 'POST', body: JSON.stringify(body) }, token,
+    ).then((response) => response.results.map((entry) => ({ requestId: entry.requestId, result: normalizeSendStatus(entry.result) })))
   },
 }
 
-function normalizeConversation(value: components['schemas']['ConversationView']): Conversation {
-  if (value.kind !== 'direct' && value.kind !== 'group') throw new Error(`Unknown conversation kind: ${value.kind}`)
-  return value as Conversation
+function normalizeChat(value: components['schemas']['ChatResponse']): Chat {
+  if (value.kind !== 'direct' && value.kind !== 'group') throw new Error(`Unknown chat kind: ${value.kind}`)
+  return value as Chat
 }
 
-function normalizeConversations(values: components['schemas']['ConversationView'][]): Conversation[] {
-  return values.map(normalizeConversation)
+function normalizeChats(values: components['schemas']['ChatResponse'][]): Chat[] {
+  return values.map(normalizeChat)
 }
 
-function normalizeSendStatus(value: components['schemas']['SendStatusView']):
-  Omit<components['schemas']['SendStatusView'], 'status'> & { status: 'unknown' | 'saved' | 'rejected' } {
+function normalizeSendStatus(value: components['schemas']['SendStatusResponse']):
+  Omit<components['schemas']['SendStatusResponse'], 'status'> & { status: 'unknown' | 'saved' | 'rejected' } {
   if (value.status !== 'unknown' && value.status !== 'saved' && value.status !== 'rejected') {
     throw new Error(`Unknown send status: ${value.status}`)
   }
-  return value as Omit<components['schemas']['SendStatusView'], 'status'> & { status: 'unknown' | 'saved' | 'rejected' }
+  return value as Omit<components['schemas']['SendStatusResponse'], 'status'> & { status: 'unknown' | 'saved' | 'rejected' }
 }

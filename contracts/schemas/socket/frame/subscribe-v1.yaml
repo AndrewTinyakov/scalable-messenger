@@ -2,20 +2,23 @@ $schema: http://json-schema.org/draft-07/schema#
 title: SocketSubscribeV1
 type: object
 additionalProperties: false
-required: [type, version, conversationId]
+required: [type, version, chatId, kind]
 properties:
   type:
     const: subscribe
   version:
     type: integer
     const: 1
-  conversationId:
+  chatId:
     type: string
     pattern: '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'
+  kind:
+    enum: [direct, group]
   epoch:
     type: string
   streamId:
     type: string
   lastAppliedSequence:
+    description: Recovery baseline. After an explicit dismissed frame this may include a skipped interval and does not imply application of every earlier message.
     type: string
     pattern: '^(0|[1-9][0-9]*)$'

@@ -1,15 +1,16 @@
 $schema: http://json-schema.org/draft-07/schema#
 title: SocketAppliedV1
+description: Cumulative device application for a chat since its recovery baseline. A previously dismissed prefix remains dismissed and is not retroactively applied.
 type: object
 additionalProperties: false
-required: [type, version, conversationId, sequence]
+required: [type, version, chatId, sequence]
 properties:
   type:
     const: applied
   version:
     type: integer
     const: 1
-  conversationId:
+  chatId:
     type: string
     pattern: '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'
   sequence:

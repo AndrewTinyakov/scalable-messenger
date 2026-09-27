@@ -4,10 +4,10 @@
 package com.andrewtinyakov.messenger.infrastructure.database.generated;
 
 
-import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.ConversationMembers;
-import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Conversations;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.ChatMembers;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Chats;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Messages;
-import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.OutboxEvents;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.MessengerOutboxEvents;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.SendRequests;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Sessions;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Users;
@@ -20,14 +20,14 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Use
 public class Tables {
 
     /**
-     * The table <code>public.conversation_members</code>.
+     * The table <code>public.chat_members</code>.
      */
-    public static final ConversationMembers CONVERSATION_MEMBERS = ConversationMembers.CONVERSATION_MEMBERS;
+    public static final ChatMembers CHAT_MEMBERS = ChatMembers.CHAT_MEMBERS;
 
     /**
-     * The table <code>public.conversations</code>.
+     * The table <code>public.chats</code>.
      */
-    public static final Conversations CONVERSATIONS = Conversations.CONVERSATIONS;
+    public static final Chats CHATS = Chats.CHATS;
 
     /**
      * The table <code>public.messages</code>.
@@ -35,9 +35,9 @@ public class Tables {
     public static final Messages MESSAGES = Messages.MESSAGES;
 
     /**
-     * The table <code>public.outbox_events</code>.
+     * The table <code>public.messenger_outbox_events</code>.
      */
-    public static final OutboxEvents OUTBOX_EVENTS = OutboxEvents.OUTBOX_EVENTS;
+    public static final MessengerOutboxEvents MESSENGER_OUTBOX_EVENTS = MessengerOutboxEvents.MESSENGER_OUTBOX_EVENTS;
 
     /**
      * The table <code>public.send_requests</code>.

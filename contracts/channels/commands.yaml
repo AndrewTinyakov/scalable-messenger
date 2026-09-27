@@ -2,7 +2,8 @@ sendCommand:
   address: messenger.send.{partition}
   description: >-
     Direct exchange messenger.commands. Partition is FNV-1a 32 of UTF-8
-    conversationId modulo four. Routing keys and queue names are
+    chatId for an existing chat, or of the sorted sender and recipient IDs
+    joined by a colon for a first direct send, modulo four. Routing keys and queue names are
     messenger.send.0 through messenger.send.3. Quorum queues are durable,
     bounded, and reject new publishes on overflow.
   parameters:

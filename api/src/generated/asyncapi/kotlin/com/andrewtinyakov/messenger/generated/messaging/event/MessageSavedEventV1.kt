@@ -6,7 +6,7 @@ data class MessageSavedEventV1(
     val version: Int,
     val eventId: String,
     val room: String,
-    val conversationId: String,
+    val chatId: String,
     val requestId: String,
     val messageId: String,
     val sequence: String,

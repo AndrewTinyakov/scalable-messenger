@@ -6,8 +6,8 @@ package com.andrewtinyakov.messenger.infrastructure.database.generated.tables;
 
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Keys;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Public;
-import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.ConversationMembers.ConversationMembersPath;
-import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Conversations.ConversationsPath;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.ChatMembers.ChatMembersPath;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Chats.ChatsPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Messages.MessagesPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Sessions.SessionsPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.UsersRecord;
@@ -158,30 +158,29 @@ public class Users extends TableImpl<UsersRecord> {
         return Arrays.asList(Keys.USERS_USERNAME_UNIQUE);
     }
 
-    private transient ConversationMembersPath _conversationMembers;
+    private transient ChatMembersPath _chatMembers;
 
     /**
      * Get the implicit to-many join path to the
-     * <code>public.conversation_members</code> table
+     * <code>public.chat_members</code> table
      */
-    public ConversationMembersPath conversationMembers() {
-        if (_conversationMembers == null)
-            _conversationMembers = new ConversationMembersPath(this, null, Keys.CONVERSATION_MEMBERS__CONVERSATION_MEMBERS_USER_ID_FKEY.getInverseKey());
+    public ChatMembersPath chatMembers() {
+        if (_chatMembers == null)
+            _chatMembers = new ChatMembersPath(this, null, Keys.CHAT_MEMBERS__CHAT_MEMBERS_USER_ID_FKEY.getInverseKey());
 
-        return _conversationMembers;
+        return _chatMembers;
     }
 
-    private transient ConversationsPath _conversations;
+    private transient ChatsPath _chats;
 
     /**
-     * Get the implicit to-many join path to the
-     * <code>public.conversations</code> table
+     * Get the implicit to-many join path to the <code>public.chats</code> table
      */
-    public ConversationsPath conversations() {
-        if (_conversations == null)
-            _conversations = new ConversationsPath(this, null, Keys.CONVERSATIONS__CONVERSATIONS_OWNER_FK.getInverseKey());
+    public ChatsPath chats() {
+        if (_chats == null)
+            _chats = new ChatsPath(this, null, Keys.CHATS__CHATS_OWNER_ID_FKEY.getInverseKey());
 
-        return _conversations;
+        return _chats;
     }
 
     private transient MessagesPath _messages;

@@ -1,33 +1,23 @@
 name: messenger
 
-x-api-environment: &api-environment
+x-database-environment: &database-environment
   SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/messenger
   SPRING_DATASOURCE_USERNAME: messenger
   SPRING_DATASOURCE_PASSWORD: messenger
-  SPRING_RABBITMQ_HOST: rabbitmq
-  SPRING_RABBITMQ_PORT: 5672
-  SPRING_RABBITMQ_USERNAME: messenger
-  SPRING_RABBITMQ_PASSWORD: messenger
-  SPRING_DATA_REDIS_HOST: redis
-  SPRING_DATA_REDIS_PORT: 6379
-  METRICS_USERNAME: metrics
-  METRICS_PASSWORD: messenger-metrics
 
 x-api: &api
   image: messenger-api:local
-  build: ./api
+  build:
+    context: .
+    dockerfile: api/Dockerfile
   environment:
-    <<: *api-environment
-    MESSENGER_ROLE: http
-    MESSENGER_CONSUMER_ENABLED: 'false'
-    MESSENGER_RELAY_ENABLED: 'false'
-    CLIENT_ORIGIN: http://localhost:8080
+    <<: *database-environment
+    METRICS_USERNAME: metrics
+    METRICS_PASSWORD: messenger-metrics
+    CLIENT_ORIGIN: http://localhost:${MESSENGER_PORT:-8080}
+    WS_TICKET_SECRET: ${WS_TICKET_SECRET:?Run scripts/dev-up.sh to generate a local secret}
   depends_on:
     postgres:
-      condition: service_healthy
-    rabbitmq:
-      condition: service_healthy
-    redis:
       condition: service_healthy
   restart: unless-stopped
 
@@ -36,18 +26,16 @@ x-ws: &ws
   build: ./ws
   environment:
     WS_ADDRESS: :8081
-    API_URL: http://api-proxy
-    RABBITMQ_URL: amqp://messenger:messenger@rabbitmq:5672/
-    REDIS_URL: redis://redis:6379/0
-    WS_ALLOWED_ORIGIN: http://localhost:8080
-    WS_REAUTHORIZE_INTERVAL: 5s
+    API_GRPC_ADDRESS: api-proxy:9090
+    WS_TICKET_SECRET: ${WS_TICKET_SECRET:?Run scripts/dev-up.sh to generate a local secret}
+    RABBITMQ_URLS: amqp://messenger:messenger@rabbitmq-1:5672/,amqp://messenger:messenger@rabbitmq-2:5672/,amqp://messenger:messenger@rabbitmq-3:5672/
+    REDIS_CLUSTER_NODES: redis-1:6379,redis-2:6379,redis-3:6379
+    WS_ALLOWED_ORIGIN: http://localhost:${MESSENGER_PORT:-8080}
   depends_on:
-    api-proxy:
-      condition: service_started
-    rabbitmq:
-      condition: service_healthy
-    redis:
-      condition: service_healthy
+    rabbitmq-cluster-init:
+      condition: service_completed_successfully
+    redis-cluster-init:
+      condition: service_completed_successfully
   restart: unless-stopped
 
 services:
@@ -66,11 +54,18 @@ services:
       retries: 20
     restart: unless-stopped
 
-  rabbitmq:
-    image: rabbitmq:4.1-management-alpine
+  rabbitmq-1:
+    image: rabbitmq:4.3.5-management
+    hostname: rabbitmq-1
     environment:
+      RABBITMQ_NODENAME: rabbit@rabbitmq-1
+      RABBITMQ_ERLANG_COOKIE: messenger-local-cluster-cookie
       RABBITMQ_DEFAULT_USER: messenger
       RABBITMQ_DEFAULT_PASS: messenger
+    volumes:
+      - rabbitmq-1-data:/var/lib/rabbitmq
+      - ./deploy/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - ./deploy/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
     healthcheck:
       test: [CMD, rabbitmq-diagnostics, -q, ping]
       interval: 10s
@@ -78,11 +73,63 @@ services:
       retries: 20
     restart: unless-stopped
 
-  redis:
-    image: redis:7.4-alpine
-    command: [redis-server, --appendonly, 'yes']
+  rabbitmq-2:
+    image: rabbitmq:4.3.5-management
+    hostname: rabbitmq-2
+    environment:
+      RABBITMQ_NODENAME: rabbit@rabbitmq-2
+      RABBITMQ_ERLANG_COOKIE: messenger-local-cluster-cookie
     volumes:
-      - redis-data:/data
+      - rabbitmq-2-data:/var/lib/rabbitmq
+      - ./deploy/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - ./deploy/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+    depends_on:
+      rabbitmq-1: { condition: service_healthy }
+    healthcheck:
+      test: [CMD, rabbitmq-diagnostics, -q, ping]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  rabbitmq-3:
+    image: rabbitmq:4.3.5-management
+    hostname: rabbitmq-3
+    environment:
+      RABBITMQ_NODENAME: rabbit@rabbitmq-3
+      RABBITMQ_ERLANG_COOKIE: messenger-local-cluster-cookie
+    volumes:
+      - rabbitmq-3-data:/var/lib/rabbitmq
+      - ./deploy/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - ./deploy/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+    depends_on:
+      rabbitmq-2: { condition: service_healthy }
+    healthcheck:
+      test: [CMD, rabbitmq-diagnostics, -q, ping]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  rabbitmq-cluster-init:
+    image: rabbitmq:4.3.5-management
+    environment:
+      RABBITMQ_ERLANG_COOKIE: messenger-local-cluster-cookie
+    entrypoint: [rabbitmqctl, -n, rabbit@rabbitmq-1, -t, '120', await_online_nodes, '3']
+    depends_on:
+      rabbitmq-1: { condition: service_healthy }
+      rabbitmq-2: { condition: service_healthy }
+      rabbitmq-3: { condition: service_healthy }
+    restart: 'no'
+
+  redis-1:
+    image: redis:7.4-alpine
+    command: [redis-server, --cluster-enabled, 'yes', --cluster-config-file, nodes.conf, --cluster-node-timeout, '5000', --cluster-announce-ip, '${MESSENGER_REDIS_IP_PREFIX:-10.245.0}.11', --appendonly, 'yes']
+    networks:
+      default:
+        ipv4_address: ${MESSENGER_REDIS_IP_PREFIX:-10.245.0}.11
+    volumes:
+      - redis-1-data:/data
     healthcheck:
       test: [CMD, redis-cli, ping]
       interval: 5s
@@ -90,27 +137,144 @@ services:
       retries: 20
     restart: unless-stopped
 
+  redis-2:
+    image: redis:7.4-alpine
+    command: [redis-server, --cluster-enabled, 'yes', --cluster-config-file, nodes.conf, --cluster-node-timeout, '5000', --cluster-announce-ip, '${MESSENGER_REDIS_IP_PREFIX:-10.245.0}.12', --appendonly, 'yes']
+    networks:
+      default:
+        ipv4_address: ${MESSENGER_REDIS_IP_PREFIX:-10.245.0}.12
+    volumes:
+      - redis-2-data:/data
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis-3:
+    image: redis:7.4-alpine
+    command: [redis-server, --cluster-enabled, 'yes', --cluster-config-file, nodes.conf, --cluster-node-timeout, '5000', --cluster-announce-ip, '${MESSENGER_REDIS_IP_PREFIX:-10.245.0}.13', --appendonly, 'yes']
+    networks:
+      default:
+        ipv4_address: ${MESSENGER_REDIS_IP_PREFIX:-10.245.0}.13
+    volumes:
+      - redis-3-data:/data
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis-4:
+    image: redis:7.4-alpine
+    command: [redis-server, --cluster-enabled, 'yes', --cluster-config-file, nodes.conf, --cluster-node-timeout, '5000', --cluster-announce-ip, '${MESSENGER_REDIS_IP_PREFIX:-10.245.0}.14', --appendonly, 'yes']
+    networks:
+      default:
+        ipv4_address: ${MESSENGER_REDIS_IP_PREFIX:-10.245.0}.14
+    volumes:
+      - redis-4-data:/data
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis-5:
+    image: redis:7.4-alpine
+    command: [redis-server, --cluster-enabled, 'yes', --cluster-config-file, nodes.conf, --cluster-node-timeout, '5000', --cluster-announce-ip, '${MESSENGER_REDIS_IP_PREFIX:-10.245.0}.15', --appendonly, 'yes']
+    networks:
+      default:
+        ipv4_address: ${MESSENGER_REDIS_IP_PREFIX:-10.245.0}.15
+    volumes:
+      - redis-5-data:/data
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis-6:
+    image: redis:7.4-alpine
+    command: [redis-server, --cluster-enabled, 'yes', --cluster-config-file, nodes.conf, --cluster-node-timeout, '5000', --cluster-announce-ip, '${MESSENGER_REDIS_IP_PREFIX:-10.245.0}.16', --appendonly, 'yes']
+    networks:
+      default:
+        ipv4_address: ${MESSENGER_REDIS_IP_PREFIX:-10.245.0}.16
+    volumes:
+      - redis-6-data:/data
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis-cluster-init:
+    image: redis:7.4-alpine
+    entrypoint: [sh, -ec]
+    command:
+      - >-
+        if test "$$(redis-cli -h redis-1 cluster nodes | wc -l)" -eq 1; then
+          redis-cli --cluster create redis-1:6379 redis-2:6379 redis-3:6379 redis-4:6379 redis-5:6379 redis-6:6379 --cluster-replicas 1 --cluster-yes;
+        fi;
+        attempt=0;
+        until redis-cli -h redis-1 cluster info | grep -q 'cluster_state:ok' &&
+          test "$$(redis-cli -h redis-1 cluster nodes | grep -c ' connected')" -eq 6; do
+          attempt=$$((attempt + 1));
+          if test "$$attempt" -ge 60; then exit 1; fi;
+          sleep 1;
+        done
+    depends_on:
+      redis-1: { condition: service_healthy }
+      redis-2: { condition: service_healthy }
+      redis-3: { condition: service_healthy }
+      redis-4: { condition: service_healthy }
+      redis-5: { condition: service_healthy }
+      redis-6: { condition: service_healthy }
+    restart: 'no'
+
   api-1:
     <<: *api
 
   api-2:
     <<: *api
 
-  command-worker:
-    <<: *api
+  messenger-command-processor:
+    image: messenger-command-processor:local
+    build:
+      context: ./api
+      dockerfile: messenger-command-processor/Dockerfile
+    deploy:
+      replicas: 2
     environment:
-      <<: *api-environment
-      MESSENGER_ROLE: worker
-      MESSENGER_CONSUMER_ENABLED: 'true'
-      MESSENGER_RELAY_ENABLED: 'false'
+      <<: *database-environment
+      METRICS_USERNAME: metrics
+      METRICS_PASSWORD: messenger-metrics
+      SPRING_RABBITMQ_ADDRESSES: amqp://messenger:messenger@rabbitmq-1:5672/,amqp://messenger:messenger@rabbitmq-2:5672/,amqp://messenger:messenger@rabbitmq-3:5672/
+    depends_on:
+      postgres: { condition: service_healthy }
+      rabbitmq-cluster-init: { condition: service_completed_successfully }
+    restart: unless-stopped
 
-  outbox-relay:
-    <<: *api
+  messenger-outbox-publisher:
+    image: messenger-outbox-publisher:local
+    build:
+      context: ./api
+      dockerfile: messenger-outbox-publisher/Dockerfile
+    deploy:
+      replicas: 2
     environment:
-      <<: *api-environment
-      MESSENGER_ROLE: relay
-      MESSENGER_CONSUMER_ENABLED: 'false'
-      MESSENGER_RELAY_ENABLED: 'true'
+      <<: *database-environment
+      METRICS_USERNAME: metrics
+      METRICS_PASSWORD: messenger-metrics
+      SPRING_DATA_REDIS_CLUSTER_NODES: redis-1:6379,redis-2:6379,redis-3:6379
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis-cluster-init: { condition: service_completed_successfully }
+    restart: unless-stopped
 
   api-proxy:
     image: nginx:1.27-alpine
@@ -139,12 +303,103 @@ services:
   client:
     build: ./client
     ports:
-      - '8080:80'
+      - '${MESSENGER_PORT:-8080}:80'
     depends_on:
       - api-proxy
       - ws-proxy
     restart: unless-stopped
 
+  postgres-exporter:
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.20.1
+    environment:
+      DATA_SOURCE_URI: postgres:5432/messenger?sslmode=disable
+      DATA_SOURCE_USER: messenger
+      DATA_SOURCE_PASS: messenger
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: unless-stopped
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.89.0
+    depends_on:
+      redis-cluster-init: { condition: service_completed_successfully }
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.14.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yaml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+    ports:
+      - '127.0.0.1:${PROMETHEUS_PORT:-9090}:9090'
+    volumes:
+      - ./deploy/prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:v0.34.1
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yaml
+      - --storage.path=/alertmanager
+    ports:
+      - '127.0.0.1:${ALERTMANAGER_PORT:-9093}:9093'
+    volumes:
+      - ./deploy/alertmanager:/etc/alertmanager:ro
+      - alertmanager-data:/alertmanager
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:13.2.2
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+    ports:
+      - '127.0.0.1:${GRAFANA_PORT:-3000}:3000'
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  nginx-exporter-client:
+    image: nginx/nginx-prometheus-exporter:1.5.1
+    command: [--nginx.scrape-uri=http://client:8083/stub_status]
+    depends_on: [client]
+    restart: unless-stopped
+
+  nginx-exporter-api:
+    image: nginx/nginx-prometheus-exporter:1.5.1
+    command: [--nginx.scrape-uri=http://api-proxy:8083/stub_status]
+    depends_on: [api-proxy]
+    restart: unless-stopped
+
+  nginx-exporter-ws:
+    image: nginx/nginx-prometheus-exporter:1.5.1
+    command: [--nginx.scrape-uri=http://ws-proxy:8083/stub_status]
+    depends_on: [ws-proxy]
+    restart: unless-stopped
+
 volumes:
   postgres-data:
-  redis-data:
+  rabbitmq-1-data:
+  rabbitmq-2-data:
+  rabbitmq-3-data:
+  redis-1-data:
+  redis-2-data:
+  redis-3-data:
+  redis-4-data:
+  redis-5-data:
+  redis-6-data:
+  prometheus-data:
+  alertmanager-data:
+  grafana-data:
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${MESSENGER_SUBNET:-10.245.0.0/24}

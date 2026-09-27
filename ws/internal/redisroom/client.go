@@ -13,23 +13,77 @@ import (
 	"messenger/ws/internal/protocol"
 )
 
-type Client struct{ redis *redis.Client }
+type Client struct {
+	redis redis.UniversalClient
+	seeds []*redis.Client
+	subs  *subscriptionHub
+}
 type Live struct {
-	Epoch    string         `json:"epoch"`
-	StreamID string         `json:"streamId"`
-	Event    protocol.Event `json:"event"`
+	Epoch            string         `json:"epoch"`
+	StreamID         string         `json:"streamId"`
+	PreviousStreamID string         `json:"previousStreamId,omitempty"`
+	HasPrevious      bool           `json:"-"`
+	Event            protocol.Event `json:"event"`
 }
 
-func New(rawURL string) (*Client, error) {
+func New(rawURL string, clusterNodes []string) (*Client, error) {
+	if len(clusterNodes) > 0 {
+		seeds := make([]*redis.Client, 0, len(clusterNodes))
+		for _, address := range clusterNodes {
+			seeds = append(seeds, redis.NewClient(&redis.Options{Addr: address}))
+		}
+		cluster := redis.NewClusterClient(&redis.ClusterOptions{
+			Addrs: clusterNodes,
+			ClusterSlots: func(ctx context.Context) ([]redis.ClusterSlot, error) {
+				var lastErr error
+				for _, seed := range seeds {
+					slots, err := seed.ClusterSlots(ctx).Result()
+					if err == nil && validClusterSlots(slots) {
+						return slots, nil
+					}
+					if err != nil {
+						lastErr = err
+					} else {
+						lastErr = errors.New("incomplete Redis Cluster topology")
+					}
+				}
+				return nil, fmt.Errorf("Redis Cluster topology unavailable: %w", lastErr)
+			},
+		})
+		client := &Client{redis: cluster, seeds: seeds}
+		client.subs = newSubscriptionHub(client)
+		return client, nil
+	}
 	opts, err := redis.ParseURL(rawURL)
 	if err != nil {
 		return nil, fmt.Errorf("Redis URL: %w", err)
 	}
-	return &Client{redis: redis.NewClient(opts)}, nil
+	client := &Client{redis: redis.NewClient(opts)}
+	client.subs = newSubscriptionHub(client)
+	return client, nil
 }
 
 func (c *Client) Ping(ctx context.Context) error { return c.redis.Ping(ctx).Err() }
-func (c *Client) Close() error                   { return c.redis.Close() }
+func (c *Client) Close() error {
+	c.subs.Close()
+	err := c.redis.Close()
+	for _, seed := range c.seeds {
+		err = errors.Join(err, seed.Close())
+	}
+	return err
+}
+
+func validClusterSlots(slots []redis.ClusterSlot) bool {
+	if len(slots) == 0 {
+		return false
+	}
+	for _, slot := range slots {
+		if len(slot.Nodes) == 0 || slot.Nodes[0].Addr == "" || strings.HasSuffix(slot.Nodes[0].Addr, ":0") {
+			return false
+		}
+	}
+	return true
+}
 
 // AllowSend applies a shared per-user limit across all WS nodes.
 func (c *Client) AllowSend(ctx context.Context, userID string) (bool, error) {
@@ -46,34 +100,21 @@ func StreamKey(room string) string { return "messenger:{" + room + "}:stream" }
 func EpochKey(room string) string  { return "messenger:{" + room + "}:epoch" }
 func Channel(room string) string   { return "messenger:{" + room + "}:live" }
 
-type Listener struct {
-	subscription *redis.PubSub
-	room         string
-}
-
 func (c *Client) Subscribe(ctx context.Context, room string) (*Listener, error) {
 	if !validRoom(room) {
 		return nil, errors.New("invalid room")
 	}
-	s := c.redis.SSubscribe(ctx, Channel(room))
-	if _, err := s.Receive(ctx); err != nil {
-		s.Close()
-		return nil, fmt.Errorf("subscribe room: %w", err)
-	}
-	return &Listener{subscription: s, room: room}, nil
+	return c.subs.Subscribe(ctx, room)
 }
 
-func (l *Listener) Receive(ctx context.Context) (Live, error) {
-	msg, err := l.subscription.ReceiveMessage(ctx)
-	if err != nil {
-		return Live{}, err
-	}
+func decodeLive(room, payload string) (Live, error) {
 	var envelope struct {
-		Epoch    string          `json:"epoch"`
-		StreamID string          `json:"streamId"`
-		Event    json.RawMessage `json:"event"`
+		Epoch            string          `json:"epoch"`
+		StreamID         string          `json:"streamId"`
+		PreviousStreamID *string         `json:"previousStreamId"`
+		Event            json.RawMessage `json:"event"`
 	}
-	d := json.NewDecoder(bytes.NewReader([]byte(msg.Payload)))
+	d := json.NewDecoder(bytes.NewReader([]byte(payload)))
 	d.DisallowUnknownFields()
 	if err := d.Decode(&envelope); err != nil {
 		return Live{}, fmt.Errorf("decode live envelope: %w", err)
@@ -89,16 +130,19 @@ func (l *Listener) Receive(ctx context.Context) (Live, error) {
 	if err != nil {
 		return Live{}, err
 	}
-	if event.Room != l.room {
+	if event.Room != room {
 		return Live{}, errors.New("event room mismatch")
 	}
 	live := Live{Epoch: envelope.Epoch, StreamID: envelope.StreamID, Event: event}
-	live.Event.Room = l.room
+	if envelope.PreviousStreamID != nil {
+		live.PreviousStreamID = *envelope.PreviousStreamID
+		live.HasPrevious = true
+	}
+	live.Event.Room = room
 	live.Event.Epoch = live.Epoch
 	live.Event.StreamID = live.StreamID
 	return live, nil
 }
-func (l *Listener) Close() error { return l.subscription.Close() }
 
 func (c *Client) Tail(ctx context.Context, room string) (string, string, error) {
 	epoch, err := c.redis.Get(ctx, EpochKey(room)).Result()

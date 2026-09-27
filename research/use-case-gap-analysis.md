@@ -11,7 +11,7 @@ Ask four questions before adding a project:
 3. Must it receive every event, or only the newest state?
 4. Must the server reach one specific connected client, or all listeners of a channel?
 
-The three selected projects already cover arbitrary overlapping conversations, one bounded object room on one WS node, and many streamer rooms whose audiences range from one WS node to many. A new project earns its place when an answer above changes routing, state recovery, or connection management. This is an architectural judgment, not a claim made by Centrifugo.
+The three selected projects already cover arbitrary overlapping chats, one bounded object room on one WS node, and many streamer rooms whose audiences range from one WS node to many. A new project earns its place when an answer above changes routing, state recovery, or connection management. This is an architectural judgment, not a claim made by Centrifugo.
 
 ## The eight Centrifugo categories
 

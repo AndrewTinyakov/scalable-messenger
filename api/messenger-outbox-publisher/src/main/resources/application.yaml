@@ -1,0 +1,44 @@
+server:
+  port: 8082
+spring:
+  application:
+    name: messenger-outbox-publisher
+  security:
+    user:
+      name: ${METRICS_USERNAME:metrics}
+      password: ${METRICS_PASSWORD:${random.uuid}}
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/messenger}
+    username: ${DATABASE_USER:messenger}
+    password: ${DATABASE_PASSWORD:messenger}
+  flyway:
+    enabled: true
+  jooq:
+    sql-dialect: postgres
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      lettuce:
+        cluster:
+          refresh:
+            period: 5s
+            dynamic-refresh-sources: false
+messenger:
+  redis:
+    room:
+      history-max-length: 1000
+      idle-ttl-seconds: 3600
+  publisher:
+    poll-ms: 1000
+    batch-size: 100
+    lease-seconds: 30
+management:
+  metrics:
+    distribution:
+      percentiles-histogram:
+        messenger.outbox.batch: true
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus

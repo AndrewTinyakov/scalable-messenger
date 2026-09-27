@@ -28,7 +28,7 @@ Use explicit request and response classes with camel-case JSON fields. Keep requ
 
 Review status codes, request headers, path parameters, pagination, and `ProblemDetail` responses in the exported document. Use endpoint annotations when inference is incomplete; the source does not require a separate annotated controller interface. Authentication, rate limiting, asynchronous request status, and history cursors must appear in the public contract.
 
-Retain a `generate:openapi` script that exports the API and regenerates client declarations. In the reference it invokes Gradle `generateOpenApiDocs` and the client's generator. The export process disables Flyway, automatic Rabbit declarations/listeners, and schedulers so documentation generation does not execute background work. Provide equivalent isolation for Messenger, including its relay.
+Retain a `generate:openapi` script that exports the API and regenerates client declarations. In the reference it invokes Gradle `generateOpenApiDocs` and the client's generator. The export process disables Flyway, automatic Rabbit declarations/listeners, and schedulers so documentation generation does not execute background work. Provide equivalent isolation for Messenger, including its publisher.
 
 Source examples: `api/build.gradle.kts`, `api/src/main/kotlin/com/andrewtinyakov/fileupload/asset/web/controller/*`, `asset/web/payload/*`, `contracts/openapi.yaml`, `client/src/api/generated/`, root and client `package.json`.
 
@@ -60,9 +60,9 @@ The Messenger filenames are illustrative; choose exact wire operations while imp
 
 Use PascalCase versioned message names, such as `SendMessageCommandV1` and `MessageSavedEventV1`. Use lower-kebab-case schema filenames ending `-v1.yaml`, imperative command names, and past-tense event names. JSON properties use camel case. Domain enum and failure-code wire values are explicit; the source uses upper snake case. Preserve the Messenger's existing lower-case protocol state names `queued`, `saved`, `rejected`, and `applied`.
 
-Declare `required`, `additionalProperties: false`, enums, ranges, patterns, and formats. Document whether an optional field is omitted or nullable. Keep identifiers and timestamps as strings with documented formats. In handwritten code, use actual time types after decoding. Specify a lossless JSON representation for conversation sequences and other 64-bit values before generating browser clients; a JavaScript number cannot represent every 64-bit integer.
+Declare `required`, `additionalProperties: false`, enums, ranges, patterns, and formats. Document whether an optional field is omitted or nullable. Keep identifiers and timestamps as strings with documented formats. In handwritten code, use actual time types after decoding. Specify a lossless JSON representation for chat sequences and other 64-bit values before generating browser clients; a JavaScript number cannot represent every 64-bit integer.
 
-Use a shared canonical identifier format across schema, Kotlin, and Go validation. The reference has differing ULID regex strictness between its API user validator and worker validator. Adopt the canonical ULID range consistently instead of copying that mismatch. ULID message identity and conversation sequence have different roles.
+Use a shared canonical identifier format across schema, Kotlin, and Go validation. The reference has differing ULID regex strictness between its API user validator and worker validator. Adopt the canonical ULID range consistently instead of copying that mismatch. ULID message identity and chat sequence have different roles.
 
 ## Generated code and compatibility
 
@@ -86,15 +86,15 @@ Maintain shared JSON fixtures for valid and invalid messages. Cover missing requ
 
 Preserve the meanings in `CONTEXT.md`. `queued` follows RabbitMQ publisher confirmation, `saved` follows SQL commit, `rejected` is a recorded terminal processing result, and `applied` is a device acknowledgement. A late `queued` must not move a saved or rejected request backward. Never use an unqualified `delivered` result to combine those facts.
 
-Keep `requestId`, `messageId`, and `eventId` distinct. The request ID survives client retries; the message ID identifies the durable message; an event ID deduplicates publication. Keep the SQL cursor `(conversationId, sequence)` distinct from the Redis cursor `(room, epoch, streamId)`. Retrying an outbox publication retains its event ID even when Redis assigns a new Stream ID.
+Keep `requestId`, `messageId`, and `eventId` distinct. The request ID survives client retries; the message ID identifies the durable message; an event ID deduplicates publication. Keep the SQL cursor `(chatId, sequence)` distinct from the Redis cursor `(room, epoch, streamId)`. Retrying an outbox publication retains its event ID even when Redis assigns a new Stream ID.
 
 ### RabbitMQ commands
 
-Use a fixed partition set selected by conversation ID. Document the hash algorithm, input encoding, partition count, routing-key format, and topology ownership so every publisher agrees. Centralize Kotlin route definitions like the reference's `AssetMessaging` object and Go definitions like `messaging/topology.go`; verify agreement against the contract. A partition-count change needs an explicit routing transition.
+Use a fixed partition set selected by chat ID for an existing chat or by the sorted sender and recipient IDs for a first direct send. Document the hash algorithm, input encoding, partition count, routing-key format, and topology ownership so every publisher agrees. Centralize Kotlin route definitions like the reference's `AssetMessaging` object and Go definitions like `messaging/topology.go`; verify agreement against the contract. A partition-count change needs an explicit routing transition.
 
 Publish persistent JSON commands with mandatory routing and publisher confirms to durable quorum queues. Reject unroutable or negatively acknowledged publishes. A timeout leaves the outcome unknown; the caller retries with the same request ID and can query status. Return `queued` only after successful routing and confirmation.
 
-Use manual consumer ACK after the SQL transaction commits. Bound consumer prefetch, worker concurrency, queue count, and backlog. Overflow rejects new publishes rather than discarding already-accepted commands. Queue partitioning distributes conversations; SQL still owns the accepted order within a conversation.
+Use manual consumer ACK after the SQL transaction commits. Bound consumer prefetch, worker concurrency, queue count, and backlog. Overflow rejects new publishes rather than discarding already-accepted commands. Queue partitioning distributes chats; SQL still owns the accepted order within a chat.
 
 Separate permanent malformed input, durable business rejection, and transient dependency failure. Use bounded retries or an explicitly chosen delayed retry policy, with a terminal path for exhausted commands. A valid queued send must eventually have a durable saved/rejected result or remain recoverable work; silently discarding it into an unobserved dead queue breaks that promise. If recording a terminal result fails, retain retryable responsibility.
 
@@ -106,7 +106,7 @@ Use sharded Pub/Sub for immediate room delivery and bounded Streams for short re
 
 Define key/channel naming and Redis Cluster hash tags centrally. A room's Stream, epoch metadata, and sharded live channel must use the intended shared slot for the publication operation. Logical room names include the room kind, such as `user:<id>` and `group:<id>`, so unrelated room kinds do not collide.
 
-The relay appends history and publishes the event with epoch/Stream position through a short Redis Function or Lua script. Prevalidate inputs; a runtime error after a Redis write does not roll it back. SQL and Redis do not share a transaction. Repeated publication is expected and retains stable event IDs.
+The publisher appends history and publishes the event with epoch/Stream position through a short Redis Function or Lua script. Prevalidate inputs; a runtime error after a Redis write does not roll it back. SQL and Redis do not share a transaction. Repeated publication is expected and retains stable event IDs.
 
 Define history retention, epoch recreation, subscription acknowledgement, replay boundaries, deduplication, buffer limits, and the `recovery_failed` fallback. A Stream ID is not a gapless counter. Recovery must prove that the prior cursor is retained in the same epoch; otherwise use SQL catch-up. Never report device application merely because a subscriber existed or a socket write completed.
 
@@ -114,7 +114,7 @@ Define history retention, epoch recreation, subscription acknowledgement, replay
 
 Define each frame's discriminator/version, required fields, response or error, size limit, and authorization rule. Document reconnect behavior, heartbeat/timeout behavior, slow-client close/resync behavior, and device-applied acknowledgements. Use authenticated user/device context for room ownership and send commands.
 
-History endpoints use bounded keyset pagination after a conversation sequence. Request-status lookup must include or resolve the full deduplication scope, such as conversation plus authenticated sender plus request ID, and enforce access. Its client-facing shape must distinguish an unknown/pending lookup from a recorded rejection.
+History endpoints use bounded keyset pagination after a chat sequence. Request-status lookup must include or resolve the full deduplication scope, such as chat plus authenticated sender plus request ID, and enforce access. Its client-facing shape must distinguish an unknown/pending lookup from a recorded rejection.
 
 Recovery must cover a Redis outage while sockets remain open, a quiet missed last event, membership revocation, and SQL fallback after trimmed/lost Stream history. SQL catch-up on reconnect and chat open remains required. A strict live freshness deadline needs database-backed reconciliation or a durable ledger beyond Redis position checks, as the existing architecture explains.
 
@@ -128,6 +128,6 @@ When implementing a contract change:
 4. Regenerate in CI and fail on differences, including new untracked output. The reference uses intent-to-add before its generated-source diff check. Add equivalent checks for each generated artifact this project adopts.
 5. Run real broker/database integration tests when topology, ACKs, retries, persistence, or recovery changes. Keep system-test helpers and fixtures separate from scenario files, following the reference's `tests/system` organization.
 
-Retain a small cross-process system suite for a send through Go, RabbitMQ, Kotlin, SQL, Redis, and another WS node. Cover a second device for the sender, direct and group rooms, duplicate sends, saved-before-queued observation, rejection, worker crash before ACK, relay crash after publication, Redis loss, and SQL catch-up. Use bounded waits and isolated test identities. Measure throughput and failure behavior separately from unit-test assertions; the standards do not establish a scaling target by themselves.
+Retain a small cross-process system suite for a send through Go, RabbitMQ, Kotlin, SQL, Redis, and another WS node. Cover a second device for the sender, direct and group rooms, duplicate sends, saved-before-queued observation, rejection, worker crash before ACK, publisher crash after publication, Redis loss, and SQL catch-up. Use bounded waits and isolated test identities. Measure throughput and failure behavior separately from unit-test assertions; the standards do not establish a scaling target by themselves.
 
 Source examples: `contracts/asyncapi.yaml`, `models.asyncapi.yaml`, `messages.yaml`, `channels/*`, `schemas/asset/*`, `generate-models.mjs`, `workers/internal/messagecodec/json_test.go`, `api/src/main/resources/application.yaml`, `.github/workflows/message-contracts.yaml`, `tests/system/*`.

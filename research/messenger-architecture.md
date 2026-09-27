@@ -4,9 +4,9 @@ This is the selected architecture for the Messenger example. It supports direct 
 
 ## Contract
 
-The client uses four distinct send states. `queued` means a RabbitMQ quorum queue confirmed the request. `saved` means the conversation database committed the message and outbox event. `rejected` means processing ended without a message. `applied` means a particular device incorporated a saved message and acknowledged it. A publisher confirm, SQL commit, Redis publication, WS-node write, and device acknowledgement answer different questions. See the [domain language](../CONTEXT.md).
+The client uses four distinct send states. `queued` means a RabbitMQ quorum queue confirmed the request. `saved` means the chat database committed the message and outbox event. `rejected` means processing ended without a message. `applied` means a particular device incorporated a saved message and acknowledged it. A publisher confirm, SQL commit, Redis publication, WS-node write, and device acknowledgement answer different questions. See the [domain language](../CONTEXT.md).
 
-The durable promise is that a saved message remains available from SQL while the history is retained. A client uses a per-conversation sequence to fetch every saved message after its last applied sequence. Live delivery can repeat or arrive out of order; devices deduplicate by message ID and apply in conversation sequence. A continuously open socket can appear healthy while its broker feed has missed an event, so live freshness also needs position checks and explicit resync. No broker by itself proves device application.
+The durable promise is that a saved message remains available from SQL while the history is retained. A client uses a per-chat sequence to fetch saved messages after its recovery baseline. That baseline advances when messages are applied, when a new device first opens at the newest page, or when the user explicitly dismisses an existing recovery gap by jumping to the newest page. Only the unseen prefix is dismissed; visible messages are applied. Older SQL history remains available through scrolling. Live delivery can repeat or arrive out of order; devices deduplicate by message ID and apply in chat sequence. A continuously open socket can appear healthy while its broker feed has missed an event, so live freshness also needs position checks and explicit resync. No broker by itself proves device application.
 
 ## Running components
 
@@ -21,7 +21,7 @@ flowchart LR
     W1 -->|room authorization| A[API]
     W2 -->|room authorization| A
     C -->|status and history HTTP| A
-    K -->|transaction| D[(Conversation SQL database)]
+    K -->|transaction| D[(Chat SQL database)]
     A -->|queries| D
     D -->|committed outbox rows| R[Outbox relay]
     R -->|XADD history and SPUBLISH live| X[(Redis)]
@@ -33,7 +33,7 @@ The API and command worker may share code or an image, but the worker consumes q
 
 ## Rooms and fanout
 
-Each WS node keeps `room -> local sockets` and subscribes to one Redis channel for each room with local listeners. It does not create a broker subscription per socket. Every authenticated device joins `user:<id>`. In this design, connected members also join their bounded group rooms after an API membership check, even when the group chat is not open. A direct message targets the sender and recipient user rooms. A group message targets its group room, reaching the sender's other devices too. If group memberships become too numerous, a personal-room inbox notification plus SQL fetch is an alternative with per-recipient fanout cost.
+Each WS node keeps `room -> local sockets` and subscribes to one Redis channel for each room with local listeners. It does not create a broker subscription per socket. Every authenticated device joins `user:<id>`. In this design, connected members also join their bounded group rooms after an API membership check, even when the group chat is not open. A direct message targets the sender and recipient user rooms. A group message targets its group room, reaching the sender's other devices too. Creating either kind of chat emits a `chat_created` event to every member's user room, so their chat lists refresh immediately. If group memberships become too numerous, a personal-room inbox notification plus SQL fetch is an alternative with per-recipient fanout cost.
 
 One RabbitMQ queue with several WS-node consumers would give each event to one node, so it cannot broadcast to every node that has group members. RabbitMQ live fanout would need an exchange and a separate queue per WS node, bound to each of its active rooms. That remains a measurable alternative. Avito's old queue-per-connection problem does not measure this queue-per-node topology. [RabbitMQ exchanges](https://www.rabbitmq.com/docs/exchanges), [Avito's engineering account](https://habr.com/ru/companies/avito/articles/522744/).
 
@@ -50,14 +50,15 @@ sequenceDiagram
     participant X as Redis
     participant O as Recipient WS node
     participant B as Recipient device
-    C->>W: send(conversationId, requestId, body)
+    C->>W: send(chatId or recipientId, requestId, body)
     W->>W: authenticate, check size, apply sender rate limit
     W->>Q: publish persistent command to partitioned quorum queue
     Q-->>W: publisher confirm
     W-->>C: queued(requestId)
     Q->>K: deliver command
-    K->>D: BEGIN; dedupe request; lock membership and sequence
-    K->>D: insert message, saved result, and room outbox rows
+    K->>D: BEGIN; dedupe sender/request; resolve direct pair if needed
+    K->>D: create direct chat and members on its first send
+    K->>D: lock chat; insert message, saved result, and room outbox rows
     K->>D: COMMIT
     D-->>K: saved
     K->>Q: ACK command
@@ -70,15 +71,15 @@ sequenceDiagram
     B-->>O: ACK last applied position
 ```
 
-The worker stores a stable `requestId` result so Rabbit redelivery or a client retry cannot create a second message. It rechecks authorization and can store `rejected` instead of a message. The sender can query status after reconnect; it might even see `saved` before a late `queued` frame, so client state must never move backwards. SQL commit happens before Rabbit consumer ACK. If the worker crashes between them, Rabbit redelivers and the worker reads the saved result. [RabbitMQ confirms and consumer ACKs](https://www.rabbitmq.com/docs/confirms).
+The worker stores a stable `requestId` result for each sender so Rabbit redelivery or a client retry cannot create a second message. It rechecks authorization and can store `rejected` instead of a message. The sender can query status after reconnect; it might even see `saved` before a late `queued` frame, so client state must never move backwards. SQL commit happens before Rabbit consumer ACK. If the worker crashes between them, Rabbit redelivers and the worker reads the saved result. [RabbitMQ confirms and consumer ACKs](https://www.rabbitmq.com/docs/confirms).
 
-The message, request result, per-conversation sequence, and outbox rows share one SQL transaction. The relay publishes each committed outbox row and marks it complete afterward. A crash after Redis publication and before completion can duplicate the event. The device deduplicates messages by stable message ID and status events by event ID. Redis publication order can differ from SQL conversation order if relays race, so the client uses the SQL sequence to order and fill gaps. ULID remains the message identity, not the catch-up cursor.
+The message, request result, per-chat sequence, and outbox rows share one SQL transaction. The relay publishes each committed outbox row and marks it complete afterward. A crash after Redis publication and before completion can duplicate the event. The device deduplicates messages by stable message ID and status events by event ID. Redis publication order can differ from SQL chat order if relays race, so the client uses the SQL sequence to order and fill gaps. ULID remains the message identity, not the catch-up cursor.
 
 For one room, a short Redis Function or Lua script appends to a bounded Stream with `XADD` and sends the live event with `SPUBLISH`. The publication includes an epoch and Stream ID. The Stream is a recovery cache; Pub/Sub is the immediate room transport. The room's Stream and metadata keys must share a Redis Cluster slot. Redis script execution coordinates these Redis operations but cannot transact with SQL. [Redis Pub/Sub](https://redis.io/docs/latest/develop/pubsub/), [Redis scripting](https://redis.io/docs/latest/develop/programmability/eval-intro/), [Redis Cluster](https://redis.io/docs/latest/operate/oss_and_stack/management/scaling/).
 
 ## Recovery
 
-The client persists its last **applied** conversation sequence and its last applied `{room, epoch, Stream ID}`. On reconnect, the WS node authorizes the room, establishes its live Redis subscription, buffers live events, then reads missed Stream entries. If the previous entry is retained in the same epoch, it replays the complete short gap and drains the buffer. Redis Stream IDs are monotonic but not gapless, so the node verifies the previous entry rather than subtracting IDs. If history was trimmed or the epoch changed, the client fetches SQL rows with `sequence > lastAppliedSequence` and merges duplicates by message ID.
+The client persists its per-chat recovery baseline and its last applied `{room, epoch, Stream ID}`. On reconnect, the WS node authorizes the room, establishes its live Redis subscription, buffers live events, then reads missed Stream entries. If the previous entry is retained in the same epoch, it replays the complete short gap and drains the buffer. Redis Stream IDs are monotonic but not gapless, so the node verifies the previous entry rather than subtracting IDs. If history was trimmed or the epoch changed, the client fetches SQL rows above its recovery baseline and merges duplicates by message ID. The browser sends `received_message` for each handled live notification; that exact socket receipt does not change the recovery baseline. Starting a new chat view or an explicit Jump can send a separate `dismissed` frame through the first visible sequence minus one; this resolves the unseen prefix without misreporting device application. The v1 subscribe field `lastAppliedSequence` carries the recovery baseline after a dismissal for compatibility.
 
 ```mermaid
 sequenceDiagram
@@ -96,7 +97,7 @@ sequenceDiagram
         W-->>C: replay, then buffered live events
     else Cannot prove complete broker replay
         W-->>C: recovery_failed
-        C->>A: GET messages after conversation sequence N
+        C->>A: GET messages after chat sequence N
         A->>D: SELECT messages WHERE sequence>N ORDER BY sequence
         D-->>A: saved rows
         A-->>C: catch-up pages
@@ -109,9 +110,9 @@ Redis Pub/Sub is at-most-once. If a WS node loses its Redis link while browser s
 
 ## Scaling and overload
 
-Use a fixed set of RabbitMQ quorum queues selected by `hash(conversationId)`, rather than one queue per user, room, or socket. Workers consume across the partitions with bounded prefetch. RabbitMQ states that one queue replica has one CPU core on its hot path, so one global queue would be a bottleneck. Partitioning does not remove the SQL row lock for one hot conversation. [RabbitMQ queue scaling](https://www.rabbitmq.com/docs/queues), [consumer prefetch](https://www.rabbitmq.com/docs/consumer-prefetch).
+Use a fixed set of RabbitMQ quorum queues selected by `hash(chatId)` for existing chats or `hash(sorted user pair)` for a first direct send, rather than one queue per user, room, or socket. Workers consume across the partitions with bounded prefetch. RabbitMQ states that one queue replica has one CPU core on its hot path, so one global queue would be a bottleneck. Partitioning does not remove the SQL row lock for one hot chat. [RabbitMQ queue scaling](https://www.rabbitmq.com/docs/queues), [consumer prefetch](https://www.rabbitmq.com/docs/consumer-prefetch).
 
-The WS node rate-limits before enqueueing, with a shared per-user limit so reconnecting to another node cannot bypass it. The queues have a measured backlog budget. Configure queue overflow to reject new publishes and return a retryable error before telling a client `queued`; RabbitMQ's default length-limit behavior can discard the oldest queued command. Broker flow control also slows fast publishers. Additional workers help until SQL or one hot conversation becomes the limit. A queue absorbs a bounded burst or short API outage, not sustained overload. RabbitMQ advises against very long backlogs in quorum queues. [RabbitMQ queue limits](https://www.rabbitmq.com/docs/maxlength), [flow control](https://www.rabbitmq.com/docs/flow-control), [quorum queue limits](https://www.rabbitmq.com/docs/quorum-queues).
+The WS node rate-limits before enqueueing, with a shared per-user limit so reconnecting to another node cannot bypass it. The queues have a measured backlog budget. Configure queue overflow to reject new publishes and return a retryable error before telling a client `queued`; RabbitMQ's default length-limit behavior can discard the oldest queued command. Broker flow control also slows fast publishers. Additional workers help until SQL or one hot chat becomes the limit. A queue absorbs a bounded burst or short API outage, not sustained overload. RabbitMQ advises against very long backlogs in quorum queues. [RabbitMQ queue limits](https://www.rabbitmq.com/docs/maxlength), [flow control](https://www.rabbitmq.com/docs/flow-control), [quorum queue limits](https://www.rabbitmq.com/docs/quorum-queues).
 
 Redis-only commands are viable with partitioned Streams, `XREADGROUP`, `XACK`, and pending-entry reclaim. They do not inherently scale worse. We keep RabbitMQ because, before SQL commit, its confirmed quorum queue gives `queued` a stronger durability meaning than an `XADD` acknowledged by a Redis primary whose replication is asynchronous. Redis Streams after SQL commit can be lost and rebuilt through SQL catch-up. [Redis consumer groups](https://redis.io/docs/latest/commands/xreadgroup/), [Redis replication](https://redis.io/docs/latest/operate/oss_and_stack/management/replication/), [RabbitMQ quorum queues](https://www.rabbitmq.com/docs/quorum-queues).
 

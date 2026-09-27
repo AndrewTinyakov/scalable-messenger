@@ -1,12 +1,12 @@
 # Kotlin API coding standards
 
-Use these rules for the Messenger Spring Boot API, command consumers, and SQL outbox relay. Read [contracts.md](contracts.md) when changing HTTP, WebSocket, RabbitMQ, or Redis payloads. The Go application follows [go-websocket.md](go-websocket.md).
+Use these rules for the Messenger Spring Boot API, command consumers, and SQL outbox publisher. Read [contracts.md](contracts.md) when changing HTTP, WebSocket, RabbitMQ, or Redis payloads. The Go application follows [go-websocket.md](go-websocket.md).
 
 ## Origin and scope
 
 These standards derive from the actual code in `/Users/andrewtinyakov/code/pet/file-upload-system`, inspected on 2026-09-26. Its HEAD was `7f7aa0d1892b7bc332154a95c480af2964093b62`; the checkout had local changes, so the reference is the files on disk at inspection time. Source paths below are relative to that repository. `K` means `api/src/main/kotlin/com/andrewtinyakov/fileupload`; `T` means the corresponding `api/src/test/kotlin/com/andrewtinyakov/fileupload` directory.
 
-Rules about naming, feature packages, interfaces, jOOQ, payloads, explicit mapping, and tests preserve the API's conventions. Sections marked Messenger adaptation apply those conventions to this project's [architecture](../../research/messenger-architecture.md), [detailed flow](../../research/messenger-detailed-flow.md), and [broker decision](../adr/0001-messenger-broker-split.md). Example Messenger filenames describe the intended layout; application code does not exist yet.
+Rules about naming, feature packages, interfaces, jOOQ, payloads, explicit mapping, and tests preserve the API's conventions. Sections marked Messenger adaptation apply those conventions to this project's [architecture](../../research/messenger-architecture.md), [detailed flow](../../research/messenger-detailed-flow.md), and [broker decision](../adr/0001-messenger-broker-split.md). Example Messenger filenames describe the feature layout.
 
 ## Stack
 
@@ -38,25 +38,29 @@ Put a capability at the first package level, then divide its implementation by r
 ```text
 api/src/main/kotlin/com/andrewtinyakov/messenger/
   ApiApplication.kt
-  conversation/
-    model/Conversation.kt, ConversationId.kt, Membership.kt
-    repository/ConversationRepository.kt, JooqConversationRepository.kt
-    service/ConversationService.kt, MembershipService.kt
-    web/controller/ConversationController.kt
-    web/payload/ConversationPayloads.kt
-    config/ConversationProperties.kt
+  chat/
+    model/Chat.kt, ChatKind.kt
+    repository/ChatRepository.kt, JooqChatRepository.kt
+    service/ChatService.kt, ChatMembershipService.kt
+    web/controller/ChatController.kt
+    web/payload/ChatPayloads.kt
   message/
-    model/Message.kt, MessageId.kt, SendRequest.kt
-    dto/SavedMessageDto.kt
+    model/Message.kt, SendResult.kt, SendResultStatus.kt
     repository/MessageRepository.kt, JooqMessageRepository.kt
-    service/MessageService.kt, SendRequestService.kt
-    web/controller/MessageController.kt, SendRequestController.kt
-    web/payload/MessagePayloads.kt, SendRequestPayloads.kt
+    service/MessageSendService.kt, MessageHistoryService.kt
+    web/controller/MessageController.kt, SendStatusController.kt
+    web/payload/MessagePayloads.kt
     messaging/listener/SendMessageListener.kt
-    messaging/publisher/MessageSavedPublisher.kt
-    monitoring/MessageMetrics.kt
-    scheduling/SendRequestRetentionScheduler.kt
-  user/UserId.kt
+  auth/
+    model/Session.kt, UserAccount.kt
+    repository/AuthRepository.kt, JooqAuthRepository.kt
+    service/AuthenticationService.kt
+    web/controller/AuthController.kt
+  user/
+    model/User.kt
+    repository/UserRepository.kt, JooqUserRepository.kt
+    service/UserSearchService.kt
+    web/controller/UserController.kt
   infrastructure/
     config/
     messaging/
@@ -103,17 +107,17 @@ Inject dependencies through the primary constructor as `private val`. Annotate i
 
 | Item | Convention | Messenger example |
 | --- | --- | --- |
-| Main type | `PascalCase.kt`, matching the type | `SendRequestService.kt` |
+| Main type | `PascalCase.kt`, matching the type | `MessageSendService.kt` |
 | Model | Domain noun without `Entity` or `Dto` suffix | `Message.kt` |
-| Typed identity | `<Thing>Id.kt`, `@JvmInline value class` | `ConversationId.kt` |
-| Enum | Domain name in its own file | `SendRequestStatus.kt` |
+| Typed identity | `<Thing>Id.kt`, `@JvmInline value class` | `ChatId.kt` |
+| Enum | Domain name in its own file | `SendResultStatus.kt` |
 | Internal transfer object | Specific name; `Dto` suffix where it clarifies the role | `SavedMessageDto.kt` |
 | HTTP payload family | `<Resource>Payloads.kt` | `MessagePayloads.kt` |
-| Request / response | Action plus resource plus `Request`; resource plus `Response` | `CreateConversationRequest`, `MessageResponse` |
+| Request / response | Action plus resource plus `Request`; resource plus `Response` | `CreateChatRequest`, `MessageResponse` |
 | Config values | `<Capability>Properties` | `MessageProperties` |
 | Config wiring | `<Capability>Config` | `RedisConfig` |
 | Message model | Imperative `...CommandV1`; past-tense `...EventV1` | `SendMessageCommandV1`, `MessageSavedEventV1` |
-| Unit / integration tests | `<Subject>Tests.kt`, mirroring its production package | `SendRequestServiceTests.kt` |
+| Unit / integration tests | `<Subject>Tests.kt`, mirroring its production package | `MessageSendServiceTests.kt` |
 | SQL migration | `V<number>__<snake_case_description>.sql` | `V1__create_initial_schema.sql` |
 | Pure function file | Name the capability | `Hashing.kt`, `MessageConsumption.kt` |
 
@@ -127,7 +131,7 @@ Use lower camel case for functions and properties, upper snake case for constant
 | --- | --- | --- |
 | `findBy...` | Lookup that can miss | `findById(...): Message?`; collection lookup returns an empty list |
 | `get...` | Retrieve a value or service response; service handles absence and access | `getHistory(...)`, `getRequestStatus(...)` |
-| `require...` | Obtain or check a required value and fail if unavailable | Private `requireConversation(...)` |
+| `require...` | Obtain or check a required value and fail if unavailable | Private `requireChat(...)` |
 | `validate...` | Check supplied values; no persistence | `validateMessageSize(...)` |
 | `...ForUpdate` | Query obtains row locks inside a transaction | `findByIdForUpdate(...)` |
 | `insert`, `complete`, `expire`, `transitionStatus` | Specific persistence operation | `insert(message)`, `transitionStatus(expected, next)` |
@@ -205,12 +209,12 @@ Repository interfaces describe needed operations, with domain values as paramete
 - Accept collections for batch writes and return early for an empty collection. Use one multi-row insert when the operation supports it, following the outbox repository.
 - Design schema constraints alongside service invariants: named foreign keys, unique idempotency keys, checks, and indexes for actual lookups and background scans. SQL uses plural snake-case tables and snake-case columns; the reference uses descriptive `_unique`, `_fk`, `_idx`, and validity constraint names.
 
-For example, this is the reference's repository shape adapted to conversation-scoped message access. Imports and the remaining model fields are omitted:
+For example, this is the reference's repository shape adapted to chat-scoped message access. Imports and the remaining model fields are omitted:
 
 ```kotlin
 interface MessageRepository {
     fun findById(
-        conversationId: ConversationId,
+        chatId: ChatId,
         id: MessageId,
     ): Message?
 }
@@ -220,13 +224,13 @@ class JooqMessageRepository(
     private val db: DSLContext,
 ) : MessageRepository {
     override fun findById(
-        conversationId: ConversationId,
+        chatId: ChatId,
         id: MessageId,
     ): Message? =
         db
             .selectFrom(MESSAGES)
             .where(
-                MESSAGES.CONVERSATION_ID.eq(conversationId.value),
+                MESSAGES.CHAT_ID.eq(chatId.value),
                 MESSAGES.ID.eq(id.value),
             ).fetchOne()
             ?.toModel()
@@ -235,7 +239,7 @@ class JooqMessageRepository(
 private fun MessagesRecord.toModel() =
     Message(
         id = MessageId(id!!),
-        conversationId = ConversationId(conversationId!!),
+        chatId = ChatId(chatId!!),
         sequence = sequence!!,
     )
 ```
@@ -248,17 +252,17 @@ Use an injected `TransactionTemplate` and visible `tx.execute` / `tx.executeWith
 
 Preserve the reference's idempotency behavior: persist a scoped key and request fingerprint, return the established result for a matching retry, and reject reuse with a different payload. A preflight lookup is insufficient for concurrent requests; enforce uniqueness in SQL and handle the race by reading the committed result. Do not count a replay as a new successful transition.
 
-Keep listeners and schedulers as adapters. `on...` decodes and dispatches; a service executes the operation; consumption infrastructure decides ACK/retry. A scheduler delegates to a service using fixed-delay configuration. Bound batch size and batches per run. Allow scheduling and queue listeners to be disabled for tests, contract export, and separate process roles.
+Keep listeners and publishers as adapters. `on...` decodes and dispatches; a service executes the operation; consumption infrastructure decides ACK/retry. The Messenger publisher wakes on committed outbox inserts through PostgreSQL `LISTEN/NOTIFY` and scans periodically for recovery. Bound each claim batch, but drain while batches succeed; a continuous message stream needs no per-wakeup batch-count cap. Keep background components out of the HTTP API binary and disable listeners in integration tests when testing command logic without RabbitMQ.
 
 Messenger adaptation:
 
-1. The command service commits membership validation, request deduplication, conversation sequence allocation, message insertion, final request result, and outbox rows in one SQL transaction. A business rejection commits its result and sender notification without a message.
+1. The command service commits membership validation, request deduplication, chat sequence allocation, message insertion, final request result, and outbox rows in one SQL transaction. A business rejection commits its result and sender notification without a message.
 2. The listener ACKs only after that transaction succeeds. A database failure leaves the command retryable. Duplicates return the recorded result. Follow [contracts.md](contracts.md) for terminal failure and retry rules.
-3. The relay claims a bounded batch with an expiring lease in a short transaction, releases row locks, publishes through Redis, then marks completion only while it still owns the lease. Reclaim expired leases and retain stable event IDs across retries.
+3. The publisher claims a bounded batch with an expiring lease in a short transaction, releases row locks, publishes through Redis, then marks completion only while it still owns the lease. Reclaim expired leases and retain stable event IDs across retries.
 4. Keep broker/network waits outside the message transaction. The reference's `OutboxService.publishBatch` holds a SQL transaction while waiting for Rabbit confirms; Messenger uses the lease flow already specified in its detailed design.
 5. Record success metrics after commit. If a transaction can join an outer transaction, use an after-commit hook or keep ownership at the outer service boundary; returning from a nested template is not proof of final commit.
 
-The API HTTP role, Rabbit consumer role, and relay may share an image and feature code. Give each an independent lifecycle and enablement configuration. Background work must not depend on an active WebSocket connection.
+The HTTP API, Messenger command processor, and Messenger outbox publisher have separate binaries and lifecycles. Share domain and persistence code through a library. Background work must not depend on an active WebSocket connection.
 
 ## Configuration, monitoring, and operational code
 
@@ -277,9 +281,9 @@ Mirror production packages under `api/src/test/kotlin`. Use `<Subject>Tests` and
 - Unit tests instantiate concrete services with mocked repository/integration interfaces, following `UploadSessionServiceTests`. Use Mockito where interaction matters, and `kotlin.test` or JUnit assertions for results and errors. Verify absence of writes on rejected/replayed paths when that is the behavior under test.
 - Test domain invariants and pure mapping without a Spring context. Test serialization against the configured mapper or an equivalent configuration; a default mapper can hide production decoding differences.
 - Use real PostgreSQL with Testcontainers for transactions, constraints, jOOQ mappings, locking, and concurrent idempotency. Mock jOOQ connections can test batch construction, as `OutboxPublisherTests` does, but cannot prove locking or rollback behavior.
-- Use `@SpringBootTest` with a random port and a real HTTP client for API behavior, as `AssetApiTests` does. Share container wiring through a `@TestConfiguration`, `@ServiceConnection`, and dynamic properties. Add Redis to the PostgreSQL/Rabbit test environment when testing relay behavior.
+- Use `@SpringBootTest` with a random port and a real HTTP client for API behavior, as `AssetApiTests` does. Share container wiring through a `@TestConfiguration`, `@ServiceConnection`, and dynamic properties. Add Redis to the PostgreSQL/Rabbit test environment when testing publisher behavior.
 - Inject a fixed or mutable clock for expiry and lease tests. Use latches or bounded Awaitility conditions for concurrency and asynchronous behavior. Give every wait a timeout.
-- Cover matching retries, conflicting request IDs, concurrent sends, membership revocation, rollback of all send writes, commit-before-ACK redelivery, relay lease recovery, and publication-before-completion crashes. Assert durable state as well as responses.
+- Cover matching retries, conflicting request IDs, concurrent sends, membership revocation, rollback of all send writes, commit-before-ACK redelivery, publisher lease recovery, and publication-before-completion crashes. Assert durable state as well as responses.
 - Split API integration tests by capability and failure scenario instead of copying the reference's large `AssetApiTests.kt` into one growing Messenger test file.
 
 When the API is scaffolded, use the reference's check command from the repository root:

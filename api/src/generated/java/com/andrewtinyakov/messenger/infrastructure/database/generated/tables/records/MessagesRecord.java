@@ -35,16 +35,16 @@ public class MessagesRecord extends UpdatableRecordImpl<MessagesRecord> {
     }
 
     /**
-     * Setter for <code>public.messages.conversation_id</code>.
+     * Setter for <code>public.messages.chat_id</code>.
      */
-    public void setConversationId(String value) {
+    public void setChatId(String value) {
         set(1, value);
     }
 
     /**
-     * Getter for <code>public.messages.conversation_id</code>.
+     * Getter for <code>public.messages.chat_id</code>.
      */
-    public String getConversationId() {
+    public String getChatId() {
         return (String) get(1);
     }
 
@@ -127,11 +127,11 @@ public class MessagesRecord extends UpdatableRecordImpl<MessagesRecord> {
     /**
      * Create a detached, initialised MessagesRecord
      */
-    public MessagesRecord(String id, String conversationId, Long sequence, String senderId, String body, OffsetDateTime createdAt) {
+    public MessagesRecord(String id, String chatId, Long sequence, String senderId, String body, OffsetDateTime createdAt) {
         super(Messages.MESSAGES);
 
         setId(id);
-        setConversationId(conversationId);
+        setChatId(chatId);
         setSequence(sequence);
         setSenderId(senderId);
         setBody(body);

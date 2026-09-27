@@ -1,11 +1,12 @@
 import type { components } from '../../shared/api/generated/schema'
 
-export type Message = components['schemas']['MessageView']
+export type Message = components['schemas']['MessageResponse']
 
 export type SendState = 'sending' | 'retryable' | 'queued' | 'saved' | 'rejected'
 
 export interface PendingSend {
-  conversationId: string
+  chatId: string
+  recipientId?: string
   requestId: string
   body: string
   createdAt: string

@@ -9,7 +9,9 @@ type SendRejectionReason uint
 
 const (
 	SendRejectionReasonNotAMember SendRejectionReason = iota
-	SendRejectionReasonConversationNotFound
+	SendRejectionReasonChatNotFound
+	SendRejectionReasonRecipientNotFound
+	SendRejectionReasonInvalidRecipient
 	SendRejectionReasonEmptyBody
 	SendRejectionReasonBodyTooLong
 	SendRejectionReasonRequestIdConflict
@@ -24,14 +26,16 @@ func (op SendRejectionReason) Value() any {
 	return SendRejectionReasonValues[op]
 }
 
-var SendRejectionReasonValues = []any{"NOT_A_MEMBER", "CONVERSATION_NOT_FOUND", "EMPTY_BODY", "BODY_TOO_LONG", "REQUEST_ID_CONFLICT", "PROCESSING_FAILED"}
+var SendRejectionReasonValues = []any{"NOT_A_MEMBER", "CHAT_NOT_FOUND", "RECIPIENT_NOT_FOUND", "INVALID_RECIPIENT", "EMPTY_BODY", "BODY_TOO_LONG", "REQUEST_ID_CONFLICT", "PROCESSING_FAILED"}
 var ValuesToSendRejectionReason = map[any]SendRejectionReason{
-	SendRejectionReasonValues[SendRejectionReasonNotAMember]:           SendRejectionReasonNotAMember,
-	SendRejectionReasonValues[SendRejectionReasonConversationNotFound]: SendRejectionReasonConversationNotFound,
-	SendRejectionReasonValues[SendRejectionReasonEmptyBody]:            SendRejectionReasonEmptyBody,
-	SendRejectionReasonValues[SendRejectionReasonBodyTooLong]:          SendRejectionReasonBodyTooLong,
-	SendRejectionReasonValues[SendRejectionReasonRequestIdConflict]:    SendRejectionReasonRequestIdConflict,
-	SendRejectionReasonValues[SendRejectionReasonProcessingFailed]:     SendRejectionReasonProcessingFailed,
+	SendRejectionReasonValues[SendRejectionReasonNotAMember]:        SendRejectionReasonNotAMember,
+	SendRejectionReasonValues[SendRejectionReasonChatNotFound]:      SendRejectionReasonChatNotFound,
+	SendRejectionReasonValues[SendRejectionReasonRecipientNotFound]: SendRejectionReasonRecipientNotFound,
+	SendRejectionReasonValues[SendRejectionReasonInvalidRecipient]:  SendRejectionReasonInvalidRecipient,
+	SendRejectionReasonValues[SendRejectionReasonEmptyBody]:         SendRejectionReasonEmptyBody,
+	SendRejectionReasonValues[SendRejectionReasonBodyTooLong]:       SendRejectionReasonBodyTooLong,
+	SendRejectionReasonValues[SendRejectionReasonRequestIdConflict]: SendRejectionReasonRequestIdConflict,
+	SendRejectionReasonValues[SendRejectionReasonProcessingFailed]:  SendRejectionReasonProcessingFailed,
 }
 
 func (op *SendRejectionReason) UnmarshalJSON(raw []byte) error {

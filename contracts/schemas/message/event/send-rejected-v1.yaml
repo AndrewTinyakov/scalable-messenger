@@ -2,7 +2,7 @@ $schema: http://json-schema.org/draft-07/schema#
 title: SendRejectedEventV1
 type: object
 additionalProperties: false
-required: [type, version, eventId, room, conversationId, requestId, reason]
+required: [type, version, eventId, room, requestId, reason]
 properties:
   type:
     const: send_rejected
@@ -15,7 +15,10 @@ properties:
   room:
     type: string
     pattern: '^(user|group):[0-7][0-9A-HJKMNP-TV-Z]{25}$'
-  conversationId:
+  chatId:
+    type: string
+    pattern: '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'
+  recipientId:
     type: string
     pattern: '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'
   requestId:
@@ -24,4 +27,4 @@ properties:
   reason:
     title: SendRejectionReason
     type: string
-    enum: [NOT_A_MEMBER, CONVERSATION_NOT_FOUND, EMPTY_BODY, BODY_TOO_LONG, REQUEST_ID_CONFLICT, PROCESSING_FAILED]
+    enum: [NOT_A_MEMBER, CHAT_NOT_FOUND, RECIPIENT_NOT_FOUND, INVALID_RECIPIENT, EMPTY_BODY, BODY_TOO_LONG, REQUEST_ID_CONFLICT, PROCESSING_FAILED]

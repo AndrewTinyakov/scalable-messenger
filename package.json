@@ -12,6 +12,8 @@
     "generate:asyncapi:go": "node contracts/generate-models.mjs go",
     "test:contracts": "node --test contracts/fixtures.test.mjs",
     "typecheck:client": "npm --prefix client run typecheck",
+    "monitoring:check": "node scripts/check-monitoring.mjs",
+    "monitoring:dashboards": "python3 scripts/generate-monitoring-dashboards.py",
     "test:system": "node --test --test-concurrency=1 tests/system/*.test.mjs",
     "test:resilience": "MESSENGER_RESILIENCE=1 node --test --test-concurrency=1 tests/system/*.test.mjs"
   },

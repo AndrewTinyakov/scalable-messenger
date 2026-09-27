@@ -9,8 +9,9 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"messenger/ws/internal/apiclient"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"messenger/ws/internal/config"
+	"messenger/ws/internal/grpcauth"
 	"messenger/ws/internal/monitoring"
 	"messenger/ws/internal/rabbitmq"
 	"messenger/ws/internal/redisroom"
@@ -22,16 +23,17 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
-	api, err := apiclient.New(cfg.APIURL, cfg.APITimeout)
+	groupAuth, err := grpcauth.New(cfg.APIGrpcAddress)
 	if err != nil {
 		return err
 	}
-	publisher, err := rabbitmq.New(cfg.RabbitURL, cfg.PublishConcurrency, cfg.ConfirmTimeout)
+	defer groupAuth.Close()
+	publisher, err := rabbitmq.New(cfg.RabbitURLs, cfg.PublishConcurrency, cfg.ConfirmTimeout)
 	if err != nil {
 		return err
 	}
 	defer publisher.Close()
-	redis, err := redisroom.New(cfg.RedisURL)
+	redis, err := redisroom.New(cfg.RedisURL, cfg.RedisClusterNodes)
 	if err != nil {
 		return err
 	}
@@ -43,8 +45,9 @@ func run(ctx context.Context, logger *slog.Logger) error {
 		return fmt.Errorf("connect Redis: %w", err)
 	}
 	registry := prometheus.NewRegistry()
+	registry.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 	metrics := monitoring.New(registry)
-	ws := socket.NewServer(ctx, cfg, logger, api, publisher, redis, registry, metrics)
+	ws := socket.NewServer(ctx, cfg, logger, groupAuth, publisher, redis, registry, metrics)
 	defer ws.Close()
 	httpServer := &http.Server{Addr: cfg.Address, Handler: ws.Handler(), ReadHeaderTimeout: 5 * time.Second}
 	result := make(chan error, 1)

@@ -4,10 +4,10 @@
 package com.andrewtinyakov.messenger.infrastructure.database.generated;
 
 
-import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.ConversationMembers;
-import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Conversations;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.ChatMembers;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Chats;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Messages;
-import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.OutboxEvents;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.MessengerOutboxEvents;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.SendRequests;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Sessions;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Users;
@@ -35,14 +35,14 @@ public class Public extends SchemaImpl {
     public static final Public PUBLIC = new Public();
 
     /**
-     * The table <code>public.conversation_members</code>.
+     * The table <code>public.chat_members</code>.
      */
-    public final ConversationMembers CONVERSATION_MEMBERS = ConversationMembers.CONVERSATION_MEMBERS;
+    public final ChatMembers CHAT_MEMBERS = ChatMembers.CHAT_MEMBERS;
 
     /**
-     * The table <code>public.conversations</code>.
+     * The table <code>public.chats</code>.
      */
-    public final Conversations CONVERSATIONS = Conversations.CONVERSATIONS;
+    public final Chats CHATS = Chats.CHATS;
 
     /**
      * The table <code>public.messages</code>.
@@ -50,9 +50,9 @@ public class Public extends SchemaImpl {
     public final Messages MESSAGES = Messages.MESSAGES;
 
     /**
-     * The table <code>public.outbox_events</code>.
+     * The table <code>public.messenger_outbox_events</code>.
      */
-    public final OutboxEvents OUTBOX_EVENTS = OutboxEvents.OUTBOX_EVENTS;
+    public final MessengerOutboxEvents MESSENGER_OUTBOX_EVENTS = MessengerOutboxEvents.MESSENGER_OUTBOX_EVENTS;
 
     /**
      * The table <code>public.send_requests</code>.
@@ -85,10 +85,10 @@ public class Public extends SchemaImpl {
     @Override
     public final List<Table<?>> getTables() {
         return Arrays.asList(
-            ConversationMembers.CONVERSATION_MEMBERS,
-            Conversations.CONVERSATIONS,
+            ChatMembers.CHAT_MEMBERS,
+            Chats.CHATS,
             Messages.MESSAGES,
-            OutboxEvents.OUTBOX_EVENTS,
+            MessengerOutboxEvents.MESSENGER_OUTBOX_EVENTS,
             SendRequests.SEND_REQUESTS,
             Sessions.SESSIONS,
             Users.USERS

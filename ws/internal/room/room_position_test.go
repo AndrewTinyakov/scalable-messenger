@@ -230,6 +230,64 @@ func TestRestoredGroupFeedRequestsFreshSQLRecoveryWhenReplayFails(t *testing.T) 
 	}
 }
 
+func TestEpochChangeRequestsSQLRecovery(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		advance       func(*Rooms)
+		wantLiveEvent bool
+	}{
+		{
+			name: "live event",
+			advance: func(rooms *Rooms) {
+				live := positionLive("1-0", "")
+				live.Epoch = "new-epoch"
+				live.Event.Epoch = live.Epoch
+				rooms.handleLive(context.Background(), "group:chat", live)
+			},
+			wantLiveEvent: true,
+		},
+		{
+			name:    "quiet position check",
+			advance: func(rooms *Rooms) { rooms.checkAll(context.Background()) },
+		},
+		{
+			name: "restored feed",
+			advance: func(rooms *Rooms) {
+				rooms.restorePosition(context.Background(), rooms.rooms["group:chat"], "new-epoch", "1-0")
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := &positionStore{
+				tail: func(context.Context, string) (string, string, error) {
+					return "new-epoch", "1-0", nil
+				},
+				replay: func(context.Context, string, string, string, int64) ([]redisroom.Live, error) {
+					t.Fatal("an epoch change cannot use Redis replay")
+					return nil, nil
+				},
+			}
+			rooms := newPositionRooms(store)
+			sink := &positionSink{}
+			addPositionRoom(rooms, "group:chat", sink)
+			test.advance(rooms)
+			if len(sink.events) == 0 || sink.events[0].Type != "recovery_failed" {
+				t.Fatalf("events = %+v, want SQL recovery", sink.events)
+			}
+			if test.wantLiveEvent {
+				if len(sink.events) != 2 || sink.events[1].EventID != "1-0" {
+					t.Fatalf("events = %+v, want the new live event after SQL recovery", sink.events)
+				}
+			} else if len(sink.events) != 1 {
+				t.Fatalf("events = %+v, want only SQL recovery", sink.events)
+			}
+			if _, epoch, last := rooms.roomPosition("group:chat"); epoch != "new-epoch" || last != "1-0" {
+				t.Fatalf("room position = (%q, %q), want (new-epoch, 1-0)", epoch, last)
+			}
+		})
+	}
+}
+
 func TestPositionChecksPauseAfterSlowSweep(t *testing.T) {
 	const interval = 100 * time.Millisecond
 	entered := make(chan int, 2)

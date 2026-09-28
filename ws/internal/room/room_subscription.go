@@ -97,12 +97,5 @@ func (r *Rooms) restorePosition(ctx context.Context, entry *localRoom, epoch, la
 	r.mu.Lock()
 	entry.lastPositionAt = time.Now()
 	r.mu.Unlock()
-	if oldEpoch == epoch && oldLast == last {
-		return
-	}
-	if oldEpoch == epoch && oldLast != "" && last != "" && r.replayThrough(ctx, entry.name, oldEpoch, oldLast, last) {
-		return
-	}
-	r.failRoom(entry.name)
-	r.setPosition(entry.name, epoch, last)
+	r.reconcilePosition(ctx, entry.name, oldEpoch, oldLast, epoch, last)
 }

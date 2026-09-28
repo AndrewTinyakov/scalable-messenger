@@ -186,3 +186,58 @@ func TestSubscribeManyChargesRateLimitOnceBeforeAuthorization(t *testing.T) {
 	}
 	connection.Close()
 }
+
+func TestSubscriptionRoomLimitPrecedesGroupAuthorization(t *testing.T) {
+	for _, batch := range []bool{false, true} {
+		t.Run(map[bool]string{false: "single", true: "batch"}[batch], func(t *testing.T) {
+			rooms := &raceRooms{}
+			connection := newRaceConnection(t, rooms, groupAuthorizerFunc(func(context.Context, string, string) (string, error) {
+				t.Fatal("group authorization called after room limit")
+				return "", nil
+			}))
+			connection.server.config.MaxRoomsPerConnection = 1
+			if err := connection.handle(protocol.Frame{Type: "subscribe", Kind: "direct", ChatID: raceChatID}); err != nil {
+				t.Fatal(err)
+			}
+			frame := protocol.Frame{Type: "subscribe", Kind: "group", ChatID: secondRaceChatID}
+			if batch {
+				frame = protocol.Frame{Type: "subscribe_many", Subscriptions: []protocol.Subscription{{ChatID: secondRaceChatID, Kind: "group"}}}
+			}
+			if err := connection.handle(frame); !errors.Is(err, errRoomLimit) || rooms.joins != 1 {
+				t.Fatalf("room limit: error=%v joins=%d", err, rooms.joins)
+			}
+			connection.Close()
+		})
+	}
+}
+
+func TestDeniedGroupRenewalLeavesJoinedRoom(t *testing.T) {
+	for _, batch := range []bool{false, true} {
+		t.Run(map[bool]string{false: "single", true: "batch"}[batch], func(t *testing.T) {
+			rooms := &raceRooms{}
+			allowed := true
+			authorizer := groupAuthorizerFunc(func(_ context.Context, _, chatID string) (string, error) {
+				if !allowed {
+					return "", grpcauth.ErrUnauthorized
+				}
+				return "group:" + chatID, nil
+			})
+			connection := newRaceConnection(t, rooms, authorizer)
+			batchAuthorizer := &recordingBatchAuthorizer{allowed: map[string]bool{raceChatID: true}}
+			frame := protocol.Frame{Type: "subscribe", Kind: "group", ChatID: raceChatID}
+			if batch {
+				connection.server.groupAuth = batchAuthorizer
+				frame = protocol.Frame{Type: "subscribe_many", Subscriptions: []protocol.Subscription{{ChatID: raceChatID, Kind: "group"}}}
+			}
+			if err := connection.handle(frame); err != nil {
+				t.Fatal(err)
+			}
+			allowed = false
+			batchAuthorizer.allowed[raceChatID] = false
+			if err := connection.handle(frame); !errors.Is(err, grpcauth.ErrUnauthorized) || rooms.leaves != 1 || connection.room(raceChatID) != "" {
+				t.Fatalf("denied renewal: error=%v leaves=%d room=%q", err, rooms.leaves, connection.room(raceChatID))
+			}
+			connection.Close()
+		})
+	}
+}

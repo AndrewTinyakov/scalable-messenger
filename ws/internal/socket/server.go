@@ -364,59 +364,11 @@ func (s *Server) Close() {
 func (c *Connection) handle(f protocol.Frame) error {
 	switch f.Type {
 	case "subscribe":
-		if c.room(f.ChatID) == "" && c.roomCount() >= c.server.config.MaxRoomsPerConnection {
-			return errRoomLimit
-		}
-		if c.server.subscribeLimiter != nil {
-			limitCtx, cancel := context.WithTimeout(c.ctx, c.server.config.APITimeout)
-			allowed, err := c.server.subscribeLimiter.AllowSubscribe(limitCtx, c.session.UserID, c.server.config.SubscribeRate, c.server.config.SubscribeWindow)
-			cancel()
-			if err != nil {
-				return fmt.Errorf("limit subscriptions: %w", err)
-			}
-			if !allowed {
-				return errRateLimited
-			}
-		}
-		revision := c.revocation(f.ChatID)
-		ctx, cancel := context.WithTimeout(c.ctx, c.server.config.APITimeout)
-		defer cancel()
-		room := "user:" + c.session.UserID
-		if f.Kind == "group" {
-			if c.server.groupAuthSlots != nil {
-				select {
-				case c.server.groupAuthSlots <- struct{}{}:
-					defer func() { <-c.server.groupAuthSlots }()
-				default:
-					return errRateLimited
-				}
-			}
-			var err error
-			started := time.Now()
-			room, err = c.server.groupAuth.AuthorizeGroup(ctx, c.token, f.ChatID)
-			result := "authorized"
-			if errors.Is(err, grpcauth.ErrUnauthorized) {
-				result = "denied"
-			} else if err != nil {
-				result = "error"
-			}
-			c.server.metrics.GroupAuthSeconds.WithLabelValues(result).Observe(time.Since(started).Seconds())
-			if err != nil {
-				if errors.Is(err, grpcauth.ErrUnauthorized) {
-					if old := c.removeRoom(f.ChatID); old != "" {
-						c.server.rooms.LeaveChat(c, old, f.ChatID)
-					}
-				}
-				return err
-			}
-		}
-		return c.joinAuthorized(ctx, f.ChatID, f.Kind, f.Epoch, f.StreamID, room, revision)
+		return c.subscribeOne(protocol.Subscription{ChatID: f.ChatID, Kind: f.Kind, Epoch: f.Epoch, StreamID: f.StreamID})
 	case "subscribe_many":
 		return c.subscribeMany(f.Subscriptions)
 	case "unsubscribe":
-		if room := c.removeRoom(f.ChatID); room != "" {
-			c.server.rooms.LeaveChat(c, room, f.ChatID)
-		}
+		c.leaveChat(f.ChatID)
 		return nil
 	case "send":
 		ctx, cancel := context.WithTimeout(c.ctx, c.server.config.ConfirmTimeout)

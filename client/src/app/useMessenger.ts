@@ -1,11 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Chat } from '../entities/chat/model'
 import { advanceSend, type Message, type PendingSend, type SendState } from '../entities/message/model'
-import {
-  advanceAppliedSequence, appendLiveWindow, hasMoreNewer, hasNewAppliedMessages, hasUnresolvedGap,
-  historyBoundaryBefore, HISTORY_PAGE_SIZE,
-  MAX_CATCH_UP_MESSAGES, pageWindow, replaceWindow,
-} from '../entities/message/historyWindow'
+import { hasMoreNewer, hasUnresolvedGap, HISTORY_PAGE_SIZE, MAX_CATCH_UP_MESSAGES } from '../entities/message/historyWindow'
+import { ChatRecovery, type RecoveryFrame } from '../entities/message/chatRecovery'
 import type { Session, User } from '../entities/session/model'
 import { ApiError, api } from '../shared/api/http'
 import { createUlid } from '../shared/lib/id'
@@ -13,9 +10,6 @@ import { reconnectDelay } from '../shared/lib/reconnect'
 
 type Connection = 'connecting' | 'connected' | 'offline'
 type MessageMap = Record<string, Message[]>
-type CursorMap = Record<string, string>
-type RoomCursor = { epoch: string; streamId: string }
-type RoomCursorMap = Record<string, RoomCursor>
 const MAX_REJECTED_SENDS = 100
 const MAX_UNRESOLVED_SENDS = 100
 const SEND_STATUS_BATCH_SIZE = 100
@@ -81,21 +75,18 @@ function socketErrorMessage(code?: string): string {
   }
 }
 
-function newerStreamId(next: string, current: string): boolean {
-  const [nextTime, nextSequence] = next.split('-').map(BigInt)
-  const [currentTime, currentSequence] = current.split('-').map(BigInt)
-  return nextTime > currentTime || (nextTime === currentTime && nextSequence > currentSequence)
-}
-
 export function useMessenger(session: Session, onSessionRevoked: () => void) {
   const prefix = `relay.${session.user.id}.${session.deviceId}`
+  const recoveryRef = useRef<{ prefix: string; value: ChatRecovery } | null>(null)
+  if (recoveryRef.current?.prefix !== prefix) recoveryRef.current = { prefix, value: new ChatRecovery(prefix) }
+  const recovery = recoveryRef.current.value
   const [chats, setChats] = useState<Chat[]>([])
   const [nextChatCursor, setNextChatCursor] = useState<string | null>(null)
   const [loadingMoreChats, setLoadingMoreChats] = useState(false)
   const [loadingOlder, setLoadingOlder] = useState<string | null>(null)
   const [loadingNewer, setLoadingNewer] = useState<string | null>(null)
   const [messages, setMessages] = useState<MessageMap>({})
-  const [latestSequences, setLatestSequences] = useState<CursorMap>({})
+  const [latestSequences, setLatestSequences] = useState<Record<string, string>>({})
   const [jumpRevision, setJumpRevision] = useState(0)
   const [pending, setPending] = useState<PendingSend[]>(() => retainPending(readStored(`${prefix}.pending`, [])))
   const [connection, setConnection] = useState<Connection>('connecting')
@@ -108,24 +99,15 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
   const groupRetryRef = useRef<number | undefined>(undefined)
   const groupRetryAttemptsRef = useRef(0)
   const chatsRef = useRef(chats)
-  const messagesRef = useRef(messages)
-  const latestRef = useRef<CursorMap>({})
   const pendingRef = useRef(pending)
   const reconcilingPendingRef = useRef(false)
   const pendingPollFailuresRef = useRef(0)
   const nextPendingPollAtRef = useRef(0)
-  // Resolved includes messages applied in order and intervals explicitly dismissed by the user.
-  // The old cursor key could have skipped unseen history, so it is not migrated.
-  const cursorRef = useRef<CursorMap>(readStored(`${prefix}.resolved-cursor.v2`, {}))
-  const dismissedThroughRef = useRef<CursorMap>(readStored(`${prefix}.dismissed-through.v2`, {}))
-  const roomCursorRef = useRef<RoomCursorMap>(readStored(`${prefix}.room-cursor.v2`, {}))
   const catchupRef = useRef(new Set<string>())
   const catchupCallbackRef = useRef<((chatId: string, fromStart?: boolean) => Promise<void>) | null>(null)
   const catchupRetryRef = useRef<{ chatId: string; attempt: number; timer?: number } | null>(null)
   const catchupErrorRef = useRef<{ chatId: string; message: string } | null>(null)
-  const deferredGapRef = useRef(new Set<string>())
   const pagingRef = useRef(new Set<string>())
-  const detachedWindowRef = useRef(new Set<string>())
   const readingHistoryRef = useRef(new Set<string>())
   const removedChatRef = useRef(new Set<string>())
   const removalGenerationRef = useRef(0)
@@ -138,10 +120,9 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
   }, [prefix])
 
   useEffect(() => {
-    const next = Object.fromEntries(Object.entries(messagesRef.current).map(([id, items]) => [id, id === selectedId ? items : items.slice(-1)]))
-    messagesRef.current = next
-    setMessages(next)
-  }, [selectedId])
+    recovery.compactWindows(selectedId)
+    setMessages(recovery.visibleWindows())
+  }, [recovery, selectedId])
 
   const updatePending = useCallback((requestId: string, status: SendState, extra: Partial<PendingSend> = {}) => {
     const next = retainPending(pendingRef.current.map((send) => send.requestId === requestId ? advanceSend(send, status, extra) : send))
@@ -150,191 +131,121 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     writeStored(`${prefix}.pending`, next)
   }, [prefix])
 
-  const recordLatest = useCallback((chatId: string, sequence: string) => {
-    if (BigInt(sequence) <= BigInt(latestRef.current[chatId] || '0')) return
-    latestRef.current = { ...latestRef.current, [chatId]: sequence }
-    setLatestSequences(latestRef.current)
+  const sendRecoveryFrame = useCallback((frame: RecoveryFrame | null) => {
+    if (frame && socketRef.current?.readyState === WebSocket.OPEN) socketRef.current.send(JSON.stringify(frame))
   }, [])
 
-  const advanceCursor = useCallback((chatId: string, incoming: Message[]) => {
-    const current = cursorRef.current[chatId] || '0'
-    const next = advanceAppliedSequence(current, incoming)
-    if (next === current) return
-    cursorRef.current = { ...cursorRef.current, [chatId]: next }
-    writeStored(`${prefix}.resolved-cursor.v2`, cursorRef.current)
-    if (BigInt(next) >= BigInt(latestRef.current[chatId] || '0')) deferredGapRef.current.delete(chatId)
-  }, [prefix])
+  const recordLatest = useCallback((chatId: string, sequence: string) => {
+    if (recovery.recordLatest(chatId, sequence)) setLatestSequences(recovery.latestSequences())
+  }, [recovery])
 
-  const dismissThrough = useCallback((chatId: string, sequence: string) => {
-    if (BigInt(sequence) <= BigInt(cursorRef.current[chatId] || '0')) return
-    dismissedThroughRef.current = { ...dismissedThroughRef.current, [chatId]: sequence }
-    writeStored(`${prefix}.dismissed-through.v2`, dismissedThroughRef.current)
-    cursorRef.current = { ...cursorRef.current, [chatId]: sequence }
-    writeStored(`${prefix}.resolved-cursor.v2`, cursorRef.current)
-    deferredGapRef.current.delete(chatId)
+  const roomForChat = useCallback((chatId: string) => {
     const chat = chatsRef.current.find((item) => item.id === chatId)
-    const room = chat?.kind === 'group' ? `group:${chatId}` : `user:${session.user.id}`
-    const { [room]: _discarded, ...remaining } = roomCursorRef.current
-    roomCursorRef.current = remaining
-    writeStored(`${prefix}.room-cursor.v2`, roomCursorRef.current)
-    if (socketRef.current?.readyState === WebSocket.OPEN) {
-      socketRef.current.send(JSON.stringify({ type: 'dismissed', version: 1, chatId, sequence }))
-    }
-  }, [prefix, session.user.id])
+    return chat?.kind === 'group' ? `group:${chatId}` : `user:${session.user.id}`
+  }, [session.user.id])
 
   const applyMessages = useCallback((chatId: string, incoming: Message[]) => {
     if (!incoming.length || removedChatRef.current.has(chatId)) return
-    const current = messagesRef.current[chatId] || []
-    const browsingOlder = selectedRef.current === chatId && (detachedWindowRef.current.has(chatId) || readingHistoryRef.current.has(chatId))
-    let visible = current
-    const incorporated: Message[] = []
-    for (const message of incoming) {
-      const next = selectedRef.current === chatId
-        ? appendLiveWindow(visible, message, browsingOlder)
-        : !visible.length || BigInt(message.sequence) >= BigInt(visible.at(-1)!.sequence) ? [message] : visible
-      if (next !== visible) incorporated.push(message)
-      visible = next
-    }
-    const highest = incoming.reduce((value, message) => BigInt(message.sequence) > BigInt(value) ? message.sequence : value, '0')
-    recordLatest(chatId, highest)
-    messagesRef.current = { ...messagesRef.current, [chatId]: visible }
-    setMessages(messagesRef.current)
-    advanceCursor(chatId, incorporated)
-  }, [advanceCursor, recordLatest])
+    const latestChanged = recovery.receive(chatId, incoming, selectedRef.current === chatId, readingHistoryRef.current.has(chatId))
+    setMessages(recovery.visibleWindows())
+    if (latestChanged) setLatestSequences(recovery.latestSequences())
+  }, [recovery])
 
   const fetchLatest = useCallback(async (chatId: string, moveViewport = false, initialize = false) => {
     const result = await api.latestMessages(session.token, chatId)
     if (removedChatRef.current.has(chatId)) return { latest: undefined, messages: [] as Message[] }
-    const visible = replaceWindow(result.messages)
-    const current = messagesRef.current[chatId] || []
-    const fetchedLatest = result.messages.at(-1)?.sequence
-    const currentLatest = current.at(-1)?.sequence
-    const keepNewerCurrent = Boolean(currentLatest && fetchedLatest && BigInt(currentLatest) > BigInt(fetchedLatest))
-    const shown = keepNewerCurrent ? current : visible
-    const replaced = (moveViewport || current.length === 0) && !keepNewerCurrent
-    if (replaced) {
-      messagesRef.current = { ...messagesRef.current, [chatId]: visible }
-      setMessages(messagesRef.current)
-      detachedWindowRef.current.delete(chatId)
-    }
-    const latest = keepNewerCurrent ? currentLatest : fetchedLatest
-    if (latest) recordLatest(chatId, latest)
-    if (initialize && !cursorRef.current[chatId] && shown.length) {
-      // Opening an existing chat on a new device starts at its newest page.
-      // Resolve only the older, unseen prefix; the fetched page is applied below.
-      const boundary = historyBoundaryBefore(shown)
-      if (BigInt(boundary) > 0n) dismissThrough(chatId, boundary)
-    }
-    if (replaced || initialize) advanceCursor(chatId, shown)
-    if (latest && BigInt(latest) > BigInt(cursorRef.current[chatId] || '0')) deferredGapRef.current.add(chatId)
+    const page = recovery.latestPage(chatId, result.messages, moveViewport, initialize, roomForChat(chatId))
+    if (page.replaced) setMessages(recovery.visibleWindows())
+    if (page.latestChanged) setLatestSequences(recovery.latestSequences())
+    sendRecoveryFrame(page.dismissal)
     if (moveViewport) setJumpRevision((value) => value + 1)
-    return { latest: shown.at(-1)?.sequence, messages: shown }
-  }, [advanceCursor, dismissThrough, recordLatest, session.token])
+    return { latest: page.latest, messages: page.messages }
+  }, [recovery, roomForChat, sendRecoveryFrame, session.token])
 
   const showLatest = useCallback(async (chatId: string) => {
-    const beforeJump = BigInt(cursorRef.current[chatId] || '0')
+    const beforeJump = recovery.baseline(chatId)
     const page = await fetchLatest(chatId, true)
     const latest = page.latest
     readingHistoryRef.current.delete(chatId)
     if (!latest) return
-    if (BigInt(latest) <= BigInt(cursorRef.current[chatId] || '0')) {
-      const applied = cursorRef.current[chatId]
-      if (applied && hasNewAppliedMessages(beforeJump.toString(), applied, dismissedThroughRef.current[chatId] || '0') && socketRef.current?.readyState === WebSocket.OPEN) {
-        socketRef.current.send(JSON.stringify({ type: 'applied', version: 1, chatId, sequence: applied }))
-      }
+    if (BigInt(latest) <= BigInt(recovery.baseline(chatId))) {
+      sendRecoveryFrame(recovery.appliedSince(chatId, beforeJump))
       return
     }
-    // Dismiss only the unseen prefix. The fetched tail is applied in order.
-    dismissThrough(chatId, historyBoundaryBefore(page.messages))
-    advanceCursor(chatId, page.messages)
-    const applied = cursorRef.current[chatId]
-    if (applied && hasNewAppliedMessages(beforeJump.toString(), applied, dismissedThroughRef.current[chatId] || '0') && socketRef.current?.readyState === WebSocket.OPEN) {
-      socketRef.current.send(JSON.stringify({ type: 'applied', version: 1, chatId, sequence: applied }))
-    }
-  }, [advanceCursor, dismissThrough, fetchLatest])
+    sendRecoveryFrame(recovery.jumpToLatest(chatId, page.messages, roomForChat(chatId)))
+    sendRecoveryFrame(recovery.appliedSince(chatId, beforeJump))
+  }, [fetchLatest, recovery, roomForChat, sendRecoveryFrame])
 
   const loadOlder = useCallback(async (chatId: string) => {
-    const first = messagesRef.current[chatId]?.[0]
+    const first = recovery.window(chatId)[0]
     if (!first || first.sequence === '1' || pagingRef.current.has(chatId)) return
     pagingRef.current.add(chatId)
     setLoadingOlder(chatId)
     try {
       const page = await api.olderMessages(session.token, chatId, first.sequence, HISTORY_PAGE_SIZE)
       if (removedChatRef.current.has(chatId)) return
-      if (messagesRef.current[chatId]?.[0]?.sequence !== first.sequence) return
-      const visible = pageWindow(messagesRef.current[chatId] || [], page.messages, 'older')
-      if (visible.at(-1)?.sequence !== messagesRef.current[chatId]?.at(-1)?.sequence) detachedWindowRef.current.add(chatId)
-      messagesRef.current = { ...messagesRef.current, [chatId]: visible }
-      setMessages(messagesRef.current)
-      advanceCursor(chatId, visible)
+      if (recovery.window(chatId)[0]?.sequence !== first.sequence) return
+      recovery.page(chatId, page.messages, 'older')
+      setMessages(recovery.visibleWindows())
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not load older messages')
     } finally {
       pagingRef.current.delete(chatId)
       setLoadingOlder(null)
     }
-  }, [advanceCursor, session.token])
+  }, [recovery, session.token])
 
   const loadNewer = useCallback(async (chatId: string) => {
-    const last = messagesRef.current[chatId]?.at(-1)
+    const last = recovery.window(chatId).at(-1)
     if (!last || pagingRef.current.has(chatId)) return
     pagingRef.current.add(chatId)
     setLoadingNewer(chatId)
     try {
       const page = await api.messages(session.token, chatId, last.sequence, HISTORY_PAGE_SIZE)
       if (removedChatRef.current.has(chatId)) return
-      if (messagesRef.current[chatId]?.at(-1)?.sequence !== last.sequence) return
-      const visible = pageWindow(messagesRef.current[chatId] || [], page.messages, 'newer')
-      messagesRef.current = { ...messagesRef.current, [chatId]: visible }
-      setMessages(messagesRef.current)
-      advanceCursor(chatId, visible)
-      const end = page.messages.at(-1)?.sequence
-      if (end) recordLatest(chatId, page.hasMore ? (BigInt(end) + 1n).toString() : end)
-      if (!hasMoreNewer(visible, latestRef.current[chatId] || '0')) detachedWindowRef.current.delete(chatId)
+      if (recovery.window(chatId).at(-1)?.sequence !== last.sequence) return
+      const latestChanged = recovery.page(chatId, page.messages, 'newer', page.hasMore)
+      setMessages(recovery.visibleWindows())
+      if (latestChanged) setLatestSequences(recovery.latestSequences())
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not load newer messages')
     } finally {
       pagingRef.current.delete(chatId)
       setLoadingNewer(null)
     }
-  }, [advanceCursor, recordLatest, session.token])
+  }, [recovery, session.token])
 
   const catchUp = useCallback(async (chatId: string, fromStart = false) => {
     if (catchupRef.current.has(chatId)) return
     catchupRef.current.add(chatId)
-    const beforeCatchUp = BigInt(cursorRef.current[chatId] || '0')
+    const beforeCatchUp = recovery.baseline(chatId)
     try {
-      if (fromStart || !cursorRef.current[chatId]) {
-        await fetchLatest(chatId, fromStart, !cursorRef.current[chatId])
+      if (fromStart || !recovery.hasBaseline(chatId)) {
+        await fetchLatest(chatId, fromStart, !recovery.hasBaseline(chatId))
       } else if (selectedRef.current === chatId &&
-        (detachedWindowRef.current.has(chatId) || readingHistoryRef.current.has(chatId))) {
+        (recovery.isDetached(chatId) || readingHistoryRef.current.has(chatId))) {
         await fetchLatest(chatId)
-      } else if (deferredGapRef.current.has(chatId) ||
-        BigInt(latestRef.current[chatId] || '0') - BigInt(cursorRef.current[chatId]) > BigInt(MAX_CATCH_UP_MESSAGES)) {
-        deferredGapRef.current.add(chatId)
+      } else if (recovery.shouldFetchLatest(chatId)) {
+        recovery.deferGap(chatId)
         await fetchLatest(chatId)
       } else {
-        let after = cursorRef.current[chatId]
+        let after = recovery.baseline(chatId)
         for (let page = 0; page < MAX_CATCH_UP_MESSAGES / HISTORY_PAGE_SIZE; page += 1) {
-          if (BigInt(cursorRef.current[chatId] || '0') > BigInt(after)) break
+          if (BigInt(recovery.baseline(chatId)) > BigInt(after)) break
           const result = await api.messages(session.token, chatId, after, HISTORY_PAGE_SIZE)
           if (removedChatRef.current.has(chatId)) break
-          if (BigInt(cursorRef.current[chatId] || '0') > BigInt(after)) break
+          if (BigInt(recovery.baseline(chatId)) > BigInt(after)) break
           applyMessages(chatId, result.messages)
           if (!result.hasMore || result.messages.length === 0) break
           if (BigInt(result.nextSequence) <= BigInt(after)) throw new Error('History cursor did not advance')
           after = result.nextSequence
           if (page === MAX_CATCH_UP_MESSAGES / HISTORY_PAGE_SIZE - 1) {
-            deferredGapRef.current.add(chatId)
+            recovery.deferGap(chatId)
             await fetchLatest(chatId)
           }
         }
       }
-      const sequence = cursorRef.current[chatId]
-      if (sequence && hasNewAppliedMessages(beforeCatchUp.toString(), sequence, dismissedThroughRef.current[chatId] || '0') &&
-        socketRef.current?.readyState === WebSocket.OPEN) {
-        socketRef.current.send(JSON.stringify({ type: 'applied', version: 1, chatId, sequence }))
-      }
+      sendRecoveryFrame(recovery.appliedSince(chatId, beforeCatchUp))
       if (catchupRetryRef.current?.chatId === chatId) {
         window.clearTimeout(catchupRetryRef.current.timer)
         catchupRetryRef.current = null
@@ -366,7 +277,7 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     } finally {
       catchupRef.current.delete(chatId)
     }
-  }, [applyMessages, fetchLatest, session.token])
+  }, [applyMessages, fetchLatest, recovery, sendRecoveryFrame, session.token])
   catchupCallbackRef.current = catchUp
 
   useEffect(() => {
@@ -537,14 +448,13 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
       const chat = chatsRef.current.find((item) => item.id === chatId)
       if (!chat) return null
       const room = chat.kind === 'group' ? `group:${chatId}` : `user:${session.user.id}`
-      const dismissedThrough = dismissedThroughRef.current[chatId]
-      if (dismissedThrough) socketRef.current?.send(JSON.stringify({ type: 'dismissed', version: 1, chatId, sequence: dismissedThrough }))
-      return { chatId, kind: chat.kind, lastAppliedSequence: cursorRef.current[chatId] || '0', ...(roomCursorRef.current[room] || {}) }
+      sendRecoveryFrame(recovery.dismissalFrame(chatId))
+      return { chatId, kind: chat.kind, ...recovery.subscription(chatId, room) }
     }).filter((item) => item !== null)
     for (let offset = 0; offset < subscriptions.length; offset += 10) {
       socketRef.current.send(JSON.stringify({ type: 'subscribe_many', version: 1, subscriptions: subscriptions.slice(offset, offset + 10) }))
     }
-  }, [session.user.id])
+  }, [recovery, sendRecoveryFrame, session.user.id])
 
   const subscribe = useCallback((chatId: string) => subscribeMany([chatId]), [subscribeMany])
 
@@ -559,7 +469,7 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     if (selectedId && !selectedId.startsWith('draft:') && subscribedRef.current !== selectedId) {
       subscribe(selectedId)
       subscribedRef.current = selectedId
-      void catchUp(selectedId, !(messagesRef.current[selectedId]?.length))
+      void catchUp(selectedId, !recovery.window(selectedId).length)
     }
   }, [selectedId, subscribe, catchUp])
 
@@ -626,9 +536,8 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
           updatePending(frame.requestId, 'queued')
         } else if ((kind === 'message_saved' || kind === 'saved' || kind === 'message') && frame.chatId && frame.messageId && frame.sequence && frame.senderId && typeof frame.body === 'string') {
           if (!chatsRef.current.some((item) => item.id === frame.chatId)) void refreshChats()
-          const previous = BigInt(cursorRef.current[frame.chatId] || '0')
-          const dismissedThrough = BigInt(dismissedThroughRef.current[frame.chatId] || '0')
-          if (BigInt(frame.sequence) > dismissedThrough) {
+          const decision = recovery.liveMessage(frame.chatId, frame.sequence)
+          if (decision.incorporate) {
             applyMessages(frame.chatId, [{
               id: frame.messageId,
               chatId: frame.chatId,
@@ -650,24 +559,14 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
             type: 'received_message', version: 1, chatId: frame.chatId, sequence: frame.sequence,
           }))
           const acknowledge = async () => {
-            if (BigInt(frame.sequence!) <= dismissedThrough) return
-            if (BigInt(frame.sequence!) > previous + 1n && !deferredGapRef.current.has(frame.chatId!)) await catchUp(frame.chatId!)
-            if (BigInt(frame.sequence!) <= BigInt(dismissedThroughRef.current[frame.chatId!] || '0')) return
-            if (BigInt(frame.sequence!) > BigInt(cursorRef.current[frame.chatId!] || '0')) return
+            if (!decision.incorporate) return
+            if (decision.catchUp) await catchUp(frame.chatId!)
             const chat = chatsRef.current.find((item) => item.id === frame.chatId)
             const room = frame.room || (chat?.kind === 'group' ? `group:${frame.chatId}` : `user:${session.user.id}`)
-            if (frame.epoch && frame.streamId) {
-              const previousRoom = roomCursorRef.current[room]
-              if (!previousRoom || previousRoom.epoch !== frame.epoch || newerStreamId(frame.streamId, previousRoom.streamId)) {
-                roomCursorRef.current = { ...roomCursorRef.current, [room]: { epoch: frame.epoch, streamId: frame.streamId } }
-                writeStored(`${prefix}.room-cursor.v2`, roomCursorRef.current)
-              }
+            if (socket.readyState === WebSocket.OPEN) {
+              const applied = recovery.acknowledgeLive(frame.chatId!, frame.sequence!, room, frame.epoch, frame.streamId)
+              if (applied) socket.send(JSON.stringify(applied))
             }
-            if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({
-              type: 'applied', version: 1, chatId: frame.chatId,
-              sequence: cursorRef.current[frame.chatId!] || '0',
-              ...(frame.epoch && frame.streamId ? { epoch: frame.epoch, streamId: frame.streamId } : {}),
-            }))
           }
           void acknowledge()
         } else if ((kind === 'send_rejected' || kind === 'rejected') && frame.requestId) {
@@ -698,24 +597,10 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
           chatsRef.current = remainingChats
           setChats(remainingChats)
           setSelectedId((current) => current === removedId ? remainingChats[0]?.id || null : current)
-          const { [removedId]: _oldMessages, ...remainingMessages } = messagesRef.current
-          messagesRef.current = remainingMessages
-          setMessages(remainingMessages)
-          const { [removedId]: _oldCursor, ...remainingCursors } = cursorRef.current
-          cursorRef.current = remainingCursors
-          writeStored(`${prefix}.resolved-cursor.v2`, remainingCursors)
-          const { [removedId]: _oldDismissal, ...remainingDismissals } = dismissedThroughRef.current
-          dismissedThroughRef.current = remainingDismissals
-          writeStored(`${prefix}.dismissed-through.v2`, remainingDismissals)
-          const { [removedId]: _oldLatest, ...remainingLatest } = latestRef.current
-          latestRef.current = remainingLatest
-          setLatestSequences(remainingLatest)
-          const { [`group:${removedId}`]: _oldRoomCursor, ...remainingRoomCursors } = roomCursorRef.current
-          roomCursorRef.current = remainingRoomCursors
-          writeStored(`${prefix}.room-cursor.v2`, remainingRoomCursors)
-          detachedWindowRef.current.delete(removedId)
+          recovery.forget(removedId)
+          setMessages(recovery.visibleWindows())
+          setLatestSequences(recovery.latestSequences())
           readingHistoryRef.current.delete(removedId)
-          deferredGapRef.current.delete(removedId)
           void refreshChats()
         }
       }
@@ -747,7 +632,7 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
       socketRef.current?.close()
       socketRef.current = null
     }
-  }, [applyMessages, catchUp, onSessionRevoked, prefix, reconcilePending, refreshChats, session.token, session.user.id, subscribe, updatePending])
+  }, [applyMessages, catchUp, onSessionRevoked, recovery, reconcilePending, refreshChats, session.token, session.user.id, subscribe, updatePending])
 
   useEffect(() => {
     const onFocus = () => {
@@ -865,7 +750,7 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     jumpRevision,
     hasOlderMessages: Boolean(selectedId && messages[selectedId]?.length && BigInt(messages[selectedId][0].sequence) > 1n),
     hasNewerMessages: Boolean(selectedId && hasMoreNewer(messages[selectedId] || [], latestSequences[selectedId] || '0')),
-    hasUnresolvedGap: Boolean(selectedId && hasUnresolvedGap(messages[selectedId] || [], cursorRef.current[selectedId] || '0')),
+    hasUnresolvedGap: Boolean(selectedId && hasUnresolvedGap(messages[selectedId] || [], recovery.baseline(selectedId))),
     selectChat, setAtLatestPosition, sendMessage, retryMessage, createDirect, createGroup, refreshChats, loadMoreChats, loadOlder, loadNewer, showLatest, clearError: () => setError(null),
   }
 }

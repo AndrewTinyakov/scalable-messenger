@@ -136,15 +136,7 @@ func (r *Rooms) checkRoom(ctx context.Context, name string) {
 		entry.lastPositionAt = time.Now()
 	}
 	r.mu.Unlock()
-	if oldEpoch != "" && epoch != oldEpoch || oldLast == "" && last != "" {
-		r.failRoom(name)
-		r.setPosition(name, epoch, last)
-		return
-	}
-	if oldLast != "" && last != oldLast && !r.replayThrough(ctx, name, oldEpoch, oldLast, last) {
-		r.failRoom(name)
-		r.setPosition(name, epoch, last)
-	}
+	r.reconcilePosition(ctx, name, oldEpoch, oldLast, epoch, last)
 }
 
 func (r *Rooms) handleLive(ctx context.Context, name string, live redisroom.Live) {
@@ -168,20 +160,29 @@ func (r *Rooms) handleLive(ctx context.Context, name string, live redisroom.Live
 			return
 		}
 		if oldLast != "" && (!live.HasPrevious || live.PreviousStreamID != oldLast) {
-			if r.replayThrough(ctx, name, oldEpoch, oldLast, live.StreamID) {
-				return
-			}
-			r.failRoom(name)
-			r.setPosition(name, live.Epoch, live.StreamID)
+			r.reconcilePosition(ctx, name, oldEpoch, oldLast, live.Epoch, live.StreamID)
 			return
 		}
 		if oldLast == "" && live.HasPrevious && live.PreviousStreamID != "" {
-			r.failRoom(name)
-			r.setPosition(name, live.Epoch, live.StreamID)
+			r.reconcilePosition(ctx, name, oldEpoch, oldLast, live.Epoch, live.StreamID)
 			return
 		}
 	}
 	r.dispatch(name, live.Event)
+}
+
+// reconcilePosition runs while the room's position lock is held. Redis can
+// fill a gap only when both positions belong to the same epoch and the old
+// cursor is still retained; every other change needs SQL catch-up.
+func (r *Rooms) reconcilePosition(ctx context.Context, name, oldEpoch, oldLast, epoch, last string) {
+	if oldEpoch == epoch && oldLast == last {
+		return
+	}
+	if oldEpoch == epoch && oldLast != "" && last != "" && r.replayThrough(ctx, name, oldEpoch, oldLast, last) {
+		return
+	}
+	r.failRoom(name)
+	r.setPosition(name, epoch, last)
 }
 
 func (r *Rooms) replayThrough(ctx context.Context, name, epoch, after, through string) bool {

@@ -518,6 +518,8 @@ export interface components {
             lastMessage?: components["schemas"]["ChatLastMessageResponse"] | null;
             /** Format: int32 */
             unreadCount?: number;
+            /** Format: date-time */
+            activityAt?: string | null;
             unreadCountCapped?: boolean;
         };
         UserResponse: {

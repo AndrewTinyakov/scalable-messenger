@@ -14,6 +14,10 @@ interface ChatDirectoryOptions {
   setError(message: string | null): void
 }
 
+function compareActivity(left: Chat, right: Chat): number {
+  return Date.parse(right.activityAt ?? '1970-01-01T00:00:00Z') - Date.parse(left.activityAt ?? '1970-01-01T00:00:00Z') || right.id.localeCompare(left.id)
+}
+
 export function useChatDirectory({
   sessionApi,
   selectedId,
@@ -110,6 +114,7 @@ export function useChatDirectory({
                   !(removedSelected && chat.id === current?.id),
               ),
             ]
+        merged.sort(compareActivity)
         chatsRef.current = merged
         refreshSuccessRef.current += 1
         setChats(merged)
@@ -161,7 +166,7 @@ export function useChatDirectory({
     try {
       const page = await sessionApi.chats(nextChatCursor)
       const known = new Set(chatsRef.current.map((chat) => chat.id))
-      const merged = [...chatsRef.current, ...page.chats.filter((chat) => !known.has(chat.id))]
+      const merged = [...chatsRef.current, ...page.chats.filter((chat) => !known.has(chat.id))].sort(compareActivity)
       chatsRef.current = merged
       setChats(merged)
       for (const chat of page.chats) recordLatest(chat.id, chat.lastSequence)
@@ -219,11 +224,12 @@ export function useChatDirectory({
         removedChatRef.current.has(chatId)
       )
         return
-      const next = chatsRef.current.map((item) =>
-        item.id === chatId
-          ? { ...item, lastMessage: chat.lastMessage, lastSequence: chat.lastSequence, unreadCount: chat.unreadCount, unreadCountCapped: chat.unreadCountCapped }
-          : item,
-      )
+      const existing = chatsRef.current.find((item) => item.id === chatId)
+      if (!existing) return
+      const updated = { ...existing, lastMessage: chat.lastMessage, lastSequence: chat.lastSequence, unreadCount: chat.unreadCount, unreadCountCapped: chat.unreadCountCapped, activityAt: chat.activityAt }
+      const next = chatsRef.current.filter((item) => item.id !== chatId)
+      const index = next.findIndex((item) => compareActivity(updated, item) < 0)
+      next.splice(index < 0 ? next.length : index, 0, updated)
       chatsRef.current = next
       setChats(next)
       recordLatest(chatId, chat.lastSequence)

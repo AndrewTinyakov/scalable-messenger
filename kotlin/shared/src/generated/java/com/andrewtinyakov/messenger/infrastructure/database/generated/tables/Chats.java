@@ -144,6 +144,11 @@ public class Chats extends TableImpl<ChatsRecord> {
      */
     public final TableField<ChatsRecord, Long> PURGED_ROWS = createField(DSL.name("purged_rows"), SQLDataType.BIGINT.nullable(false).defaultValue(DSL.field(DSL.raw("0"), SQLDataType.BIGINT)), this, "");
 
+    /**
+     * The column <code>public.chats.last_activity_at</code>.
+     */
+    public final TableField<ChatsRecord, OffsetDateTime> LAST_ACTIVITY_AT = createField(DSL.name("last_activity_at"), SQLDataType.TIMESTAMPWITHTIMEZONE(6), this, "");
+
     private Chats(Name alias, Table<ChatsRecord> aliased) {
         this(alias, aliased, (Field<?>[]) null, null);
     }

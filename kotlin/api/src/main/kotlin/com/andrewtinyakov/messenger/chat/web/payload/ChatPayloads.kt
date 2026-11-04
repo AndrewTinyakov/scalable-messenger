@@ -29,6 +29,8 @@ data class ChatResponse(
     val lastMessage: ChatLastMessageResponse? = null,
     @field:Schema(requiredMode = Schema.RequiredMode.NOT_REQUIRED)
     val unreadCount: Int = 0,
+    @field:Schema(requiredMode = Schema.RequiredMode.NOT_REQUIRED, nullable = true)
+    val activityAt: java.time.OffsetDateTime? = null,
     @field:Schema(requiredMode = Schema.RequiredMode.NOT_REQUIRED)
     val unreadCountCapped: Boolean = false,
 )
@@ -80,6 +82,7 @@ fun Chat.toResponse(members: List<UserSummary>): ChatResponse = ChatResponse(
     lastSequence = lastSequence.toString(),
     ownerId = ownerId?.value,
     unreadCount = unreadCount,
+    activityAt = activityAt,
     unreadCountCapped = unreadCountCapped,
     lastMessage = lastMessage?.let {
         ChatLastMessageResponse(it.id, it.sequence.toString(), it.senderId, it.senderUsername, it.createdAt, it.bodyPreview, it.deleted)

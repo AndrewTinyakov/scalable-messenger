@@ -42,6 +42,36 @@ class ChatServiceTests
         private val messageHistoryService: MessageHistoryService,
     ) : MessengerIntegrationTest() {
         @Test
+        fun `chat pages order by activity with deterministic ties and sends update activity transactionally`() {
+            val owner = user("activity-owner")
+            val peer = user("activity-peer")
+            val chats = (1..3).map { chatService.createGroup(UserId(owner), CreateGroupChatRequest("Activity $it", listOf(peer))) }
+            db.update("UPDATE chat_members SET joined_at='2026-01-01T00:00:00Z' WHERE user_id=?", owner)
+            db.update("UPDATE chats SET last_activity_at='2026-02-01T00:00:00Z' WHERE id IN (?,?)", chats[0].id, chats[1].id)
+            val first = chatService.list(UserId(owner), null, 1)
+            val second = chatService.list(UserId(owner), first.nextCursor, 1)
+            val third = chatService.list(UserId(owner), second.nextCursor, 1)
+            assertEquals(listOf(chats[1].id, chats[0].id, chats[2].id), (first.chats + second.chats + third.chats).map { it.id })
+            assertEquals(null, third.nextCursor)
+            messageSendService.process(command(peer, newId(), "Latest", chat = chats[2].id))
+            assertEquals(chats[2].id, chatService.list(UserId(owner), null, 1).chats.single().id)
+            assertTrue(chatService.get(ChatId(chats[2].id), UserId(owner)).activityAt != null)
+            val before = db.queryForObject(
+                "SELECT last_activity_at FROM chats WHERE id=?",
+                java.time.OffsetDateTime::class.java,
+                chats[0].id,
+            )
+            tx.executeWithoutResult { status ->
+                chatRepository.allocateSequenceForMember(ChatId(chats[0].id), UserId(owner))
+                status.setRollbackOnly()
+            }
+            assertEquals(
+                before,
+                db.queryForObject("SELECT last_activity_at FROM chats WHERE id=?", java.time.OffsetDateTime::class.java, chats[0].id),
+            )
+        }
+
+        @Test
         fun `unread windows cap raw candidates before own and personal visibility filters`() {
             val owner = user("unread-owner")
             val peer = user("unread-peer")

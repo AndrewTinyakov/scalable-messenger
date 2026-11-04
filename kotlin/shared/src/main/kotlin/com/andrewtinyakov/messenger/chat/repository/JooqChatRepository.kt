@@ -37,7 +37,9 @@ class JooqChatRepository(
         limit: Int,
     ): List<MemberChat> = DatabaseObservation.query(DatabaseOperation.CHAT_FIND_BY_MEMBER) {
         val summary = summary(userId)
+        val activityAt = DSL.coalesce(CHATS.LAST_ACTIVITY_AT, CHAT_MEMBERS.JOINED_AT)
         db.select(
+            activityAt,
             summary,
             CHATS.ID,
             CHATS.KIND,
@@ -54,9 +56,9 @@ class JooqChatRepository(
             .and(CHAT_MEMBERS.HIDDEN_THROUGH_SEQUENCE.isNull.or(CHATS.NEXT_SEQUENCE.minus(1L).gt(CHAT_MEMBERS.HIDDEN_THROUGH_SEQUENCE)))
             .and(
                 if (beforeJoinedAt != null && beforeChatId != null) {
-                    CHAT_MEMBERS.JOINED_AT.lt(beforeJoinedAt)
+                    activityAt.lt(beforeJoinedAt)
                         .or(
-                            CHAT_MEMBERS.JOINED_AT.eq(beforeJoinedAt)
+                            activityAt.eq(beforeJoinedAt)
                                 .and(CHAT_MEMBERS.CHAT_ID.lt(beforeChatId.value)),
                         )
                 } else {
@@ -64,7 +66,7 @@ class JooqChatRepository(
                 },
             )
             .orderBy(
-                CHAT_MEMBERS.JOINED_AT.desc(),
+                activityAt.desc(),
                 CHAT_MEMBERS.CHAT_ID.desc(),
             )
             .limit(limit)
@@ -78,11 +80,12 @@ class JooqChatRepository(
                         ownerId = row.get(CHATS.OWNER_ID)
                             ?.let(::UserId),
                         memberCount = row.get(CHATS.MEMBER_COUNT)!!,
+                        activityAt = row.get(activityAt),
                         lastMessage = row.get(summary).lastMessage,
                         unreadCount = row.get(summary).unreadCount,
                         unreadCountCapped = row.get(summary).unreadCountCapped,
                     ),
-                    joinedAt = row.get(CHAT_MEMBERS.JOINED_AT)!!,
+                    joinedAt = row.get(activityAt)!!,
                 )
             }
     }
@@ -455,7 +458,14 @@ class JooqChatRepository(
                 }
             }
         val summary = summary(userId)
+        val activityAt = DSL.coalesce(
+            CHATS.LAST_ACTIVITY_AT,
+            DSL.select(
+                CHAT_MEMBERS.JOINED_AT,
+            ).from(CHAT_MEMBERS).where(CHAT_MEMBERS.CHAT_ID.eq(CHATS.ID), CHAT_MEMBERS.USER_ID.eq(userId.value)).asField<OffsetDateTime>(),
+        )
         return db.select(
+            activityAt,
             CHATS.asterisk(),
             members,
             summary,
@@ -476,6 +486,7 @@ class JooqChatRepository(
                 MemberChatDetails(
                     chat = row.into(CHATS)
                         .toModel().copy(
+                            activityAt = row.get(activityAt),
                             lastMessage = row.get(summary).lastMessage,
                             unreadCount = row.get(summary).unreadCount,
                             unreadCountCapped = row.get(summary).unreadCountCapped,
@@ -615,6 +626,10 @@ class JooqChatRepository(
                 CHATS.NEXT_SEQUENCE,
                 CHATS.NEXT_SEQUENCE.plus(userIds.size.toLong()),
             )
+            .set(
+                CHATS.LAST_ACTIVITY_AT,
+                DSL.greatest(DSL.coalesce(CHATS.LAST_ACTIVITY_AT, DSL.currentOffsetDateTime()), DSL.currentOffsetDateTime()),
+            )
             .where(CHATS.ID.eq(chatId.value), CHATS.DELETED_AT.isNull)
             .and(
                 DSL.field(
@@ -676,4 +691,5 @@ private fun ChatsRecord.toModel(): Chat =
         lastSequence = nextSequence!! - 1,
         ownerId = ownerId?.let(::UserId),
         memberCount = memberCount!!,
+        activityAt = lastActivityAt,
     )

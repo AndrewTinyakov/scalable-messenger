@@ -2033,6 +2033,11 @@ components:
         unreadCount:
           type: integer
           format: int32
+        activityAt:
+          type:
+          - string
+          - "null"
+          format: date-time
         unreadCountCapped:
           type: boolean
       required:

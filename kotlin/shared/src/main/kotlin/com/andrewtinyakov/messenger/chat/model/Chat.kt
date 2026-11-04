@@ -11,6 +11,7 @@ data class Chat(
     val ownerId: UserId?,
     val memberCount: Int,
     val lastMessage: ChatLastMessage? = null,
+    val activityAt: java.time.OffsetDateTime? = null,
     val unreadCount: Int = 0,
     val unreadCountCapped: Boolean = false,
 ) {

@@ -13,7 +13,11 @@ export function advanceAppliedSequence(current: string, incoming: Message[]): st
   return next.toString()
 }
 
-export function hasNewAppliedMessages(before: string, after: string, dismissedThrough: string): boolean {
+export function hasNewAppliedMessages(
+  before: string,
+  after: string,
+  dismissedThrough: string,
+): boolean {
   return BigInt(after) > BigInt(before) && BigInt(after) > BigInt(dismissedThrough)
 }
 
@@ -22,7 +26,10 @@ export function historyBoundaryBefore(messages: Message[]): string {
 }
 
 export function isContiguous(messages: Message[]): boolean {
-  return messages.every((message, index) => index === 0 || BigInt(message.sequence) === BigInt(messages[index - 1].sequence) + 1n)
+  return messages.every(
+    (message, index) =>
+      index === 0 || BigInt(message.sequence) === BigInt(messages[index - 1].sequence) + 1n,
+  )
 }
 
 export function replaceWindow(incoming: Message[]): Message[] {
@@ -31,14 +38,24 @@ export function replaceWindow(incoming: Message[]): Message[] {
   return sorted.slice(-MAX_VISIBLE_MESSAGES)
 }
 
-export function pageWindow(current: Message[], incoming: Message[], direction: Direction): Message[] {
+export function pageWindow(
+  current: Message[],
+  incoming: Message[],
+  direction: Direction,
+): Message[] {
   if (incoming.length === 0) return current
   const merged = mergeMessages(current, incoming)
   if (!isContiguous(merged)) throw new Error('History contains a sequence gap')
-  return direction === 'older' ? merged.slice(0, MAX_VISIBLE_MESSAGES) : merged.slice(-MAX_VISIBLE_MESSAGES)
+  return direction === 'older'
+    ? merged.slice(0, MAX_VISIBLE_MESSAGES)
+    : merged.slice(-MAX_VISIBLE_MESSAGES)
 }
 
-export function appendLiveWindow(current: Message[], incoming: Message, browsingOlder: boolean): Message[] {
+export function appendLiveWindow(
+  current: Message[],
+  incoming: Message,
+  browsingOlder: boolean,
+): Message[] {
   if (current.length === 0) return [incoming]
   const first = BigInt(current[0].sequence)
   const last = BigInt(current[current.length - 1].sequence)
@@ -54,4 +71,12 @@ export function hasMoreNewer(window: Message[], latestSequence: string): boolean
 
 export function hasUnresolvedGap(window: Message[], resolvedSequence: string): boolean {
   return window.length > 0 && BigInt(window[0].sequence) > BigInt(resolvedSequence) + 1n
+}
+
+export function historyAvailability(messages: Message[], latestSequence: string, baseline: string) {
+  return {
+    hasOlderMessages: Boolean(messages.length && BigInt(messages[0].sequence) > 1n),
+    hasNewerMessages: hasMoreNewer(messages, latestSequence),
+    hasUnresolvedGap: hasUnresolvedGap(messages, baseline),
+  }
 }

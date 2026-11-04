@@ -1,27 +1,31 @@
 import type { components } from '../../shared/api/generated/schema'
+import { createUlid } from '../../shared/lib/id'
 
 export type User = components['schemas']['UserResponse']
 
 export type Session = components['schemas']['AuthResponse']
 
-const storageKey = 'messenger.session.v1'
+const deviceKey = 'relay.device.v1'
+let fallbackDeviceId: string | undefined
 
-export function readSession(): Session | null {
+export function deviceId(): string {
   try {
-    const value = localStorage.getItem(storageKey)
-    if (!value) return null
-    const parsed: unknown = JSON.parse(value)
-    if (!parsed || typeof parsed !== 'object') return null
-    const session = parsed as Partial<Session>
-    if (typeof session.token !== 'string' || typeof session.deviceId !== 'string') return null
-    if (!session.user || typeof session.user.id !== 'string' || typeof session.user.username !== 'string') return null
-    return session as Session
-  } catch {
-    return null
-  }
+    const existing = localStorage.getItem(deviceKey)
+    if (existing && /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/.test(existing)) {
+      fallbackDeviceId = existing
+      return existing
+    }
+  } catch {}
+  const created = fallbackDeviceId ?? createUlid()
+  fallbackDeviceId = created
+  try {
+    localStorage.setItem(deviceKey, created)
+  } catch {}
+  return created
 }
 
-export function saveSession(session: Session | null) {
-  if (session) localStorage.setItem(storageKey, JSON.stringify(session))
-  else localStorage.removeItem(storageKey)
+export function discardLegacySession(): void {
+  try {
+    localStorage.removeItem('messenger.session.v1')
+  } catch {}
 }

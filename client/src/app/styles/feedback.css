@@ -1,0 +1,40 @@
+.toast {
+  position: fixed;
+  z-index: 20;
+  right: 24px;
+  bottom: 24px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  max-width: 400px;
+  padding: 13px 15px;
+  border: 1px solid #eccabb;
+  border-radius: 9px;
+  background: #fff5ee;
+  color: #9d4d3b;
+  box-shadow: 0 10px 30px #282d231a;
+  font-size: 12px;
+}
+.toast button {
+  border: 0;
+  background: none;
+  color: inherit;
+  font-size: 20px;
+  line-height: 1;
+}
+.loading-overlay {
+  position: fixed;
+  z-index: 9;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: #faf9f4a8;
+}
+.loading-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid #e6e9dd;
+  border-top-color: var(--orange);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}

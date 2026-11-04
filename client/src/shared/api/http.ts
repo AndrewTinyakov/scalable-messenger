@@ -1,8 +1,33 @@
-import type { Chat } from '../../entities/chat/model'
-import type { Session, User } from '../../entities/session/model'
+import type { Session } from '../../entities/session/model'
+import { isRecord } from '../lib/validation'
+import {
+  decodeChat,
+  decodeChats,
+  decodeDirectChat,
+  decodeGroupMembers,
+  decodeHistory,
+  decodeMessage,
+  decodeSendStatus,
+  decodeSendStatuses,
+  decodeSession,
+  decodeSessionStatus,
+  decodeTicket,
+  decodeUser,
+  decodeUsers,
+} from './decode'
+import {
+  decodeAround,
+  decodeChanges,
+  decodeReadProgress,
+  decodeReaders,
+  decodeReads,
+} from './featureDecode'
 import type { components, paths } from './generated/schema'
 
-const apiBase = '/api'
+const apiBase = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8081/api').replace(
+  /\/$/,
+  '',
+)
 const routes = {
   login: '/v1/auth/login',
   register: '/v1/auth/register',
@@ -10,134 +35,264 @@ const routes = {
   logout: '/v1/auth/logout',
   wsTicket: '/v1/auth/ws-ticket',
   users: '/v1/users',
+  user: '/v1/users/{userId}',
   chats: '/v1/chats',
   chat: '/v1/chats/{id}',
+  directChat: '/v1/chats/direct/{userId}',
   groups: '/v1/chats/groups',
   addGroupMembers: '/v1/chats/{id}/members',
+  removeGroupMember: '/v1/chats/{id}/members/{userId}',
   messages: '/v1/chats/{id}/messages',
+  around: '/v1/chats/{id}/messages/around',
+  changes: '/v1/chats/{id}/messages/changes',
+  message: '/v1/chats/{id}/messages/{messageId}',
+  reads: '/v1/chats/{id}/reads',
+  messageReads: '/v1/chats/{id}/messages/{messageId}/reads',
   sendStatus: '/v1/sends/{requestId}',
   sendStatuses: '/v1/sends/status',
 } as const satisfies Record<string, keyof paths>
 
-function endpoint(path: keyof paths, params: Record<string, string> = {}, query?: Record<string, string | number>): string {
+function endpoint(
+  path: keyof paths,
+  params: Record<string, string> = {},
+  query?: Record<string, string | number>,
+): string {
   const resolved = path.replace(/\{([^}]+)\}/g, (_, key: string) => {
     if (!params[key]) throw new Error(`Missing URL parameter: ${key}`)
     return encodeURIComponent(params[key])
   })
-  const search = query ? `?${new URLSearchParams(Object.entries(query).map(([key, value]) => [key, String(value)]))}` : ''
+  const search = query
+    ? `?${new URLSearchParams(Object.entries(query).map(([key, value]) => [key, String(value)]))}`
+    : ''
   return `${resolved}${search}`
 }
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(
+    public status: number,
+    message: string,
+  ) {
     super(message)
   }
 }
 
-async function request<T>(path: string, options: RequestInit = {}, token?: string): Promise<T> {
-  const response = await fetch(`${apiBase}${path}`, {
-    ...options,
-    headers: {
-      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...options.headers,
-    },
-  })
-  if (!response.ok) {
-    let message = `Request failed (${response.status})`
-    try {
-      const body = await response.json() as { detail?: string; message?: string; title?: string }
-      message = body.detail || body.message || body.title || message
-    } catch { /* The server can return an empty error body. */ }
-    throw new ApiError(response.status, message)
+async function request<T>(
+  path: string,
+  decode: (value: unknown) => T,
+  options: RequestInit = {},
+): Promise<T> {
+  const controller = new AbortController()
+  const timer = setTimeout(
+    () => controller.abort(new Error('Request timed out. Try again.')),
+    15000,
+  )
+  try {
+    const response = await fetch(`${apiBase}${path}`, {
+      ...options,
+      signal: controller.signal,
+      cache: 'no-store',
+      credentials: 'include',
+      redirect: 'error',
+      headers: {
+        ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(options.method && !['GET', 'HEAD', 'OPTIONS'].includes(options.method)
+          ? { 'X-Messenger-CSRF': '1' }
+          : {}),
+        ...options.headers,
+      },
+    })
+    if (!response.ok) {
+      let message = `Request failed (${response.status})`
+      try {
+        const body: unknown = await response.json()
+        if (isRecord(body)) {
+          const detail = [body.detail, body.message, body.title].find(
+            (value) => typeof value === 'string' && value.length > 0,
+          )
+          if (typeof detail === 'string') message = detail
+        }
+      } catch {}
+      throw new ApiError(response.status, message)
+    }
+    return decode(response.status === 204 ? undefined : ((await response.json()) as unknown))
+  } catch (cause) {
+    if (controller.signal.aborted) throw controller.signal.reason
+    throw cause
+  } finally {
+    clearTimeout(timer)
   }
-  return response.json() as Promise<T>
+}
+
+function noContent(value: unknown): void {
+  if (value !== undefined) throw new Error('Invalid response from server')
 }
 
 export const api = {
   login(username: string, password: string, deviceId: string) {
     const body: components['schemas']['AuthRequest'] = { username, password, deviceId }
-    return request<Session>(endpoint(routes.login), { method: 'POST', body: JSON.stringify(body) })
+    return request(endpoint(routes.login), decodeSession, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    })
   },
   register(username: string, password: string, deviceId: string) {
     const body: components['schemas']['AuthRequest'] = { username, password, deviceId }
-    return request<Session>(endpoint(routes.register), { method: 'POST', body: JSON.stringify(body) })
-  },
-  session(token: string) {
-    return request<components['schemas']['SessionResponse']>(endpoint(routes.session), {}, token)
-  },
-  async logout(token: string): Promise<void> {
-    const response = await fetch(`${apiBase}${endpoint(routes.logout)}`, {
-      method: 'POST', headers: { Authorization: `Bearer ${token}` },
+    return request(endpoint(routes.register), decodeSession, {
+      method: 'POST',
+      body: JSON.stringify(body),
     })
-    if (!response.ok) throw new ApiError(response.status, `Could not sign out (${response.status})`)
   },
-  wsTicket(token: string) {
-    return request<components['schemas']['WsTicketResponse']>(endpoint(routes.wsTicket), { method: 'POST' }, token)
+  session() {
+    return request(endpoint(routes.session), decodeSessionStatus)
   },
-  addGroupMembers(token: string, chatId: string, memberIds: string[]) {
-    const body: components['schemas']['AddGroupMembersRequest'] = { memberIds }
-    return fetch(`${apiBase}${endpoint(routes.addGroupMembers, { id: chatId })}`, {
-      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-    }).then((response) => { if (!response.ok) throw new ApiError(response.status, `Could not add members (${response.status})`) })
+  forSession(session: Session) {
+    const headers = { 'X-Messenger-User': session.user.id, 'X-Messenger-Device': session.deviceId }
+    function authenticated<T>(
+      path: string,
+      decode: (value: unknown) => T,
+      options: RequestInit = {},
+    ): Promise<T> {
+      return request(path, decode, { ...options, headers: { ...options.headers, ...headers } })
+    }
+    return {
+      logout(): Promise<void> {
+        return authenticated(endpoint(routes.logout), noContent, { method: 'POST' })
+      },
+      wsTicket() {
+        return authenticated(endpoint(routes.wsTicket), decodeTicket, { method: 'POST' })
+      },
+      addGroupMembers(chatId: string, memberIds: string[]) {
+        const body: components['schemas']['AddGroupMembersRequest'] = { memberIds }
+        return authenticated(endpoint(routes.addGroupMembers, { id: chatId }), noContent, {
+          method: 'POST',
+          body: JSON.stringify(body),
+        })
+      },
+      groupMembers(chatId: string, afterUserId?: string) {
+        return authenticated(
+          endpoint(
+            routes.addGroupMembers,
+            { id: chatId },
+            { limit: 50, ...(afterUserId ? { afterUserId } : {}) },
+          ),
+          decodeGroupMembers,
+        )
+      },
+      removeGroupMember(chatId: string, userId: string) {
+        return authenticated(
+          endpoint(routes.removeGroupMember, { id: chatId, userId }),
+          noContent,
+          { method: 'DELETE' },
+        )
+      },
+      users(query: string) {
+        return authenticated(endpoint(routes.users, {}, { query }), decodeUsers)
+      },
+      user(userId: string) {
+        return authenticated(endpoint(routes.user, { userId }), (value) => {
+          const user = decodeUser(value)
+          if (user.id !== userId) throw new Error('Invalid response from server')
+          return user
+        })
+      },
+      chats(cursor?: string) {
+        return authenticated(
+          endpoint(routes.chats, {}, { limit: 100, ...(cursor ? { cursor } : {}) }),
+          decodeChats,
+        )
+      },
+      chat(chatId: string) {
+        return authenticated(endpoint(routes.chat, { id: chatId }), decodeChat)
+      },
+      directChat(userId: string) {
+        return authenticated(endpoint(routes.directChat, { userId }), (value) =>
+          decodeDirectChat(value, userId, session.user.id),
+        )
+      },
+      createGroup(name: string, memberIds: string[]) {
+        const body: components['schemas']['CreateGroupChatRequest'] = { name, memberIds }
+        return authenticated(endpoint(routes.groups), decodeChat, {
+          method: 'POST',
+          body: JSON.stringify(body),
+        })
+      },
+      messages(chatId: string, afterSeq: string, limit = 50) {
+        return authenticated(
+          endpoint(routes.messages, { id: chatId }, { afterSeq, limit }),
+          (value) => decodeHistory(value, chatId),
+        )
+      },
+      latestMessages(chatId: string, limit = 50) {
+        return authenticated(endpoint(routes.messages, { id: chatId }, { limit }), (value) =>
+          decodeHistory(value, chatId),
+        )
+      },
+      olderMessages(chatId: string, beforeSeq: string, limit = 50) {
+        return authenticated(
+          endpoint(routes.messages, { id: chatId }, { beforeSeq, limit }),
+          (value) => decodeHistory(value, chatId),
+        )
+      },
+      aroundMessage(chatId: string, messageId: string) {
+        return authenticated(
+          endpoint(routes.around, { id: chatId }, { messageId, limit: 50 }),
+          (value) => decodeAround(value, chatId),
+        )
+      },
+      messageChanges(chatId: string, afterRevision: string) {
+        return authenticated(
+          endpoint(routes.changes, { id: chatId }, { afterRevision, limit: 100 }),
+          (value) => decodeChanges(value, chatId),
+        )
+      },
+      editMessage(chatId: string, messageId: string, body: string, expectedVersion: string) {
+        const payload: components['schemas']['EditMessageRequest'] = { body, expectedVersion }
+        return authenticated(
+          endpoint(routes.message, { id: chatId, messageId }),
+          (value) => decodeMessage(value, chatId),
+          { method: 'PATCH', body: JSON.stringify(payload) },
+        )
+      },
+      deleteMessage(chatId: string, messageId: string, expectedVersion: string) {
+        return authenticated(
+          endpoint(routes.message, { id: chatId, messageId }, { expectedVersion }),
+          (value) => decodeMessage(value, chatId),
+          { method: 'DELETE' },
+        )
+      },
+      deleteChat(chatId: string) {
+        return authenticated(endpoint(routes.chat, { id: chatId }), noContent, { method: 'DELETE' })
+      },
+      reads(chatId: string) {
+        return authenticated(endpoint(routes.reads, { id: chatId }), decodeReads)
+      },
+      advanceRead(chatId: string, throughSequence: string) {
+        const payload: components['schemas']['AdvanceReadRequest'] = { throughSequence }
+        return authenticated(endpoint(routes.reads, { id: chatId }), decodeReadProgress, {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        })
+      },
+      messageReaders(chatId: string, messageId: string, afterUserId?: string) {
+        return authenticated(
+          endpoint(
+            routes.messageReads,
+            { id: chatId, messageId },
+            { limit: 50, ...(afterUserId ? { afterUserId } : {}) },
+          ),
+          decodeReaders,
+        )
+      },
+      sendStatus(requestId: string) {
+        return authenticated(endpoint(routes.sendStatus, { requestId }), decodeSendStatus)
+      },
+      sendStatuses(requestIds: string[]) {
+        const body: components['schemas']['SendStatusesRequest'] = { requestIds }
+        return authenticated(endpoint(routes.sendStatuses), decodeSendStatuses, {
+          method: 'POST',
+          body: JSON.stringify(body),
+        }).then((response) => response.results)
+      },
+    }
   },
-  users(token: string, query: string) {
-    return request<User[]>(endpoint(routes.users, {}, { query }), {}, token)
-  },
-  chats(token: string, cursor?: string) {
-    return request<components['schemas']['ChatPageResponse']>(
-      endpoint(routes.chats, {}, { limit: 100, ...(cursor ? { cursor } : {}) }), {}, token,
-    ).then((page) => ({ chats: normalizeChats(page.chats), nextCursor: page.nextCursor ?? null }))
-  },
-  chat(token: string, chatId: string) {
-    return request<components['schemas']['ChatResponse']>(endpoint(routes.chat, { id: chatId }), {}, token).then(normalizeChat)
-  },
-  createGroup(token: string, name: string, memberIds: string[]) {
-    const body: components['schemas']['CreateGroupChatRequest'] = { name, memberIds }
-    return request<components['schemas']['ChatResponse']>(endpoint(routes.groups), { method: 'POST', body: JSON.stringify(body) }, token).then(normalizeChat)
-  },
-  messages(token: string, chatId: string, afterSeq: string, limit = 50) {
-    return request<components['schemas']['MessageHistoryResponse']>(
-      endpoint(routes.messages, { id: chatId }, { afterSeq, limit }),
-      {}, token,
-    )
-  },
-  latestMessages(token: string, chatId: string, limit = 50) {
-    return request<components['schemas']['MessageHistoryResponse']>(
-      endpoint(routes.messages, { id: chatId }, { limit }), {}, token,
-    )
-  },
-  olderMessages(token: string, chatId: string, beforeSeq: string, limit = 50) {
-    return request<components['schemas']['MessageHistoryResponse']>(
-      endpoint(routes.messages, { id: chatId }, { beforeSeq, limit }), {}, token,
-    )
-  },
-  sendStatus(token: string, requestId: string) {
-    return request<components['schemas']['SendStatusResponse']>(
-      endpoint(routes.sendStatus, { requestId }), {}, token,
-    ).then(normalizeSendStatus)
-  },
-  sendStatuses(token: string, requestIds: string[]) {
-    const body: components['schemas']['SendStatusesRequest'] = { requestIds }
-    return request<components['schemas']['SendStatusesResponse']>(
-      endpoint(routes.sendStatuses), { method: 'POST', body: JSON.stringify(body) }, token,
-    ).then((response) => response.results.map((entry) => ({ requestId: entry.requestId, result: normalizeSendStatus(entry.result) })))
-  },
-}
-
-function normalizeChat(value: components['schemas']['ChatResponse']): Chat {
-  if (value.kind !== 'direct' && value.kind !== 'group') throw new Error(`Unknown chat kind: ${value.kind}`)
-  return value as Chat
-}
-
-function normalizeChats(values: components['schemas']['ChatResponse'][]): Chat[] {
-  return values.map(normalizeChat)
-}
-
-function normalizeSendStatus(value: components['schemas']['SendStatusResponse']):
-  Omit<components['schemas']['SendStatusResponse'], 'status'> & { status: 'unknown' | 'saved' | 'rejected' } {
-  if (value.status !== 'unknown' && value.status !== 'saved' && value.status !== 'rejected') {
-    throw new Error(`Unknown send status: ${value.status}`)
-  }
-  return value as Omit<components['schemas']['SendStatusResponse'], 'status'> & { status: 'unknown' | 'saved' | 'rejected' }
 }

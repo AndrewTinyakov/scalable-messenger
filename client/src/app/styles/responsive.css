@@ -1,0 +1,55 @@
+@media (max-width: 1000px) {
+  .workspace {
+    grid-template-columns: 305px minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+  .workspace {
+    display: block;
+  }
+  .sidebar,
+  .chat-panel {
+    width: 100%;
+    height: 100dvh;
+  }
+  .workspace .chat-panel {
+    display: none;
+  }
+  .workspace.show-chat .sidebar {
+    display: none;
+  }
+  .workspace.show-chat .chat-panel {
+    display: flex;
+  }
+  .sidebar-header {
+    height: 76px;
+  }
+  .mobile-back {
+    display: inline-grid;
+    margin-left: -10px;
+  }
+  .chat-header {
+    height: 76px;
+    padding: 0 18px;
+  }
+  .chat-body-inner {
+    padding: 18px;
+  }
+  .composer-wrap {
+    padding: 13px 15px 15px;
+  }
+  .composer-foot {
+    font-size: 8px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *:before,
+  *:after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -1,10 +1,18 @@
-import { useLayoutEffect, useRef } from 'react'
-import { ArrowLeft, MessageSquare, UsersRound } from 'lucide-react'
-import { chatInitials, chatTitle, type Chat } from '../../entities/chat/model'
+import { ArrowDown, MessageSquare } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import type { Chat } from '../../entities/chat/model'
 import { MessageItem } from '../../entities/message/MessageItem'
 import type { Message, PendingSend } from '../../entities/message/model'
 import type { User } from '../../entities/session/model'
+import { DeleteConfirmation } from '../../features/conversation/DeleteConfirmation'
+import { ReaderDialog } from '../../features/conversation/ReaderDialog'
+import type { useConversationFeatures } from '../../features/conversation/useConversationFeatures'
 import { MessageComposer } from '../../features/message-send/MessageComposer'
+import { ChatKind } from '../../shared/api/generated/socket-vocabulary'
+import { ChatHeader } from './ChatHeader'
+import { messageEntries } from './messageEntries'
+import { useMessageViewport } from './useMessageViewport'
+import { useSenderNames } from './useSenderNames'
 
 interface Props {
   chat: Chat | undefined
@@ -12,10 +20,15 @@ interface Props {
   messages: Message[]
   pending: PendingSend[]
   connection: 'connecting' | 'connected' | 'offline'
-  onSend: (chatId: string, body: string) => boolean
+  onSend: (chatId: string, body: string, replyToMessageId?: string) => boolean
+  features?: ReturnType<typeof useConversationFeatures>
+  detached?: boolean
+  onDeleteChat?: (chatId: string) => Promise<void>
   onRetry: (requestId: string) => void
   onBack: () => void
   onNew: () => void
+  onMembers?: () => void
+  lookupUser?: (id: string) => Promise<User>
   hasOlder: boolean
   hasNewer: boolean
   hasUnresolvedGap: boolean
@@ -28,92 +41,296 @@ interface Props {
   onViewPositionChange: (atLatest: boolean) => void
 }
 
-export function ChatPanel({ chat, currentUser, messages, pending, connection, onSend, onRetry, onBack, onNew, hasOlder, hasNewer, hasUnresolvedGap, loadingOlder, loadingNewer, onLoadOlder, onLoadNewer, onJumpToLatest, jumpRevision, onViewPositionChange }: Props) {
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const anchorRef = useRef<{ id: string; top: number } | null>(null)
-  const atBottomRef = useRef(true)
-  const previousViewRef = useRef<{ chatId?: string; jumpRevision: number }>({ chatId: undefined, jumpRevision })
-  const autoPageRef = useRef<{ older?: string; newer?: string }>({})
+export function ChatPanel({
+  chat,
+  features,
+  detached = false,
+  onDeleteChat,
+  currentUser,
+  messages,
+  pending,
+  connection,
+  onSend,
+  onRetry,
+  onBack,
+  onNew,
+  onMembers,
+  lookupUser,
+  hasOlder,
+  hasNewer,
+  hasUnresolvedGap,
+  loadingOlder,
+  loadingNewer,
+  onLoadOlder,
+  onLoadNewer,
+  onJumpToLatest,
+  jumpRevision,
+  onViewPositionChange,
+}: Props) {
+  const senderNames = useSenderNames(chat, messages, lookupUser)
+  const [reply, setReply] = useState<Message | undefined>()
+  const [edit, setEdit] = useState<Message | undefined>()
+  const [confirm, setConfirm] = useState<Message | 'chat' | null>(null)
+  const [readers, setReaders] = useState<Message | null>(null)
+  const [busy, setBusy] = useState(false)
+  const busyRef = useRef(false)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [announcement, setAnnouncement] = useState('')
+  const recipient =
+    chat?.kind === ChatKind.DIRECT
+      ? chat.members.find((member) => member.id !== currentUser.id)?.id
+      : undefined
+  const modeKey = recipient ? `user:${recipient}` : chat?.id
+  const active = useRef(true)
+  useEffect(() => {
+    active.current = true
+    return () => {
+      active.current = false
+    }
+  }, [])
+  useEffect(() => {
+    setReply(undefined)
+    setEdit(undefined)
+    setConfirm(null)
+    setReaders(null)
+    setActionError(null)
+  }, [modeKey])
+  useEffect(() => {
+    if (reply) {
+      const latest = messages.find((message) => message.id === reply.id)
+      if (latest?.deletedAt) {
+        setReply(undefined)
+        setAnnouncement('The message you were replying to was deleted.')
+      } else if (latest && latest !== reply) setReply(latest)
+    }
+    if (edit && messages.find((message) => message.id === edit.id)?.deletedAt) {
+      setEdit(undefined)
+      setAnnouncement('The message you were editing was deleted.')
+    }
+  }, [messages, reply, edit])
 
-  function rememberAnchor(direction: 'older' | 'newer') {
-    const scroller = scrollRef.current
-    if (!scroller) return
-    const bounds = scroller.getBoundingClientRect()
-    const visible = [...scroller.querySelectorAll<HTMLElement>('[data-message-id]')]
-      .filter((element) => element.getBoundingClientRect().bottom > bounds.top && element.getBoundingClientRect().top < bounds.bottom)
-    const target = direction === 'older' ? visible[0] : visible.at(-1)
-    if (target?.dataset.messageId) anchorRef.current = { id: target.dataset.messageId, top: target.getBoundingClientRect().top }
+  const { scrollRef, highlight, rememberAnchor, handleScroll } = useMessageViewport({
+    chatId: chat?.id,
+    userId: currentUser.id,
+    messages,
+    pendingCount: pending.length,
+    throughSequence: features?.summary.throughSequence,
+    onRead: features?.readThrough,
+    reveal: features?.reveal,
+    jumpRevision,
+    hasOlder,
+    hasNewer,
+    loadingOlder,
+    loadingNewer,
+    onLoadOlder,
+    onLoadNewer,
+    onViewPositionChange,
+    announce: setAnnouncement,
+  })
+
+  async function confirmDelete() {
+    if (!confirm || !chat || busyRef.current) return
+    busyRef.current = true
+    setBusy(true)
+    setActionError(null)
+    try {
+      if (confirm === 'chat') await onDeleteChat?.(chat.id)
+      else await features?.deleteMessage(confirm)
+      if (active.current) {
+        setConfirm(null)
+        setAnnouncement(confirm === 'chat' ? 'Chat deleted for everyone.' : 'Message deleted.')
+      }
+    } catch (cause) {
+      if (active.current)
+        setActionError(cause instanceof Error ? cause.message : 'Could not delete')
+    } finally {
+      busyRef.current = false
+      if (active.current) setBusy(false)
+    }
   }
 
-  useLayoutEffect(() => {
-    const scroller = scrollRef.current
-    if (!scroller) return
-    const previous = previousViewRef.current
-    const switched = previous.chatId !== chat?.id || previous.jumpRevision !== jumpRevision
-    previousViewRef.current = { chatId: chat?.id, jumpRevision }
-    if (switched) {
-      anchorRef.current = null
-      scroller.scrollTop = scroller.scrollHeight
-      atBottomRef.current = true
-      onViewPositionChange(true)
-      return
-    }
-    const anchor = anchorRef.current
-    anchorRef.current = null
-    const target = anchor && [...scroller.querySelectorAll<HTMLElement>('[data-message-id]')]
-      .find((element) => element.dataset.messageId === anchor.id)
-    if (anchor && target) scroller.scrollTop += target.getBoundingClientRect().top - anchor.top
-    else if (atBottomRef.current && !hasNewer) scroller.scrollTop = scroller.scrollHeight
-  }, [chat?.id, messages, pending.length, hasNewer, jumpRevision])
+  if (!chat)
+    return (
+      <section className="chat-panel empty-panel">
+        <MessageSquare size={38} strokeWidth={1.2} aria-hidden="true" />
+        <h2>No chat selected</h2>
+        <button className="button button-primary" onClick={onNew}>
+          New chat
+        </button>
+      </section>
+    )
 
-  function handleScroll() {
-    const scroller = scrollRef.current
-    if (!scroller) return
-    const distanceToBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight
-    atBottomRef.current = distanceToBottom < 48
-    onViewPositionChange(atBottomRef.current && !hasNewer)
-    const first = messages[0]?.sequence
-    const last = messages.at(-1)?.sequence
-    if (scroller.scrollTop < 120 && hasOlder && !loadingOlder && first && autoPageRef.current.older !== first) {
-      autoPageRef.current.older = first
-      rememberAnchor('older')
-      onLoadOlder()
-    } else if (distanceToBottom < 120 && hasNewer && !loadingNewer && last && autoPageRef.current.newer !== last) {
-      autoPageRef.current.newer = last
-      rememberAnchor('newer')
-      onLoadNewer()
-    }
-  }
+  const entries = messageEntries(chat.id, recipient, messages, pending, hasNewer)
 
-  if (!chat) return <section className="chat-panel empty-panel"><MessageSquare size={38} strokeWidth={1.2} aria-hidden="true" /><h2>No chat selected</h2><button className="button button-primary" onClick={onNew}>New chat</button></section>
+  return (
+    <section className="chat-panel">
+      <ChatHeader
+        chat={chat}
+        currentUser={currentUser}
+        connection={connection}
+        presence={features?.presence}
+        onBack={onBack}
+        onMembers={onMembers}
+        onDelete={
+          onDeleteChat
+            ? () => {
+                setConfirm('chat')
+                setActionError(null)
+              }
+            : undefined
+        }
+      />
 
-  const senderNames = new Map(chat.members.map((member) => [member.id, member.username]))
-  const unsaved = hasNewer ? [] : pending.filter((send) => send.chatId === chat.id && !messages.some((message) => message.id === send.messageId))
-  const entries = [
-    ...messages.map((message) => ({ key: message.id, message, send: undefined as PendingSend | undefined })),
-    ...unsaved.sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map((send) => ({ key: send.requestId, message: undefined as Message | undefined, send })),
-  ]
-
-  return <section className="chat-panel">
-    <header className="chat-header">
-      <button className="icon-button mobile-back" onClick={onBack} aria-label="Back to chats"><ArrowLeft size={20} /></button>
-      <span className={`chat-header-avatar ${chat.kind === 'group' ? 'group-avatar' : ''}`}>{chat.kind === 'group' ? <UsersRound size={22} /> : chatInitials(chat, currentUser.id)}</span>
-      <div className="chat-header-info"><h2>{chatTitle(chat, currentUser.id)}</h2><p>{chat.kind === 'group' ? `${chat.memberCount} members` : 'Direct chat'}</p></div>
-      <span className={`connection-pill ${connection}`}><span />{connection === 'connected' ? 'Live' : connection === 'connecting' ? 'Connecting' : 'Offline'}</span>
-    </header>
-
-    <div className="chat-body" ref={scrollRef} onScroll={handleScroll} role="log" aria-label="Messages" aria-live="polite">
-      <div className="chat-body-inner">
-        {hasOlder && <button className="history-page-button" onClick={() => { rememberAnchor('older'); onLoadOlder() }} disabled={loadingOlder}>{loadingOlder ? 'Loading…' : 'Load earlier messages'}</button>}
-        {entries.map(({ key, message, send }) => {
-          const mine = Boolean(send || message?.senderId === currentUser.id)
-          const sender = send ? currentUser.username : senderNames.get(message?.senderId || '') || 'Member'
-          return <MessageItem key={key} message={message} send={send} mine={mine} sender={sender} group={chat.kind === 'group'} connected={connection === 'connected'} onRetry={onRetry} />
-        })}
-        {(hasNewer || hasUnresolvedGap) && <div className="history-newer-controls">{hasNewer && <button className="history-page-button" onClick={() => { rememberAnchor('newer'); onLoadNewer() }} disabled={loadingNewer}>{loadingNewer ? 'Loading…' : 'Load newer messages'}</button>}<button className="history-jump-button" onClick={onJumpToLatest}>{hasNewer ? 'Jump to latest' : 'Continue from here'}</button></div>}
+      <div
+        className="chat-body"
+        ref={scrollRef}
+        onScroll={handleScroll}
+        role="region"
+        aria-label="Messages"
+      >
+        <div className="chat-body-inner">
+          {hasOlder && (
+            <button
+              className="history-page-button"
+              onClick={() => {
+                rememberAnchor('older')
+                onLoadOlder()
+              }}
+              disabled={loadingOlder}
+            >
+              {loadingOlder ? 'Loading…' : 'Load earlier messages'}
+            </button>
+          )}
+          {entries.map(({ key, message, send }) => {
+            const mine = Boolean(send || message?.senderId === currentUser.id)
+            const sender = send
+              ? currentUser.username
+              : senderNames.get(message?.senderId || '') || 'Member'
+            return (
+              <MessageItem
+                key={key}
+                message={message}
+                send={send}
+                mine={mine}
+                sender={sender}
+                group={chat.kind === ChatKind.GROUP}
+                connected={connection === 'connected'}
+                onRetry={onRetry}
+                read={Boolean(
+                  message &&
+                  BigInt(message.sequence) <= BigInt(features?.summary.maxOtherReadSequence ?? '0'),
+                )}
+                onReaders={features ? setReaders : undefined}
+                onReply={
+                  features
+                    ? (target) => {
+                        setEdit(undefined)
+                        setReply(target)
+                      }
+                    : undefined
+                }
+                onEdit={
+                  features
+                    ? (target) => {
+                        setReply(undefined)
+                        setEdit(target)
+                      }
+                    : undefined
+                }
+                onDelete={
+                  features
+                    ? (target) => {
+                        setConfirm(target)
+                        setActionError(null)
+                      }
+                    : undefined
+                }
+                onQuote={features?.jumpToMessage}
+                quoteSender={
+                  message?.replySenderId === currentUser.id
+                    ? currentUser.username
+                    : senderNames.get(message?.replySenderId ?? '')
+                }
+                quoteLoading={Boolean(
+                  message?.replyToMessageId && features?.jumpLoading === message.replyToMessageId,
+                )}
+                highlighted={message?.id === highlight}
+              />
+            )
+          })}
+          {(hasNewer || hasUnresolvedGap) && (
+            <div className="history-newer-controls">
+              {hasNewer && (
+                <button
+                  className="history-page-button"
+                  onClick={() => {
+                    rememberAnchor('newer')
+                    onLoadNewer()
+                  }}
+                  disabled={loadingNewer}
+                >
+                  {loadingNewer ? 'Loading…' : 'Load newer messages'}
+                </button>
+              )}
+              <button className="history-jump-button" onClick={onJumpToLatest}>
+                {hasNewer ? 'Jump to latest' : 'Continue from here'}
+              </button>
+            </div>
+          )}
+        </div>
       </div>
-    </div>
 
-    <MessageComposer chatId={chat.id} connected={connection === 'connected'} onSend={onSend} />
-  </section>
+      {(detached || hasNewer) && (
+        <div className="fixed-latest-wrap">
+          <button className="fixed-latest" onClick={onJumpToLatest}>
+            <ArrowDown size={15} />
+            Back to latest
+          </button>
+        </div>
+      )}
+      <span className="visually-hidden" role="status" aria-live="polite">
+        {announcement}
+      </span>
+      <MessageComposer
+        key={modeKey}
+        chatId={chat.id}
+        connected={connection === 'connected'}
+        onSend={onSend}
+        reply={
+          reply
+            ? {
+                message: reply,
+                sender:
+                  reply.senderId === currentUser.id
+                    ? currentUser.username
+                    : (senderNames.get(reply.senderId) ?? 'Member'),
+              }
+            : undefined
+        }
+        edit={edit}
+        onCancelMode={() => {
+          setReply(undefined)
+          setEdit(undefined)
+        }}
+        onSave={features?.editMessage}
+      />
+      {confirm && (
+        <DeleteConfirmation
+          target={confirm}
+          busy={busy}
+          error={actionError}
+          onCancel={() => setConfirm(null)}
+          onConfirm={() => void confirmDelete()}
+        />
+      )}
+      {readers && features && (
+        <ReaderDialog
+          key={readers.id}
+          message={messages.find((message) => message.id === readers.id) ?? readers}
+          load={features.readers}
+          onClose={() => setReaders(null)}
+        />
+      )}
+    </section>
+  )
 }

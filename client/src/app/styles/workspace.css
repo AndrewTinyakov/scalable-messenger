@@ -1,0 +1,246 @@
+/* Workspace shell */
+.workspace {
+  display: grid;
+  grid-template-columns: 348px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  width: min(100%, 1700px);
+  height: 100dvh;
+  overflow: hidden;
+  margin: 0 auto;
+  background: #fff;
+  box-shadow: 0 0 65px #35372b0b;
+}
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-right: 1px solid #e8e9e2;
+  background: #f8f8f2;
+}
+.sidebar-header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  height: 88px;
+  padding: 0 29px;
+}
+.sidebar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sidebar-create {
+  background: #eceee5;
+  color: #4b6955;
+}
+.sidebar-create:hover {
+  background: #dfe6da;
+}
+.sidebar-search {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  height: 43px;
+  margin: 18px 29px 27px;
+  padding: 0 14px;
+  border: 1px solid #ecece4;
+  border-radius: 9px;
+  background: #f0f1e9;
+  color: #9ca195;
+}
+.sidebar-search:focus-within {
+  border-color: #b8c7b6;
+}
+.sidebar-search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  background: none;
+  border: 0;
+  outline: 0;
+  color: var(--ink);
+  font-size: 12px;
+}
+.sidebar-search input::placeholder {
+  color: #aaada1;
+}
+.chat-list-heading {
+  display: flex;
+  flex: none;
+  justify-content: space-between;
+  padding: 0 29px 14px;
+  color: #7f8779;
+  font-size: 12px;
+  font-weight: 700;
+}
+.chat-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 12px 20px;
+}
+.chat-list-empty {
+  padding: 34px 20px;
+  color: #9a9d91;
+  font-size: 12px;
+  line-height: 1.6;
+  text-align: center;
+}
+.chat-load-more {
+  display: block;
+  width: calc(100% - 24px);
+  margin: 12px;
+  padding: 10px;
+  border: 1px solid #d7ddd0;
+  border-radius: 9px;
+  background: #fff;
+  color: var(--green);
+  font: inherit;
+  cursor: pointer;
+}
+.chat-load-more:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.chat-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 73px;
+  padding: 11px 16px;
+  margin-bottom: 4px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  transition: background 0.2s;
+}
+.chat-item:hover {
+  background: #f0f1e9;
+}
+.chat-item.selected {
+  background: #e9eee6;
+}
+.chat-item.selected:before {
+  position: absolute;
+  content: '';
+  width: 3px;
+  height: 30px;
+  left: 0;
+  top: calc(50% - 15px);
+  border-radius: 0 3px 3px 0;
+  background: var(--green);
+}
+.chat-avatar,
+.chat-header-avatar {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 45px;
+  height: 45px;
+  border-radius: 15px;
+  background: #ead9cc;
+  color: #925e46;
+  font-family: var(--display);
+  font-size: 17px;
+  font-weight: 700;
+}
+.chat-avatar.group-avatar,
+.chat-header-avatar.group-avatar {
+  background: #e3e7d6;
+  color: #5b6e4f;
+}
+.chat-item:nth-child(3n + 2) .chat-avatar:not(.group-avatar) {
+  background: #e2e4d6;
+  color: #667354;
+}
+.chat-item:nth-child(3n + 3) .chat-avatar:not(.group-avatar) {
+  background: #dbe4e5;
+  color: #527477;
+}
+.chat-item-copy {
+  display: block;
+  flex: 1;
+  min-width: 0;
+}
+.chat-item-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: baseline;
+}
+.chat-item-top strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 700;
+}
+.chat-item-top time {
+  flex: none;
+  color: #a7aa9d;
+  font-size: 10px;
+}
+.chat-preview {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 5px;
+  color: #92978a;
+  font-size: 11px;
+}
+.sidebar-account {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  min-height: 76px;
+  padding: 14px 26px;
+  border-top: 1px solid #e9e9df;
+}
+.account-avatar,
+.person-avatar {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  border-radius: 50%;
+  background: #d9e0d0;
+  color: #4b6352;
+  font-family: var(--display);
+  font-weight: 700;
+}
+.account-avatar {
+  width: 35px;
+  height: 35px;
+  background: #dce3d6;
+  font-size: 15px;
+}
+.account-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.account-copy strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.account-copy small {
+  color: #a4a89b;
+  font-size: 10px;
+}
+.signout-button {
+  margin-left: auto;
+  color: #9fa397;
+}

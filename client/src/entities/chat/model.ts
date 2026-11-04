@@ -1,12 +1,10 @@
 import type { components } from '../../shared/api/generated/schema'
+import { ChatKind } from '../../shared/api/generated/socket-vocabulary'
 
-export type Chat = Omit<components['schemas']['ChatResponse'], 'kind' | 'name'> & {
-  kind: 'direct' | 'group'
-  name?: string | null
-}
+export type Chat = components['schemas']['ChatResponse']
 
 export function chatTitle(chat: Chat, myId: string): string {
-  if (chat.kind === 'group') return chat.name || 'Untitled group'
+  if (chat.kind === ChatKind.GROUP) return chat.name || 'Untitled group'
   return chat.members.find((member) => member.id !== myId)?.username || 'Your notes'
 }
 

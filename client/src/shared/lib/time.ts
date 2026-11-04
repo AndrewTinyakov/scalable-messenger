@@ -1,5 +1,7 @@
 export function formatMessageTime(timestamp: string): string {
-  return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(new Date(timestamp))
+  return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(
+    new Date(timestamp),
+  )
 }
 
 export function formatChatTime(timestamp?: string): string {

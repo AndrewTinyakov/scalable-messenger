@@ -2,14 +2,56 @@ import { describe, expect, it } from 'vitest'
 import { advanceSend, mergeMessages, type Message, type PendingSend } from './model'
 
 const pending: PendingSend = {
-  chatId: 'chat', requestId: 'request', body: 'Hi', createdAt: '2026-09-26T10:00:00Z', status: 'sending',
+  chatId: 'chat',
+  requestId: 'request',
+  body: 'Hi',
+  createdAt: '2026-09-26T10:00:00Z',
+  status: 'sending',
 }
 
 function message(id: string, sequence: string): Message {
-  return { id, chatId: 'chat', sequence, senderId: 'user', body: id, createdAt: '2026-09-26T10:00:00Z' }
+  return {
+    id,
+    chatId: 'chat',
+    sequence,
+    senderId: 'user',
+    body: id,
+    createdAt: '2026-09-26T10:00:00Z',
+  }
 }
 
 describe('message state', () => {
+  it('keeps a newer quote tombstone when its target is outside a stale history page', () => {
+    const reply = {
+      ...message('reply', '100'),
+      replyToMessageId: 'old',
+      replySenderId: 'author',
+      replyBody: '',
+      replyDeleted: true,
+      replyVersion: '3',
+    }
+    const stale = { ...reply, replyBody: 'deleted body', replyDeleted: false, replyVersion: '1' }
+    expect(mergeMessages([reply], [stale])[0]).toMatchObject({
+      replyBody: '',
+      replyDeleted: true,
+      replyVersion: '3',
+    })
+  })
+  it('rejects old saved content and clears quotes after a newer message tombstone', () => {
+    const original = message('target', '5')
+    const deleted = {
+      ...original,
+      body: '',
+      deletedAt: '2026-11-04T10:00:00Z',
+      messageVersion: '3',
+    }
+    expect(mergeMessages([deleted], [{ ...original, messageVersion: '1' }])[0]).toMatchObject({
+      body: '',
+      deletedAt: deleted.deletedAt,
+      messageVersion: '3',
+    })
+  })
+
   it('keeps a final saved result when a queued receipt arrives later', () => {
     const saved = advanceSend(pending, 'saved', { messageId: 'message' })
     expect(advanceSend(saved, 'queued')).toEqual(saved)

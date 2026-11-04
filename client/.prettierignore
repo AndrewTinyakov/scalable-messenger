@@ -1,0 +1,9 @@
+node_modules/
+dist/
+build/
+coverage/
+src/shared/api/generated/
+*.tsbuildinfo
+package-lock.json
+playwright-report/
+test-results/

@@ -1,12 +1,26 @@
 import { describe, expect, it } from 'vitest'
 import {
-  advanceAppliedSequence, appendLiveWindow, hasMoreNewer, hasNewAppliedMessages, hasUnresolvedGap, historyBoundaryBefore,
-  MAX_VISIBLE_MESSAGES, pageWindow, replaceWindow,
+  advanceAppliedSequence,
+  appendLiveWindow,
+  hasMoreNewer,
+  hasNewAppliedMessages,
+  hasUnresolvedGap,
+  historyBoundaryBefore,
+  MAX_VISIBLE_MESSAGES,
+  pageWindow,
+  replaceWindow,
 } from './historyWindow'
 import type { Message } from './model'
 
 function message(sequence: number): Message {
-  return { id: `message-${sequence}`, chatId: 'chat', sequence: String(sequence), senderId: 'user', body: String(sequence), createdAt: '2026-09-26T10:00:00Z' }
+  return {
+    id: `message-${sequence}`,
+    chatId: 'chat',
+    sequence: String(sequence),
+    senderId: 'user',
+    body: String(sequence),
+    createdAt: '2026-09-26T10:00:00Z',
+  }
 }
 
 function range(first: number, last: number): Message[] {
@@ -16,7 +30,8 @@ function range(first: number, last: number): Message[] {
 describe('history window', () => {
   it('loads older and newer pages without retaining more than four pages', () => {
     let window = replaceWindow(range(301, 350))
-    for (const first of [251, 201, 151, 101, 51]) window = pageWindow(window, range(first, first + 49), 'older')
+    for (const first of [251, 201, 151, 101, 51])
+      window = pageWindow(window, range(first, first + 49), 'older')
     expect(window).toHaveLength(MAX_VISIBLE_MESSAGES)
     expect([window[0].sequence, window.at(-1)?.sequence]).toEqual(['51', '250'])
     window = pageWindow(window, range(251, 300), 'newer')

@@ -1,0 +1,293 @@
+import { describe, expect, it, vi } from 'vitest'
+import type { PendingSend } from './model'
+import { SendRequests, type SendRequestAdapters, type SendResult } from './sendRequests'
+
+function id(index: number): string {
+  return String(index).padStart(26, '0')
+}
+const chatId = id(10000)
+const recipientId = id(10001)
+const resolvedChatId = id(10002)
+const messageId = id(10003)
+const draftChatId = `draft:${recipientId}`
+
+function setup(initial: PendingSend[] = []) {
+  const values = new Map<string, string>([['relay.user.device.pending', JSON.stringify(initial)]])
+  const sent: PendingSend[] = []
+  const changes: PendingSend[][] = []
+  const statuses = vi.fn(
+    async (requestIds: string[]): Promise<{ requestId: string; result: SendResult }[]> =>
+      requestIds.map((requestId) => ({ requestId, result: { status: 'UNKNOWN' } })),
+  )
+  const status = vi.fn(async (): Promise<SendResult> => ({ status: 'UNKNOWN' }))
+  let connected = true
+  let time = Date.parse('2026-09-28T10:00:00Z')
+  let nextId = 0
+  const adapters: SendRequestAdapters = {
+    storage: {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => {
+        values.set(key, value)
+      },
+    },
+    statuses,
+    status,
+    send: (send) => {
+      sent.push(send)
+    },
+    isConnected: () => connected,
+    createId: () => id(++nextId),
+    now: () => time,
+    onChange: (sends) => {
+      changes.push(sends)
+    },
+    pause: async () => {},
+  }
+  const requests = new SendRequests('relay.user.device', adapters)
+  return {
+    requests,
+    adapters,
+    values,
+    sent,
+    changes,
+    statuses,
+    status,
+    disconnect: () => {
+      connected = false
+    },
+    connect: () => {
+      connected = true
+    },
+    advanceTime: (milliseconds: number) => {
+      time += milliseconds
+    },
+  }
+}
+
+function pending(
+  requestId: string,
+  status: PendingSend['status'] = 'sending',
+  targetChatId = chatId,
+): PendingSend {
+  return {
+    requestId,
+    chatId: targetChatId,
+    body: 'Hello',
+    createdAt: '2026-09-28T10:00:00Z',
+    status,
+  }
+}
+
+describe('send requests', () => {
+  it('retains reply identity and request fingerprint through storage and unknown retries, then removes deleted-chat intents', async () => {
+    const fixture = setup()
+    fixture.requests.start(chatId, 'A reply', messageId)
+    const original = fixture.sent[0]
+    const reloaded = new SendRequests('relay.user.device', fixture.adapters)
+    await reloaded.reconcile(true)
+    expect(fixture.sent[1]).toMatchObject({
+      requestId: original.requestId,
+      body: 'A reply',
+      replyToMessageId: messageId,
+    })
+    reloaded.forget(chatId)
+    await reloaded.reconcile(true)
+    expect(fixture.sent).toHaveLength(2)
+    expect(reloaded.list()).toEqual([])
+    expect(fixture.values.get('relay.user.device.pending')).toBe('[]')
+  })
+
+  it('counts message limits in Unicode codepoints', () => {
+    const fixture = setup()
+    expect(fixture.requests.start(chatId, '😀'.repeat(4000))).toEqual({ ok: true })
+    expect(fixture.sent[0].body).toBe('😀'.repeat(4000))
+    expect(fixture.requests.start(chatId, '😀'.repeat(4001))).toEqual({ ok: false })
+  })
+
+  it('discards malformed stored requests and deduplicates retries without losing valid work', async () => {
+    const test = setup()
+    const valid = pending(id(1000), 'retryable')
+    test.values.set(
+      'relay.user.device.pending',
+      JSON.stringify([
+        null,
+        'invalid',
+        {},
+        { ...valid, status: 'unexpected' },
+        { ...valid, requestId: 'bad-id' },
+        { ...valid, requestId: id(1001), body: {} },
+        { ...valid, requestId: id(1004), chatId: 'bad-id' },
+        { ...valid, requestId: id(1005), messageId: 'bad-id' },
+        { ...valid, requestId: id(1006), chatId: 'draft:bad-id', recipientId: 'bad-id' },
+        { ...valid, requestId: id(1002), createdAt: 'not a date' },
+        { ...valid, requestId: id(1003), chatId: draftChatId, recipientId: id(10007) },
+        valid,
+        valid,
+      ]),
+    )
+    const requests = new SendRequests('relay.user.device', test.adapters)
+    test.statuses.mockImplementation(async (requestIds) => {
+      if (requestIds.includes('bad-id')) throw new Error('Invalid request IDs')
+      return requestIds.map((requestId) => ({ requestId, result: { status: 'UNKNOWN' } }))
+    })
+    expect(requests.list()).toEqual([valid])
+    await requests.reconcile(true)
+    expect(test.statuses).toHaveBeenCalledWith([id(1000)])
+    expect(test.sent.map((send) => send.requestId)).toEqual([id(1000)])
+  })
+
+  it('persists a request before sending and keeps saved after a late queued frame', () => {
+    const fixture = setup()
+    const send = vi.fn((item: PendingSend) => {
+      expect(JSON.parse(fixture.values.get('relay.user.device.pending') || '[]')).toEqual([item])
+    })
+    const requests = new SendRequests('relay.user.device', {
+      storage: {
+        getItem: (key) => fixture.values.get(key) ?? null,
+        setItem: (key, value) => {
+          fixture.values.set(key, value)
+        },
+      },
+      statuses: fixture.statuses,
+      status: fixture.status,
+      send,
+      isConnected: () => true,
+      createId: () => id(1),
+      now: () => Date.parse('2026-09-28T10:00:00Z'),
+      onChange: () => {},
+    })
+    expect(requests.start(chatId, ' Hello ')).toEqual({ ok: true })
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ requestId: id(1), body: 'Hello' }))
+    expect(requests.saved(id(1), chatId, messageId)).toEqual({ chatId: chatId })
+    requests.queued(id(1))
+    expect(requests.list()).toEqual([
+      expect.objectContaining({ requestId: id(1), messageId, status: 'saved' }),
+    ])
+    expect(JSON.parse(fixture.values.get('relay.user.device.pending') || '[]')).toEqual([])
+  })
+
+  it('checks status before a manual unknown retry and reuses the request ID', async () => {
+    const fixture = setup([pending(id(7), 'retryable')])
+    fixture.status.mockResolvedValue({ status: 'UNKNOWN' })
+    await fixture.requests.retry(id(7))
+    expect(fixture.status).toHaveBeenCalledWith(id(7))
+    expect(fixture.sent).toEqual([expect.objectContaining({ requestId: id(7), body: 'Hello' })])
+    expect(fixture.requests.list()[0]).toEqual(
+      expect.objectContaining({ requestId: id(7), status: 'sending' }),
+    )
+  })
+
+  it('checks unresolved requests in batches of 100 and resolves saved statuses', async () => {
+    const fixture = setup(Array.from({ length: 101 }, (_, index) => pending(id(index))))
+    fixture.statuses.mockImplementation(async (requestIds) =>
+      requestIds.map((requestId) => ({
+        requestId,
+        result: { status: 'SAVED' as const, chatId: chatId, messageId: messageId },
+      })),
+    )
+    const outcomes = await fixture.requests.reconcile()
+    expect(fixture.statuses.mock.calls.map(([requestIds]) => requestIds.length)).toEqual([100, 1])
+    expect(outcomes).toHaveLength(101)
+    expect(fixture.requests.list()).toHaveLength(101)
+    expect(fixture.requests.list().every((send) => send.status === 'saved')).toBe(true)
+    expect(JSON.parse(fixture.values.get('relay.user.device.pending') || '[]')).toEqual([])
+  })
+
+  it('ignores duplicate status and frame results', async () => {
+    const fixture = setup([pending(id(1))])
+    fixture.statuses.mockResolvedValue([
+      { requestId: id(1), result: { status: 'SAVED', chatId: chatId, messageId: messageId } },
+    ])
+    expect(await fixture.requests.reconcile()).toEqual([{ chatId: chatId }])
+    expect(fixture.requests.saved(id(1), chatId, messageId)).toBeUndefined()
+    fixture.requests.queued(id(1))
+    expect(await fixture.requests.reconcile()).toEqual([])
+    expect(fixture.changes).toHaveLength(1)
+  })
+
+  it('reports direct draft resolution from a saved frame and status lookup', async () => {
+    const first = setup([{ ...pending(id(1), 'sending', draftChatId), recipientId: recipientId }])
+    expect(first.requests.saved(id(1), resolvedChatId, messageId)).toEqual({
+      chatId: resolvedChatId,
+      draftChatId: draftChatId,
+    })
+    const second = setup([
+      { ...pending(id(2), 'retryable', draftChatId), recipientId: recipientId },
+    ])
+    second.status.mockResolvedValue({
+      status: 'SAVED',
+      chatId: resolvedChatId,
+      messageId: messageId,
+    })
+    expect(await second.requests.retry(id(2))).toEqual({
+      chatId: resolvedChatId,
+      draftChatId: draftChatId,
+    })
+  })
+
+  it('keeps rejected UI and stored states lowercase after an uppercase lookup result', async () => {
+    const fixture = setup([pending(id(1))])
+    fixture.statuses.mockResolvedValue([
+      { requestId: id(1), result: { status: 'REJECTED', reason: 'NOT_A_MEMBER' } },
+    ])
+    await fixture.requests.reconcile()
+    expect(fixture.requests.list()[0]).toMatchObject({
+      status: 'rejected',
+      reason: 'NOT_A_MEMBER',
+    })
+    expect(JSON.parse(fixture.values.get('relay.user.device.pending') || '[]')[0].status).toBe(
+      'rejected',
+    )
+  })
+
+  it('does not retry a queued request with an unknown status', async () => {
+    const fixture = setup([pending(id(1), 'queued')])
+    await fixture.requests.reconcile(true)
+    expect(fixture.sent).toEqual([])
+    expect(fixture.requests.list()[0].status).toBe('queued')
+  })
+
+  it('keeps reconnect retry intent when a status poll is already in flight', async () => {
+    const fixture = setup([pending(id(1))])
+    let resolveStatus!: (value: { requestId: string; result: SendResult }[]) => void
+    fixture.statuses.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveStatus = resolve
+        }),
+    )
+    const inFlight = fixture.requests.reconcile()
+    expect(await fixture.requests.reconcile(true)).toEqual([])
+    resolveStatus([{ requestId: id(1), result: { status: 'UNKNOWN' } }])
+    await inFlight
+    expect(fixture.sent).toEqual([])
+    await fixture.requests.reconcile()
+    expect(fixture.sent).toEqual([expect.objectContaining({ requestId: id(1) })])
+  })
+
+  it('keeps reconnect retry intent through status backoff', async () => {
+    const fixture = setup([pending(id(1))])
+    fixture.statuses.mockRejectedValueOnce(new Error('Status unavailable'))
+    await fixture.requests.reconcile()
+    await fixture.requests.reconcile(true)
+    fixture.advanceTime(30000)
+    await fixture.requests.reconcile()
+    expect(fixture.sent).toEqual([expect.objectContaining({ requestId: id(1) })])
+  })
+
+  it('keeps retry intent when the socket disconnects before every resend', async () => {
+    const fixture = setup([pending(id(1)), pending(id(2))])
+    fixture.adapters.send = (send) => {
+      fixture.sent.push(send)
+      fixture.disconnect()
+    }
+    await fixture.requests.reconcile(true)
+    expect(fixture.sent.map((send) => send.requestId)).toEqual([id(1)])
+    fixture.connect()
+    fixture.adapters.send = (send) => {
+      fixture.sent.push(send)
+    }
+    await fixture.requests.reconcile()
+    expect(fixture.sent.map((send) => send.requestId)).toEqual([id(1), id(1), id(2)])
+  })
+})

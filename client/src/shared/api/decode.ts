@@ -3,6 +3,7 @@ import type { Session, User } from '../../entities/session/model'
 import { isDateTime, isId, isRecord, isSendRejectionReason, isSequence } from '../lib/validation'
 import type { components } from './generated/schema'
 import { ChatKind } from './generated/socket-vocabulary'
+import { decodeSnapshot, snapshotFields } from './snapshotDecode'
 
 function invalid(): never {
   throw new Error('Invalid response from server')
@@ -181,16 +182,20 @@ export function decodeMessage(
     if (value[key] != null && !isDateTime(value[key])) invalid()
   if (value.deletedAt != null && value.body !== '') invalid()
   if (value.replyToMessageId != null) {
+    const unavailable = ['replySenderId', 'replyBody', 'replyDeleted', 'replyVersion'].every(
+      (key) => value[key] == null,
+    )
     if (
       !isId(value.replyToMessageId) ||
-      !isId(value.replySenderId) ||
-      typeof value.replyBody !== 'string' ||
-      [...value.replyBody].length > 160 ||
-      typeof value.replyDeleted !== 'boolean' ||
-      !isSequence(value.replyVersion) ||
-      value.replyVersion === '0' ||
-      (!value.replyDeleted && value.replyBody === '') ||
-      (value.replyDeleted && value.replyBody !== '')
+      (!unavailable &&
+        (!isId(value.replySenderId) ||
+          typeof value.replyBody !== 'string' ||
+          [...value.replyBody].length > 160 ||
+          typeof value.replyDeleted !== 'boolean' ||
+          !isSequence(value.replyVersion) ||
+          value.replyVersion === '0' ||
+          (!value.replyDeleted && value.replyBody === '') ||
+          (value.replyDeleted && value.replyBody !== '')))
     )
       invalid()
   } else if (
@@ -213,20 +218,48 @@ export function decodeMessage(
 export function decodeHistory(
   value: unknown,
   chatId: string,
-): components['schemas']['MessageHistoryResponse'] {
-  fields(value, ['messages', 'nextSequence', 'hasMore'], ['mutationRevision'])
+): Required<components['schemas']['MessageHistoryResponse']> {
+  fields(value, [
+    'messages',
+    'nextSequence',
+    'hasMore',
+    'coverageAfterSequence',
+    'coverageThroughSequence',
+    ...snapshotFields,
+  ])
   if (
     !Array.isArray(value.messages) ||
+    value.messages.length > 100 ||
     !isSequence(value.nextSequence) ||
+    !isSequence(value.coverageAfterSequence) ||
+    !isSequence(value.coverageThroughSequence) ||
     typeof value.hasMore !== 'boolean'
   )
     invalid()
-  if (value.mutationRevision != null && !isSequence(value.mutationRevision)) invalid()
+  decodeSnapshot(value)
+  if (
+    BigInt(value.coverageAfterSequence as string) >
+      BigInt(value.coverageThroughSequence as string) ||
+    BigInt(value.coverageThroughSequence as string) > BigInt(value.snapshotSequence as string)
+  )
+    invalid()
+  const messages = value.messages.map((message) => decodeMessage(message, chatId))
+  if (
+    messages.some(
+      (message, index) =>
+        BigInt(message.sequence) <= BigInt(value.coverageAfterSequence as string) ||
+        BigInt(message.sequence) > BigInt(value.coverageThroughSequence as string) ||
+        BigInt(message.sequence) <= BigInt(value.clearedThroughSequence as string) ||
+        BigInt(message.sequence) <= BigInt(value.globalClearedThroughSequence as string) ||
+        (index > 0 && BigInt(message.sequence) <= BigInt(messages[index - 1].sequence)),
+    ) ||
+    new Set(messages.map((message) => message.id)).size !== messages.length
+  )
+    invalid()
   return {
     ...value,
-    messages: value.messages.map((message) => decodeMessage(message, chatId)),
-    mutationRevision: value.mutationRevision ?? '0',
-  } as components['schemas']['MessageHistoryResponse']
+    messages,
+  } as Required<components['schemas']['MessageHistoryResponse']>
 }
 
 export type DecodedSendStatus = components['schemas']['SendStatusResponse']

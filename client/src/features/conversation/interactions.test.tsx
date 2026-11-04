@@ -10,7 +10,9 @@ import { ChatKind } from '../../shared/api/generated/socket-vocabulary'
 import { Dialog } from '../../shared/ui/Dialog'
 import { ChatHeader } from '../../widgets/chat-panel/ChatHeader'
 import { MessageComposer } from '../message-send/MessageComposer'
-import { ReaderDialog } from './ReaderDialog'
+import { InlineReaders } from './InlineReaders'
+
+let MessageActionMenu: typeof import('./MessageActionMenu').MessageActionMenu
 
 let dom: JSDOM
 let root: Root
@@ -24,6 +26,7 @@ beforeEach(async () => {
   container = document.createElement('div')
   document.body.append(container)
   const { createRoot } = await import('react-dom/client')
+  MessageActionMenu = (await import('./MessageActionMenu')).MessageActionMenu
   root = createRoot(container)
 })
 afterEach(async () => {
@@ -147,8 +150,7 @@ describe('conversation interactions', () => {
           group={false}
           connected
           onRetry={() => {}}
-          onEdit={() => {}}
-          onDelete={() => {}}
+          onActions={() => {}}
         />,
       ),
     )
@@ -200,6 +202,7 @@ describe('conversation interactions', () => {
       const user = { id: 'alice', username: 'Alice' }
       function Harness() {
         const [open, setOpen] = useState(false)
+        const [anchor, setAnchor] = useState<HTMLElement | null>(null)
         return (
           <>
             {kind === 'message' ? (
@@ -210,7 +213,7 @@ describe('conversation interactions', () => {
                 group={false}
                 connected
                 onRetry={() => {}}
-                onDelete={() => setOpen(true)}
+                onActions={(_message, target) => setAnchor(target)}
               />
             ) : (
               <ChatHeader
@@ -228,6 +231,18 @@ describe('conversation interactions', () => {
                 onDelete={() => setOpen(true)}
               />
             )}
+            {anchor && (
+              <MessageActionMenu
+                message={message('1')}
+                anchor={anchor}
+                keyboard={false}
+                mine
+                onReply={() => {}}
+                onDelete={() => setOpen(true)}
+                onSelect={() => {}}
+                onClose={() => setAnchor(null)}
+              />
+            )}
             {open && (
               <Dialog title="Confirm deletion" onClose={() => setOpen(false)}>
                 Delete?
@@ -237,13 +252,17 @@ describe('conversation interactions', () => {
         )
       }
       await act(async () => root.render(<Harness />))
-      const trigger = container.querySelector<HTMLButtonElement>(
-        kind === 'message' ? '.message-action-trigger' : '[aria-label="Chat actions"]',
+      const trigger = container.querySelector<HTMLElement>(
+        kind === 'message' ? '[data-message-id]' : '[aria-label="Chat actions"]',
       )!
-      await act(async () => trigger.click())
-      const remove = container.querySelector<HTMLButtonElement>(
-        '.message-action-menu .danger-text',
-      )!
+      await act(async () => {
+        if (kind === 'message')
+          trigger.dispatchEvent(
+            new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+          )
+        else trigger.click()
+      })
+      const remove = document.querySelector<HTMLButtonElement>('.message-action-menu .danger-text')!
       remove.focus()
       await act(async () => remove.click())
       expect(container.querySelector('[role="dialog"]')).not.toBeNull()
@@ -257,7 +276,34 @@ describe('conversation interactions', () => {
     },
   )
 
-  it('shows server read timestamps, paginates once and expires an open details dialog by message creation age', async () => {
+  it('shows an unavailable quote without exposing a missing target as an empty jump button', async () => {
+    const quoted = {
+      ...message('2'),
+      replyToMessageId: 'hidden-target',
+      replySenderId: null,
+      replyBody: null,
+      replyDeleted: null,
+      replyVersion: null,
+    }
+    await act(async () =>
+      root.render(
+        <MessageItem
+          message={quoted}
+          mine={false}
+          sender="Bob"
+          group={false}
+          connected
+          onRetry={vi.fn()}
+        />,
+      ),
+    )
+    expect(container.querySelector('.message-quote')?.textContent).toContain(
+      'Original message unavailable',
+    )
+    expect(container.querySelector<HTMLButtonElement>('.message-quote')?.disabled).toBe(true)
+  })
+
+  it('shows server read timestamps, paginates once and expires inline timestamps by message creation age', async () => {
     vi.useFakeTimers()
     const now = '2026-11-04T10:00:00Z'
     const first: ReaderPage = {
@@ -275,9 +321,7 @@ describe('conversation interactions', () => {
         readers: [{ userId: 'reader-2', username: 'Carol', readAt: '2026-11-04T09:45:00Z' }],
         nextUserId: null,
       })
-    await act(async () =>
-      root.render(<ReaderDialog message={message('1')} load={load} onClose={() => {}} />),
-    )
+    await act(async () => root.render(<InlineReaders message={message('1')} load={load} />))
     expect(container.querySelector('time')?.dateTime).toBe('2026-11-04T09:30:00Z')
     const more = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
       (button) => button.textContent === 'More readers',
@@ -315,21 +359,18 @@ describe('conversation interactions', () => {
           : Promise.resolve(page),
       )
       const original = message('1')
-      await act(async () =>
-        root.render(<ReaderDialog message={original} load={load} onClose={() => {}} />),
-      )
+      await act(async () => root.render(<InlineReaders message={original} load={load} />))
       if (!pending) expect(container.querySelectorAll('time')).toHaveLength(1)
       await act(async () =>
         root.render(
-          <ReaderDialog
+          <InlineReaders
             message={{ ...original, deletedAt: '2026-11-04T10:00:00Z', body: '' }}
             load={load}
-            onClose={() => {}}
           />,
         ),
       )
       if (pending) await act(async () => resolve(page))
-      expect(container.textContent).toContain('Read details are unavailable for deleted messages.')
+      expect(container.textContent).toContain('Read times are unavailable for deleted messages.')
       expect(container.querySelectorAll('time')).toHaveLength(0)
       expect(container.textContent).not.toContain('More readers')
       expect(container.textContent).not.toContain('Loading readers')

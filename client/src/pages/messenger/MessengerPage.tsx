@@ -48,7 +48,9 @@ export function MessengerPage({ session, onSignOut, onSessionRevoked }: Props) {
         chat={selected}
         features={messenger.features}
         detached={messenger.detached}
-        onDeleteChat={messenger.deleteChat}
+        readingLocation={messenger.location}
+        locationRevision={messenger.locationRevision}
+        onLocationChange={messenger.rememberLocation}
         currentUser={session.user}
         messages={selected ? messenger.messages[selected.id] || [] : []}
         pending={messenger.pending}

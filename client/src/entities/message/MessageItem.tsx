@@ -1,14 +1,5 @@
-import {
-  Check,
-  CheckCheck,
-  CircleAlert,
-  Clock3,
-  CornerUpLeft,
-  MoreHorizontal,
-  Pencil,
-  Trash2,
-} from 'lucide-react'
-import { useRef, useState } from 'react'
+import { Check, CheckCheck, CircleAlert, Clock3, CornerUpLeft } from 'lucide-react'
+import { useRef } from 'react'
 import { formatMessageTime } from '../../shared/lib/time'
 import type { Message, PendingSend } from './model'
 
@@ -21,19 +12,21 @@ interface Props {
   connected: boolean
   onRetry: (requestId: string) => void
   read?: boolean
-  onReaders?: (message: Message) => void
+  onActions?: (message: Message, anchor: HTMLElement, keyboard: boolean) => void
   onReply?: (message: Message) => void
-  onEdit?: (message: Message) => void
-  onDelete?: (message: Message) => void
   onQuote?: (messageId: string, keyboard: boolean) => void
   quoteSender?: string
   quoteLoading?: boolean
   highlighted?: boolean
+  runStart?: boolean
+  runEnd?: boolean
+  selectionMode?: boolean
+  selected?: boolean
 }
 
-function SendStateIcon({ state }: { state: PendingSend['status'] }) {
+function SendStateIcon({ state, read }: { state: PendingSend['status']; read?: boolean }) {
   if (state === 'rejected' || state === 'retryable') return <CircleAlert size={13} />
-  if (state === 'saved') return <Check size={13} />
+  if (state === 'saved') return read ? <CheckCheck size={15} /> : <Check size={13} />
   return <Clock3 size={13} />
 }
 
@@ -46,42 +39,99 @@ export function MessageItem({
   connected,
   onRetry,
   read,
-  onReaders,
+  onActions,
   onReply,
-  onEdit,
-  onDelete,
   onQuote,
   quoteSender,
   quoteLoading,
   highlighted,
+  runStart = true,
+  runEnd = true,
+  selectionMode = false,
+  selected = false,
 }: Props) {
-  const [menu, setMenu] = useState(false)
-  const actionsRef = useRef<HTMLButtonElement>(null)
+  const bubbleRef = useRef<HTMLDivElement>(null)
+  const pointer = useRef({ x: 0, y: 0, moved: false })
   const state = send?.status || (mine ? 'saved' : undefined)
   const timestamp = useRef(send?.createdAt ?? message?.createdAt ?? '')
   const statusLabel =
     state === 'saved'
-      ? 'Sent'
+      ? read
+        ? 'Read by another member'
+        : 'Sent'
       : state === 'rejected' || state === 'retryable'
         ? 'Not sent'
         : 'Pending'
   const deleted = Boolean(message?.deletedAt)
+  const unavailableQuote = Boolean(
+    message?.replyToMessageId &&
+    (message.replyDeleted || message.replySenderId == null || message.replyBody == null),
+  )
+  function openActions(keyboard: boolean) {
+    if (message && !deleted && !selectionMode && bubbleRef.current)
+      onActions?.(message, bubbleRef.current, keyboard)
+  }
   return (
     <div
-      className={`message-row ${mine ? 'mine' : ''} ${highlighted ? 'message-revealed' : ''}`}
+      className={`message-row ${mine ? 'mine' : ''} ${highlighted ? 'message-revealed' : ''} ${runStart ? 'run-start' : 'run-continued'} ${runEnd ? 'run-end' : ''} ${selected ? 'message-selected' : ''}`}
       data-message-id={message?.id}
-      tabIndex={-1}
+      data-message-sequence={message?.sequence}
+      tabIndex={message && !deleted ? 0 : -1}
+      role={selectionMode && message && !deleted ? 'checkbox' : undefined}
+      aria-checked={selectionMode && message && !deleted ? selected : undefined}
+      aria-label={message && !deleted ? `Message from ${sender}` : undefined}
+      aria-haspopup={!selectionMode && onActions && !deleted ? 'menu' : undefined}
+      onKeyDown={(event) => {
+        if (event.target !== event.currentTarget || selectionMode) return
+        if (
+          ['Enter', ' ', 'ContextMenu'].includes(event.key) ||
+          (event.key === 'F10' && event.shiftKey)
+        ) {
+          event.preventDefault()
+          openActions(true)
+        }
+      }}
     >
-      {!mine && <span className="message-avatar">{sender[0]?.toUpperCase()}</span>}
+      {selectionMode && message && !deleted && (
+        <span className="message-selection-mark" aria-hidden="true">
+          {selected && <Check size={14} />}
+        </span>
+      )}
+      {!mine && (
+        <span className={`message-avatar ${runEnd ? '' : 'avatar-spacer'}`} aria-hidden="true">
+          {sender[0]?.toUpperCase()}
+        </span>
+      )}
       <div className="message-stack">
-        {group && !mine && <span className="message-sender">{sender}</span>}
+        {group && !mine && runStart && <span className="message-sender">{sender}</span>}
         <div
+          ref={bubbleRef}
           className={`message-bubble ${deleted ? 'message-deleted' : ''} ${send?.status === 'rejected' || send?.status === 'retryable' ? 'rejected' : ''}`}
+          onPointerDown={(event) => {
+            pointer.current = { x: event.clientX, y: event.clientY, moved: false }
+          }}
+          onPointerMove={(event) => {
+            if (
+              event.buttons &&
+              Math.hypot(event.clientX - pointer.current.x, event.clientY - pointer.current.y) > 5
+            )
+              pointer.current.moved = true
+          }}
+          onClick={(event) => {
+            if ((event.target as HTMLElement).closest('button, a') || event.detail > 1) return
+            if (pointer.current.moved || window.getSelection()?.toString()) return
+            openActions(false)
+          }}
+          onDoubleClick={(event) => {
+            if (selectionMode || !message || deleted) return
+            if (pointer.current.moved || (event.target as HTMLElement).closest('button, a')) return
+            onReply?.(message)
+          }}
         >
           {message?.replyToMessageId && !deleted && (
             <button
               className="message-quote"
-              disabled={quoteLoading}
+              disabled={quoteLoading || unavailableQuote}
               onClick={(event) => onQuote?.(message.replyToMessageId!, event.detail === 0)}
               aria-label={`Show original message from ${quoteSender ?? 'Member'}`}
             >
@@ -89,10 +139,12 @@ export function MessageItem({
                 <CornerUpLeft size={12} />
                 {quoteLoading ? 'Finding original…' : (quoteSender ?? 'Member')}
               </strong>
-              <span>{message.replyDeleted ? 'Message deleted' : message.replyBody}</span>
+              <span>{unavailableQuote ? 'Original message unavailable' : message.replyBody}</span>
             </button>
           )}
-          <span>{message ? (deleted ? 'Message deleted' : message.body) : send?.body}</span>
+          <span className="message-text">
+            {message ? (deleted ? 'Message deleted' : message.body) : send?.body}
+          </span>
         </div>
         <div className="message-meta">
           <time dateTime={timestamp.current} title={new Date(timestamp.current).toLocaleString()}>
@@ -106,84 +158,10 @@ export function MessageItem({
               aria-label={statusLabel}
               title={statusLabel}
             >
-              <SendStateIcon state={state} />
+              <SendStateIcon state={state} read={read} />
             </span>
           )}
-          {mine && message && !deleted && (
-            <button
-              className={`read-receipt ${read ? 'is-read' : ''}`}
-              onClick={() => onReaders?.(message)}
-              aria-label={read ? 'Read, view details' : 'View read details'}
-            >
-              {read && <CheckCheck size={14} />}
-              <span>{read ? 'Read' : 'Read details'}</span>
-            </button>
-          )}
         </div>
-        {message && !deleted && (onReply || onEdit || onDelete) && (
-          <div
-            className="message-actions"
-            onKeyDown={(event) => {
-              if (event.key === 'Escape') {
-                event.stopPropagation()
-                setMenu(false)
-                actionsRef.current?.focus()
-              }
-            }}
-            onBlur={(event) => {
-              if (!event.currentTarget.contains(event.relatedTarget)) setMenu(false)
-            }}
-          >
-            <button
-              ref={actionsRef}
-              className="message-action-trigger"
-              aria-label={`Actions for ${mine ? 'your message' : `message from ${sender}`}`}
-              aria-expanded={menu}
-              onClick={() => setMenu(!menu)}
-            >
-              <MoreHorizontal size={17} />
-            </button>
-            {menu && (
-              <div className="message-action-menu">
-                {onReply && (
-                  <button
-                    onClick={() => {
-                      setMenu(false)
-                      onReply(message)
-                    }}
-                  >
-                    <CornerUpLeft size={14} />
-                    Reply
-                  </button>
-                )}
-                {mine && onEdit && (
-                  <button
-                    onClick={() => {
-                      setMenu(false)
-                      onEdit(message)
-                    }}
-                  >
-                    <Pencil size={14} />
-                    Edit
-                  </button>
-                )}
-                {mine && onDelete && (
-                  <button
-                    className="danger-text"
-                    onClick={() => {
-                      setMenu(false)
-                      actionsRef.current?.focus()
-                      onDelete(message)
-                    }}
-                  >
-                    <Trash2 size={14} />
-                    Delete
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-        )}
         {send?.status === 'rejected' && (
           <div className="rejection-reason">
             {send.reason || 'This message could not be saved.'}

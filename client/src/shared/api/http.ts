@@ -1,3 +1,4 @@
+import type { DeleteScope, DeleteTarget } from '../../entities/message/historySnapshot'
 import type { Session } from '../../entities/session/model'
 import { isRecord } from '../lib/validation'
 import {
@@ -18,9 +19,12 @@ import {
 import {
   decodeAround,
   decodeChanges,
+  decodeDeletion,
   decodeReadProgress,
   decodeReaders,
   decodeReads,
+  decodeResolved,
+  decodeVisibility,
 } from './featureDecode'
 import type { components, paths } from './generated/schema'
 
@@ -46,6 +50,10 @@ const routes = {
   around: '/v1/chats/{id}/messages/around',
   changes: '/v1/chats/{id}/messages/changes',
   message: '/v1/chats/{id}/messages/{messageId}',
+  visibility: '/v1/chats/{id}/visibility',
+  resolveMessages: '/v1/chats/{id}/messages/resolve',
+  deletions: '/v1/chats/{id}/deletions',
+  deletion: '/v1/chats/{id}/deletions/{operationId}',
   reads: '/v1/chats/{id}/reads',
   messageReads: '/v1/chats/{id}/messages/{messageId}/reads',
   sendStatus: '/v1/sends/{requestId}',
@@ -233,11 +241,71 @@ export const api = {
           (value) => decodeHistory(value, chatId),
         )
       },
-      aroundMessage(chatId: string, messageId: string) {
+      aroundMessage(chatId: string, messageId?: string, anchorSequence?: string) {
         return authenticated(
-          endpoint(routes.around, { id: chatId }, { messageId, limit: 50 }),
+          endpoint(
+            routes.around,
+            { id: chatId },
+            {
+              ...(messageId ? { messageId } : {}),
+              ...(anchorSequence ? { anchorSequence } : {}),
+              limit: 50,
+            },
+          ),
           (value) => decodeAround(value, chatId),
         )
+      },
+      visibility(chatId: string) {
+        return authenticated(endpoint(routes.visibility, { id: chatId }), decodeVisibility)
+      },
+      resolveMessages(chatId: string, messageIds: string[]) {
+        if (messageIds.length > 100 || new Set(messageIds).size !== messageIds.length)
+          throw new Error('Choose at most 100 messages')
+        return authenticated(
+          endpoint(routes.resolveMessages, { id: chatId }),
+          (value) => {
+            const page = decodeResolved(value, chatId)
+            if (page.messages.some((message) => !messageIds.includes(message.id)))
+              throw new Error('Invalid response from server')
+            return page
+          },
+          { method: 'POST', body: JSON.stringify({ messageIds }) },
+        )
+      },
+      delete(
+        chatId: string,
+        requestId: string,
+        scope: DeleteScope,
+        target: DeleteTarget,
+        messageIds?: string[],
+      ) {
+        const body: components['schemas']['DeletionRequest'] = {
+          requestId,
+          scope,
+          target,
+          ...(messageIds ? { messageIds } : {}),
+        }
+        return authenticated(
+          endpoint(routes.deletions, { id: chatId }),
+          (value) => {
+            const result = decodeDeletion(value)
+            if (
+              result.operationId !== requestId ||
+              result.scope !== scope ||
+              result.target !== target
+            )
+              throw new Error('Invalid response from server')
+            return result
+          },
+          { method: 'POST', body: JSON.stringify(body) },
+        )
+      },
+      deletion(chatId: string, operationId: string) {
+        return authenticated(endpoint(routes.deletion, { id: chatId, operationId }), (value) => {
+          const result = decodeDeletion(value)
+          if (result.operationId !== operationId) throw new Error('Invalid response from server')
+          return result
+        })
       },
       messageChanges(chatId: string, afterRevision: string) {
         return authenticated(

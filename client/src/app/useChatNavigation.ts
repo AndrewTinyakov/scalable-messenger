@@ -38,8 +38,6 @@ export function useChatNavigation({
   listChats,
   rememberChat,
   refreshChats,
-  leaveHistory,
-  catchUp,
   setError,
 }: Options) {
   const { path, navigate, allowDefaultSelection } = location
@@ -49,12 +47,10 @@ export function useChatNavigation({
     (chatId: string, replaceLocation = false) => {
       const chat = listChats().find((item) => item.id === chatId)
       if (chat) navigate(chatPath(chat, session.user.id), replaceLocation)
-      leaveHistory(chatId)
       selectedRef.current = chatId
       setSelectedId(chatId)
-      void catchUp(chatId, true)
     },
-    [catchUp, leaveHistory, listChats, navigate, session.user.id],
+    [listChats, navigate, session.user.id],
   )
 
   const createDirect = useCallback(

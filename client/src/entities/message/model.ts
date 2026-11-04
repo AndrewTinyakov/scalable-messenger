@@ -55,7 +55,9 @@ export function mergeMessages(current: Message[], incoming: Message[]): Message[
         ? message
         : previous
     const preview =
-      previous && BigInt(previous.replyVersion ?? '0') > BigInt(message.replyVersion ?? '0')
+      previous &&
+      message.replySenderId != null &&
+      BigInt(previous.replyVersion ?? '0') > BigInt(message.replyVersion ?? '0')
         ? previous
         : message
     byId.set(
@@ -82,7 +84,11 @@ export function mergeMessages(current: Message[], incoming: Message[]): Message[
   }
   for (const [id, message] of byId) {
     const target = message.replyToMessageId ? byId.get(message.replyToMessageId) : undefined
-    if (target && BigInt(target.messageVersion ?? '1') >= BigInt(message.replyVersion ?? '0'))
+    if (
+      target &&
+      message.replyVersion != null &&
+      BigInt(target.messageVersion ?? '1') >= BigInt(message.replyVersion)
+    )
       byId.set(id, {
         ...message,
         replySenderId: target.senderId,

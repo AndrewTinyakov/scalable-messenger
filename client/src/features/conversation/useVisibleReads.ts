@@ -17,14 +17,15 @@ export function useVisibleReads(
   chatId: string | undefined,
   through: string,
   onRead?: (sequence: string) => void,
+  isSettled?: () => boolean,
 ) {
   const candidates = new Map(
     messages
       .filter((message) => message.senderId !== userId)
       .map((message) => [message.id, message]),
   )
-  const current = useRef({ candidates, through, onRead })
-  current.current = { candidates, through, onRead }
+  const current = useRef({ candidates, through, onRead, isSettled })
+  current.current = { candidates, through, onRead, isSettled }
   const rescan = useRef<() => void>()
   const enabled = Boolean(onRead)
   useEffect(() => {
@@ -33,7 +34,10 @@ export function useVisibleReads(
     let reportedThrough = '0'
     const timers = new Map<string, ReturnType<typeof setTimeout>>()
     const observed = new Set<HTMLElement>()
-    const active = () => document.visibilityState === 'visible' && document.hasFocus()
+    const active = () =>
+      document.visibilityState === 'visible' &&
+      document.hasFocus() &&
+      (current.current.isSettled?.() ?? true)
     const visible = (row: HTMLElement) =>
       viewport.contains(row) &&
       active() &&

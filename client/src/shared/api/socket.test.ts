@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { decodeSocketEvent, sendSocketFrame } from './socket'
 
@@ -48,6 +49,37 @@ describe('socket output', () => {
 })
 
 describe('socket event decoding', () => {
+  it.each(['history-changed', 'message-saved-reply-identity'])(
+    'accepts the shared %s fixture and rejects malformed snapshot fields',
+    (name) => {
+      const fixture = {
+        ...JSON.parse(
+          readFileSync(
+            new URL(`../../../../contracts/fixtures/valid/${name}.json`, import.meta.url),
+            'utf8',
+          ),
+        ),
+        epoch: 'epoch',
+        streamId: '1-0',
+      } as Record<string, unknown>
+      expect(decodeSocketEvent(JSON.stringify(fixture))).toEqual(fixture)
+      if (name === 'history-changed')
+        for (const field of ['sequence', 'mutationRevision', 'visibilityRevision']) {
+          expect(decodeSocketEvent(JSON.stringify({ ...fixture, [field]: undefined }))).toBeNull()
+          expect(
+            decodeSocketEvent(JSON.stringify({ ...fixture, [field]: '9223372036854775808' })),
+          ).toBeNull()
+        }
+      else
+        for (const fields of [
+          { replyBody: 'partial quote' },
+          { replySenderId: id },
+          { replyDeleted: true },
+          { replyVersion: '1' },
+        ])
+          expect(decodeSocketEvent(JSON.stringify({ ...fixture, ...fields }))).toBeNull()
+    },
+  )
   it('preserves message text and lossless chat sequences from a valid saved event', () => {
     expect(decodeSocketEvent(JSON.stringify(message))).toEqual(message)
   })

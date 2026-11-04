@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Chat } from '../../entities/chat/model'
 import type { ChatRecovery } from '../../entities/message/chatRecovery'
-import { mergeMessages, type Message } from '../../entities/message/model'
+import type { DeleteScope, DeleteTarget } from '../../entities/message/historySnapshot'
+import { type Message } from '../../entities/message/model'
 import type { api } from '../../shared/api/http'
 import type { OutgoingSocketFrame, PresenceStatus, SocketEvent } from '../../shared/api/socket'
+import { createUlid } from '../../shared/lib/id'
 import { MutationRecovery } from './mutationRecovery'
 
 type SessionApi = ReturnType<typeof api.forSession>
@@ -14,6 +16,7 @@ interface Options {
   sessionApi: SessionApi
   send(frame: OutgoingSocketFrame): void
   remove(chatId: string): void
+  hide?(chatId: string): void
   fail(message: string): void
 }
 
@@ -42,48 +45,16 @@ export function useConversationFeatures(options: Options) {
   const reconcileRef = useRef<MutationRecovery | null>(null)
   if (!reconcileRef.current)
     reconcileRef.current = new MutationRecovery({
-      changes: (chatId, after) => optionsRef.current.sessionApi.messageChanges(chatId, after),
+      changes: (chatId, after) =>
+        optionsRef.current.recovery.fetchChanges(chatId, () =>
+          optionsRef.current.sessionApi.messageChanges(chatId, after),
+        ),
       patch: (chatId, messages) => optionsRef.current.recovery.patch(chatId, messages),
+      apply: (chatId, changes, snapshot) =>
+        optionsRef.current.recovery.applyChanges(chatId, changes, snapshot),
       reset: async (chatId) => {
-        const current = optionsRef.current
-        const generation = scope.current
-        const active = current.recovery.visibleWindows()[chatId] ?? []
-        return (
-          (await current.recovery.withHistorySnapshot(
-            chatId,
-            async () => {
-              const requests = [current.sessionApi.latestMessages(chatId)]
-              if (active.length)
-                for (let index = 0; index < active.length; index += 50)
-                  requests.push(
-                    current.sessionApi.messages(
-                      chatId,
-                      (BigInt(active[index].sequence) - 1n).toString(),
-                      50,
-                    ),
-                  )
-              const pages = await Promise.all(requests)
-              return {
-                messages: mergeMessages(
-                  [],
-                  pages.flatMap((page) => page.messages),
-                ),
-                mutationRevision: pages.reduce(
-                  (min, page) =>
-                    BigInt(page.mutationRevision ?? '0') < BigInt(min)
-                      ? (page.mutationRevision ?? '0')
-                      : min,
-                  pages[0].mutationRevision ?? '0',
-                ),
-              }
-            },
-            (page) => {
-              if (generation !== scope.current || optionsRef.current.chat?.id !== chatId) return '0'
-              current.recovery.patch(chatId, page.messages)
-              return page.mutationRevision
-            },
-          )) ?? '0'
-        )
+        await optionsRef.current.recovery.synchronize(chatId)
+        return optionsRef.current.recovery.mutationRevision(chatId)
       },
     })
   const chatId = options.chat?.id.startsWith('draft:') ? undefined : options.chat?.id
@@ -208,6 +179,7 @@ export function useConversationFeatures(options: Options) {
       void refreshReads()
       void flushRead()
       void reconcileRef.current!.refresh().catch(() => {})
+      void optionsRef.current.recovery.synchronize(chatId)
     }
     refresh()
     const timer = window.setInterval(refresh, 12000 + Math.random() * 3000)
@@ -226,23 +198,22 @@ export function useConversationFeatures(options: Options) {
   const onEvent = useCallback(
     (event: SocketEvent): boolean => {
       const current = optionsRef.current
+      if (event.type === 'history_changed') {
+        void current.recovery.synchronize(event.chatId, {
+          snapshotSequence: event.sequence,
+          mutationRevision: event.mutationRevision,
+          visibilityRevision: event.visibilityRevision,
+        })
+        return true
+      }
       if (event.type === 'chat_deleted') {
         current.remove(event.chatId)
         return true
       }
       if (event.type === 'message_changed') {
-        const {
-          type: _type,
-          eventId: _event,
-          room: _room,
-          epoch: _epoch,
-          streamId: _stream,
-          version: _version,
-          mutationRevision: _mutation,
-          messageId,
-          ...message
-        } = event
-        current.recovery.patch(event.chatId, [{ ...message, id: messageId }])
+        void current.recovery.synchronize(event.chatId, {
+          mutationRevision: event.mutationRevision,
+        })
         return true
       }
       if (event.type === 'reads_changed') {
@@ -310,9 +281,9 @@ export function useConversationFeatures(options: Options) {
         id,
         () => current.sessionApi.aroundMessage(id, messageId),
         (page) => {
-          if (generation !== scope.current || page.anchorMessageId !== messageId) return
-          if (current.recovery.reveal(id, page.messages, revision))
-            setReveal({ messageId, revision, focus })
+          if (generation !== scope.current || !page.anchorMessageId) return
+          if (current.recovery.reveal(id, page.messages, revision, page))
+            setReveal({ messageId: page.anchorMessageId, revision, focus })
         },
       )
     } catch (cause) {
@@ -348,13 +319,62 @@ export function useConversationFeatures(options: Options) {
       mutationBusy.current.delete(message.id)
     }
   }, [])
-  const deleteChat = useCallback(async (chatId: string) => {
-    const current = optionsRef.current
-    await current.sessionApi.deleteChat(chatId)
-    current.remove(chatId)
-  }, [])
+  const deletionRequests = useRef(new Map<string, string>())
+  const deletion = useCallback(
+    async (target: DeleteTarget, scope: DeleteScope, messages?: Message[]) => {
+      const current = optionsRef.current
+      const id = current.chat?.id
+      if (!id || id.startsWith('draft:')) throw new Error('Choose a saved chat')
+      const ids = messages ? [...new Set(messages.map((message) => message.id))].sort() : undefined
+      if (
+        target === 'MESSAGES' &&
+        (!ids?.length || ids.length > 100 || messages?.some((message) => message.chatId !== id))
+      )
+        throw new Error('Choose up to 100 messages from this chat')
+      const key = JSON.stringify([id, scope, target, ids])
+      const requestId = deletionRequests.current.get(key) ?? createUlid()
+      deletionRequests.current.set(key, requestId)
+      if (deletionRequests.current.size > 100)
+        deletionRequests.current.delete(deletionRequests.current.keys().next().value!)
+      const result = await current.sessionApi.delete(id, requestId, scope, target, ids)
+      deletionRequests.current.delete(key)
+      current.recovery.observe(id, {
+        mutationRevision: result.mutationRevision,
+        visibilityRevision: result.visibilityRevision,
+        ...(scope === 'SELF'
+          ? { clearedThroughSequence: result.clearedThroughSequence }
+          : { globalClearedThroughSequence: result.clearedThroughSequence }),
+      })
+      if (target === 'CHAT' && scope === 'EVERYONE') current.remove(id)
+      else {
+        await current.recovery.synchronize(id)
+        if (target === 'CHAT') current.hide?.(id)
+      }
+    },
+    [],
+  )
+  const deleteChat = useCallback((scope: DeleteScope) => deletion('CHAT', scope), [deletion])
+  const clearHistory = useCallback((scope: DeleteScope) => deletion('HISTORY', scope), [deletion])
+  const deleteMessages = useCallback(
+    (messages: Message[], scope: DeleteScope) => deletion('MESSAGES', scope, messages),
+    [deletion],
+  )
+
   return {
+    revisionKey: chatId ? options.recovery.revisionKey(chatId) : '0:0',
+    resolveTarget: useCallback(async (messageId: string) => {
+      const current = optionsRef.current
+      const id = current.chat?.id
+      const generation = scope.current
+      if (!id || id.startsWith('draft:')) return undefined
+      const message = await current.recovery.resolveTarget(id, messageId)
+      if (generation !== scope.current)
+        throw new Error('Conversation changed while loading the message')
+      return message
+    }, []),
     deleteChat,
+    clearHistory,
+    deleteMessages,
     presence: options.connected ? presence : {},
     watchMembers: useCallback(
       (ids: string[] | null) =>

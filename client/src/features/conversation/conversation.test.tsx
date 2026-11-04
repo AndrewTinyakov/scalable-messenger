@@ -194,6 +194,23 @@ describe('selected conversation features', () => {
       after: async () => ({ messages: [], nextSequence: '1000000', hasMore: false }),
     }).recovery
     const service = {
+      delete: vi.fn(
+        async (
+          _id: string,
+          requestId: string,
+          scope: 'SELF' | 'EVERYONE',
+          target: 'MESSAGES' | 'HISTORY' | 'CHAT',
+        ) => ({
+          operationId: requestId,
+          scope,
+          target,
+          clearedThroughSequence: '0',
+          mutationRevision: '1',
+          visibilityRevision: '1',
+          state: 'COMPLETED' as const,
+          deletedRows: '1',
+        }),
+      ),
       reads: vi.fn(async () => ({
         throughSequence: '0',
         maxOtherReadSequence: '0',
@@ -266,6 +283,37 @@ describe('selected conversation features', () => {
       root.render(<fixture.Harness connected={false} />)
     })
     expect(fixture.get().presence).toEqual({})
+    fixture.recovery.dispose()
+  })
+  it('retains the deletion request identity after an uncertain response and bounds selected messages', async () => {
+    const fixture = setup()
+    fixture.service.delete.mockRejectedValueOnce(new Error('Connection lost'))
+    await act(async () => root.render(<fixture.Harness />))
+    await act(async () => {
+      await expect(fixture.get().deleteMessages([message('1')], 'SELF')).rejects.toThrow(
+        'Connection lost',
+      )
+    })
+    await act(async () => fixture.get().deleteMessages([message('1')], 'SELF'))
+    expect(fixture.service.delete).toHaveBeenCalledTimes(2)
+    expect(fixture.service.delete.mock.calls[0]).toEqual(fixture.service.delete.mock.calls[1])
+    expect(fixture.service.delete.mock.calls[1]).toMatchObject([
+      'chat',
+      expect.any(String),
+      'SELF',
+      'MESSAGES',
+      ['message-1'],
+    ])
+    await expect(
+      fixture.get().deleteMessages(
+        Array.from({ length: 101 }, (_, index) => message(String(index + 1))),
+        'EVERYONE',
+      ),
+    ).rejects.toThrow('Choose up to 100')
+    await expect(
+      fixture.get().deleteMessages([{ ...message('2'), chatId: 'other' }], 'SELF'),
+    ).rejects.toThrow('Choose up to 100')
+    expect(fixture.service.delete).toHaveBeenCalledTimes(2)
     fixture.recovery.dispose()
   })
   it('resolves an uncached million-sequence reply with one request and emits no human read-through', async () => {

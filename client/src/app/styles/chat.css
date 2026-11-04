@@ -404,33 +404,6 @@
   outline-color: #d38b58;
   background: #efc89118;
 }
-.message-actions {
-  position: absolute;
-  top: 1px;
-  left: calc(100% + 5px);
-  z-index: 3;
-}
-.mine .message-actions {
-  right: calc(100% + 5px);
-  left: auto;
-}
-.message-action-trigger {
-  display: grid;
-  place-items: center;
-  width: 29px;
-  height: 29px;
-  padding: 0;
-  border: 0;
-  border-radius: 9px;
-  background: #eeeee5;
-  color: #79816e;
-  opacity: 0;
-}
-.message-row:hover .message-action-trigger,
-.message-row:focus-within .message-action-trigger,
-.message-action-trigger[aria-expanded='true'] {
-  opacity: 1;
-}
 .message-action-menu {
   position: absolute;
   top: 32px;
@@ -504,23 +477,6 @@
   background: #f0eee7;
   color: #878b7e;
   font-style: italic;
-}
-.read-receipt {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  min-height: 24px;
-  padding: 0 2px;
-  border: 0;
-  background: transparent;
-  color: #868d7c;
-  font-size: 10px;
-}
-.read-receipt.is-read {
-  color: #587d5b;
-}
-.read-receipt:hover {
-  text-decoration: underline;
 }
 .fixed-latest-wrap {
   display: flex;
@@ -666,13 +622,6 @@ button:focus-visible {
   outline: 2px solid #c47b53;
   outline-offset: 3px;
 }
-@media (hover: none), (pointer: coarse) {
-  .message-action-trigger {
-    opacity: 1;
-    min-width: 32px;
-    min-height: 32px;
-  }
-}
 @media (max-width: 600px) {
   .chat-header .connection-pill {
     padding: 7px;
@@ -699,4 +648,149 @@ button:focus-visible {
     transition: none;
     animation: none;
   }
+}
+.message-row {
+  margin: 3px 0;
+  padding: 2px 0;
+}
+.message-row.run-start {
+  margin-top: 18px;
+}
+.message-row:not(.run-end) .message-bubble,
+.message-row.mine:not(.run-end) .message-bubble {
+  border-radius: 12px;
+}
+.message-row.run-end .message-bubble {
+  border-bottom-left-radius: 3px;
+}
+.message-row.mine.run-end .message-bubble {
+  border-bottom-left-radius: 12px;
+  border-bottom-right-radius: 3px;
+}
+.message-avatar.avatar-spacer {
+  visibility: hidden;
+}
+.message-row.message-selected {
+  background: #dfe8d9a6;
+  outline-color: #dfe8d9a6;
+}
+.message-selection-mark {
+  position: absolute;
+  left: -22px;
+  top: calc(50% - 9px);
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid #a4b49b;
+  border-radius: 50%;
+  background: #fffefa;
+  color: white;
+}
+.message-selected .message-selection-mark {
+  border-color: #53715d;
+  background: #53715d;
+}
+.message-selection-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 100px;
+  padding: 18px 28px;
+  border-top: 1px solid #e4e8dc;
+  background: #fffefa;
+  color: #53644d;
+  font-size: 13px;
+}
+.message-selection-toolbar small {
+  display: block;
+  margin-top: 4px;
+  color: #8a9381;
+  font-size: 10px;
+}
+.message-selection-toolbar .button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.message-popup {
+  position: fixed;
+  z-index: 30;
+  min-width: 190px;
+  max-width: min(340px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  overflow: auto;
+}
+.inline-readers {
+  min-width: 220px;
+  margin: 5px 7px;
+  border-top: 1px solid #e8ebdf;
+}
+.inline-readers h3 {
+  margin: 12px 3px 4px;
+  color: #8a9381;
+  font-size: 10px;
+  font-weight: 600;
+}
+.inline-readers .reader-list {
+  max-height: 180px;
+  margin: 0;
+}
+.inline-readers .reader-list li {
+  padding: 9px 0;
+  grid-template-columns: 26px 1fr;
+}
+.inline-readers .reader-list .person-avatar {
+  width: 25px;
+  height: 25px;
+  font-size: 11px;
+}
+.inline-readers .reader-list strong {
+  font-size: 11px;
+}
+.inline-readers .reader-list time {
+  font-size: 10px;
+}
+.inline-readers .receipt-empty,
+.inline-readers [role='status'],
+.popup-error {
+  margin: 10px 3px;
+  color: #7c8573;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.inline-readers .history-page-button {
+  margin: 8px 0 0;
+  font-size: 11px;
+}
+.deletion-scopes {
+  display: flex;
+  gap: 16px;
+  margin: 18px 0;
+  padding: 12px;
+  border: 1px solid #dfe5d7;
+  border-radius: 9px;
+  color: #53644d;
+  font-size: 12px;
+}
+.deletion-scopes legend {
+  padding: 0 5px;
+  color: #818c77;
+  font-size: 11px;
+}
+.deletion-scopes label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.deletion-scopes input {
+  accent-color: #53715d;
+}
+.chat-body {
+  overflow-anchor: none;
+}
+
+.chat-composer-region {
+  flex: none;
 }

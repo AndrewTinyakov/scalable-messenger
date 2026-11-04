@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { api } from '../support/api-client.mjs';
 import { ulid } from '../support/fixtures.mjs';
 import { connect } from '../support/socket-client.mjs';
-import { compose, sendQueue, rabbitQueues } from '../support/compose.mjs';
+import { compose, startWorkers, sendQueue, rabbitQueues } from '../support/compose.mjs';
 import { randomBytes } from 'node:crypto';
 
 test('a send survives its queue leader failing and a publisher reconnect', {
@@ -33,7 +33,7 @@ test('a send survives its queue leader failing and a publisher reconnect', {
   const recipientSocket = await connect(recipient.cookie);
   t.after(() => { senderSocket.socket.close(); recipientSocket.socket.close(); });
   compose('stop', 'messenger-command-processor');
-  t.after(() => compose('up', '-d', '--no-deps', 'messenger-command-processor'));
+  t.after(() => startWorkers('messenger-command-processor'));
   const pendingRequestId = ulid();
   senderSocket.send({ type: 'send', recipientId: recipient.user.id, requestId: pendingRequestId, body: 'Confirmed before queue leader failure' });
   await senderSocket.waitFor((frame) => frame.type === 'queued' && frame.requestId === pendingRequestId);
@@ -41,10 +41,10 @@ test('a send survives its queue leader failing and a publisher reconnect', {
 
   compose('stop', failedNode);
   t.after(() => {
-    compose('up', '-d', '--no-deps', failedNode);
+    compose('start', failedNode);
     compose('exec', '-T', survivingNode, 'rabbitmqctl', '-t', '60', 'await_online_nodes', '3');
   });
-  compose('up', '-d', '--no-deps', 'messenger-command-processor');
+  await startWorkers('messenger-command-processor');
   const recovered = await recipientSocket.waitFor((frame) => frame.type === 'message_saved' && frame.requestId === pendingRequestId, 30000);
   const chatId = (recovered.event ?? recovered).chatId;
   compose('exec', '-T', survivingNode, 'rabbitmqctl', 'close_all_connections', '--global', 'resilience test reconnect');

@@ -4,7 +4,7 @@ import { api } from '../support/api-client.mjs';
 import { redisNodes } from '../support/runtime.mjs';
 import { ulid } from '../support/fixtures.mjs';
 import { connect } from '../support/socket-client.mjs';
-import { compose, waitForRedisCluster } from '../support/compose.mjs';
+import { compose, startWorkers, waitForRedisCluster } from '../support/compose.mjs';
 import { establishDirect } from '../support/chat-fixtures.mjs';
 import { randomBytes } from 'node:crypto';
 
@@ -24,8 +24,9 @@ test('SQL history remains available while Redis is down', {
 
   compose('stop', 'messenger-outbox-publisher');
   t.after(async () => {
-    compose('up', '-d', '--no-deps', ...redisNodes, 'messenger-outbox-publisher');
+    compose('start', ...redisNodes);
     await waitForRedisCluster();
+    await startWorkers('messenger-outbox-publisher');
   });
   const requestId = ulid();
   senderSocket.send({ type: 'send', chatId: chat.id, requestId, body: 'Recover through SQL' });

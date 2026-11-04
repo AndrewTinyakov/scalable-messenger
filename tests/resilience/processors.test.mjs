@@ -4,7 +4,7 @@ import { api } from '../support/api-client.mjs';
 import { apiBase, composeOptions } from '../support/runtime.mjs';
 import { ulid } from '../support/fixtures.mjs';
 import { connect } from '../support/socket-client.mjs';
-import { compose } from '../support/compose.mjs';
+import { compose, startWorkers } from '../support/compose.mjs';
 import { establishDirect } from '../support/chat-fixtures.mjs';
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -43,7 +43,7 @@ test('two processors save concurrent chat commands and one continues after its p
   senderSocket.send({ type: 'applied', chatId: chat.id, sequence: '17' });
 
   execFileSync('docker', ['stop', processors[0]], { stdio: 'pipe' });
-  t.after(() => execFileSync('docker', ['start', processors[0]], { stdio: 'pipe' }));
+  t.after(() => startWorkers('messenger-command-processor'));
   const finalRequestId = ulid();
   senderSocket.send({ type: 'send', chatId: chat.id, requestId: finalRequestId, body: 'Survived one processor stop' });
   await recipientSocket.waitFor((frame) => frame.type === 'message_saved' && frame.requestId === finalRequestId, 30000);
@@ -67,14 +67,14 @@ test('a confirmed command survives a stopped command processor', {
   await recipientSocket.waitFor((frame) => frame.type === 'subscribed' && frame.chatId === chat.id);
 
   compose('stop', 'messenger-command-processor');
-  t.after(() => compose('up', '-d', '--no-deps', 'messenger-command-processor'));
+  t.after(() => startWorkers('messenger-command-processor'));
   const requestId = ulid();
   senderSocket.send({ type: 'send', chatId: chat.id, requestId, body: 'Saved after processor restart' });
   await senderSocket.waitFor((frame) => frame.type === 'queued' && frame.requestId === requestId);
   const pending = await api(`/sends/${requestId}`, { cookie: sender.cookie });
   assert.equal(pending.status, 'UNKNOWN');
 
-  compose('up', '-d', '--no-deps', 'messenger-command-processor');
+  await startWorkers('messenger-command-processor');
   const received = await recipientSocket.waitFor((frame) => frame.type === 'message_saved' && frame.requestId === requestId, 30000);
   assert.equal((received.event ?? received).body, 'Saved after processor restart');
   const finalStatus = await api(`/sends/${requestId}`, { cookie: sender.cookie });
@@ -97,14 +97,14 @@ test('a queued sender can recover a rejection after group removal', {
   await socket.waitFor((frame) => frame.type === 'subscribed' && frame.chatId === group.id);
 
   compose('stop', 'messenger-command-processor');
-  t.after(() => compose('up', '-d', '--no-deps', 'messenger-command-processor'));
+  t.after(() => startWorkers('messenger-command-processor'));
   const requestId = ulid();
   socket.send({ type: 'send', chatId: group.id, requestId, body: 'Queued before removal' });
   await socket.waitFor((frame) => frame.type === 'queued' && frame.requestId === requestId);
   await api(`/chats/${group.id}/members/${member.user.id}`, {
     cookie: owner.cookie, method: 'DELETE',
   });
-  compose('up', '-d', '--no-deps', 'messenger-command-processor');
+  await startWorkers('messenger-command-processor');
 
   let finalStatus;
   for (let attempt = 0; attempt < 100; attempt++) {

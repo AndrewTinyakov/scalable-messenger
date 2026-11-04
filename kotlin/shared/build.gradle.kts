@@ -15,6 +15,9 @@ repositories { mavenCentral() }
 dependencyManagement { imports { mavenBom("org.springframework.boot:spring-boot-dependencies:4.1.1") } }
 
 dependencies {
+    constraints {
+        api("com.google.guava:guava:33.7.2-jre")
+    }
     api("org.springframework.boot:spring-boot-starter-jooq")
     api("org.springframework.boot:spring-boot-starter-flyway")
     api("org.flywaydb:flyway-database-postgresql")

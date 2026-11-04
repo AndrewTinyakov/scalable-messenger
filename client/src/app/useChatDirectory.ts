@@ -192,17 +192,32 @@ export function useChatDirectory({
   const loadMoreChats = useCallback(async () => {
     if (!nextChatCursor || loadingMoreChats) return
     setLoadingMoreChats(true)
+    const refreshGeneration = refreshGenerationRef.current
+    const requestGeneration = ++requestGenerationRef.current
     try {
       const page = await sessionApi.chats(nextChatCursor)
-      const known = new Set(chatsRef.current.map((chat) => chat.id))
-      const merged = [
-        ...chatsRef.current,
-        ...page.chats.filter((chat) => !known.has(chat.id)).map(applyOptimisticRead),
-      ].sort(compareActivity)
+      const firstPage = await sessionApi.chats()
+      if (!activeRef.current || refreshGeneration !== refreshGenerationRef.current) return
+      const byId = new Map(chatsRef.current.map((chat) => [chat.id, chat]))
+      const fresh = new Map(page.chats.map((chat) => [chat.id, chat]))
+      for (const chat of firstPage.chats) fresh.set(chat.id, chat)
+      const applied: Chat[] = []
+      for (const chat of fresh.values()) {
+        if (
+          removedChatRef.current.has(chat.id) ||
+          requestGeneration < (appliedSummaryGenerationsRef.current.get(chat.id) ?? 0)
+        )
+          continue
+        const existing = byId.get(chat.id)
+        const updated = applyOptimisticRead({ ...chat, members: existing?.members ?? chat.members })
+        byId.set(chat.id, updated)
+        appliedSummaryGenerationsRef.current.set(chat.id, requestGeneration)
+        applied.push(updated)
+      }
+      const merged = [...byId.values()].sort(compareActivity)
       chatsRef.current = merged
       setChats(merged)
-      for (const chat of page.chats)
-        if (!known.has(chat.id)) recordLatest(chat.id, chat.lastSequence)
+      for (const chat of applied) recordLatest(chat.id, chat.lastSequence)
       setNextChatCursor(page.nextCursor)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not load more chats')

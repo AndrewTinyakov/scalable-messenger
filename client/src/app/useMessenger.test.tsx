@@ -84,7 +84,6 @@ function Harness() {
         onSend={current.sendMessage}
         onRetry={current.retryMessage}
         onBack={current.closeChat}
-        onNew={() => {}}
         hasOlder={current.hasOlderMessages}
         hasNewer={current.hasNewerMessages}
         hasUnresolvedGap={current.hasUnresolvedGap}
@@ -759,7 +758,7 @@ describe('messenger request coordination', () => {
       window.dispatchEvent(new dom.window.Event('focus'))
     })
     expect(container.querySelector('.workspace')).toBe(workspace)
-    expect(container.textContent).toContain("You're offline")
+    expect(container.textContent).toContain('Waiting for network')
     expect(container.querySelector('.toast')).toBeNull()
     expect(paths).toEqual([])
     expect(sessionRequests).toHaveLength(1)
@@ -771,7 +770,7 @@ describe('messenger request coordination', () => {
     await act(async () => {
       sessionRequests[1](Response.json({ message: 'Unauthorized' }, { status: 401 }))
     })
-    expect(container.querySelector('h1')?.textContent).toBe('Sign in')
+    expect(container.querySelector('h1')?.textContent).toBe('Welcome back')
   })
 
   it('waits offline on startup and restores automatically without showing the sign-in form', async () => {
@@ -831,9 +830,13 @@ describe('messenger request coordination', () => {
     await act(async () => {
       sessionRequests[0](Response.json({ userId, username: 'alice', deviceId: 'device' }))
     })
-    const signOut = container.querySelector<HTMLButtonElement>('button[aria-label="Sign out"]')!
     await act(async () => {
-      signOut.click()
+      container.querySelector<HTMLButtonElement>('button[aria-label="Main menu"]')!.click()
+    })
+    await act(async () => {
+      ;[...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+        .find((item) => item.textContent === 'Sign out')!
+        .click()
     })
     expect(logoutRequests).toHaveLength(1)
     await act(async () => {
@@ -848,12 +851,12 @@ describe('messenger request coordination', () => {
     await act(async () => {
       sessionRequests[2](Response.json({ message: 'Unauthorized' }, { status: 401 }))
     })
-    expect(container.querySelector('h1')?.textContent).toBe('Sign in')
+    expect(container.querySelector('h1')?.textContent).toBe('Welcome back')
 
     await act(async () => {
       sessionRequests[1](Response.json({ userId, username: 'alice', deviceId: 'device' }))
     })
-    expect(container.querySelector('h1')?.textContent).toBe('Sign in')
+    expect(container.querySelector('h1')?.textContent).toBe('Welcome back')
   })
 
   it('shares an in-flight chat refresh and follows an event burst with one fresh read', async () => {

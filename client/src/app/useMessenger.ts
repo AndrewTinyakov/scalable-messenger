@@ -337,6 +337,12 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
 
   return {
     features,
+    sidebarPresence: {} as Record<string, 'online' | 'offline' | 'unknown'>,
+    watchSidebarPeers: (_chatIds: string[]) => {},
+    reconnect: { nextRetryAt: null as number | null },
+    retryNow: () => {},
+    deleteChatById: async (_chatId: string, _scope: 'SELF' | 'EVERYONE') => {},
+    clearChatHistory: async (_chatId: string, _scope: 'SELF' | 'EVERYONE') => {},
     deleteChat: features.deleteChat,
     latestMessages: recovery.latestWindows(),
     detached: Boolean(selectedId && recovery.isDetached(selectedId)),

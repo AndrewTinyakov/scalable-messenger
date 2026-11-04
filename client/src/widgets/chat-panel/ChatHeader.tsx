@@ -1,137 +1,111 @@
-import { ArrowLeft, Eraser, MoreHorizontal, Trash2, UsersRound } from 'lucide-react'
+import { ArrowLeft, Eraser, MoreVertical, Trash2, UsersRound } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { chatInitials, chatTitle, type Chat } from '../../entities/chat/model'
+import { chatTitle, type Chat } from '../../entities/chat/model'
 import type { User } from '../../entities/session/model'
 import { ChatKind } from '../../shared/api/generated/socket-vocabulary'
 import type { PresenceStatus } from '../../shared/api/socket'
-import type { ConnectionState } from '../../shared/api/socketConnection'
+import { Avatar } from '../../shared/ui/Avatar'
+import { Menu, MenuItem } from '../../shared/ui/Menu'
 
 interface Props {
   chat: Chat
   currentUser: User
-  connection: ConnectionState
   presence?: Record<string, PresenceStatus['state']>
   onBack(): void
   onMembers?: () => void
   onDelete?: () => void
   onClear?: () => void
 }
+
+function subtitle(
+  chat: Chat,
+  recipient: string | undefined,
+  presence: Props['presence'],
+): { text: string; online: boolean } {
+  if (chat.kind === ChatKind.GROUP) {
+    const members = `${chat.memberCount} ${chat.memberCount === 1 ? 'member' : 'members'}`
+    const online = Object.values(presence ?? {}).filter((state) => state === 'online').length
+    return { text: online ? `${members}, ${online} online` : members, online: false }
+  }
+  const state = recipient ? presence?.[recipient] : undefined
+  if (state === 'online') return { text: 'online', online: true }
+  if (state === 'offline') return { text: 'offline', online: false }
+  return { text: '', online: false }
+}
+
 export function ChatHeader({
   chat,
   currentUser,
-  connection,
   presence,
   onBack,
   onMembers,
   onDelete,
   onClear,
 }: Props) {
-  const [chatMenu, setChatMenu] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
   const actionsRef = useRef<HTMLButtonElement>(null)
-  const recipient =
-    chat.kind === ChatKind.DIRECT
-      ? chat.members.find((member) => member.id !== currentUser.id)?.id
-      : undefined
-  useEffect(() => setChatMenu(false), [chat.id])
+  const group = chat.kind === ChatKind.GROUP
+  const recipient = group
+    ? undefined
+    : chat.members.find((member) => member.id !== currentUser.id)?.id
+  const title = chatTitle(chat, currentUser.id)
+  const status = subtitle(chat, recipient, presence)
+  useEffect(() => setMenuOpen(false), [chat.id])
+
+  function run(action: () => void) {
+    setMenuOpen(false)
+    actionsRef.current?.focus()
+    action()
+  }
+
   return (
     <header className="chat-header">
       <button className="icon-button mobile-back" onClick={onBack} aria-label="Back to chats">
-        <ArrowLeft size={20} />
+        <ArrowLeft size={22} />
       </button>
-      <span className={`chat-header-avatar ${chat.kind === ChatKind.GROUP ? 'group-avatar' : ''}`}>
-        {chat.kind === ChatKind.GROUP ? (
-          <UsersRound size={22} />
-        ) : (
-          chatInitials(chat, currentUser.id)
-        )}
-        {recipient && presence && (
-          <span
-            className={`presence-dot ${presence[recipient] ?? 'unknown'}`}
-            aria-label={`Presence ${presence[recipient] ?? 'unknown'}`}
-          />
-        )}
-      </span>
+      <Avatar seed={recipient ?? chat.id} name={title} size={42} group={group} />
       <div className="chat-header-info">
-        <h2>{chatTitle(chat, currentUser.id)}</h2>
-        <p>
-          {chat.kind === ChatKind.GROUP
-            ? `${chat.memberCount} members${presence ? (Object.keys(presence).length ? ` · ${Object.values(presence).filter((state) => state === 'online').length} online here` : ' · Presence unknown') : ''}`
-            : presence && recipient
-              ? presence[recipient] === 'online'
-                ? 'Online'
-                : presence[recipient] === 'offline'
-                  ? 'Offline'
-                  : 'Presence unknown'
-              : 'Direct chat'}
-        </p>
+        <h2>{title}</h2>
+        {status.text && <p className={status.online ? 'online' : ''}>{status.text}</p>}
       </div>
-      {chat.kind === ChatKind.GROUP && onMembers && (
-        <button className="group-members-button" onClick={onMembers} aria-label="Group members">
-          <UsersRound size={17} /> <span>Members</span>
+      {group && onMembers && (
+        <button className="icon-button" onClick={onMembers} aria-label="Group members">
+          <UsersRound size={21} />
         </button>
       )}
       {(onDelete || onClear) && !chat.id.startsWith('draft:') && (
-        <div
-          className="chat-overflow"
-          onKeyDown={(event) => {
-            if (event.key === 'Escape') {
-              event.stopPropagation()
-              setChatMenu(false)
-              actionsRef.current?.focus()
-            }
-          }}
-          onBlur={(event) => {
-            if (!event.currentTarget.contains(event.relatedTarget)) setChatMenu(false)
+        <button
+          className="icon-button"
+          ref={actionsRef}
+          aria-label="Chat actions"
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen(!menuOpen)}
+        >
+          <MoreVertical size={21} />
+        </button>
+      )}
+      {menuOpen && actionsRef.current && (
+        <Menu
+          label="Chat actions"
+          anchor={actionsRef.current}
+          align="end"
+          onClose={() => {
+            setMenuOpen(false)
+            actionsRef.current?.focus()
           }}
         >
-          <button
-            className="icon-button"
-            ref={actionsRef}
-            aria-label="Chat actions"
-            aria-expanded={chatMenu}
-            onClick={() => setChatMenu(!chatMenu)}
-          >
-            <MoreHorizontal size={20} />
-          </button>
-          {chatMenu && (
-            <div className="message-action-menu">
-              {onClear && (
-                <button
-                  onClick={() => {
-                    setChatMenu(false)
-                    actionsRef.current?.focus()
-                    onClear()
-                  }}
-                >
-                  <Eraser size={14} />
-                  Clear history
-                </button>
-              )}
-              {onDelete && (
-                <button
-                  className="danger-text"
-                  onClick={() => {
-                    setChatMenu(false)
-                    actionsRef.current?.focus()
-                    onDelete()
-                  }}
-                >
-                  <Trash2 size={14} />
-                  Delete chat
-                </button>
-              )}
-            </div>
+          {onClear && (
+            <MenuItem icon={<Eraser size={18} />} onClick={() => run(onClear)}>
+              Clear history
+            </MenuItem>
           )}
-        </div>
+          {onDelete && (
+            <MenuItem icon={<Trash2 size={18} />} danger onClick={() => run(onDelete)}>
+              Delete chat
+            </MenuItem>
+          )}
+        </Menu>
       )}
-      <span className={`connection-pill ${connection}`}>
-        <span />
-        {connection === 'connected'
-          ? 'Live'
-          : connection === 'connecting'
-            ? 'Connecting'
-            : 'Offline'}
-      </span>
     </header>
   )
 }

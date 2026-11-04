@@ -1,138 +1,235 @@
-import { LogOut, MessageCirclePlus, RefreshCw, Search, UsersRound } from 'lucide-react'
-import { useState } from 'react'
-import { chatInitials, chatTitle, type Chat } from '../../entities/chat/model'
+import { Pencil, Search, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { chatPeer, chatTitle, type Chat } from '../../entities/chat/model'
 import type { Message } from '../../entities/message/model'
 import type { User } from '../../entities/session/model'
 import { ChatKind } from '../../shared/api/generated/socket-vocabulary'
-import { formatChatTime } from '../../shared/lib/time'
-import { Brand } from '../../shared/ui/Brand'
+import { Avatar } from '../../shared/ui/Avatar'
+import { ChatRow, type OpenChatMenu } from './ChatRow'
+import type { ChatFolder } from './FolderRail'
+
+const MAX_PEOPLE_RESULTS = 8
 
 interface Props {
   user: User
   chats: Chat[]
+  folder: ChatFolder
+  loading: boolean
   messages: Record<string, Message[]>
   selectedId: string | null
-  onSelect: (id: string) => void
-  onCreate: () => void
-  onRefresh: () => void
-  onSignOut: () => void
+  presence: Record<string, 'online' | 'offline' | 'unknown'>
+  onSelect(id: string): void
+  onChatMenu: OpenChatMenu
+  onCreate(): void
+  onOpenUser(user: User): void
+  searchUsers(query: string): Promise<User[]>
+  onVisibleChats(chatIds: string[]): void
   hasMore: boolean
   loadingMore: boolean
-  onLoadMore: () => void
+  onLoadMore(): void
+}
+
+function inFolder(chat: Chat, folder: ChatFolder): boolean {
+  if (folder === 'unread') return (chat.unreadCount ?? 0) > 0
+  if (folder === 'direct') return chat.kind === ChatKind.DIRECT
+  if (folder === 'groups') return chat.kind === ChatKind.GROUP
+  return true
+}
+
+function usePeopleSearch(query: string, search: Props['searchUsers']) {
+  const [people, setPeople] = useState<User[]>([])
+  useEffect(() => {
+    let active = true
+    setPeople([])
+    if (!query) return
+    const timer = window.setTimeout(() => {
+      search(query)
+        .then((users) => {
+          if (active) setPeople(users)
+        })
+        .catch(() => {})
+    }, 220)
+    return () => {
+      active = false
+      window.clearTimeout(timer)
+    }
+  }, [query, search])
+  return people
+}
+
+function useVisibleChats(
+  list: React.RefObject<HTMLElement>,
+  ids: string,
+  report: (ids: string[]) => void,
+) {
+  const reportRef = useRef(report)
+  reportRef.current = report
+  useEffect(() => {
+    const root = list.current
+    if (!root || typeof IntersectionObserver === 'undefined') return
+    const visible = new Set<string>()
+    const observer = new IntersectionObserver(
+      (records) => {
+        for (const record of records) {
+          const id = (record.target as HTMLElement).dataset.chatId
+          if (!id) continue
+          if (record.isIntersecting) visible.add(id)
+          else visible.delete(id)
+        }
+        reportRef.current([...visible])
+      },
+      { root },
+    )
+    root.querySelectorAll('[data-chat-id]').forEach((row) => observer.observe(row))
+    return () => observer.disconnect()
+  }, [ids, list])
+}
+
+function useEndReached(enabled: boolean, onReached: () => void) {
+  const ref = useRef<HTMLButtonElement>(null)
+  const reached = useRef(onReached)
+  reached.current = onReached
+  useEffect(() => {
+    const target = ref.current
+    if (!target || !enabled || typeof IntersectionObserver === 'undefined') return
+    const observer = new IntersectionObserver(
+      ([record]) => {
+        if (record?.isIntersecting) reached.current()
+      },
+      { rootMargin: '480px' },
+    )
+    observer.observe(target)
+    return () => observer.disconnect()
+  }, [enabled])
+  return ref
 }
 
 export function ChatList({
   user,
   chats,
+  folder,
+  loading,
   messages,
   selectedId,
+  presence,
   onSelect,
+  onChatMenu,
   onCreate,
-  onRefresh,
-  onSignOut,
+  onOpenUser,
+  searchUsers,
+  onVisibleChats,
   hasMore,
   loadingMore,
   onLoadMore,
 }: Props) {
   const [filter, setFilter] = useState('')
-  const visible = chats.filter((item) =>
-    chatTitle(item, user.id).toLowerCase().includes(filter.toLowerCase()),
+  const listRef = useRef<HTMLElement>(null)
+  const query = filter.trim().toLowerCase()
+  const visible = useMemo(
+    () =>
+      chats.filter((chat) =>
+        query ? chatTitle(chat, user.id).toLowerCase().includes(query) : inFolder(chat, folder),
+      ),
+    [chats, folder, query, user.id],
   )
+  const people = usePeopleSearch(query, searchUsers)
+    .filter(
+      (person) =>
+        person.id !== user.id && !visible.some((chat) => chatPeer(chat, user.id) === person.id),
+    )
+    .slice(0, MAX_PEOPLE_RESULTS)
+  const visibleIds = useMemo(() => visible.map((chat) => chat.id).join(), [visible])
+  useVisibleChats(listRef, visibleIds, onVisibleChats)
+  const loadMoreRef = useEndReached(hasMore && !loadingMore, onLoadMore)
 
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
-        <Brand compact />
-        <div className="sidebar-actions">
-          <button
-            className="icon-button"
-            onClick={onRefresh}
-            aria-label="Refresh chats"
-            title="Refresh chats"
-          >
-            <RefreshCw size={18} strokeWidth={1.8} />
-          </button>
-          <button
-            className="icon-button sidebar-create"
-            onClick={onCreate}
-            aria-label="New chat"
-            title="New chat"
-          >
-            <MessageCirclePlus size={20} strokeWidth={1.8} />
-          </button>
-        </div>
+        <label className="sidebar-search">
+          <Search size={18} />
+          <input
+            value={filter}
+            onChange={(event) => setFilter(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') setFilter('')
+            }}
+            placeholder="Search"
+            aria-label="Search chats and people"
+          />
+          {filter && (
+            <button
+              type="button"
+              className="sidebar-search-clear"
+              onClick={() => setFilter('')}
+              aria-label="Clear search"
+            >
+              <X size={15} />
+            </button>
+          )}
+        </label>
       </div>
-      <label className="sidebar-search">
-        <Search size={18} strokeWidth={1.8} />
-        <input
-          value={filter}
-          onChange={(event) => setFilter(event.target.value)}
-          placeholder="Search chats"
-          aria-label="Search chats"
-        />
-      </label>
-      <div className="chat-list-heading">
-        <span>Chats</span>
-        <span>{chats.length}</span>
-      </div>
-      <nav className="chat-list" aria-label="Chats">
-        {visible.length === 0 && (
+      <nav className="chat-list" aria-label="Chats" ref={listRef}>
+        {loading &&
+          chats.length === 0 &&
+          [0, 1, 2, 3, 4, 5, 6].map((index) => (
+            <div className="chat-skeleton" key={index} aria-hidden="true">
+              <span />
+              <span>
+                <i />
+                <i />
+              </span>
+            </div>
+          ))}
+        {!loading && visible.length === 0 && people.length === 0 && (
           <div className="chat-list-empty">
-            {chats.length ? 'No matching chats' : 'No chats yet'}
+            {query ? 'Nothing found' : folder === 'unread' ? 'All caught up' : 'No chats here yet'}
           </div>
         )}
-        {visible.map((item) => {
-          const last = messages[item.id]?.at(-1)
+        {visible.map((chat) => {
+          const peer = chatPeer(chat, user.id)
           return (
-            <button
-              key={item.id}
-              className={`chat-item ${selectedId === item.id ? 'selected' : ''}`}
-              onClick={() => onSelect(item.id)}
-            >
-              <span className={`chat-avatar ${item.kind === ChatKind.GROUP ? 'group-avatar' : ''}`}>
-                {item.kind === ChatKind.GROUP ? (
-                  <UsersRound size={22} strokeWidth={1.7} />
-                ) : (
-                  chatInitials(item, user.id)
-                )}
-              </span>
-              <span className="chat-item-copy">
-                <span className="chat-item-top">
-                  <strong>{chatTitle(item, user.id)}</strong>
-                  <time>{formatChatTime(last?.createdAt)}</time>
-                </span>
-                <span className="chat-preview">
-                  {last
-                    ? `${last.senderId === user.id ? 'You: ' : ''}${last.deletedAt ? 'Message deleted' : last.body}`
-                    : item.lastSequence === '0'
-                      ? 'No messages yet'
-                      : 'Open to load messages'}
-                </span>
-              </span>
-            </button>
+            <ChatRow
+              key={chat.id}
+              chat={chat}
+              userId={user.id}
+              selected={selectedId === chat.id}
+              online={peer !== undefined && presence[peer] === 'online'}
+              loaded={messages[chat.id]?.at(-1)}
+              onSelect={onSelect}
+              onMenu={onChatMenu}
+            />
           )
         })}
-        {hasMore && (
-          <button className="chat-load-more" onClick={onLoadMore} disabled={loadingMore}>
+        {people.length > 0 && <div className="chat-list-heading">People</div>}
+        {people.map((person) => (
+          <button key={person.id} className="chat-item" onClick={() => onOpenUser(person)}>
+            <Avatar seed={person.id} name={person.username} size={54} />
+            <span className="chat-item-copy">
+              <span className="chat-item-top">
+                <strong>{person.username}</strong>
+              </span>
+              <span className="chat-item-bottom">
+                <span className="chat-preview">Start a conversation</span>
+              </span>
+            </span>
+          </button>
+        ))}
+        {hasMore && !query && (
+          <button
+            ref={loadMoreRef}
+            className="chat-load-more"
+            onClick={onLoadMore}
+            disabled={loadingMore}
+          >
             {loadingMore ? 'Loading…' : 'Load more chats'}
           </button>
         )}
       </nav>
-      <div className="sidebar-account">
-        <span className="account-avatar">{user.username[0]?.toUpperCase()}</span>
-        <span className="account-copy">
-          <strong>{user.username}</strong>
-          <small>Signed in</small>
-        </span>
-        <button
-          className="icon-button signout-button"
-          onClick={onSignOut}
-          title="Sign out"
-          aria-label="Sign out"
-        >
-          <LogOut size={18} />
+      {!query && (
+        <button className="compose-button" onClick={onCreate} aria-label="New chat">
+          <Pencil size={22} />
         </button>
-      </div>
+      )}
     </aside>
   )
 }

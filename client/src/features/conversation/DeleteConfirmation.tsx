@@ -85,11 +85,11 @@ export function DeleteConfirmation({
       )}
       {busy && <p role="status">Deleting…</p>}
       <div className="dialog-actions">
-        <button className="button" disabled={busy} onClick={onCancel}>
+        <button className="button button-ghost" disabled={busy} onClick={onCancel}>
           Cancel
         </button>
         <button
-          className="button button-danger"
+          className="button button-danger-ghost"
           disabled={busy}
           onClick={() => onConfirm(canDeleteEveryone ? scope : 'SELF')}
         >

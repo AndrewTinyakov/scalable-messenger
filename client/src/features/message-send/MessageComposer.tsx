@@ -1,6 +1,17 @@
-import { ArrowUp, Check, CornerUpLeft, Pencil, X } from 'lucide-react'
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { Check, CornerUpLeft, Pencil, SendHorizontal, X } from 'lucide-react'
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+} from 'react'
 import type { Message } from '../../entities/message/model'
+
+const MAX_LENGTH = 4000
+const COUNTER_THRESHOLD = 3600
+const MAX_INPUT_HEIGHT = 216
 
 interface Props {
   chatId: string
@@ -40,6 +51,14 @@ export function MessageComposer({
     setError(null)
     if (edit || reply) textareaRef.current?.focus()
   }, [edit?.id, reply?.message.id])
+  useLayoutEffect(() => {
+    const input = textareaRef.current
+    if (!input) return
+    input.style.height = 'auto'
+    const height = Math.min(input.scrollHeight, MAX_INPUT_HEIGHT)
+    input.style.height = `${height}px`
+    input.style.overflowY = input.scrollHeight > MAX_INPUT_HEIGHT ? 'auto' : 'hidden'
+  }, [text])
 
   async function send(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault()
@@ -77,66 +96,64 @@ export function MessageComposer({
 
   return (
     <div className="composer-wrap">
-      {(reply || edit) && (
-        <div className={`composer-mode ${edit ? 'editing' : ''}`}>
-          {edit ? <Pencil size={17} /> : <CornerUpLeft size={17} />}
-          <div>
-            <strong>{edit ? 'Editing your message' : `Reply to ${reply?.sender}`}</strong>
-            <span>
-              {edit
-                ? edit.body
-                : reply?.message.deletedAt
-                  ? 'Message deleted'
-                  : reply?.message.body}
-            </span>
-          </div>
-          <button
-            className="icon-button"
-            disabled={saving}
-            onClick={onCancelMode}
-            aria-label={edit ? 'Cancel edit' : 'Cancel reply'}
-          >
-            <X size={17} />
-          </button>
-        </div>
-      )}
-      <form className="composer" onSubmit={(event) => void send(event)}>
-        <textarea
-          ref={textareaRef}
-          value={text}
-          onChange={(event) =>
-            (edit ? setEditDraft : setDraft)([...event.target.value].slice(0, 4000).join(''))
-          }
-          onKeyDown={onKeyDown}
-          placeholder={connected ? 'Write a message…' : 'Write a draft…'}
-          disabled={saving}
-          rows={1}
-          aria-label={edit ? 'Edit message' : 'Write a message'}
-        />
-        <button
-          type="submit"
-          className="send-button"
-          disabled={!text.trim() || length > 4000 || !connected || saving}
-          aria-label={edit ? (saving ? 'Saving edit' : 'Save edit') : 'Send message'}
-        >
-          {edit ? <Check size={20} /> : <ArrowUp size={20} strokeWidth={2.2} />}
-        </button>
-      </form>
       {error && (
         <p className="composer-error" role="alert">
           {error}
         </p>
       )}
-      <div className="composer-foot">
-        <span>
-          {saving
-            ? 'Saving your edit…'
-            : connected
-              ? 'Enter to send · Shift+Enter for a new line'
-              : 'You can send when reconnected'}
-        </span>
-        {length > 0 && <span>{length}/4000</span>}
-      </div>
+      <form className="composer" onSubmit={(event) => void send(event)}>
+        <div className="composer-field">
+          {(reply || edit) && (
+            <div className={`composer-mode ${edit ? 'editing' : ''}`}>
+              {edit ? <Pencil size={18} /> : <CornerUpLeft size={18} />}
+              <div>
+                <strong>{edit ? 'Edit message' : `Reply to ${reply?.sender}`}</strong>
+                <span>
+                  {edit
+                    ? edit.body
+                    : reply?.message.deletedAt
+                      ? 'Message deleted'
+                      : reply?.message.body}
+                </span>
+              </div>
+              <button
+                type="button"
+                className="icon-button"
+                disabled={saving}
+                onClick={onCancelMode}
+                aria-label={edit ? 'Cancel edit' : 'Cancel reply'}
+              >
+                <X size={18} />
+              </button>
+            </div>
+          )}
+          <textarea
+            ref={textareaRef}
+            value={text}
+            onChange={(event) =>
+              (edit ? setEditDraft : setDraft)(
+                [...event.target.value].slice(0, MAX_LENGTH).join(''),
+              )
+            }
+            onKeyDown={onKeyDown}
+            placeholder="Write a message…"
+            disabled={saving}
+            rows={1}
+            aria-label={edit ? 'Edit message' : 'Write a message'}
+          />
+          {length >= COUNTER_THRESHOLD && (
+            <span className="composer-count">{MAX_LENGTH - length}</span>
+          )}
+        </div>
+        <button
+          type="submit"
+          className="send-button"
+          disabled={!text.trim() || length > MAX_LENGTH || !connected || saving}
+          aria-label={edit ? (saving ? 'Saving edit' : 'Save edit') : 'Send message'}
+        >
+          {edit ? <Check size={22} /> : <SendHorizontal size={21} />}
+        </button>
+      </form>
     </div>
   )
 }

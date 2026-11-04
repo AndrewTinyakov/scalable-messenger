@@ -1,0 +1,115 @@
+.menu {
+  position: fixed;
+  z-index: 40;
+  width: max-content;
+  min-width: 196px;
+  max-width: min(320px, calc(100vw - 16px));
+  max-height: calc(100dvh - 16px);
+  padding: 6px;
+  overflow-y: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-m);
+  background: var(--bg-menu);
+  backdrop-filter: blur(22px) saturate(1.4);
+  box-shadow: var(--shadow-pop);
+  animation: menu-in 130ms var(--ease) both;
+}
+.menu-item {
+  display: flex;
+  width: 100%;
+  height: 40px;
+  padding: 0 14px 0 10px;
+  align-items: center;
+  gap: 14px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  font-size: 14.5px;
+  font-weight: 500;
+  text-align: left;
+  white-space: nowrap;
+}
+.menu-item:not(.danger-text) {
+  color: var(--text);
+}
+.menu-item:not(.danger-text) svg {
+  color: var(--text-2);
+}
+.menu-item:hover,
+.menu-item:focus-visible {
+  background: rgb(255 255 255 / 8%);
+  outline: none;
+}
+.menu-item.danger-text:hover,
+.menu-item.danger-text:focus-visible {
+  background: var(--danger-soft);
+}
+.menu-account {
+  display: flex;
+  padding: 6px 10px 10px;
+  margin-bottom: 4px;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.menu-account strong {
+  max-width: 200px;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.popup-error {
+  max-width: 260px;
+  padding: 8px 10px;
+  color: var(--danger);
+  font-size: 13px;
+  white-space: normal;
+}
+
+.inline-readers {
+  max-width: 290px;
+  margin-top: 6px;
+  padding: 8px 8px 4px;
+  border-top: 1px solid var(--line);
+}
+.inline-readers h3 {
+  margin-bottom: 6px;
+  color: var(--text-3);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.inline-readers p {
+  color: var(--text-3);
+  font-size: 13px;
+  white-space: normal;
+}
+.reader-list {
+  max-height: 180px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+.reader-list li {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  column-gap: 10px;
+  padding: 4px 0;
+  align-items: center;
+  font-size: 13.5px;
+}
+.reader-list .avatar {
+  grid-row: span 2;
+}
+.reader-list strong {
+  overflow: hidden;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.reader-list time {
+  color: var(--text-3);
+  font-size: 12px;
+}

@@ -1,12 +1,16 @@
-import { WifiOff } from 'lucide-react'
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { useMessenger } from '../../app/useMessenger'
 import type { Session } from '../../entities/session/model'
+import { ChatActions, type ChatMenuTarget } from '../../features/chat-actions/ChatActions'
 import { CreateChatDialog } from '../../features/chat-create/CreateChatDialog'
 import { GroupMembersDialog } from '../../features/group-members/GroupMembersDialog'
 import { ChatKind } from '../../shared/api/generated/socket-vocabulary'
+import { api } from '../../shared/api/http'
 import { isNetworkOnline, subscribeNetwork } from '../../shared/lib/network'
 import { ChatList } from '../../widgets/chat-list/ChatList'
+import type { OpenChatMenu } from '../../widgets/chat-list/ChatRow'
+import { ConnectionStatus } from '../../widgets/chat-list/ConnectionStatus'
+import { FolderRail, type ChatFolder } from '../../widgets/chat-list/FolderRail'
 import { ChatPanel } from '../../widgets/chat-panel/ChatPanel'
 
 interface Props {
@@ -18,45 +22,70 @@ interface Props {
 export function MessengerPage({ session, onSignOut, onSessionRevoked }: Props) {
   const online = useSyncExternalStore(subscribeNetwork, isNetworkOnline)
   const messenger = useMessenger(session, onSessionRevoked)
-  const [creating, setCreating] = useState(false)
+  const [creating, setCreating] = useState<'direct' | 'group' | null>(null)
   const [managingMembers, setManagingMembers] = useState(false)
+  const [folder, setFolder] = useState<ChatFolder>('all')
+  const [chatMenu, setChatMenu] = useState<ChatMenuTarget | null>(null)
   const closeMembers = useCallback(() => setManagingMembers(false), [])
+  const openChatMenu = useCallback<OpenChatMenu>(
+    (chat, anchor, keyboard, point) => setChatMenu({ chat, anchor, keyboard, point }),
+    [],
+  )
+  const searchUsers = useMemo(() => api.forSession(session).users, [session])
   const selected =
     messenger.chats.find((item) => item.id === messenger.selectedId) || messenger.draftChat
+  const unreadChats = useMemo(() => {
+    const counts = { all: 0, unread: 0, direct: 0, groups: 0 }
+    for (const chat of messenger.chats) {
+      if (!chat.unreadCount) continue
+      counts.all += 1
+      counts.unread += 1
+      counts[chat.kind === ChatKind.GROUP ? 'groups' : 'direct'] += 1
+    }
+    return counts
+  }, [messenger.chats])
 
   useEffect(() => {
     setManagingMembers(false)
   }, [selected?.id])
 
-  function select(id: string) {
-    messenger.selectChat(id)
-  }
+  useEffect(() => {
+    document.title = unreadChats.all ? `(${unreadChats.all}) Messenger` : 'Messenger'
+    return () => {
+      document.title = 'Messenger'
+    }
+  }, [unreadChats.all])
 
   return (
     <div className="messenger-shell">
-      {(!online || messenger.connection !== 'connected') && (
-        <div className="connection-notice" role="status">
-          <WifiOff size={17} aria-hidden="true" />
-          <div>
-            <strong>{online ? 'Reconnecting…' : "You're offline"}</strong>
-            <span>
-              {online
-                ? 'Your messages will update when the connection returns.'
-                : "You can keep writing. We'll reconnect when you're back online."}
-            </span>
-          </div>
-        </div>
-      )}
-      <main className={`workspace ${selected ? 'show-chat' : ''}`}>
+      <main
+        className={`workspace ${selected ? 'show-chat' : ''}`}
+        onContextMenu={(event) => {
+          if (!(event.target as HTMLElement).closest('input, textarea')) event.preventDefault()
+        }}
+      >
+        <FolderRail
+          user={session.user}
+          folder={folder}
+          unreadChats={unreadChats}
+          onFolder={setFolder}
+          onCreate={setCreating}
+          onSignOut={onSignOut}
+        />
         <ChatList
           user={session.user}
           chats={messenger.chats}
+          folder={folder}
+          loading={messenger.loading}
           messages={messenger.latestMessages}
           selectedId={messenger.selectedId}
-          onSelect={select}
-          onCreate={() => setCreating(true)}
-          onRefresh={() => void messenger.refreshChats(true)}
-          onSignOut={onSignOut}
+          presence={messenger.sidebarPresence}
+          onSelect={messenger.selectChat}
+          onChatMenu={openChatMenu}
+          onCreate={() => setCreating('direct')}
+          onOpenUser={(user) => void messenger.createDirect(user)}
+          searchUsers={searchUsers}
+          onVisibleChats={messenger.watchSidebarPeers}
           hasMore={messenger.hasMoreChats}
           loadingMore={messenger.loadingMoreChats}
           onLoadMore={() => void messenger.loadMoreChats()}
@@ -75,7 +104,6 @@ export function MessengerPage({ session, onSignOut, onSessionRevoked }: Props) {
           onSend={messenger.sendMessage}
           onRetry={(id) => void messenger.retryMessage(id)}
           onBack={messenger.closeChat}
-          onNew={() => setCreating(true)}
           onMembers={() => setManagingMembers(true)}
           lookupUser={messenger.lookupUser}
           hasOlder={messenger.hasOlderMessages}
@@ -91,6 +119,12 @@ export function MessengerPage({ session, onSignOut, onSessionRevoked }: Props) {
             selected && messenger.setAtLatestPosition(selected.id, atLatest)
           }
         />
+        <ConnectionStatus
+          connection={messenger.connection}
+          networkOnline={online}
+          nextRetryAt={messenger.reconnect.nextRetryAt}
+          onRetry={messenger.retryNow}
+        />
         {messenger.error && (
           <div className="toast" role="alert">
             <span>{messenger.error}</span>
@@ -100,21 +134,29 @@ export function MessengerPage({ session, onSignOut, onSessionRevoked }: Props) {
           </div>
         )}
         {messenger.loading && (
-          <div className="loading-overlay" aria-label="Loading chats">
-            <div className="loading-spinner" />
-          </div>
+          <div className="loading-bar" role="progressbar" aria-label="Loading chats" />
         )}
         {creating && (
           <CreateChatDialog
             session={session}
             currentUserId={session.user.id}
-            onClose={() => setCreating(false)}
+            initialMode={creating}
+            onClose={() => setCreating(null)}
             onDirect={async (user) => {
               await messenger.createDirect(user)
             }}
             onGroup={async (name, ids) => {
               await messenger.createGroup(name, ids)
             }}
+          />
+        )}
+        {chatMenu && (
+          <ChatActions
+            target={chatMenu}
+            user={session.user}
+            onDelete={messenger.deleteChatById}
+            onClear={messenger.clearChatHistory}
+            onClose={() => setChatMenu(null)}
           />
         )}
         {managingMembers && selected?.kind === ChatKind.GROUP && (

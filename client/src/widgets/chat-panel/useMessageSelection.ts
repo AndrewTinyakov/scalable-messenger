@@ -22,6 +22,7 @@ export function useMessageSelection(
 ) {
   const [enabled, setEnabled] = useState(false)
   const [selected, setSelected] = useState(new Map<string, Message>())
+  const [gestureEnds, setGestureEnds] = useState(0)
   const current = useRef({ messages, selected, enabled })
   current.current = { messages, selected, enabled }
   const gesture = useRef<Gesture | null>(null)
@@ -36,6 +37,7 @@ export function useMessageSelection(
     if (frame.current !== undefined) window.cancelAnimationFrame(frame.current)
     frame.current = undefined
     if (!active) return
+    setGestureEnds((value) => value + 1)
     if (active.wasEnabled || active.dragged) suppressUntil.current = Date.now() + 400
     if (restore) {
       setSelected(new Map(active.initial))
@@ -54,6 +56,10 @@ export function useMessageSelection(
       stopRef.current?.(false)
     }
   }, [chatId])
+
+  useEffect(() => {
+    if (enabled && selected.size === 0 && !gesture.current) setEnabled(false)
+  }, [enabled, selected, gestureEnds])
 
   useEffect(() => {
     const cancel = () => stopRef.current?.(true)

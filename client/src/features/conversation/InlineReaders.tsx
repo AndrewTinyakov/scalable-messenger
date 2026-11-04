@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Message } from '../../entities/message/model'
 import type { ReaderPage } from '../../shared/api/featureDecode'
+import { Avatar } from '../../shared/ui/Avatar'
 
 interface Props {
   message: Message
@@ -74,7 +75,7 @@ export function InlineReaders({ message, load }: Props) {
           <ul className="reader-list">
             {readers.map((reader) => (
               <li key={reader.userId}>
-                <span className="person-avatar">{reader.username[0]?.toUpperCase()}</span>
+                <Avatar seed={reader.userId} name={reader.username} size={28} />
                 <strong>{reader.username}</strong>
                 <time
                   dateTime={reader.readAt}

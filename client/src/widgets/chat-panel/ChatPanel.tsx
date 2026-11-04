@@ -1,5 +1,5 @@
-import { ArrowDown, MessageSquare, Trash2, X } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { ChevronDown, Trash2, X } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Chat } from '../../entities/chat/model'
 import type { DeleteScope } from '../../entities/message/historySnapshot'
 import { MessageItem } from '../../entities/message/MessageItem'
@@ -14,7 +14,10 @@ import { MessageActionMenu } from '../../features/conversation/MessageActionMenu
 import type { useConversationFeatures } from '../../features/conversation/useConversationFeatures'
 import { MessageComposer } from '../../features/message-send/MessageComposer'
 import { ChatKind } from '../../shared/api/generated/socket-vocabulary'
+import { formatDayLabel } from '../../shared/lib/time'
+import type { MenuPoint } from '../../shared/ui/Menu'
 import { ChatHeader } from './ChatHeader'
+import { groupByDay } from './messageDays'
 import { messageEntries } from './messageEntries'
 import { sameMessageRun } from './messageGrouping'
 import { useMessageSelection } from './useMessageSelection'
@@ -32,7 +35,6 @@ interface Props {
   detached?: boolean
   onRetry: (requestId: string) => void
   onBack: () => void
-  onNew: () => void
   onMembers?: () => void
   lookupUser?: (id: string) => Promise<User>
   hasOlder: boolean
@@ -61,7 +63,6 @@ export function ChatPanel({
   onSend,
   onRetry,
   onBack,
-  onNew,
   onMembers,
   lookupUser,
   hasOlder,
@@ -85,6 +86,7 @@ export function ChatPanel({
   const [popup, setPopup] = useState<{
     messageId: string
     anchor: HTMLElement
+    point?: MenuPoint
     keyboard: boolean
   } | null>(null)
   const [busy, setBusy] = useState(false)
@@ -183,11 +185,28 @@ export function ChatPanel({
     ? messages.find((message) => message.id === popup.messageId && !message.deletedAt)
     : undefined
 
-  function beginReply(target: Message) {
+  const callbacks = useRef({ onRetry, jump: features?.jumpToMessage })
+  callbacks.current = { onRetry, jump: features?.jumpToMessage }
+  const retry = useCallback((requestId: string) => callbacks.current.onRetry(requestId), [])
+  const jumpToQuote = useCallback(
+    (messageId: string, keyboard: boolean) => callbacks.current.jump?.(messageId, keyboard),
+    [],
+  )
+  const openActions = useCallback(
+    (target: Message, anchor: HTMLElement, keyboard: boolean, point?: MenuPoint) =>
+      setPopup({ messageId: target.id, anchor, keyboard, point }),
+    [],
+  )
+  const beginReply = useCallback((target: Message) => {
     setPopup(null)
     setEdit(undefined)
     setReply(target)
-  }
+  }, [])
+  const entries = useMemo(
+    () => (chat ? messageEntries(chat.id, recipient, messages, pending, hasNewer) : []),
+    [chat?.id, recipient, messages, pending, hasNewer],
+  )
+  const days = useMemo(() => groupByDay(entries), [entries])
 
   async function confirmDelete(scope: DeleteScope) {
     if (!confirm || !chat || busyRef.current) return
@@ -220,22 +239,15 @@ export function ChatPanel({
   if (!chat)
     return (
       <section className="chat-panel empty-panel">
-        <MessageSquare size={38} strokeWidth={1.2} aria-hidden="true" />
-        <h2>No chat selected</h2>
-        <button className="button button-primary" onClick={onNew}>
-          New chat
-        </button>
+        <p className="chat-hint">Select a chat to start messaging</p>
       </section>
     )
-
-  const entries = messageEntries(chat.id, recipient, messages, pending, hasNewer)
 
   return (
     <section className="chat-panel">
       <ChatHeader
         chat={chat}
         currentUser={currentUser}
-        connection={connection}
         presence={features?.presence}
         onBack={onBack}
         onMembers={onMembers}
@@ -280,49 +292,56 @@ export function ChatPanel({
               {loadingOlder ? 'Loading…' : 'Load earlier messages'}
             </button>
           )}
-          {entries.map(({ key, message, send }, index) => {
-            const mine = Boolean(send || message?.senderId === currentUser.id)
-            const sender = send
-              ? currentUser.username
-              : senderNames.get(message?.senderId || '') || 'Member'
-            return (
-              <MessageItem
-                key={key}
-                message={message}
-                send={send}
-                mine={mine}
-                sender={sender}
-                group={chat.kind === ChatKind.GROUP}
-                connected={connection === 'connected'}
-                onRetry={onRetry}
-                read={Boolean(
-                  message &&
-                  BigInt(message.sequence) <= BigInt(features?.summary.maxOtherReadSequence ?? '0'),
-                )}
-                onActions={
-                  features && !selection.enabled
-                    ? (target, anchor, keyboard) =>
-                        setPopup({ messageId: target.id, anchor, keyboard })
-                    : undefined
-                }
-                onReply={features ? beginReply : undefined}
-                runStart={!sameMessageRun(entries[index - 1], entries[index], currentUser.id)}
-                runEnd={!sameMessageRun(entries[index], entries[index + 1], currentUser.id)}
-                selectionMode={selection.enabled}
-                selected={Boolean(message && selection.selected.has(message.id))}
-                onQuote={features?.jumpToMessage}
-                quoteSender={
-                  message?.replySenderId === currentUser.id
-                    ? currentUser.username
-                    : senderNames.get(message?.replySenderId ?? '')
-                }
-                quoteLoading={Boolean(
-                  message?.replyToMessageId && features?.jumpLoading === message.replyToMessageId,
-                )}
-                highlighted={message?.id === highlight}
-              />
-            )
-          })}
+          {days.map((day) => (
+            <section className="message-day" key={day.key}>
+              <div className="message-day-label">
+                <span>{formatDayLabel(day.timestamp)}</span>
+              </div>
+              {day.entries.map(({ entry: { key, message, send }, index }) => {
+                const mine = Boolean(send || message?.senderId === currentUser.id)
+                const sender = send
+                  ? currentUser.username
+                  : senderNames.get(message?.senderId || '') || 'Member'
+                return (
+                  <MessageItem
+                    key={key}
+                    message={message}
+                    send={send}
+                    mine={mine}
+                    sender={sender}
+                    group={chat.kind === ChatKind.GROUP}
+                    connected={connection === 'connected'}
+                    onRetry={retry}
+                    read={Boolean(
+                      message &&
+                      BigInt(message.sequence) <=
+                        BigInt(features?.summary.maxOtherReadSequence ?? '0'),
+                    )}
+                    onActions={features ? openActions : undefined}
+                    onReply={features ? beginReply : undefined}
+                    runStart={!sameMessageRun(entries[index - 1], entries[index], currentUser.id)}
+                    runEnd={!sameMessageRun(entries[index], entries[index + 1], currentUser.id)}
+                    selectionMode={selection.enabled}
+                    selected={Boolean(message && selection.selected.has(message.id))}
+                    onQuote={features ? jumpToQuote : undefined}
+                    quoteSender={
+                      message?.replySenderId === currentUser.id
+                        ? currentUser.username
+                        : senderNames.get(message?.replySenderId ?? '')
+                    }
+                    quoteLoading={Boolean(
+                      message?.replyToMessageId &&
+                      features?.jumpLoading === message.replyToMessageId,
+                    )}
+                    highlighted={message?.id === highlight}
+                  />
+                )
+              })}
+            </section>
+          ))}
+          {entries.length === 0 && chat.lastSequence === '0' && (
+            <p className="chat-hint chat-hint-center">No messages here yet</p>
+          )}
           {(hasNewer || hasUnresolvedGap) && (
             <div className="history-newer-controls">
               {hasNewer && (
@@ -346,12 +365,9 @@ export function ChatPanel({
       </div>
 
       {(detached || hasNewer) && (
-        <div className="fixed-latest-wrap">
-          <button className="fixed-latest" onClick={onJumpToLatest}>
-            <ArrowDown size={15} />
-            Back to latest
-          </button>
-        </div>
+        <button className="fixed-latest" onClick={onJumpToLatest} aria-label="Back to latest">
+          <ChevronDown size={24} />
+        </button>
       )}
       <span className="visually-hidden" role="status" aria-live="polite">
         {announcement}
@@ -363,10 +379,10 @@ export function ChatPanel({
             aria-label="Cancel selection"
             onClick={() => selection.clear()}
           >
-            <X size={19} />
+            <X size={21} />
           </button>
           <span role="status">
-            {selection.selected.size} selected <small>of 100 maximum</small>
+            {selection.selected.size} {selection.selected.size === 1 ? 'message' : 'messages'}
           </span>
           <button
             className="button button-danger"
@@ -376,7 +392,7 @@ export function ChatPanel({
               setActionError(null)
             }}
           >
-            <Trash2 size={15} />
+            <Trash2 size={17} />
             Delete
           </button>
         </div>
@@ -426,6 +442,7 @@ export function ChatPanel({
         <MessageActionMenu
           message={popupMessage}
           anchor={popup.anchor}
+          point={popup.point}
           keyboard={popup.keyboard}
           mine={popupMessage.senderId === currentUser.id}
           readers={features.readers}

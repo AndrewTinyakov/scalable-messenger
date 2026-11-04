@@ -146,7 +146,6 @@ async function render(messages = rows(10), chat = direct) {
         onSend={() => true}
         onRetry={() => {}}
         onBack={() => {}}
-        onNew={() => {}}
         hasOlder={false}
         hasNewer={false}
         hasUnresolvedGap={false}
@@ -224,7 +223,7 @@ describe('message actions and scoped deletion', () => {
     expect(container.querySelectorAll('.lucide-check')).toHaveLength(1)
     expect(container.querySelector('.message-action-trigger, .read-receipt')).toBeNull()
     await open()
-    expect(document.querySelector('[role="menu"]')?.textContent).toBe('ReplyEditCopyDeleteSelect')
+    expect(document.querySelector('[role="menu"]')?.textContent).toBe('ReplyEditCopySelectDelete')
     expect(document.querySelector('.inline-readers time')?.getAttribute('datetime')).toBe(
       '2026-11-04T10:01:00Z',
     )
@@ -237,7 +236,7 @@ describe('message actions and scoped deletion', () => {
     const messages = rows(1)
     await render(messages)
     await open()
-    expect(document.querySelector('[role="menu"]')?.textContent).toBe('ReplyCopyDeleteSelect')
+    expect(document.querySelector('[role="menu"]')?.textContent).toBe('ReplyCopySelectDelete')
     expect(features.readers).not.toHaveBeenCalled()
     await click(button('Delete'))
     expect((document.querySelector('input[value="SELF"]') as HTMLInputElement).checked).toBe(true)
@@ -332,6 +331,32 @@ describe('list selection', () => {
     expect(document.querySelector('[role="menu"]')).toBeNull()
   })
 
+  it('leaves select mode when the last selected message is deselected', async () => {
+    await render(rows(4))
+    await select(0)
+    const first = container.querySelector<HTMLElement>('[data-message-id]')!
+    await pointer('pointerdown', first, 30)
+    await pointer('pointerup', first, 30)
+    expect(selectedIds()).toEqual([])
+    expect(container.querySelector('[aria-label="Selected messages"]')).toBeNull()
+    expect(container.querySelector('.chat-composer-region')?.hasAttribute('hidden')).toBe(false)
+  })
+
+  it('stays in select mode while a drag passes through zero and exits when it ends empty', async () => {
+    await render(rows(4))
+    await select(0)
+    const viewport = container.querySelector<HTMLElement>('.chat-body')!
+    const first = container.querySelector<HTMLElement>('[data-message-id]')!
+    await pointer('pointerdown', first, 30)
+    expect(selectedIds()).toEqual([])
+    expect(container.querySelector('[aria-label="Selected messages"]')).not.toBeNull()
+    await pointer('pointermove', viewport, 60)
+    await pointer('pointermove', viewport, 30)
+    await pointer('pointerup', viewport, 30)
+    expect(selectedIds()).toEqual([])
+    expect(container.querySelector('[aria-label="Selected messages"]')).toBeNull()
+  })
+
   it('keeps an ordinary left click available and cancels an automatically started drag', async () => {
     await render(rows(5))
     const first = container.querySelector<HTMLElement>('[data-message-id]')!
@@ -400,7 +425,7 @@ describe('list selection', () => {
     await act(async () => vi.advanceTimersByTimeAsync(300))
     expect(viewport.scrollTop).toBe(stopped)
     expect(container.querySelector('[aria-label="Selected messages"]')?.textContent).toContain(
-      '100 selected',
+      '100 messages',
     )
     await click(button('Delete'))
     await click(button('Delete for me'))

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Chat } from '../../entities/chat/model'
 import type { Session, User } from '../../entities/session/model'
 import { api } from '../../shared/api/http'
+import { Avatar } from '../../shared/ui/Avatar'
 
 interface Props {
   chat: Chat
@@ -262,19 +263,22 @@ export function GroupMembersDialog({
           {members.map((member) => (
             <li key={member.id} data-member-id={member.id} className="group-member-row">
               <div className="group-member-main">
-                <span className="person-avatar">{member.username[0]?.toUpperCase()}</span>
+                <Avatar
+                  seed={member.id}
+                  name={member.username}
+                  size={42}
+                  online={presence?.[member.id] === 'online'}
+                />
                 <span className="group-member-name">
                   {member.username}
                   {member.id === session.user.id && <small>You</small>}
-                  {presence && (
-                    <small className={`member-presence ${presence[member.id] ?? 'unknown'}`}>
-                      {presence[member.id] === 'online'
-                        ? 'Online'
-                        : presence[member.id] === 'offline'
-                          ? 'Offline'
-                          : 'Presence unknown'}
-                    </small>
-                  )}
+                  {presence &&
+                    presence[member.id] !== undefined &&
+                    presence[member.id] !== 'unknown' && (
+                      <small className={`member-presence ${presence[member.id]}`}>
+                        {presence[member.id] === 'online' ? 'online' : 'offline'}
+                      </small>
+                    )}
                 </span>
                 {member.id === details.ownerId ? (
                   <span className="member-owner">Owner</span>
@@ -357,7 +361,7 @@ export function GroupMembersDialog({
             <div className="member-add-results">
               {candidates.map((user) => (
                 <div key={user.id} className="group-member-main">
-                  <span className="person-avatar">{user.username[0]?.toUpperCase()}</span>
+                  <Avatar seed={user.id} name={user.username} size={42} />
                   <span className="group-member-name">{user.username}</span>
                   <button
                     className="member-add"

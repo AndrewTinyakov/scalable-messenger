@@ -113,10 +113,12 @@ export function App() {
   if (!session && !online)
     return (
       <main className="auth-layout">
-        <section className="auth-form-card" role="status">
-          <WifiOff size={28} aria-hidden="true" />
+        <section className="auth-card" role="status">
+          <span className="auth-offline-icon">
+            <WifiOff size={30} aria-hidden="true" />
+          </span>
           <h1>You're offline</h1>
-          <p>
+          <p className="auth-lede">
             Waiting for a connection. We'll check your session automatically when you're back
             online.
           </p>
@@ -132,7 +134,7 @@ export function App() {
   if (!session && restoreError)
     return (
       <main className="auth-layout">
-        <section className="auth-form-card">
+        <section className="auth-card">
           <p role="alert">{restoreError}</p>
           <button
             className="button button-primary"

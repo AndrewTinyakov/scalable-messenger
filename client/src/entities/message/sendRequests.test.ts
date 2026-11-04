@@ -41,7 +41,6 @@ function setup(initial: PendingSend[] = []) {
     onChange: (sends) => {
       changes.push(sends)
     },
-    pause: async () => {},
   }
   const requests = new SendRequests('relay.user.device', adapters)
   return {
@@ -84,9 +83,55 @@ describe('send requests', () => {
   it('holds later persisted intents behind a queued request until its SQL result is known', async () => {
     const fixture = setup([pending(id(1), 'queued'), pending(id(2))])
     await fixture.requests.reconcile(true)
-    expect(fixture.sent).toEqual([])
+    expect(fixture.sent.map((send) => send.requestId)).toEqual([id(1)])
     fixture.requests.saved(id(1), chatId, messageId)
-    expect(fixture.sent.map((send) => send.requestId)).toEqual([id(2)])
+    expect(fixture.sent.map((send) => send.requestId)).toEqual([id(1), id(2)])
+  })
+
+  it('retries lost confirmations with the same ID and holds other chats after the bound', async () => {
+    vi.useFakeTimers()
+    const fixture = setup()
+    fixture.adapters.now = Date.now
+    fixture.requests.start(chatId, 'first')
+    fixture.requests.start(resolvedChatId, 'second')
+    for (let i = 0; i < 4; i++) await vi.advanceTimersByTimeAsync(10000)
+    expect(fixture.sent.map((send) => send.requestId)).toEqual([id(1), id(1), id(1), id(1)])
+    expect(fixture.requests.list()[0].status).toBe('retryable')
+    await fixture.requests.retry(id(1))
+    expect(fixture.sent.at(-1)?.requestId).toBe(id(1))
+    fixture.requests.saved(id(1), chatId, messageId)
+    await vi.advanceTimersByTimeAsync(75)
+    expect(fixture.sent.at(-1)?.body).toBe('second')
+  })
+
+  it('offers Try again after bounded status outages without publishing a later chat', async () => {
+    vi.useFakeTimers()
+    const fixture = setup()
+    fixture.adapters.now = Date.now
+    fixture.statuses.mockRejectedValue(new TypeError('status unavailable'))
+    fixture.requests.start(chatId, 'first')
+    fixture.requests.start(resolvedChatId, 'second')
+    await vi.advanceTimersByTimeAsync(60000)
+    expect(fixture.requests.list()[0].status).toBe('retryable')
+    expect(fixture.sent.map((send) => send.body)).toEqual(['first'])
+  })
+
+  it('holds unknown publication ahead of another chat and retries queued UNKNOWN after reconnect', async () => {
+    vi.useFakeTimers()
+    const fixture = setup()
+    fixture.adapters.now = Date.now
+    fixture.requests.start(chatId, 'first')
+    fixture.requests.start(resolvedChatId, 'second')
+    fixture.requests.unknown(id(1))
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(fixture.sent.map((send) => send.body)).toEqual(['first', 'first'])
+    fixture.requests.queued(id(1))
+    fixture.requests.disconnected()
+    await fixture.requests.reconcile(true)
+    expect(fixture.sent.at(-1)?.requestId).toBe(id(1))
+    fixture.requests.saved(id(1), chatId, messageId)
+    await vi.advanceTimersByTimeAsync(75)
+    expect(fixture.sent.at(-1)?.body).toBe('second')
   })
 
   it('unblocks other chats when an active send is forgotten', async () => {
@@ -320,11 +365,11 @@ describe('send requests', () => {
     )
   })
 
-  it('does not retry a queued request with an unknown status', async () => {
+  it('retries a queued request with the same ID after reconnect', async () => {
     const fixture = setup([pending(id(1), 'queued')])
     await fixture.requests.reconcile(true)
-    expect(fixture.sent).toEqual([])
-    expect(fixture.requests.list()[0].status).toBe('queued')
+    expect(fixture.sent.map((send) => send.requestId)).toEqual([id(1)])
+    expect(fixture.requests.list()[0].status).toBe('sending')
   })
 
   it('keeps reconnect retry intent when a status poll is already in flight', async () => {

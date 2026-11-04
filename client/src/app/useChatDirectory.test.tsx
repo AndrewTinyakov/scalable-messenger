@@ -172,3 +172,76 @@ it('does not restore an unread badge after a read on another device at the same 
   })
   expect(directory.chats[0].unreadCount).toBe(0)
 })
+
+it('includes a chat activated ahead of the cursor exactly once when pagination completes', async () => {
+  const rows: Chat[] = Array.from({ length: 130 }, (_, index) => ({
+    ...older,
+    id: `chat-${index}`,
+    activityAt: new Date(Date.UTC(2026, 0, 1, 0, 130 - index)).toISOString(),
+  }))
+  chats.mockImplementation(async (cursor?: string) => {
+    const start = cursor ? rows.findIndex((row) => row.id === cursor) + 1 : 0
+    const page = rows.slice(start, start + 50)
+    return {
+      chats: page,
+      nextCursor: start + 50 < rows.length ? page.at(-1)!.id : null,
+    }
+  })
+  await act(async () => directory.refreshChats(true))
+  expect(directory.chats).toHaveLength(100)
+  expect(directory.hasMoreChats).toBe(true)
+  const moved = { ...rows.splice(115, 1)[0], ...newer, id: 'chat-115' }
+  rows.unshift(moved)
+  chats.mockClear()
+  await act(async () => directory.loadMoreChats())
+  expect(directory.hasMoreChats).toBe(false)
+  expect(directory.chats).toHaveLength(130)
+  expect(new Set(directory.chats.map((row) => row.id)).size).toBe(130)
+  expect(directory.chats[0]).toEqual(moved)
+  expect(chats.mock.calls.map(([cursor]) => cursor)).toEqual(['chat-99', undefined])
+})
+
+it.each(['remove', 'summary', 'refresh'] as const)(
+  'preserves a later %s while merging the first page during pagination',
+  async (change) => {
+    const initial = Array.from({ length: 100 }, (_, index) => ({
+      ...older,
+      id: index === 0 ? older.id : `loaded-${index}`,
+    }))
+    chats.mockResolvedValueOnce({ chats: initial, nextCursor: 'more' })
+    await act(async () => directory.refreshChats(true))
+    const firstPage = deferred<{ chats: Chat[]; nextCursor: string | null }>()
+    const incoming = { ...older, id: 'incoming' }
+    chats
+      .mockResolvedValueOnce({ chats: [incoming], nextCursor: null })
+      .mockReturnValueOnce(firstPage.promise)
+    let pending!: Promise<void>
+    await act(async () => {
+      pending = directory.loadMoreChats()
+      await Promise.resolve()
+    })
+    await act(async () => {
+      if (change === 'remove') {
+        directory.removeChat(older.id)
+        directory.removeChat(incoming.id)
+      } else if (change === 'summary') {
+        chat.mockResolvedValueOnce(newer)
+        await directory.refreshChatSummary(older.id)
+      } else {
+        chats.mockResolvedValueOnce({ chats: [newer], nextCursor: null })
+        await directory.refreshChats(true)
+      }
+    })
+    await act(async () => {
+      firstPage.resolve({ chats: [older, incoming], nextCursor: 'ignored' })
+      await pending
+    })
+    if (change === 'remove') {
+      expect(directory.chats.some((row) => [older.id, incoming.id].includes(row.id))).toBe(false)
+    } else {
+      expect(directory.chats.find((row) => row.id === older.id)).toEqual(newer)
+    }
+    if (change === 'refresh') expect(directory.chats).toEqual([newer])
+    expect(directory.hasMoreChats).toBe(false)
+  },
+)

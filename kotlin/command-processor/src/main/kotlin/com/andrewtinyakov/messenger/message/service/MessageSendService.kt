@@ -139,11 +139,21 @@ class MessageSendService(
                 duplicateOutcome(request, previousFingerprint)
             } else {
                 val reason = request.bodyRejection ?: when {
-                    chat == null -> SendRejectionReason.CHAT_NOT_FOUND
-                    request.senderId !in members -> SendRejectionReason.NOT_A_MEMBER
-                    request.replyToMessageId != null && (request.senderId to request.replyToMessageId) !in replyTargets ->
+                    chat == null -> {
+                        SendRejectionReason.CHAT_NOT_FOUND
+                    }
+
+                    request.senderId !in members -> {
+                        SendRejectionReason.NOT_A_MEMBER
+                    }
+
+                    request.replyToMessageId != null && (request.senderId to request.replyToMessageId) !in replyTargets -> {
                         SendRejectionReason.INVALID_REPLY_TARGET
-                    else -> null
+                    }
+
+                    else -> {
+                        null
+                    }
                 }
                 if (reason != null) {
                     existing[request.key] = reject(request, reason)
@@ -174,7 +184,13 @@ class MessageSendService(
         SendStageRecorder.requests(SendStage.SEQUENCES_ALLOCATED, accepted) { it.requestId.value }
         val rooms = roomsFor(chat)
         val pending = accepted.mapIndexed { index, request ->
-            prepareMessage(request, chat, firstSequence + index, rooms, replyTargets[request.senderId to request.replyToMessageId]?.asReply())
+            prepareMessage(
+                request,
+                chat,
+                firstSequence + index,
+                rooms,
+                replyTargets[request.senderId to request.replyToMessageId]?.asReply(),
+            )
         }
         repository.insertSavedMessages(pending.map { it.saved })
         SendStageRecorder.requests(SendStage.MESSAGES_RESULTS_WRITTEN, accepted) { it.requestId.value }

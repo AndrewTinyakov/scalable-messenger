@@ -37,7 +37,7 @@ class JooqChatRepository(
         beforeChatId: ChatId?,
         limit: Int,
     ): List<MemberChat> = DatabaseObservation.query(DatabaseOperation.CHAT_FIND_BY_MEMBER) {
-        val summary = summary(userId)
+        val summary = chatSummary(userId)
         val activityAt = DSL.coalesce(CHATS.LAST_ACTIVITY_AT, CHAT_MEMBERS.JOINED_AT)
         db.select(
             activityAt,
@@ -80,89 +80,10 @@ class JooqChatRepository(
                         ownerId = row.get(CHATS.OWNER_ID)
                             ?.let(::UserId),
                         memberCount = row.get(CHATS.MEMBER_COUNT)!!,
-                        activityAt = row.get(activityAt),
-                        lastMessage = row.get(summary).lastMessage,
-                        unreadCount = row.get(summary).unreadCount,
-                        unreadCountCapped = row.get(summary).unreadCountCapped,
-                    ),
+                    ).withSummary(row.get(summary), row.get(activityAt)),
                     activityAt = row.get(activityAt)!!,
                 )
             }
-    }
-
-    private data class Summary(
-        val unreadCount: Int,
-        val unreadCountCapped: Boolean,
-        val lastMessage: ChatLastMessage?,
-    )
-
-    private fun summary(userId: UserId): org.jooq.Field<Summary> {
-        val candidates = DSL.name("summary_candidates").asMaterialized(
-            DSL.select(MESSAGES.ID, MESSAGES.SEQUENCE, MESSAGES.SENDER_ID, MESSAGES.CREATED_AT, MESSAGES.BODY, MESSAGES.DELETED_AT)
-                .from(MESSAGES).where(MESSAGES.CHAT_ID.eq(CHATS.ID))
-                .orderBy(MESSAGES.SEQUENCE.desc()).limit(256),
-        )
-        val sequence = candidates.field(MESSAGES.SEQUENCE)!!
-        val sender = candidates.field(MESSAGES.SENDER_ID)!!
-        val readThrough = DSL.coalesce(
-            DSL.select(CHAT_READ_PROGRESS.THROUGH_SEQUENCE).from(CHAT_READ_PROGRESS)
-                .where(CHAT_READ_PROGRESS.CHAT_ID.eq(CHATS.ID), CHAT_READ_PROGRESS.USER_ID.eq(userId.value)).asField<Long>(),
-            DSL.inline(0L),
-        )
-        val visible = candidates.field(MESSAGES.DELETED_AT)!!.isNull.and(
-            DSL.exists(
-                DSL.selectOne().from(CHAT_MEMBERS).where(
-                    CHAT_MEMBERS.CHAT_ID.eq(CHATS.ID),
-                    CHAT_MEMBERS.USER_ID.eq(userId.value),
-                    sequence.gt(CHATS.CLEARED_THROUGH_SEQUENCE),
-                    sequence.gt(CHAT_MEMBERS.CLEARED_THROUGH_SEQUENCE),
-                    CHAT_MEMBERS.HIDDEN_THROUGH_SEQUENCE.isNull.or(CHATS.NEXT_SEQUENCE.minus(1L).gt(CHAT_MEMBERS.HIDDEN_THROUGH_SEQUENCE)),
-                ),
-            ),
-        ).and(
-            sequence.gt(
-                DSL.coalesce(
-                    DSL.select(HIDDEN_MESSAGE_RANGES.THROUGH_SEQUENCE).from(HIDDEN_MESSAGE_RANGES)
-                        .where(
-                            HIDDEN_MESSAGE_RANGES.CHAT_ID.eq(CHATS.ID),
-                            HIDDEN_MESSAGE_RANGES.USER_ID.eq(userId.value),
-                            HIDDEN_MESSAGE_RANGES.AFTER_SEQUENCE.lt(sequence),
-                        )
-                        .orderBy(HIDDEN_MESSAGE_RANGES.AFTER_SEQUENCE.desc()).limit(1).asField<Long>(),
-                    DSL.inline(0L),
-                ),
-            ),
-        )
-        val last = DSL.multiset(
-            DSL.select(
-                candidates.field(MESSAGES.ID),
-                sequence,
-                sender,
-                USERS.USERNAME,
-                candidates.field(MESSAGES.CREATED_AT),
-                DSL.left(candidates.field(MESSAGES.BODY), 160),
-            )
-                .from(candidates).join(USERS).on(USERS.ID.eq(sender)).where(visible).orderBy(sequence.desc()).limit(1),
-        ).convertFrom { rows ->
-            rows.firstOrNull()?.let {
-                ChatLastMessage(
-                    MessageId(it.value1()!!),
-                    it.value2()!!,
-                    UserId(it.value3()!!),
-                    it.value4()!!,
-                    it.value5()!!,
-                    it.value6()!!,
-                    false,
-                )
-            }
-        }
-        return DSL.multiset(
-            DSL.with(candidates).select(
-                DSL.count().filterWhere(visible.and(sender.ne(userId.value)).and(sequence.gt(readThrough))),
-                DSL.count().filterWhere(sequence.gt(readThrough)).eq(256),
-                last,
-            ).from(candidates),
-        ).convertFrom { rows -> rows.single().let { Summary(it.value1(), it.value2(), it.value3()) } }
     }
 
     override fun findMembersByChatIds(chatIds: List<ChatId>): Map<ChatId, List<UserSummary>> = DatabaseObservation.query(
@@ -465,7 +386,7 @@ class JooqChatRepository(
                     )
                 }
             }
-        val summary = summary(userId)
+        val summary = chatSummary(userId)
         val activityAt = DSL.coalesce(
             CHATS.LAST_ACTIVITY_AT,
             DSL.select(
@@ -492,13 +413,7 @@ class JooqChatRepository(
             )
             .fetchOne { row ->
                 MemberChatDetails(
-                    chat = row.into(CHATS)
-                        .toModel().copy(
-                            activityAt = row.get(activityAt),
-                            lastMessage = row.get(summary).lastMessage,
-                            unreadCount = row.get(summary).unreadCount,
-                            unreadCountCapped = row.get(summary).unreadCountCapped,
-                        ),
+                    chat = row.into(CHATS).toModel().withSummary(row.get(summary), row.get(activityAt)),
                     members = row.get(members),
                 )
             }

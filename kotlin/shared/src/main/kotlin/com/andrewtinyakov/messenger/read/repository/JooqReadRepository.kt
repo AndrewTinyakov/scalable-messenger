@@ -181,6 +181,13 @@ class JooqReadRepository(
             .fetch { RoomAddress.user(UserId(it.value1()!!)) }
     }
 
+    override fun completeNotification(chatId: ChatId, userId: UserId) {
+        db.deleteFrom(PENDING_READ_NOTIFICATIONS).where(
+            PENDING_READ_NOTIFICATIONS.CHAT_ID.eq(chatId.value),
+            PENDING_READ_NOTIFICATIONS.USER_ID.eq(userId.value),
+        ).execute()
+    }
+
     override fun pendingNotifications(now: OffsetDateTime, limit: Int): Map<ChatId, List<String>> {
         require(limit in 1..1000)
         val pending = db.selectFrom(PENDING_READ_NOTIFICATIONS)

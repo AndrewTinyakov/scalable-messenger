@@ -51,7 +51,9 @@ class ReadService(
             if (advanced.advanced) {
                 metrics.count("ranges", "inserted", advanced.rangesWritten)
                 metrics.count("batches", "ranges")
-                val rooms = (repository.notificationRooms(chatId, advanced.progress.readAt!!) + RoomAddress.user(userId)).distinct()
+                val sharedRooms = repository.notificationRooms(chatId, advanced.progress.readAt!!)
+                if (sharedRooms.isNotEmpty()) repository.completeNotification(chatId, userId)
+                val rooms = (sharedRooms + RoomAddress.user(userId)).distinct()
                 metrics.count("notifications", if (rooms.isEmpty()) "coalesced" else "emitted")
                 outbox.enqueue(
                     rooms.map { room ->

@@ -137,6 +137,22 @@ class ReadServiceTests
         }
 
         @Test
+        fun `an immediate notification does not spend the next bucket on unchanged progress`() {
+            val f = fixture(messages = 3)
+            val clock = MutableClock("2026-11-02T12:00:00Z")
+            val reads = service(clock)
+            reads.advance(f.chat, f.members.first(), AdvanceReadRequest("1"))
+            assertEquals(1, sharedNotifications(f.chat))
+            clock.set("2026-11-02T12:00:02Z")
+            reads.publishPendingNotifications()
+            assertEquals(1, sharedNotifications(f.chat))
+            clock.set("2026-11-02T12:00:02.100Z")
+            reads.advance(f.chat, f.members.first(), AdvanceReadRequest("3"))
+            assertEquals(2, sharedNotifications(f.chat))
+            assertEquals("3", reads.summary(f.chat, f.owner).maxOtherReadSequence)
+        }
+
+        @Test
         fun `last read in an already notified bucket gets a durable trailing notification`() {
             val f = fixture(messages = 3)
             val clock = MutableClock("2026-11-02T12:00:00Z")

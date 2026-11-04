@@ -1,6 +1,7 @@
 package com.andrewtinyakov.messenger.chat.model
 
 import com.andrewtinyakov.messenger.shared.id.ChatId
+import com.andrewtinyakov.messenger.shared.id.MessageId
 import com.andrewtinyakov.messenger.shared.id.UserId
 
 data class Chat(
@@ -35,9 +36,9 @@ data class Chat(
 }
 
 data class ChatLastMessage(
-    val id: String,
+    val id: MessageId,
     val sequence: Long,
-    val senderId: String,
+    val senderId: UserId,
     val senderUsername: String,
     val createdAt: java.time.OffsetDateTime,
     val bodyPreview: String,

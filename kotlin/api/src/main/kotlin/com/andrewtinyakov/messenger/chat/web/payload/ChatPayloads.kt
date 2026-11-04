@@ -97,7 +97,15 @@ fun Chat.toResponse(members: List<UserSummary>): ChatResponse = ChatResponse(
     activityAt = activityAt,
     unreadCountCapped = unreadCountCapped,
     lastMessage = lastMessage?.let {
-        ChatLastMessageResponse(it.id, it.sequence.toString(), it.senderId, it.senderUsername, it.createdAt, it.bodyPreview, it.deleted)
+        ChatLastMessageResponse(
+            it.id.value,
+            it.sequence.toString(),
+            it.senderId.value,
+            it.senderUsername,
+            it.createdAt,
+            it.bodyPreview,
+            it.deleted,
+        )
     },
 )
 

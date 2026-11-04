@@ -17,6 +17,7 @@ import com.andrewtinyakov.messenger.infrastructure.database.observability.Databa
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseOperation
 import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxMessage
 import com.andrewtinyakov.messenger.shared.id.ChatId
+import com.andrewtinyakov.messenger.shared.id.MessageId
 import com.andrewtinyakov.messenger.shared.id.UserId
 import org.jooq.DSLContext
 import org.jooq.JSONB
@@ -145,7 +146,15 @@ class JooqChatRepository(
                 .from(candidates).join(USERS).on(USERS.ID.eq(sender)).where(visible).orderBy(sequence.desc()).limit(1),
         ).convertFrom { rows ->
             rows.firstOrNull()?.let {
-                ChatLastMessage(it.value1()!!, it.value2()!!, it.value3()!!, it.value4()!!, it.value5()!!, it.value6()!!, false)
+                ChatLastMessage(
+                    MessageId(it.value1()!!),
+                    it.value2()!!,
+                    UserId(it.value3()!!),
+                    it.value4()!!,
+                    it.value5()!!,
+                    it.value6()!!,
+                    false,
+                )
             }
         }
         return DSL.multiset(

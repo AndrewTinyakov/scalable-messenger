@@ -176,6 +176,9 @@ export function ChatPanel({
   })
 
   const selection = useMessageSelection(scrollRef, messages, chat?.id)
+  useEffect(() => {
+    if (selection.enabled) setPopup(null)
+  }, [selection.enabled])
   const popupMessage = popup
     ? messages.find((message) => message.id === popup.messageId && !message.deletedAt)
     : undefined

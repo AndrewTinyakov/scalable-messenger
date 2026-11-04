@@ -6,11 +6,13 @@ export const MAX_SELECTED_MESSAGES = 100
 interface Gesture {
   pointerId: number
   startId: string
+  startX: number
   startY: number
   y: number
   selecting: boolean
   initial: Map<string, Message>
   dragged: boolean
+  wasEnabled: boolean
 }
 
 export function useMessageSelection(
@@ -25,7 +27,8 @@ export function useMessageSelection(
   const gesture = useRef<Gesture | null>(null)
   const suppressUntil = useRef(0)
   const frame = useRef<number>()
-  const cancelRef = useRef<() => void>()
+  const stopRef = useRef<(restore: boolean) => void>()
+  const moveRef = useRef<(event: PointerEvent) => void>()
 
   function stop(restore: boolean) {
     const active = gesture.current
@@ -33,33 +36,48 @@ export function useMessageSelection(
     if (frame.current !== undefined) window.cancelAnimationFrame(frame.current)
     frame.current = undefined
     if (!active) return
-    suppressUntil.current = Date.now() + 400
-    if (restore) setSelected(new Map(active.initial))
+    if (active.wasEnabled || active.dragged) suppressUntil.current = Date.now() + 400
+    if (restore) {
+      setSelected(new Map(active.initial))
+      setEnabled(active.wasEnabled)
+    }
     if (scroller.current?.hasPointerCapture?.(active.pointerId))
       scroller.current.releasePointerCapture(active.pointerId)
   }
-  cancelRef.current = () => stop(true)
+  stopRef.current = stop
 
   useEffect(() => {
     setEnabled(false)
     setSelected(new Map())
     suppressUntil.current = 0
     return () => {
-      gesture.current = null
-      if (frame.current !== undefined) window.cancelAnimationFrame(frame.current)
+      stopRef.current?.(false)
     }
   }, [chatId])
 
   useEffect(() => {
-    const cancel = () => cancelRef.current?.()
+    const cancel = () => stopRef.current?.(true)
+    const move = (event: PointerEvent) => moveRef.current?.(event)
+    const up = (event: PointerEvent) => {
+      if (gesture.current?.pointerId === event.pointerId) stopRef.current?.(false)
+    }
+    const canceled = (event: PointerEvent) => {
+      if (gesture.current?.pointerId === event.pointerId) cancel()
+    }
     const key = (event: KeyboardEvent) => {
       if (event.key === 'Escape') cancel()
     }
     window.addEventListener('blur', cancel)
     window.addEventListener('keydown', key)
+    window.addEventListener('pointermove', move, { passive: false })
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', canceled)
     return () => {
       window.removeEventListener('blur', cancel)
       window.removeEventListener('keydown', key)
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', canceled)
     }
   }, [])
 
@@ -122,6 +140,32 @@ export function useMessageSelection(
     return current.current.messages.find((message) => message.id === id && !message.deletedAt)
   }
 
+  moveRef.current = (event) => {
+    const active = gesture.current
+    const viewport = scroller.current
+    if (!active || !viewport || event.pointerId !== active.pointerId) return
+    if (!(event.buttons & 1)) {
+      stop(false)
+      return
+    }
+    active.y = event.clientY
+    if (
+      !active.dragged &&
+      Math.hypot(event.clientX - active.startX, active.y - active.startY) > 5
+    ) {
+      active.dragged = true
+      setEnabled(true)
+      window.getSelection()?.removeAllRanges()
+      if (!viewport.hasPointerCapture?.(active.pointerId))
+        viewport.setPointerCapture?.(active.pointerId)
+      frame.current = window.requestAnimationFrame(autoScroll)
+    }
+    if (active.dragged) {
+      event.preventDefault()
+      applyRange()
+    }
+  }
+
   return {
     enabled,
     selected,
@@ -131,43 +175,36 @@ export function useMessageSelection(
     },
     clear() {
       stop(false)
+      suppressUntil.current = 0
       setEnabled(false)
       setSelected(new Map())
     },
     handlers: {
       onPointerDown(event: React.PointerEvent<HTMLDivElement>) {
-        if (!enabled || event.button !== 0 || event.pointerType === 'touch') return
+        if (gesture.current || event.button !== 0 || event.pointerType === 'touch') return
         const message = targetMessage(event.target)
         if (!message) return
-        event.preventDefault()
+        suppressUntil.current = 0
+        window.getSelection()?.removeAllRanges()
+        if (enabled) event.preventDefault()
         gesture.current = {
           pointerId: event.pointerId,
           startId: message.id,
+          startX: event.clientX,
           startY: event.clientY,
           y: event.clientY,
           selecting: !selected.has(message.id),
           initial: new Map(selected),
           dragged: false,
+          wasEnabled: enabled,
         }
-        toggle(message)
-        event.currentTarget.setPointerCapture?.(event.pointerId)
-        frame.current = window.requestAnimationFrame(autoScroll)
+        if (enabled) {
+          toggle(message)
+          event.currentTarget.setPointerCapture?.(event.pointerId)
+        }
       },
-      onPointerMove(event: React.PointerEvent<HTMLDivElement>) {
-        const active = gesture.current
-        if (!active || event.pointerId !== active.pointerId) return
-        active.y = event.clientY
-        if (Math.abs(active.y - active.startY) >= 5) active.dragged = true
-        if (active.dragged) applyRange()
-      },
-      onPointerUp(event: React.PointerEvent<HTMLDivElement>) {
-        if (gesture.current?.pointerId === event.pointerId) stop(false)
-      },
-      onPointerCancel() {
-        stop(true)
-      },
-      onLostPointerCapture() {
-        stop(true)
+      onLostPointerCapture(event: React.PointerEvent<HTMLDivElement>) {
+        if (gesture.current?.pointerId === event.pointerId) stop(true)
       },
       onClickCapture(event: React.MouseEvent<HTMLDivElement>) {
         if (event.detail !== 0 && Date.now() < suppressUntil.current) {

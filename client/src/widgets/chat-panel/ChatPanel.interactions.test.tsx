@@ -187,7 +187,7 @@ async function pointer(kind: string, target: HTMLElement, y: number, x = 5) {
       bubbles: true,
       cancelable: true,
       button: 0,
-      buttons: kind === 'pointermove' ? 1 : 0,
+      buttons: ['pointerdown', 'pointermove'].includes(kind) ? 1 : 0,
       clientY: y,
       clientX: x,
     })
@@ -202,6 +202,20 @@ function selectedIds() {
 }
 
 describe('message actions and scoped deletion', () => {
+  it('replaces the browser context menu with message actions without selecting messages', async () => {
+    await render(rows(2))
+    const target = container.querySelector<HTMLElement>('.message-text')!
+    const event = new dom.window.MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+      button: 2,
+    })
+    await act(async () => target.dispatchEvent(event))
+    expect(event.defaultPrevented).toBe(true)
+    expect(document.querySelector('[role="menu"]')).not.toBeNull()
+    expect(container.querySelector('[aria-label="Selected messages"]')).toBeNull()
+  })
+
   it('opens relevant actions on left click, loads own read times inline and shows a single read status', async () => {
     const messages = rows(2).map((row) => ({ ...row, senderId: alice.id }))
     features.summary.maxOtherReadSequence = '1'
@@ -272,7 +286,7 @@ describe('message actions and scoped deletion', () => {
     expect(container.textContent).toContain('This message is no longer available.')
   })
 
-  it('replies on bubble and body double click, preserves drag text selection and disables reply during selection', async () => {
+  it('replies on bubble and body double click and suppresses reply after a selection drag', async () => {
     await render(rows(2))
     const bubble = container.querySelector<HTMLElement>('.message-bubble')!
     await act(async () =>
@@ -289,12 +303,12 @@ describe('message actions and scoped deletion', () => {
     await click(container.querySelector('[aria-label="Cancel reply"]')!)
     await pointer('pointerdown', bubble, 30, 150)
     await pointer('pointermove', bubble, 50, 200)
+    await pointer('pointerup', bubble, 50, 200)
     await act(async () =>
       bubble.dispatchEvent(new dom.window.MouseEvent('dblclick', { bubbles: true, detail: 2 })),
     )
     expect(container.querySelector('.composer-mode')).toBeNull()
-    await pointer('pointerdown', bubble, 30, 150)
-    await select()
+    expect(container.querySelector('[aria-label="Selected messages"]')).not.toBeNull()
     await act(async () =>
       bubble.dispatchEvent(new dom.window.MouseEvent('dblclick', { bubbles: true, detail: 2 })),
     )
@@ -304,6 +318,36 @@ describe('message actions and scoped deletion', () => {
 })
 
 describe('list selection', () => {
+  it('starts selection by dragging a message without entering select mode first', async () => {
+    await render(rows(8))
+    const viewport = container.querySelector<HTMLElement>('.chat-body')!
+    viewport.scrollTop = 0
+    const elements = container.querySelectorAll<HTMLElement>('[data-message-id]')
+    await pointer('pointerdown', elements[1].querySelector('.message-text')!, 100, 150)
+    expect(container.querySelector('[aria-label="Selected messages"]')).toBeNull()
+    await pointer('pointermove', viewport, 220)
+    await pointer('pointerup', viewport, 220)
+    expect(selectedIds()).toEqual(['chat-a-2', 'chat-a-3', 'chat-a-4'])
+    expect(container.querySelector('[aria-label="Selected messages"]')).not.toBeNull()
+    expect(document.querySelector('[role="menu"]')).toBeNull()
+  })
+
+  it('keeps an ordinary left click available and cancels an automatically started drag', async () => {
+    await render(rows(5))
+    const first = container.querySelector<HTMLElement>('[data-message-id]')!
+    await pointer('pointerdown', first, 30, 150)
+    await pointer('pointerup', first, 30, 150)
+    await click(first.querySelector('time')!)
+    expect(document.querySelector('[role="menu"]')).not.toBeNull()
+    await pointer('pointerdown', first.querySelector('.message-text')!, 30, 150)
+    await pointer('pointermove', document.body, 160, 5)
+    expect(selectedIds()).toHaveLength(3)
+    await pointer('pointercancel', document.body, 160, 5)
+    expect(selectedIds()).toHaveLength(0)
+    expect(container.querySelector('[aria-label="Selected messages"]')).toBeNull()
+    expect(document.querySelector('[role="menu"]')).toBeNull()
+  })
+
   it('selects and deselects a vertical range outside bubble X, reverses without toggling intent, and suppresses trailing click', async () => {
     await render(rows(6))
     await select(0)

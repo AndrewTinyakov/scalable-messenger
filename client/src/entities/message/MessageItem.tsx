@@ -81,6 +81,32 @@ export function MessageItem({
       aria-checked={selectionMode && message && !deleted ? selected : undefined}
       aria-label={message && !deleted ? `Message from ${sender}` : undefined}
       aria-haspopup={!selectionMode && onActions && !deleted ? 'menu' : undefined}
+      onPointerDown={(event) => {
+        if (event.button === 0)
+          pointer.current = { x: event.clientX, y: event.clientY, moved: false }
+      }}
+      onPointerMove={(event) => {
+        if (
+          event.buttons &&
+          Math.hypot(event.clientX - pointer.current.x, event.clientY - pointer.current.y) > 5
+        )
+          pointer.current.moved = true
+      }}
+      onClick={(event) => {
+        if (event.button !== 0 || (event.target as HTMLElement).closest('button, a')) return
+        if (event.detail > 1 || pointer.current.moved) return
+        openActions(false)
+      }}
+      onContextMenu={(event) => {
+        if (!message || deleted) return
+        event.preventDefault()
+        openActions(false)
+      }}
+      onDoubleClick={(event) => {
+        if (selectionMode || !message || deleted) return
+        if (pointer.current.moved || (event.target as HTMLElement).closest('button, a')) return
+        onReply?.(message)
+      }}
       onKeyDown={(event) => {
         if (event.target !== event.currentTarget || selectionMode) return
         if (
@@ -107,26 +133,6 @@ export function MessageItem({
         <div
           ref={bubbleRef}
           className={`message-bubble ${deleted ? 'message-deleted' : ''} ${send?.status === 'rejected' || send?.status === 'retryable' ? 'rejected' : ''}`}
-          onPointerDown={(event) => {
-            pointer.current = { x: event.clientX, y: event.clientY, moved: false }
-          }}
-          onPointerMove={(event) => {
-            if (
-              event.buttons &&
-              Math.hypot(event.clientX - pointer.current.x, event.clientY - pointer.current.y) > 5
-            )
-              pointer.current.moved = true
-          }}
-          onClick={(event) => {
-            if ((event.target as HTMLElement).closest('button, a') || event.detail > 1) return
-            if (pointer.current.moved || window.getSelection()?.toString()) return
-            openActions(false)
-          }}
-          onDoubleClick={(event) => {
-            if (selectionMode || !message || deleted) return
-            if (pointer.current.moved || (event.target as HTMLElement).closest('button, a')) return
-            onReply?.(message)
-          }}
         >
           {message?.replyToMessageId && !deleted && (
             <button

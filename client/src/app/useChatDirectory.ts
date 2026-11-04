@@ -37,6 +37,9 @@ export function useChatDirectory({
   const removedChatRef = useRef(new Set<string>())
   const removalGenerationRef = useRef(0)
   const refreshGenerationRef = useRef(0)
+  const requestGenerationRef = useRef(0)
+  const directoryGenerationRef = useRef(0)
+  const summaryGenerationsRef = useRef(new Map<string, number>())
   const refreshRequestRef = useRef<{
     promise: Promise<Chat[]>
     invalidated: boolean
@@ -62,6 +65,7 @@ export function useChatDirectory({
     return () => {
       activeRef.current = false
       refreshGenerationRef.current += 1
+      directoryGenerationRef.current = ++requestGenerationRef.current
       refreshRequestRef.current = null
     }
   }, [sessionApi])
@@ -69,6 +73,8 @@ export function useChatDirectory({
   const fetchChats = useCallback(
     async (full = false) => {
       const refreshGeneration = ++refreshGenerationRef.current
+      const requestGeneration = ++requestGenerationRef.current
+      directoryGenerationRef.current = requestGeneration
       try {
         const removalGeneration = removalGenerationRef.current
         const previouslyLoaded = chatsRef.current
@@ -112,7 +118,13 @@ export function useChatDirectory({
         }
         if (!activeRef.current || refreshGeneration !== refreshGenerationRef.current)
           return chatsRef.current
+        const currentById = new Map(chatsRef.current.map((chat) => [chat.id, chat]))
         const fresh = list
+          .map((chat) =>
+            (summaryGenerationsRef.current.get(chat.id) ?? 0) > requestGeneration
+              ? (currentById.get(chat.id) ?? chat)
+              : chat,
+          )
           .map(applyOptimisticRead)
           .filter(
             (chat) =>
@@ -124,7 +136,7 @@ export function useChatDirectory({
           ? fresh
           : [
               ...fresh,
-              ...previouslyLoaded.filter(
+              ...chatsRef.current.filter(
                 (chat) =>
                   !seen.has(chat.id) &&
                   !removedChatRef.current.has(chat.id) &&
@@ -189,7 +201,8 @@ export function useChatDirectory({
       ].sort(compareActivity)
       chatsRef.current = merged
       setChats(merged)
-      for (const chat of page.chats) recordLatest(chat.id, chat.lastSequence)
+      for (const chat of page.chats)
+        if (!known.has(chat.id)) recordLatest(chat.id, chat.lastSequence)
       setNextChatCursor(page.nextCursor)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not load more chats')
@@ -227,6 +240,7 @@ export function useChatDirectory({
   const listChats = useCallback(() => chatsRef.current, [])
   const rememberChat = useCallback(
     (chat: Chat) => {
+      summaryGenerationsRef.current.set(chat.id, ++requestGenerationRef.current)
       const next = [
         applyOptimisticRead(chat),
         ...chatsRef.current.filter((item) => item.id !== chat.id),
@@ -240,10 +254,14 @@ export function useChatDirectory({
   const refreshChatSummary = useCallback(
     async (chatId: string) => {
       const generation = removalGenerationRef.current
+      const requestGeneration = ++requestGenerationRef.current
+      summaryGenerationsRef.current.set(chatId, requestGeneration)
       const chat = applyOptimisticRead(await sessionApi.chat(chatId))
       if (
         !activeRef.current ||
         generation !== removalGenerationRef.current ||
+        requestGeneration < directoryGenerationRef.current ||
+        requestGeneration !== summaryGenerationsRef.current.get(chatId) ||
         removedChatRef.current.has(chatId)
       )
         return

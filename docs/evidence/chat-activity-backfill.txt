@@ -1,0 +1,10 @@
+2026-11-04, isolated postgres:17-alpine, Docker on Apple Silicon
+Limits: 2 CPUs, 768 MiB RAM; default PostgreSQL configuration
+Dataset: 1,192,660 messages, 5,201 chats; sidebar seed, activity reset to NULL
+Production V11 backfill: 239 batches, at most 5,000 message rows per batch
+Longest batch including COMMIT: 33.849 ms
+This bounds chat lock duration for this uncontended run; it is not a worst-case production latency guarantee.
+Concurrent-send and separately committed batch checks: ChatActivityMigrationTests PASS against real PostgreSQL through Flyway.
+Reproduce: tests/chat-activity-backfill/run.sh
+Reproduction script rerun: 239 batches, longest including COMMIT 157.147 ms.
+The rerun overlapped the Kotlin integration suites on the same host. Both runs completed successfully; the script removed its container afterwards.

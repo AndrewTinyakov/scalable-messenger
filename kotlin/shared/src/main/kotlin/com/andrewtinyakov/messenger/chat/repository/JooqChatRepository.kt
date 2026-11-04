@@ -17,6 +17,7 @@ import com.andrewtinyakov.messenger.infrastructure.database.observability.Databa
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseOperation
 import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxMessage
 import com.andrewtinyakov.messenger.shared.id.ChatId
+import com.andrewtinyakov.messenger.shared.id.MessageId
 import com.andrewtinyakov.messenger.shared.id.UserId
 import org.jooq.DSLContext
 import org.jooq.JSONB
@@ -32,7 +33,7 @@ class JooqChatRepository(
 ) : ChatRepository {
     override fun findByMember(
         userId: UserId,
-        beforeJoinedAt: OffsetDateTime?,
+        beforeActivityAt: OffsetDateTime?,
         beforeChatId: ChatId?,
         limit: Int,
     ): List<MemberChat> = DatabaseObservation.query(DatabaseOperation.CHAT_FIND_BY_MEMBER) {
@@ -45,7 +46,6 @@ class JooqChatRepository(
             CHATS.KIND,
             CHATS.NAME,
             CHATS.NEXT_SEQUENCE,
-            CHAT_MEMBERS.JOINED_AT,
             CHATS.MEMBER_COUNT,
             CHATS.OWNER_ID,
         )
@@ -55,10 +55,10 @@ class JooqChatRepository(
             .where(CHAT_MEMBERS.USER_ID.eq(userId.value), CHATS.DELETED_AT.isNull)
             .and(CHAT_MEMBERS.HIDDEN_THROUGH_SEQUENCE.isNull.or(CHATS.NEXT_SEQUENCE.minus(1L).gt(CHAT_MEMBERS.HIDDEN_THROUGH_SEQUENCE)))
             .and(
-                if (beforeJoinedAt != null && beforeChatId != null) {
-                    activityAt.lt(beforeJoinedAt)
+                if (beforeActivityAt != null && beforeChatId != null) {
+                    activityAt.lt(beforeActivityAt)
                         .or(
-                            activityAt.eq(beforeJoinedAt)
+                            activityAt.eq(beforeActivityAt)
                                 .and(CHAT_MEMBERS.CHAT_ID.lt(beforeChatId.value)),
                         )
                 } else {
@@ -85,7 +85,7 @@ class JooqChatRepository(
                         unreadCount = row.get(summary).unreadCount,
                         unreadCountCapped = row.get(summary).unreadCountCapped,
                     ),
-                    joinedAt = row.get(activityAt)!!,
+                    activityAt = row.get(activityAt)!!,
                 )
             }
     }
@@ -145,7 +145,15 @@ class JooqChatRepository(
                 .from(candidates).join(USERS).on(USERS.ID.eq(sender)).where(visible).orderBy(sequence.desc()).limit(1),
         ).convertFrom { rows ->
             rows.firstOrNull()?.let {
-                ChatLastMessage(it.value1()!!, it.value2()!!, it.value3()!!, it.value4()!!, it.value5()!!, it.value6()!!, false)
+                ChatLastMessage(
+                    MessageId(it.value1()!!),
+                    it.value2()!!,
+                    UserId(it.value3()!!),
+                    it.value4()!!,
+                    it.value5()!!,
+                    it.value6()!!,
+                    false,
+                )
             }
         }
         return DSL.multiset(

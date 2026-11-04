@@ -27,11 +27,12 @@ class SidebarPageEvidenceTests {
         require(url.startsWith("jdbc:postgresql://localhost:25457/"))
         DriverManager.getConnection(url, "messenger", "messenger").use { connection ->
             val statements = mutableListOf<String>()
-            val listener = object : ExecuteListener {
-                override fun executeStart(ctx: ExecuteContext) {
-                    ctx.query()?.let { statements.add(it.getSQL(ParamType.INLINED)) }
+            val listener =
+                object : ExecuteListener {
+                    override fun executeStart(ctx: ExecuteContext) {
+                        ctx.query()?.let { statements.add(it.getSQL(ParamType.INLINED)) }
+                    }
                 }
-            }
             val db = DSL.using(connection, SQLDialect.POSTGRES)
             val repository = JooqChatRepository(DSL.using(db.configuration().derive(listener)))
             val viewer = UserId("00000000000000000000000001")
@@ -47,15 +48,28 @@ class SidebarPageEvidenceTests {
             repeat(5) { page() }
             val wall = List(60) { measureNanoTime { page() } / 1_000_000.0 }.sorted()
             val mapper = JsonMapper.builder().build()
-            val execution = List(60) {
-                val json = db.fetch("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) $sql").single().get(0).toString()
-                mapper.readTree(json).get(0).path("Execution Time").asDouble()
-            }.sorted()
+            val execution =
+                List(60) {
+                    val json =
+                        db
+                            .fetch("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) $sql")
+                            .single()
+                            .get(0)
+                            .toString()
+                    mapper
+                        .readTree(json)
+                        .get(0)
+                        .path("Execution Time")
+                        .asDouble()
+                }.sorted()
 
-            fun percentile(values: List<Double>, p: Double) = values[ceil(values.size * p).toInt() - 1]
+            fun percentile(
+                values: List<Double>,
+                p: Double,
+            ) = values[ceil(values.size * p).toInt() - 1]
             val directory = Path.of("../../docs/evidence")
             Files.createDirectories(directory)
-            Files.writeString(directory.resolve("sidebar-page.sql"), sql + ";\n")
+            Files.writeString(Path.of("../../tests/sidebar-benchmark/sidebar-page.sql"), sql + ";\n")
             val plan = db.fetch("EXPLAIN (ANALYZE, BUFFERS) $sql").joinToString("\n") { it.get(0).toString() }
             Files.writeString(directory.resolve("sidebar-page-plan.txt"), plan + "\n")
             statements.clear()
@@ -63,21 +77,24 @@ class SidebarPageEvidenceTests {
             val largeSql = statements.last { it.contains("summary_candidates") }
             val largePlan = db.fetch("EXPLAIN (ANALYZE, BUFFERS) $largeSql").joinToString("\n") { it.get(0).toString() }
             Files.writeString(directory.resolve("sidebar-large-chat-plan.txt"), largePlan + "\n")
-            val counts = db.fetch(
-                """
-                SELECT
-                  (SELECT count(*) FROM messages WHERE chat_id='00000000000000000010000000') AS large_chat_messages,
-                  (SELECT count(*) FROM chat_members WHERE user_id='00000000000000000000000001') AS viewer_chats,
-                  (SELECT count(*) FROM hidden_message_ranges) AS exclusions
-                """.trimIndent(),
-            ).single()
-            val exactUnread = db.fetchValue(
-                """
-                SELECT count(*) FROM messages
-                WHERE chat_id='00000000000000000010000000' AND sequence>1000000
-                  AND sender_id<>'00000000000000000000000001' AND sequence%10 NOT BETWEEN 1 AND 5
-                """.trimIndent(),
-            )
+            val counts =
+                db
+                    .fetch(
+                        """
+                        SELECT
+                          (SELECT count(*) FROM messages WHERE chat_id='00000000000000000010000000') AS large_chat_messages,
+                          (SELECT count(*) FROM chat_members WHERE user_id='00000000000000000000000001') AS viewer_chats,
+                          (SELECT count(*) FROM hidden_message_ranges) AS exclusions
+                        """.trimIndent(),
+                    ).single()
+            val exactUnread =
+                db.fetchValue(
+                    """
+                    SELECT count(*) FROM messages
+                    WHERE chat_id='00000000000000000010000000' AND sequence>1000000
+                      AND sender_id<>'00000000000000000000000001' AND sequence%10 NOT BETWEEN 1 AND 5
+                    """.trimIndent(),
+                )
             Files.writeString(
                 directory.resolve("sidebar-window-result.txt"),
                 listOf(

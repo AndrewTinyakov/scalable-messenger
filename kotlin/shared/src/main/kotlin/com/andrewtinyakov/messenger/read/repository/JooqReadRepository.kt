@@ -82,7 +82,8 @@ class JooqReadRepository(
             db.insertInto(PENDING_READ_NOTIFICATIONS)
                 .set(PENDING_READ_NOTIFICATIONS.CHAT_ID, chatId.value)
                 .set(PENDING_READ_NOTIFICATIONS.USER_ID, userId.value)
-                .onConflictDoNothing().execute()
+                .onConflict(PENDING_READ_NOTIFICATIONS.CHAT_ID, PENDING_READ_NOTIFICATIONS.USER_ID)
+                .doUpdate().set(PENDING_READ_NOTIFICATIONS.USER_ID, userId.value).execute()
             ReadAdvance(ReadProgress(sequence, acceptedAt), true, inserts.size)
         }
 
@@ -195,7 +196,10 @@ class JooqReadRepository(
             .limit(limit).forUpdate().skipLocked().fetch()
         return pending.groupBy { ChatId(it.chatId!!) }.mapNotNull { (chatId, rows) ->
             val rooms = notificationRooms(chatId, now)
-            if (rooms.isEmpty()) return@mapNotNull null
+            val deleted = !db.fetchExists(
+                db.selectOne().from(CHATS).where(CHATS.ID.eq(chatId.value), CHATS.DELETED_AT.isNull),
+            )
+            if (rooms.isEmpty() && !deleted) return@mapNotNull null
             db.deleteFrom(PENDING_READ_NOTIFICATIONS).where(
                 PENDING_READ_NOTIFICATIONS.CHAT_ID.eq(chatId.value),
                 PENDING_READ_NOTIFICATIONS.USER_ID.`in`(rows.map { it.userId!! }),

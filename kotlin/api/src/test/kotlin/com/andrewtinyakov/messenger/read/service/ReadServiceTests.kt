@@ -96,6 +96,47 @@ class ReadServiceTests
         )
 
         @Test
+        fun `pending advance locks out drain until progress commits`() {
+            val f = fixture(messages = 2)
+            val clock = MutableClock("2026-11-02T12:00:00Z")
+            val repository = JooqReadRepository(jooq, clock)
+            tx.execute { repository.advance(f.chat, f.members.first(), 1) }
+            val advanced = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            val future = concurrently {
+                tx.execute {
+                    repository.advance(f.chat, f.members.first(), 2)
+                    advanced.countDown()
+                    check(release.await(10, TimeUnit.SECONDS))
+                }
+            }
+            try {
+                assertTrue(advanced.await(10, TimeUnit.SECONDS))
+                assertTrue(tx.execute { repository.pendingNotifications(OffsetDateTime.now(clock), 1000) }!!.keys.none { it == f.chat })
+                assertEquals("1", service(clock).summary(f.chat, f.owner).maxOtherReadSequence)
+            } finally {
+                release.countDown()
+                future.get(10, TimeUnit.SECONDS)
+            }
+            assertTrue(tx.execute { repository.pendingNotifications(OffsetDateTime.now(clock), 1000) }!!.containsKey(f.chat))
+            assertEquals("2", service(clock).summary(f.chat, f.owner).maxOtherReadSequence)
+        }
+
+        @Test
+        fun `deleted chats discard pending read work`() {
+            val f = fixture(messages = 1)
+            val clock = MutableClock("2026-11-02T12:00:00Z")
+            val repository = JooqReadRepository(jooq, clock)
+            tx.execute { repository.advance(f.chat, f.members.first(), 1) }
+            db.update("UPDATE chats SET deleted_at=now() WHERE id=?", f.chat.value)
+            tx.execute { repository.pendingNotifications(OffsetDateTime.now(clock), 1000) }
+            assertEquals(
+                0,
+                db.queryForObject("SELECT count(*) FROM pending_read_notifications WHERE chat_id=?", Int::class.java, f.chat.value),
+            )
+        }
+
+        @Test
         fun `last read in an already notified bucket gets a durable trailing notification`() {
             val f = fixture(messages = 3)
             val clock = MutableClock("2026-11-02T12:00:00Z")

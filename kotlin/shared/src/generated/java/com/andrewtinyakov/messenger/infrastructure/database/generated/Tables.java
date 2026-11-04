@@ -5,7 +5,11 @@ package com.andrewtinyakov.messenger.infrastructure.database.generated;
 
 
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.ChatMembers;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.ChatReadNotifications;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.ChatReadProgress;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.ChatReadRanges;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Chats;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.MessageChanges;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Messages;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.MessengerOutboxEvents;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.SendRequests;
@@ -25,9 +29,29 @@ public class Tables {
     public static final ChatMembers CHAT_MEMBERS = ChatMembers.CHAT_MEMBERS;
 
     /**
+     * The table <code>public.chat_read_notifications</code>.
+     */
+    public static final ChatReadNotifications CHAT_READ_NOTIFICATIONS = ChatReadNotifications.CHAT_READ_NOTIFICATIONS;
+
+    /**
+     * The table <code>public.chat_read_progress</code>.
+     */
+    public static final ChatReadProgress CHAT_READ_PROGRESS = ChatReadProgress.CHAT_READ_PROGRESS;
+
+    /**
+     * The table <code>public.chat_read_ranges</code>.
+     */
+    public static final ChatReadRanges CHAT_READ_RANGES = ChatReadRanges.CHAT_READ_RANGES;
+
+    /**
      * The table <code>public.chats</code>.
      */
     public static final Chats CHATS = Chats.CHATS;
+
+    /**
+     * The table <code>public.message_changes</code>.
+     */
+    public static final MessageChanges MESSAGE_CHANGES = MessageChanges.MESSAGE_CHANGES;
 
     /**
      * The table <code>public.messages</code>.

@@ -4,6 +4,8 @@
 package com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records;
 
 
+import com.andrewtinyakov.messenger.infrastructure.database.generated.enums.SendRejectionReason;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.enums.SendResultStatus;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.SendRequests;
 
 import java.time.OffsetDateTime;
@@ -93,15 +95,15 @@ public class SendRequestsRecord extends UpdatableRecordImpl<SendRequestsRecord> 
     /**
      * Setter for <code>public.send_requests.status</code>.
      */
-    public void setStatus(String value) {
+    public void setStatus(SendResultStatus value) {
         set(5, value);
     }
 
     /**
      * Getter for <code>public.send_requests.status</code>.
      */
-    public String getStatus() {
-        return (String) get(5);
+    public SendResultStatus getStatus() {
+        return (SendResultStatus) get(5);
     }
 
     /**
@@ -135,15 +137,15 @@ public class SendRequestsRecord extends UpdatableRecordImpl<SendRequestsRecord> 
     /**
      * Setter for <code>public.send_requests.reason</code>.
      */
-    public void setReason(String value) {
+    public void setReason(SendRejectionReason value) {
         set(8, value);
     }
 
     /**
      * Getter for <code>public.send_requests.reason</code>.
      */
-    public String getReason() {
-        return (String) get(8);
+    public SendRejectionReason getReason() {
+        return (SendRejectionReason) get(8);
     }
 
     /**
@@ -183,7 +185,7 @@ public class SendRequestsRecord extends UpdatableRecordImpl<SendRequestsRecord> 
     /**
      * Create a detached, initialised SendRequestsRecord
      */
-    public SendRequestsRecord(String chatId, String recipientId, String senderId, String requestId, String fingerprint, String status, String messageId, Long sequence, String reason, OffsetDateTime createdAt) {
+    public SendRequestsRecord(String chatId, String recipientId, String senderId, String requestId, String fingerprint, SendResultStatus status, String messageId, Long sequence, SendRejectionReason reason, OffsetDateTime createdAt) {
         super(SendRequests.SEND_REQUESTS);
 
         setChatId(chatId);

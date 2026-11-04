@@ -8,16 +8,58 @@ import (
 
 	"messenger/ws/internal/generated/messaging"
 	"messenger/ws/internal/messagecodec"
+	"messenger/ws/internal/roomname"
 	"messenger/ws/internal/ticket"
 )
 
 var ulidPattern = regexp.MustCompile(`^[0-7][0-9A-HJKMNP-TV-Z]{25}$`)
 
+type FrameType = messaging.FrameType
+
+const (
+	FrameSend            = messaging.FrameSend
+	FrameSubscribe       = messaging.FrameSubscribe
+	FrameSubscribeMany   = messaging.FrameSubscribeMany
+	FrameUnsubscribe     = messaging.FrameUnsubscribe
+	FrameApplied         = messaging.FrameApplied
+	FrameDismissed       = messaging.FrameDismissed
+	FrameReceivedMessage = messaging.FrameReceivedMessage
+	FrameWatchPresence   = messaging.FrameWatchPresence
+	FrameUnwatchPresence = messaging.FrameUnwatchPresence
+)
+
+type EventType = messaging.EventType
+
+const (
+	EventMessageSaved        = messaging.EventMessageSaved
+	EventMessageChanged      = messaging.EventMessageChanged
+	EventChatDeleted         = messaging.EventChatDeleted
+	EventReadsChanged        = messaging.EventReadsChanged
+	EventPresence            = messaging.EventPresence
+	EventSendRejected        = messaging.EventSendRejected
+	EventChatCreated         = messaging.EventChatCreated
+	EventMemberRemoved       = messaging.EventMemberRemoved
+	EventMembershipChanged   = messaging.EventMembershipChanged
+	EventSessionRevoked      = messaging.EventSessionRevoked
+	EventQueued              = messaging.EventQueued
+	EventSubscribed          = messaging.EventSubscribed
+	EventRecoveryFailed      = messaging.EventRecoveryFailed
+	EventSubscriptionExpired = messaging.EventSubscriptionExpired
+	EventError               = messaging.EventError
+)
+
+type ChatKind = messaging.ChatKind
+
+const (
+	ChatDirect = messaging.ChatDirect
+	ChatGroup  = messaging.ChatGroup
+)
+
 type Frame struct {
-	Type                string         `json:"type"`
+	Type                FrameType      `json:"type"`
 	Version             int            `json:"version"`
 	ChatID              string         `json:"chatId,omitempty"`
-	Kind                string         `json:"kind,omitempty"`
+	Kind                ChatKind       `json:"kind,omitempty"`
 	RecipientID         string         `json:"recipientId,omitempty"`
 	RequestID           string         `json:"requestId,omitempty"`
 	Body                string         `json:"body,omitempty"`
@@ -26,77 +68,67 @@ type Frame struct {
 	StreamID            string         `json:"streamId,omitempty"`
 	LastAppliedSequence string         `json:"lastAppliedSequence,omitempty"`
 	Subscriptions       []Subscription `json:"subscriptions,omitempty"`
+	ReplyToMessageID    string         `json:"replyToMessageId,omitempty"`
+	UserIDs             []string       `json:"userIds,omitempty"`
 }
 
 type Subscription struct {
-	ChatID              string `json:"chatId"`
-	Kind                string `json:"kind"`
-	Epoch               string `json:"epoch,omitempty"`
-	StreamID            string `json:"streamId,omitempty"`
-	LastAppliedSequence string `json:"lastAppliedSequence,omitempty"`
-}
-
-type Event struct {
-	Type        string `json:"type"`
-	Version     int    `json:"version,omitempty"`
-	EventID     string `json:"eventId,omitempty"`
-	Room        string `json:"room,omitempty"`
-	SessionID   string `json:"sessionId,omitempty"`
-	ChatID      string `json:"chatId,omitempty"`
-	RecipientID string `json:"recipientId,omitempty"`
-	RequestID   string `json:"requestId,omitempty"`
-	MessageID   string `json:"messageId,omitempty"`
-	Sequence    string `json:"sequence,omitempty"`
-	SenderID    string `json:"senderId,omitempty"`
-	Body        string `json:"body,omitempty"`
-	CreatedAt   string `json:"createdAt,omitempty"`
-	Reason      string `json:"reason,omitempty"`
-	Epoch       string `json:"epoch,omitempty"`
-	StreamID    string `json:"streamId,omitempty"`
-	Code        string `json:"code,omitempty"`
+	ChatID              string   `json:"chatId"`
+	Kind                ChatKind `json:"kind"`
+	Epoch               string   `json:"epoch,omitempty"`
+	StreamID            string   `json:"streamId,omitempty"`
+	LastAppliedSequence string   `json:"lastAppliedSequence,omitempty"`
 }
 
 type SendCommand struct {
-	Version     int    `json:"version"`
-	ChatID      string `json:"chatId"`
-	RecipientID string `json:"recipientId,omitempty"`
-	RequestID   string `json:"requestId"`
-	SenderID    string `json:"senderId"`
-	Body        string `json:"body"`
-	SentAt      string `json:"sentAt"`
+	Version          int    `json:"version"`
+	ChatID           string `json:"chatId"`
+	RecipientID      string `json:"recipientId,omitempty"`
+	RequestID        string `json:"requestId"`
+	SenderID         string `json:"senderId"`
+	Body             string `json:"body"`
+	SentAt           string `json:"sentAt"`
+	ReplyToMessageID string `json:"replyToMessageId,omitempty"`
 }
 
 func (command SendCommand) Wire() messaging.SendMessageCommandV1 {
-	return messaging.SendMessageCommandV1{Version: command.Version, ChatId: command.ChatID, RecipientId: command.RecipientID, RequestId: command.RequestID, SenderId: command.SenderID, Body: command.Body, SentAt: command.SentAt}
+	return messaging.SendMessageCommandV1{Version: command.Version, ChatId: command.ChatID, RecipientId: command.RecipientID, RequestId: command.RequestID, SenderId: command.SenderID, Body: command.Body, SentAt: command.SentAt, ReplyToMessageId: command.ReplyToMessageID}
 }
 
 func DecodeFrame(data []byte) (Frame, error) {
-	f, err := messagecodec.Decode[Frame](data)
+	f, fields, err := messagecodec.DecodeObject[Frame](data)
 	if err != nil {
+		return f, err
+	}
+	if err := validateFrameFields(f, fields); err != nil {
 		return f, err
 	}
 	if f.Version != 1 {
 		return f, errors.New("unsupported frame version")
 	}
-	if f.Type != "subscribe_many" && f.Subscriptions != nil {
+	if f.Type != FrameSubscribeMany && f.Subscriptions != nil {
 		return f, errors.New("unexpected subscriptions")
 	}
+	if err := validateFeatureFrame(f); err != nil {
+		return f, err
+	}
 	switch f.Type {
-	case "send":
+	case FrameSend:
 		if (f.ChatID == "") == (f.RecipientID == "") ||
 			(f.ChatID != "" && !ValidULID(f.ChatID)) ||
 			(f.RecipientID != "" && !ValidULID(f.RecipientID)) ||
 			!ValidULID(f.RequestID) || strings.TrimSpace(f.Body) == "" || len([]rune(f.Body)) > 4000 || f.Kind != "" || f.Sequence != "" || f.Epoch != "" || f.StreamID != "" || f.LastAppliedSequence != "" {
 			return f, errors.New("invalid send")
 		}
-	case "subscribe":
+	case FrameWatchPresence, FrameUnwatchPresence:
+	case FrameSubscribe:
 		if f.RecipientID != "" || f.RequestID != "" || f.Body != "" || f.Sequence != "" {
 			return f, errors.New("invalid subscribe")
 		}
 		if !validSubscription(Subscription{f.ChatID, f.Kind, f.Epoch, f.StreamID, f.LastAppliedSequence}) {
 			return f, errors.New("invalid subscribe")
 		}
-	case "subscribe_many":
+	case FrameSubscribeMany:
 		if f.ChatID != "" || f.Kind != "" || f.RecipientID != "" || f.RequestID != "" || f.Body != "" || f.Sequence != "" || f.Epoch != "" || f.StreamID != "" || f.LastAppliedSequence != "" || len(f.Subscriptions) < 1 || len(f.Subscriptions) > 10 {
 			return f, errors.New("invalid subscribe batch")
 		}
@@ -110,11 +142,11 @@ func DecodeFrame(data []byte) (Frame, error) {
 			}
 			seen[subscription.ChatID] = struct{}{}
 		}
-	case "unsubscribe":
+	case FrameUnsubscribe:
 		if !ValidULID(f.ChatID) || f.Kind != "" || f.RecipientID != "" || f.RequestID != "" || f.Body != "" || f.Sequence != "" || f.Epoch != "" || f.StreamID != "" || f.LastAppliedSequence != "" {
 			return f, errors.New("invalid unsubscribe")
 		}
-	case "applied":
+	case FrameApplied:
 		if !ValidULID(f.ChatID) || !validSequence(f.Sequence) {
 			return f, errors.New("invalid applied position")
 		}
@@ -124,11 +156,11 @@ func DecodeFrame(data []byte) (Frame, error) {
 		if (f.Epoch == "") != (f.StreamID == "") {
 			return f, errors.New("incomplete Redis cursor")
 		}
-	case "dismissed":
+	case FrameDismissed:
 		if !ValidULID(f.ChatID) || !validSequence(f.Sequence) || f.Sequence == "0" || f.Kind != "" || f.RecipientID != "" || f.RequestID != "" || f.Body != "" || f.Epoch != "" || f.StreamID != "" || f.LastAppliedSequence != "" {
 			return f, errors.New("invalid dismissed frame")
 		}
-	case "received_message":
+	case FrameReceivedMessage:
 		if !ValidULID(f.ChatID) || !validSequence(f.Sequence) || f.Sequence == "0" || f.Kind != "" || f.RecipientID != "" || f.RequestID != "" || f.Body != "" || f.Epoch != "" || f.StreamID != "" || f.LastAppliedSequence != "" {
 			return f, errors.New("invalid received message frame")
 		}
@@ -139,62 +171,85 @@ func DecodeFrame(data []byte) (Frame, error) {
 }
 
 func validSubscription(s Subscription) bool {
-	return ValidULID(s.ChatID) && (s.Kind == "group" || s.Kind == "direct") &&
+	return ValidULID(s.ChatID) && (s.Kind == ChatGroup || s.Kind == ChatDirect) &&
 		(s.LastAppliedSequence == "" || validSequence(s.LastAppliedSequence)) &&
 		((s.Epoch == "") == (s.StreamID == ""))
 }
 
 func DecodeEvent(data []byte) (Event, error) {
-	event, err := messagecodec.Decode[Event](data)
+	event, fields, err := messagecodec.DecodeObject[Event](data)
 	if err != nil {
 		return event, err
 	}
-	if event.Version != 1 || !ValidULID(event.EventID) || !validRoom(event.Room) || event.Epoch != "" || event.StreamID != "" || event.Code != "" || (event.Type != "session_revoked" && event.SessionID != "") {
-		return event, errors.New("invalid event metadata")
+	if err := validateEventFields(event, fields); err != nil {
+		return event, err
+	}
+	if event.Type == EventMembershipChanged {
+		if _, err := messagecodec.Decode[messaging.MembershipChangedEventV1](data); err != nil {
+			return event, err
+		}
+	}
+	return event, ValidateEvent(event)
+}
+
+func ValidateEvent(event Event) error {
+	if event.Version != 1 || !ValidULID(event.EventID) || !validRoom(event.Room) || event.Epoch != "" || event.StreamID != "" || event.Code != "" || (event.Type != EventSessionRevoked && event.SessionID != "") || (event.Type != EventMemberRemoved && event.MemberID != "") {
+		return errors.New("invalid event metadata")
+	}
+	if err := validateFeatureEvent(event); err != nil {
+		return err
 	}
 	switch event.Type {
-	case "message_saved":
+	case EventMessageSaved:
 		if !ValidULID(event.ChatID) || !ValidULID(event.RequestID) || event.RecipientID != "" || !ValidULID(event.MessageID) || !ValidULID(event.SenderID) || !validSequence(event.Sequence) || event.Sequence == "0" || event.Body == "" || len([]rune(event.Body)) > 4000 || event.Reason != "" {
-			return event, errors.New("invalid saved event")
+			return errors.New("invalid saved event")
 		}
 		if _, err := time.Parse(time.RFC3339Nano, event.CreatedAt); err != nil {
-			return event, errors.New("invalid event timestamp")
+			return errors.New("invalid event timestamp")
 		}
-	case "send_rejected":
-		if !ValidULID(event.RequestID) || (ValidULID(event.ChatID) == ValidULID(event.RecipientID)) || event.MessageID != "" || event.Sequence != "" || event.SenderID != "" || event.Body != "" || event.CreatedAt != "" {
-			return event, errors.New("invalid rejection event")
+	case EventMessageChanged:
+		return validateChangedMessage(event)
+	case EventChatDeleted, EventReadsChanged:
+		if !ValidULID(event.ChatID) || event.RecipientID != "" || event.RequestID != "" || event.MessageID != "" || event.Sequence != "" || event.SenderID != "" || event.Body != "" || event.CreatedAt != "" || event.Reason != "" {
+			return errors.New("invalid chat feature event")
 		}
-		switch event.Reason {
-		case "NOT_A_MEMBER", "CHAT_NOT_FOUND", "RECIPIENT_NOT_FOUND", "INVALID_RECIPIENT", "EMPTY_BODY", "BODY_TOO_LONG", "REQUEST_ID_CONFLICT", "PROCESSING_FAILED":
-		default:
-			return event, errors.New("invalid rejection reason")
+	case EventSendRejected:
+		if !ValidULID(event.RequestID) || (event.ChatID == "") == (event.RecipientID == "") || (event.ChatID != "" && !ValidULID(event.ChatID)) || (event.RecipientID != "" && !ValidULID(event.RecipientID)) || event.MessageID != "" || event.Sequence != "" || event.SenderID != "" || event.Body != "" || event.CreatedAt != "" {
+			return errors.New("invalid rejection event")
 		}
-	case "chat_created":
-		if !ValidULID(event.ChatID) || !strings.HasPrefix(event.Room, "user:") || event.RecipientID != "" || event.MessageID != "" || event.Sequence != "" || event.SenderID != "" || event.Body != "" || event.CreatedAt != "" || event.Reason != "" || (event.RequestID != "" && !ValidULID(event.RequestID)) {
-			return event, errors.New("invalid chat creation event")
+		if _, valid := messaging.ValuesToSendRejectionReason[event.Reason]; !valid {
+			return errors.New("invalid rejection reason")
 		}
-	case "member_removed":
-		if !ValidULID(event.ChatID) || !strings.HasPrefix(event.Room, "user:") || event.SessionID != "" || event.RecipientID != "" || event.RequestID != "" || event.MessageID != "" || event.Sequence != "" || event.SenderID != "" || event.Body != "" || event.CreatedAt != "" || event.Reason != "" {
-			return event, errors.New("invalid member removal event")
+	case EventChatCreated:
+		if !ValidULID(event.ChatID) || !roomname.IsUser(event.Room) || event.RecipientID != "" || event.MessageID != "" || event.Sequence != "" || event.SenderID != "" || event.Body != "" || event.CreatedAt != "" || event.Reason != "" || (event.RequestID != "" && !ValidULID(event.RequestID)) {
+			return errors.New("invalid chat creation event")
 		}
-	case "session_revoked":
-		if !strings.HasPrefix(event.Room, "user:") || !ticket.ValidSessionID(event.SessionID) || event.ChatID != "" || event.RecipientID != "" || event.RequestID != "" || event.MessageID != "" || event.Sequence != "" || event.SenderID != "" || event.Body != "" || event.CreatedAt != "" || event.Reason != "" {
-			return event, errors.New("invalid session revocation event")
+	case EventMembershipChanged:
+		if !ValidULID(event.ChatID) || event.Room != roomname.Group(event.ChatID) || event.RecipientID != "" || event.RequestID != "" || event.MessageID != "" || event.Sequence != "" || event.SenderID != "" || event.Body != "" || event.CreatedAt != "" || event.Reason != "" {
+			return errors.New("invalid membership change event")
+		}
+	case EventMemberRemoved:
+		if !ValidULID(event.ChatID) || !ValidULID(event.MemberID) || (event.Room != roomname.User(event.MemberID) && event.Room != roomname.Group(event.ChatID)) || event.SessionID != "" || event.RecipientID != "" || event.RequestID != "" || event.MessageID != "" || event.Sequence != "" || event.SenderID != "" || event.Body != "" || event.CreatedAt != "" || event.Reason != "" {
+			return errors.New("invalid member removal event")
+		}
+	case EventSessionRevoked:
+		if !roomname.IsUser(event.Room) || !ticket.ValidSessionID(event.SessionID) || event.ChatID != "" || event.RecipientID != "" || event.RequestID != "" || event.MessageID != "" || event.Sequence != "" || event.SenderID != "" || event.Body != "" || event.CreatedAt != "" || event.Reason != "" {
+			return errors.New("invalid session revocation event")
 		}
 	default:
-		return event, errors.New("unknown event type")
+		return errors.New("unknown event type")
 	}
-	return event, nil
+	return nil
 }
 
 func validRoom(room string) bool {
-	parts := strings.SplitN(room, ":", 2)
-	return len(parts) == 2 && (parts[0] == "user" || parts[0] == "group") && ValidULID(parts[1])
+	return (roomname.IsUser(room) && ValidULID(strings.TrimPrefix(room, roomname.UserPrefix))) ||
+		(roomname.IsGroup(room) && ValidULID(strings.TrimPrefix(room, roomname.GroupPrefix)))
 }
 
 func ValidULID(s string) bool { return ulidPattern.MatchString(s) }
 func validSequence(s string) bool {
-	if s == "" {
+	if s == "" || len(s) > 19 || (len(s) == 19 && s > "9223372036854775807") {
 		return false
 	}
 	if len(s) > 1 && s[0] == '0' {

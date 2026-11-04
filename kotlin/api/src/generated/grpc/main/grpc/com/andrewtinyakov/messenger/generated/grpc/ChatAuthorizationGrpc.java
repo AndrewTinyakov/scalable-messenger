@@ -105,6 +105,37 @@ public final class ChatAuthorizationGrpc {
     return getAuthorizeGroupsMethod;
   }
 
+  private static volatile io.grpc.MethodDescriptor<com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest,
+      com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceResponse> getAuthorizePresenceMethod;
+
+  @io.grpc.stub.annotations.RpcMethod(
+      fullMethodName = SERVICE_NAME + '/' + "AuthorizePresence",
+      requestType = com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest.class,
+      responseType = com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceResponse.class,
+      methodType = io.grpc.MethodDescriptor.MethodType.UNARY)
+  public static io.grpc.MethodDescriptor<com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest,
+      com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceResponse> getAuthorizePresenceMethod() {
+    io.grpc.MethodDescriptor<com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest, com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceResponse> getAuthorizePresenceMethod;
+    if ((getAuthorizePresenceMethod = ChatAuthorizationGrpc.getAuthorizePresenceMethod) == null) {
+      synchronized (ChatAuthorizationGrpc.class) {
+        if ((getAuthorizePresenceMethod = ChatAuthorizationGrpc.getAuthorizePresenceMethod) == null) {
+          ChatAuthorizationGrpc.getAuthorizePresenceMethod = getAuthorizePresenceMethod =
+              io.grpc.MethodDescriptor.<com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest, com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceResponse>newBuilder()
+              .setType(io.grpc.MethodDescriptor.MethodType.UNARY)
+              .setFullMethodName(generateFullMethodName(SERVICE_NAME, "AuthorizePresence"))
+              .setSampledToLocalTracing(true)
+              .setRequestMarshaller(io.grpc.protobuf.ProtoUtils.marshaller(
+                  com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest.getDefaultInstance()))
+              .setResponseMarshaller(io.grpc.protobuf.ProtoUtils.marshaller(
+                  com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceResponse.getDefaultInstance()))
+              .setSchemaDescriptor(new ChatAuthorizationMethodDescriptorSupplier("AuthorizePresence"))
+              .build();
+        }
+      }
+    }
+    return getAuthorizePresenceMethod;
+  }
+
   /**
    * Creates a new async stub that supports all call types for the service
    */
@@ -169,10 +200,6 @@ public final class ChatAuthorizationGrpc {
   public interface AsyncService {
 
     /**
-     * <pre>
-     * Called after the WS node subscribes to the user's room. SQL session state
-     * is checked on every connection, including reconnects.
-     * </pre>
      */
     default void validateSession(com.andrewtinyakov.messenger.generated.grpc.ValidateSessionRequest request,
         io.grpc.stub.StreamObserver<com.andrewtinyakov.messenger.generated.grpc.ValidateSessionResponse> responseObserver) {
@@ -180,10 +207,6 @@ public final class ChatAuthorizationGrpc {
     }
 
     /**
-     * <pre>
-     * The ticket is issued by the API for this user and device. The API verifies
-     * it against current SQL session state before checking group membership.
-     * </pre>
      */
     default void authorizeGroup(com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupRequest request,
         io.grpc.stub.StreamObserver<com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupResponse> responseObserver) {
@@ -191,13 +214,17 @@ public final class ChatAuthorizationGrpc {
     }
 
     /**
-     * <pre>
-     * One current-session check and one membership lookup for a bounded group batch.
-     * </pre>
      */
     default void authorizeGroups(com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupsRequest request,
         io.grpc.stub.StreamObserver<com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupsResponse> responseObserver) {
       io.grpc.stub.ServerCalls.asyncUnimplementedUnaryCall(getAuthorizeGroupsMethod(), responseObserver);
+    }
+
+    /**
+     */
+    default void authorizePresence(com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest request,
+        io.grpc.stub.StreamObserver<com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceResponse> responseObserver) {
+      io.grpc.stub.ServerCalls.asyncUnimplementedUnaryCall(getAuthorizePresenceMethod(), responseObserver);
     }
   }
 
@@ -229,10 +256,6 @@ public final class ChatAuthorizationGrpc {
     }
 
     /**
-     * <pre>
-     * Called after the WS node subscribes to the user's room. SQL session state
-     * is checked on every connection, including reconnects.
-     * </pre>
      */
     public void validateSession(com.andrewtinyakov.messenger.generated.grpc.ValidateSessionRequest request,
         io.grpc.stub.StreamObserver<com.andrewtinyakov.messenger.generated.grpc.ValidateSessionResponse> responseObserver) {
@@ -241,10 +264,6 @@ public final class ChatAuthorizationGrpc {
     }
 
     /**
-     * <pre>
-     * The ticket is issued by the API for this user and device. The API verifies
-     * it against current SQL session state before checking group membership.
-     * </pre>
      */
     public void authorizeGroup(com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupRequest request,
         io.grpc.stub.StreamObserver<com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupResponse> responseObserver) {
@@ -253,14 +272,19 @@ public final class ChatAuthorizationGrpc {
     }
 
     /**
-     * <pre>
-     * One current-session check and one membership lookup for a bounded group batch.
-     * </pre>
      */
     public void authorizeGroups(com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupsRequest request,
         io.grpc.stub.StreamObserver<com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupsResponse> responseObserver) {
       io.grpc.stub.ClientCalls.asyncUnaryCall(
           getChannel().newCall(getAuthorizeGroupsMethod(), getCallOptions()), request, responseObserver);
+    }
+
+    /**
+     */
+    public void authorizePresence(com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest request,
+        io.grpc.stub.StreamObserver<com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceResponse> responseObserver) {
+      io.grpc.stub.ClientCalls.asyncUnaryCall(
+          getChannel().newCall(getAuthorizePresenceMethod(), getCallOptions()), request, responseObserver);
     }
   }
 
@@ -281,10 +305,6 @@ public final class ChatAuthorizationGrpc {
     }
 
     /**
-     * <pre>
-     * Called after the WS node subscribes to the user's room. SQL session state
-     * is checked on every connection, including reconnects.
-     * </pre>
      */
     public com.andrewtinyakov.messenger.generated.grpc.ValidateSessionResponse validateSession(com.andrewtinyakov.messenger.generated.grpc.ValidateSessionRequest request) throws io.grpc.StatusException {
       return io.grpc.stub.ClientCalls.blockingV2UnaryCall(
@@ -292,10 +312,6 @@ public final class ChatAuthorizationGrpc {
     }
 
     /**
-     * <pre>
-     * The ticket is issued by the API for this user and device. The API verifies
-     * it against current SQL session state before checking group membership.
-     * </pre>
      */
     public com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupResponse authorizeGroup(com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupRequest request) throws io.grpc.StatusException {
       return io.grpc.stub.ClientCalls.blockingV2UnaryCall(
@@ -303,13 +319,17 @@ public final class ChatAuthorizationGrpc {
     }
 
     /**
-     * <pre>
-     * One current-session check and one membership lookup for a bounded group batch.
-     * </pre>
      */
     public com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupsResponse authorizeGroups(com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupsRequest request) throws io.grpc.StatusException {
       return io.grpc.stub.ClientCalls.blockingV2UnaryCall(
           getChannel(), getAuthorizeGroupsMethod(), getCallOptions(), request);
+    }
+
+    /**
+     */
+    public com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceResponse authorizePresence(com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest request) throws io.grpc.StatusException {
+      return io.grpc.stub.ClientCalls.blockingV2UnaryCall(
+          getChannel(), getAuthorizePresenceMethod(), getCallOptions(), request);
     }
   }
 
@@ -330,10 +350,6 @@ public final class ChatAuthorizationGrpc {
     }
 
     /**
-     * <pre>
-     * Called after the WS node subscribes to the user's room. SQL session state
-     * is checked on every connection, including reconnects.
-     * </pre>
      */
     public com.andrewtinyakov.messenger.generated.grpc.ValidateSessionResponse validateSession(com.andrewtinyakov.messenger.generated.grpc.ValidateSessionRequest request) {
       return io.grpc.stub.ClientCalls.blockingUnaryCall(
@@ -341,10 +357,6 @@ public final class ChatAuthorizationGrpc {
     }
 
     /**
-     * <pre>
-     * The ticket is issued by the API for this user and device. The API verifies
-     * it against current SQL session state before checking group membership.
-     * </pre>
      */
     public com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupResponse authorizeGroup(com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupRequest request) {
       return io.grpc.stub.ClientCalls.blockingUnaryCall(
@@ -352,13 +364,17 @@ public final class ChatAuthorizationGrpc {
     }
 
     /**
-     * <pre>
-     * One current-session check and one membership lookup for a bounded group batch.
-     * </pre>
      */
     public com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupsResponse authorizeGroups(com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupsRequest request) {
       return io.grpc.stub.ClientCalls.blockingUnaryCall(
           getChannel(), getAuthorizeGroupsMethod(), getCallOptions(), request);
+    }
+
+    /**
+     */
+    public com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceResponse authorizePresence(com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest request) {
+      return io.grpc.stub.ClientCalls.blockingUnaryCall(
+          getChannel(), getAuthorizePresenceMethod(), getCallOptions(), request);
     }
   }
 
@@ -379,10 +395,6 @@ public final class ChatAuthorizationGrpc {
     }
 
     /**
-     * <pre>
-     * Called after the WS node subscribes to the user's room. SQL session state
-     * is checked on every connection, including reconnects.
-     * </pre>
      */
     public com.google.common.util.concurrent.ListenableFuture<com.andrewtinyakov.messenger.generated.grpc.ValidateSessionResponse> validateSession(
         com.andrewtinyakov.messenger.generated.grpc.ValidateSessionRequest request) {
@@ -391,10 +403,6 @@ public final class ChatAuthorizationGrpc {
     }
 
     /**
-     * <pre>
-     * The ticket is issued by the API for this user and device. The API verifies
-     * it against current SQL session state before checking group membership.
-     * </pre>
      */
     public com.google.common.util.concurrent.ListenableFuture<com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupResponse> authorizeGroup(
         com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupRequest request) {
@@ -403,20 +411,26 @@ public final class ChatAuthorizationGrpc {
     }
 
     /**
-     * <pre>
-     * One current-session check and one membership lookup for a bounded group batch.
-     * </pre>
      */
     public com.google.common.util.concurrent.ListenableFuture<com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupsResponse> authorizeGroups(
         com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupsRequest request) {
       return io.grpc.stub.ClientCalls.futureUnaryCall(
           getChannel().newCall(getAuthorizeGroupsMethod(), getCallOptions()), request);
     }
+
+    /**
+     */
+    public com.google.common.util.concurrent.ListenableFuture<com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceResponse> authorizePresence(
+        com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest request) {
+      return io.grpc.stub.ClientCalls.futureUnaryCall(
+          getChannel().newCall(getAuthorizePresenceMethod(), getCallOptions()), request);
+    }
   }
 
   private static final int METHODID_VALIDATE_SESSION = 0;
   private static final int METHODID_AUTHORIZE_GROUP = 1;
   private static final int METHODID_AUTHORIZE_GROUPS = 2;
+  private static final int METHODID_AUTHORIZE_PRESENCE = 3;
 
   private static final class MethodHandlers<Req, Resp> implements
       io.grpc.stub.ServerCalls.UnaryMethod<Req, Resp>,
@@ -446,6 +460,10 @@ public final class ChatAuthorizationGrpc {
         case METHODID_AUTHORIZE_GROUPS:
           serviceImpl.authorizeGroups((com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupsRequest) request,
               (io.grpc.stub.StreamObserver<com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupsResponse>) responseObserver);
+          break;
+        case METHODID_AUTHORIZE_PRESENCE:
+          serviceImpl.authorizePresence((com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest) request,
+              (io.grpc.stub.StreamObserver<com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceResponse>) responseObserver);
           break;
         default:
           throw new AssertionError();
@@ -486,6 +504,13 @@ public final class ChatAuthorizationGrpc {
               com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupsRequest,
               com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupsResponse>(
                 service, METHODID_AUTHORIZE_GROUPS)))
+        .addMethod(
+          getAuthorizePresenceMethod(),
+          io.grpc.stub.ServerCalls.asyncUnaryCall(
+            new MethodHandlers<
+              com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest,
+              com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceResponse>(
+                service, METHODID_AUTHORIZE_PRESENCE)))
         .build();
   }
 
@@ -537,6 +562,7 @@ public final class ChatAuthorizationGrpc {
               .addMethod(getValidateSessionMethod())
               .addMethod(getAuthorizeGroupMethod())
               .addMethod(getAuthorizeGroupsMethod())
+              .addMethod(getAuthorizePresenceMethod())
               .build();
         }
       }

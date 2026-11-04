@@ -21,14 +21,14 @@ func (r *Rooms) listen(ctx context.Context, entry *localRoom) {
 	if err == nil {
 		epoch, last, err = r.redis.Tail(ctx, entry.name)
 	}
-	r.mu.Lock()
+	entry.mu.Lock()
 	entry.err = err
 	entry.epoch, entry.lastID = epoch, last
 	if err == nil {
 		entry.lastPositionAt = time.Now()
 	}
 	close(entry.ready)
-	r.mu.Unlock()
+	entry.mu.Unlock()
 	if err != nil {
 		if listener != nil {
 			listener.Close()
@@ -48,7 +48,7 @@ func (r *Rooms) listen(ctx context.Context, entry *localRoom) {
 				return
 			}
 			r.logger.Error("Redis room feed stopped", "room", entry.name, "error", err)
-			r.failRoom(entry.name)
+			r.failRoomEntry(entry)
 			_ = listener.Close()
 			attempt := 0
 			for {
@@ -80,7 +80,7 @@ func (r *Rooms) listen(ctx context.Context, entry *localRoom) {
 			}
 			continue
 		}
-		r.handleLive(ctx, entry.name, live)
+		r.handleLiveRoom(ctx, entry, live)
 	}
 }
 
@@ -94,8 +94,8 @@ func (r *Rooms) restorePosition(ctx context.Context, entry *localRoom, epoch, la
 	if current != entry {
 		return
 	}
-	r.mu.Lock()
+	entry.mu.Lock()
 	entry.lastPositionAt = time.Now()
-	r.mu.Unlock()
-	r.reconcilePosition(ctx, entry.name, oldEpoch, oldLast, epoch, last)
+	entry.mu.Unlock()
+	r.reconcileRoomPosition(ctx, entry, oldEpoch, oldLast, epoch, last)
 }

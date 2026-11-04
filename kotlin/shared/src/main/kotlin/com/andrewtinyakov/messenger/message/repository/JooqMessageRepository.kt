@@ -1,102 +1,243 @@
 package com.andrewtinyakov.messenger.message.repository
 
+import com.andrewtinyakov.messenger.generated.messaging.event.SendRejectionReason
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Routines
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHATS
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHAT_MEMBERS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSAGES
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.SEND_REQUESTS
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.MessagesRecord
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.SendRequestsRecord
+import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseObservation
+import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseOperation
 import com.andrewtinyakov.messenger.message.model.Message
+import com.andrewtinyakov.messenger.message.model.SavedMessage
 import com.andrewtinyakov.messenger.message.model.SendResult
 import com.andrewtinyakov.messenger.message.model.SendResultStatus
+import com.andrewtinyakov.messenger.message.model.asReply
+import com.andrewtinyakov.messenger.shared.id.ChatId
+import com.andrewtinyakov.messenger.shared.id.MessageId
+import com.andrewtinyakov.messenger.shared.id.RequestId
+import com.andrewtinyakov.messenger.shared.id.UserId
 import org.jooq.DSLContext
+import org.jooq.impl.DSL
 import org.springframework.stereotype.Repository
-import java.time.OffsetDateTime
+import com.andrewtinyakov.messenger.infrastructure.database.generated.enums.SendRejectionReason as DbSendRejectionReason
+import com.andrewtinyakov.messenger.infrastructure.database.generated.enums.SendResultStatus as DbSendResultStatus
 
 @Repository
 class JooqMessageRepository(
     private val db: DSLContext,
 ) : MessageRepository {
-    override fun lockSend(senderId: String, requestId: String) {
-        db.fetch("select pg_advisory_xact_lock(hashtextextended(?, 0))", "send:$senderId:$requestId")
+    override fun lockSend(senderId: UserId, requestId: RequestId) = DatabaseObservation.query(DatabaseOperation.MESSAGE_LOCK_SEND) {
+        Routines.acquireTransactionLock(db.configuration(), "send:${senderId.value}:${requestId.value}")
     }
 
-    override fun findSendResult(senderId: String, requestId: String): SendResult? =
+    override fun findSendResult(senderId: UserId, requestId: RequestId): SendResult? = DatabaseObservation.query(
+        DatabaseOperation.MESSAGE_FIND_SEND_RESULT,
+    ) {
         db.selectFrom(SEND_REQUESTS)
             .where(
-                SEND_REQUESTS.SENDER_ID.eq(senderId),
-                SEND_REQUESTS.REQUEST_ID.eq(requestId),
+                SEND_REQUESTS.SENDER_ID.eq(senderId.value),
+                SEND_REQUESTS.REQUEST_ID.eq(requestId.value),
             ).fetchOne()?.toSendResult()
+    }
 
-    override fun findSendResults(senderId: String, requestIds: List<String>): List<SendResult> {
+    override fun findSendResults(senderId: UserId, requestIds: List<RequestId>): List<SendResult> = DatabaseObservation.query(
+        DatabaseOperation.MESSAGE_FIND_SEND_RESULTS,
+    ) {
         if (requestIds.isEmpty()) return emptyList()
         return db.selectFrom(SEND_REQUESTS)
-            .where(SEND_REQUESTS.SENDER_ID.eq(senderId), SEND_REQUESTS.REQUEST_ID.`in`(requestIds))
+            .where(SEND_REQUESTS.SENDER_ID.eq(senderId.value), SEND_REQUESTS.REQUEST_ID.`in`(requestIds.map { it.value }))
             .fetch { it.toSendResult() }
     }
 
-    override fun insertSendResult(result: SendResult) {
-        check(
-            db.insertInto(SEND_REQUESTS)
-                .set(SEND_REQUESTS.SENDER_ID, result.senderId)
-                .set(SEND_REQUESTS.REQUEST_ID, result.requestId)
-                .set(SEND_REQUESTS.CHAT_ID, result.chatId)
-                .set(SEND_REQUESTS.RECIPIENT_ID, result.recipientId)
-                .set(SEND_REQUESTS.FINGERPRINT, result.fingerprint)
-                .set(SEND_REQUESTS.STATUS, result.status.value)
-                .set(SEND_REQUESTS.MESSAGE_ID, result.messageId)
-                .set(SEND_REQUESTS.SEQUENCE, result.sequence)
-                .set(SEND_REQUESTS.REASON, result.reason)
-                .execute() == 1,
-        )
+    override fun insertSendResult(result: SendResult) = DatabaseObservation.query(DatabaseOperation.MESSAGE_INSERT_SEND_RESULT) {
+        check(sendResultInsert(result).execute() == 1)
     }
 
-    override fun insertMessage(
-        id: String,
-        chatId: String,
-        sequence: Long,
-        senderId: String,
-        body: String,
-        createdAt: OffsetDateTime,
+    override fun findSendResults(requests: Map<UserId, List<RequestId>>): List<SendResult> = DatabaseObservation.query(
+        DatabaseOperation.MESSAGE_FIND_SEND_RESULTS,
     ) {
-        check(
-            db.insertInto(MESSAGES)
-                .set(MESSAGES.ID, id)
-                .set(MESSAGES.CHAT_ID, chatId)
-                .set(MESSAGES.SEQUENCE, sequence)
-                .set(MESSAGES.SENDER_ID, senderId)
-                .set(MESSAGES.BODY, body)
-                .set(MESSAGES.CREATED_AT, createdAt)
-                .execute() == 1,
-        )
+        if (requests.isEmpty()) return emptyList()
+        return db.selectFrom(SEND_REQUESTS)
+            .where(
+                DSL.or(
+                    requests.map { (sender, ids) ->
+                        SEND_REQUESTS.SENDER_ID.eq(sender.value)
+                            .and(SEND_REQUESTS.REQUEST_ID.`in`(ids.map(RequestId::value)))
+                    },
+                ),
+            )
+            .fetch { it.toSendResult() }
     }
 
-    override fun findMessagesAfter(chatId: String, afterSequence: Long, limit: Int): List<Message> =
+    private fun sendResultInsert(result: SendResult) = db.insertInto(SEND_REQUESTS)
+        .set(SEND_REQUESTS.SENDER_ID, result.senderId.value)
+        .set(SEND_REQUESTS.REQUEST_ID, result.requestId.value)
+        .set(SEND_REQUESTS.CHAT_ID, result.chatId?.value)
+        .set(SEND_REQUESTS.RECIPIENT_ID, result.recipientId?.value)
+        .set(SEND_REQUESTS.FINGERPRINT, result.fingerprint)
+        .set(SEND_REQUESTS.STATUS, DbSendResultStatus.valueOf(result.status.name))
+        .set(SEND_REQUESTS.MESSAGE_ID, result.messageId?.value)
+        .set(SEND_REQUESTS.SEQUENCE, result.sequence)
+        .set(SEND_REQUESTS.REASON, result.reason?.let { DbSendRejectionReason.valueOf(it.name) })
+
+    override fun insertSavedMessage(message: Message, result: SendResult) = DatabaseObservation.query(
+        DatabaseOperation.MESSAGE_INSERT_SAVED_MESSAGE,
+    ) {
+        insertSavedMessages(listOf(SavedMessage(message, result)))
+    }
+
+    override fun insertSavedMessages(messages: List<SavedMessage>) = DatabaseObservation.query(
+        DatabaseOperation.MESSAGE_INSERT_SAVED_MESSAGES,
+    ) {
+        if (messages.isEmpty()) return@query
+        require(messages.size <= 16) { "Saved message batch must contain at most sixteen messages" }
+        val messageInsert = db.insertInto(
+            MESSAGES,
+            MESSAGES.ID,
+            MESSAGES.CHAT_ID,
+            MESSAGES.SEQUENCE,
+            MESSAGES.SENDER_ID,
+            MESSAGES.BODY,
+            MESSAGES.CREATED_AT,
+            MESSAGES.REPLY_TO_MESSAGE_ID,
+        )
+        val resultInsert = db.insertInto(
+            SEND_REQUESTS,
+            SEND_REQUESTS.SENDER_ID,
+            SEND_REQUESTS.REQUEST_ID,
+            SEND_REQUESTS.CHAT_ID,
+            SEND_REQUESTS.RECIPIENT_ID,
+            SEND_REQUESTS.FINGERPRINT,
+            SEND_REQUESTS.STATUS,
+            SEND_REQUESTS.MESSAGE_ID,
+            SEND_REQUESTS.SEQUENCE,
+            SEND_REQUESTS.REASON,
+        )
+        for ((message, result) in messages) {
+            messageInsert.values(
+                message.id.value,
+                message.chatId.value,
+                message.sequence,
+                message.senderId.value,
+                message.body,
+                message.createdAt,
+                message.reply?.messageId?.value,
+            )
+            resultInsert.values(
+                result.senderId.value,
+                result.requestId.value,
+                result.chatId?.value,
+                result.recipientId?.value,
+                result.fingerprint,
+                DbSendResultStatus.valueOf(result.status.name),
+                result.messageId?.value,
+                result.sequence,
+                result.reason?.let { DbSendRejectionReason.valueOf(it.name) },
+            )
+        }
+        check(db.batch(messageInsert, resultInsert).execute().all { it == messages.size })
+    }
+
+    override fun findMessagesAfter(
+        chatId: ChatId,
+        userId: UserId,
+        afterSequence: Long,
+        limit: Int,
+    ): List<Message> = DatabaseObservation.query(
+        DatabaseOperation.MESSAGE_FIND_MESSAGES_AFTER,
+    ) {
         db.selectFrom(MESSAGES)
-            .where(MESSAGES.CHAT_ID.eq(chatId), MESSAGES.SEQUENCE.gt(afterSequence))
+            .where(
+                MESSAGES.CHAT_ID.eq(chatId.value),
+                MESSAGES.SEQUENCE.gt(afterSequence),
+                currentMembership(chatId = chatId, userId = userId),
+            )
             .orderBy(MESSAGES.SEQUENCE)
             .limit(limit)
-            .fetch { row ->
-                row.toModel()
-            }
+            .fetch().let(::hydrate)
+    }
 
-    override fun findMessagesBefore(chatId: String, beforeSequence: Long?, limit: Int): List<Message> =
+    override fun findMessagesBefore(
+        chatId: ChatId,
+        userId: UserId,
+        beforeSequence: Long?,
+        limit: Int,
+    ): List<Message> = DatabaseObservation.query(
+        DatabaseOperation.MESSAGE_FIND_MESSAGES_BEFORE,
+    ) {
         db.selectFrom(MESSAGES)
-            .where(MESSAGES.CHAT_ID.eq(chatId))
-            .and(beforeSequence?.let { MESSAGES.SEQUENCE.lt(it) } ?: org.jooq.impl.DSL.trueCondition())
+            .where(MESSAGES.CHAT_ID.eq(chatId.value), currentMembership(chatId = chatId, userId = userId))
+            .and(beforeSequence?.let { MESSAGES.SEQUENCE.lt(it) } ?: DSL.trueCondition())
             .orderBy(MESSAGES.SEQUENCE.desc())
             .limit(limit)
-            .fetch { it.toModel() }
+            .fetch().let(::hydrate)
+    }
 
-    private fun com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.MessagesRecord.toModel(): Message =
-        Message(id!!, chatId!!, sequence!!, senderId!!, body!!, createdAt!!)
+    private fun currentMembership(chatId: ChatId, userId: UserId) = DSL.exists(
+        DSL.selectOne().from(CHAT_MEMBERS)
+            .join(CHATS).on(CHATS.ID.eq(CHAT_MEMBERS.CHAT_ID))
+            .where(CHAT_MEMBERS.CHAT_ID.eq(chatId.value), CHAT_MEMBERS.USER_ID.eq(userId.value), CHATS.DELETED_AT.isNull),
+    )
 
-    private fun com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.SendRequestsRecord.toSendResult(): SendResult =
+    override fun findMessagesByIds(chatId: ChatId, userId: UserId, messageIds: List<MessageId>): List<Message> =
+        DatabaseObservation.query(DatabaseOperation.MESSAGE_FIND_MESSAGE) {
+            require(messageIds.size <= 100)
+            if (messageIds.isEmpty()) return@query emptyList()
+            db.selectFrom(MESSAGES)
+                .where(MESSAGES.CHAT_ID.eq(chatId.value), MESSAGES.ID.`in`(messageIds.map { it.value }), currentMembership(chatId, userId))
+                .fetch().let(::hydrate)
+        }
+
+    override fun findMessage(chatId: ChatId, userId: UserId, messageId: MessageId): Message? =
+        DatabaseObservation.query(DatabaseOperation.MESSAGE_FIND_MESSAGE) {
+            db.selectFrom(MESSAGES)
+                .where(MESSAGES.CHAT_ID.eq(chatId.value), MESSAGES.ID.eq(messageId.value), currentMembership(chatId, userId))
+                .fetch().let(::hydrate).singleOrNull()
+        }
+
+    override fun findReply(chatId: ChatId, userId: UserId, messageId: MessageId): Message? =
+        findMessage(chatId, userId, messageId)?.takeIf { it.deletedAt == null }
+
+    private fun hydrate(rows: List<MessagesRecord>): List<Message> {
+        val targets = rows.filter { it.deletedAt == null }.mapNotNull { it.replyToMessageId }.distinct()
+        val replies = if (targets.isEmpty()) {
+            emptyMap()
+        } else {
+            db.selectFrom(MESSAGES)
+                .where(MESSAGES.ID.`in`(targets)).fetch().associateBy { it.id }
+        }
+        return rows.map { row ->
+            val parent = if (row.deletedAt == null) replies[row.replyToMessageId] else null
+            row.toModel().copy(reply = parent?.toModel()?.asReply())
+        }
+    }
+
+    private fun MessagesRecord.toModel(): Message =
+        Message(
+            id = MessageId(id!!),
+            chatId = ChatId(chatId!!),
+            sequence = sequence!!,
+            senderId = UserId(senderId!!),
+            body = body!!,
+            createdAt = createdAt!!,
+            messageVersion = messageVersion!!,
+            editedAt = editedAt,
+            deletedAt = deletedAt,
+        )
+
+    private fun SendRequestsRecord.toSendResult(): SendResult =
         SendResult(
-            senderId = senderId!!,
-            requestId = requestId!!,
-            chatId = chatId,
-            recipientId = recipientId,
+            senderId = UserId(senderId!!),
+            requestId = RequestId(requestId!!),
+            chatId = chatId?.let(::ChatId),
+            recipientId = recipientId?.let(::UserId),
             fingerprint = fingerprint!!,
-            status = SendResultStatus.valueOf(status!!.uppercase()),
-            messageId = messageId,
+            status = SendResultStatus.valueOf(status!!.name),
+            messageId = messageId?.let(::MessageId),
             sequence = sequence,
-            reason = reason,
+            reason = reason?.let { SendRejectionReason.valueOf(it.name) },
         )
 }

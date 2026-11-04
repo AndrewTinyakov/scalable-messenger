@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
@@ -10,19 +11,36 @@ import (
 
 const testID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 
+func TestDecodeEventRejectsSharedConflictingTargets(t *testing.T) {
+	payload, err := os.ReadFile("../../../contracts/fixtures/invalid/send-rejected-both-targets.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DecodeEvent(payload); err == nil {
+		t.Fatal("accepted conflicting rejection targets")
+	}
+}
+
 func TestDecodeFrame(t *testing.T) {
 	cases := []struct {
 		name, input string
 		wantError   bool
 	}{
+		{"duplicate field", `{"type":"send","version":1,"chatId":"` + testID + `","requestId":"` + testID + `","body":"hello","body":"changed"}`, true},
+		{"case alias", `{"type":"send","version":1,"chatId":"` + testID + `","requestId":"` + testID + `","Body":"hello"}`, true},
+		{"null optional field", `{"type":"send","version":1,"chatId":"` + testID + `","requestId":"` + testID + `","body":"hello","kind":null}`, true},
+		{"nested duplicate field", `{"type":"subscribe_many","version":1,"subscriptions":[{"kind":"GROUP","chatId":"` + testID + `","chatId":"` + testID + `"}]}`, true},
+		{"nested case alias", `{"type":"subscribe_many","version":1,"subscriptions":[{"Kind":"GROUP","chatId":"` + testID + `"}]}`, true},
 		{"valid send", `{"type":"send","version":1,"chatId":"` + testID + `","requestId":"` + testID + `","body":"hello"}`, false},
 		{"valid direct send", `{"type":"send","version":1,"recipientId":"` + testID + `","requestId":"` + testID + `","body":"hello"}`, false},
-		{"valid group subscribe", `{"type":"subscribe","version":1,"kind":"group","chatId":"` + testID + `"}`, false},
-		{"valid direct subscribe", `{"type":"subscribe","version":1,"kind":"direct","chatId":"` + testID + `"}`, false},
-		{"valid subscribe batch", `{"type":"subscribe_many","version":1,"subscriptions":[{"kind":"group","chatId":"` + testID + `"}]}`, false},
+		{"valid group subscribe", `{"type":"subscribe","version":1,"kind":"GROUP","chatId":"` + testID + `"}`, false},
+		{"lowercase group subscribe", `{"type":"subscribe","version":1,"kind":"group","chatId":"` + testID + `"}`, true},
+		{"lowercase direct subscribe", `{"type":"subscribe","version":1,"kind":"direct","chatId":"` + testID + `"}`, true},
+		{"valid direct subscribe", `{"type":"subscribe","version":1,"kind":"DIRECT","chatId":"` + testID + `"}`, false},
+		{"valid subscribe batch", `{"type":"subscribe_many","version":1,"subscriptions":[{"kind":"GROUP","chatId":"` + testID + `"}]}`, false},
 		{"empty subscribe batch", `{"type":"subscribe_many","version":1,"subscriptions":[]}`, true},
-		{"duplicate subscribe batch", `{"type":"subscribe_many","version":1,"subscriptions":[{"kind":"group","chatId":"` + testID + `"},{"kind":"group","chatId":"` + testID + `"}]}`, true},
-		{"unknown subscribe batch entry", `{"type":"subscribe_many","version":1,"subscriptions":[{"kind":"group","chatId":"` + testID + `","extra":true}]}`, true},
+		{"duplicate subscribe batch", `{"type":"subscribe_many","version":1,"subscriptions":[{"kind":"GROUP","chatId":"` + testID + `"},{"kind":"GROUP","chatId":"` + testID + `"}]}`, true},
+		{"unknown subscribe batch entry", `{"type":"subscribe_many","version":1,"subscriptions":[{"kind":"GROUP","chatId":"` + testID + `","extra":true}]}`, true},
 		{"subscriptions on send", `{"type":"send","version":1,"chatId":"` + testID + `","requestId":"` + testID + `","body":"hello","subscriptions":[]}`, true},
 		{"missing subscribe kind", `{"type":"subscribe","version":1,"chatId":"` + testID + `"}`, true},
 		{"valid unsubscribe", `{"type":"unsubscribe","version":1,"chatId":"` + testID + `"}`, false},
@@ -112,9 +130,17 @@ func TestDecodeEventAcceptsChatCreationAndDirectRejection(t *testing.T) {
 	if _, err := DecodeEvent([]byte(created)); err != nil {
 		t.Fatalf("chat creation: %v", err)
 	}
-	removed := `{"type":"member_removed","version":1,"eventId":"` + testID + `","room":"user:` + testID + `","chatId":"` + testID + `"}`
+	removed := `{"type":"member_removed","version":1,"eventId":"` + testID + `","room":"user:` + testID + `","chatId":"` + testID + `","memberId":"` + testID + `"}`
 	if _, err := DecodeEvent([]byte(removed)); err != nil {
 		t.Fatalf("member removal: %v", err)
+	}
+	groupRemoved := `{"type":"member_removed","version":1,"eventId":"` + testID + `","room":"group:` + testID + `","chatId":"` + testID + `","memberId":"` + testID + `"}`
+	if _, err := DecodeEvent([]byte(groupRemoved)); err != nil {
+		t.Fatalf("group removal: %v", err)
+	}
+	wrongRoom := `{"type":"member_removed","version":1,"eventId":"` + testID + `","room":"group:01ARZ3NDEKTSV4RRFFQ69G5FAW","chatId":"` + testID + `","memberId":"` + testID + `"}`
+	if _, err := DecodeEvent([]byte(wrongRoom)); err == nil {
+		t.Fatal("member removal accepted a different group room")
 	}
 	rejected := `{"type":"send_rejected","version":1,"eventId":"` + testID + `","room":"user:` + testID + `","recipientId":"` + testID + `","requestId":"` + testID + `","reason":"RECIPIENT_NOT_FOUND"}`
 	if _, err := DecodeEvent([]byte(rejected)); err != nil {
@@ -136,5 +162,69 @@ func TestDecodeEventValidatesSessionRevocation(t *testing.T) {
 		if _, err := DecodeEvent([]byte(raw)); err == nil {
 			t.Fatalf("accepted invalid session revocation: %s", raw)
 		}
+	}
+}
+
+func TestDecodeEventRejectsConflictingRejectionTargets(t *testing.T) {
+	for _, targets := range []string{
+		`"chatId":"bad","recipientId":"` + testID + `"`,
+		`"chatId":"` + testID + `","recipientId":"bad"`,
+	} {
+		raw := `{"type":"send_rejected","version":1,"eventId":"` + testID + `","room":"user:` + testID + `","requestId":"` + testID + `","reason":"RECIPIENT_NOT_FOUND",` + targets + `}`
+		if _, err := DecodeEvent([]byte(raw)); err == nil {
+			t.Fatalf("accepted conflicting rejection targets: %s", raw)
+		}
+	}
+}
+
+func TestDecodeMembershipChanged(t *testing.T) {
+	payload, err := os.ReadFile("../../../contracts/fixtures/valid/membership-changed.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	event, err := DecodeEvent(payload)
+	if err != nil || event.Type != EventMembershipChanged || event.Room != "group:"+event.ChatID {
+		t.Fatalf("membership notification = %+v, error = %v", event, err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(payload, &fields); err != nil {
+		t.Fatal(err)
+	}
+	for name, value := range map[string]any{
+		"room":   "group:01ARZ3NDEKTSV4RRFFQ69G5FAW",
+		"chatId": "invalid", "eventId": nil, "version": 2,
+		"sequence": "", "requestId": "", "memberId": "", "sessionId": "",
+		"epoch": "epoch", "streamId": "1-0", "unknown": true,
+	} {
+		t.Run(name, func(t *testing.T) {
+			invalid := make(map[string]any)
+			for key, original := range fields {
+				invalid[key] = original
+			}
+			invalid[name] = value
+			wire, err := json.Marshal(invalid)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := DecodeEvent(wire); err == nil {
+				t.Fatalf("accepted %s", wire)
+			}
+		})
+	}
+	for _, field := range []string{"version", "eventId", "room", "chatId"} {
+		invalid := make(map[string]any)
+		for key, value := range fields {
+			if key != field {
+				invalid[key] = value
+			}
+		}
+		wire, _ := json.Marshal(invalid)
+		if _, err := DecodeEvent(wire); err == nil {
+			t.Fatalf("accepted missing %s", field)
+		}
+	}
+	event.Room = "user:" + event.ChatID
+	if err := ValidateEvent(event); err == nil {
+		t.Fatal("accepted user room")
 	}
 }

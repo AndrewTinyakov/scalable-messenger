@@ -1,10 +1,14 @@
 package com.andrewtinyakov.messenger.infrastructure.messaging
 
+import org.springframework.amqp.core.AcknowledgeMode
 import org.springframework.amqp.core.Binding
 import org.springframework.amqp.core.Declarable
 import org.springframework.amqp.core.Declarables
 import org.springframework.amqp.core.DirectExchange
 import org.springframework.amqp.core.QueueBuilder
+import org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory
+import org.springframework.amqp.rabbit.connection.ConnectionFactory
+import org.springframework.boot.amqp.autoconfigure.SimpleRabbitListenerContainerFactoryConfigurer
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -12,6 +16,20 @@ import org.springframework.context.annotation.Configuration
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(MessagingProperties::class)
 class RabbitConfig {
+    @Bean
+    fun sendBatchListenerContainerFactory(
+        configurer: SimpleRabbitListenerContainerFactoryConfigurer,
+        connectionFactory: ConnectionFactory,
+        properties: MessagingProperties,
+    ): SimpleRabbitListenerContainerFactory = SimpleRabbitListenerContainerFactory().apply {
+        configurer.configure(this, connectionFactory)
+        setAcknowledgeMode(AcknowledgeMode.MANUAL)
+        setConsumerBatchEnabled(true)
+        setBatchSize(properties.sendBatchSize)
+        setReceiveTimeout(1L)
+        setBatchReceiveTimeout(5L)
+    }
+
     @Bean
     fun commandTopology(properties: MessagingProperties): Declarables {
         val declarations = buildList<Declarable> {

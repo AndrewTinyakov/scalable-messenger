@@ -10,7 +10,7 @@ import (
 
 func TestConcurrentUpgradesReserveConnectionCapacity(t *testing.T) {
 	const limit = 4
-	server := &Server{config: config.Config{MaxConnections: limit}, connections: make(map[*Connection]struct{})}
+	server := newTestServer(t, config.Config{MaxConnections: limit, MaxGroupAuths: 1, QueueItems: 8, QueueBytes: 4096}, testDependencies(&sessionRooms{}))
 	start := make(chan struct{})
 	var accepted atomic.Int32
 	var workers sync.WaitGroup
@@ -38,4 +38,5 @@ func TestConcurrentUpgradesReserveConnectionCapacity(t *testing.T) {
 	if !server.reserveUpgrade() {
 		t.Fatal("released capacity could not be reserved again")
 	}
+	server.releaseUpgrade()
 }

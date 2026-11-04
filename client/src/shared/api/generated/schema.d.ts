@@ -20,6 +20,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/chats/{id}/reads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["summary"];
+        put?: never;
+        post: operations["advance"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/chats/{id}/members": {
         parameters: {
             query?: never;
@@ -27,7 +43,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        get: operations["members"];
         put?: never;
         post: operations["addMembers"];
         delete?: never;
@@ -116,6 +132,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/chats/{id}/messages/{messageId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["delete"];
+        options?: never;
+        head?: never;
+        patch: operations["edit"];
+        trace?: never;
+    };
     "/v1/users": {
         parameters: {
             query?: never;
@@ -124,6 +156,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["search"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/users/{userId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -171,10 +219,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get"];
+        get: operations["get_1"];
         put?: never;
         post?: never;
-        delete?: never;
+        delete: operations["delete_1"];
         options?: never;
         head?: never;
         patch?: never;
@@ -188,6 +236,70 @@ export interface paths {
             cookie?: never;
         };
         get: operations["messages"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/chats/{id}/messages/{messageId}/reads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["readers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/chats/{id}/messages/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["changes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/chats/{id}/messages/around": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["around"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/chats/direct/{userId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["direct"];
         put?: never;
         post?: never;
         delete?: never;
@@ -240,14 +352,26 @@ export interface components {
             result: components["schemas"]["SendStatusResponse"];
         };
         SendStatusResponse: {
-            status: string;
+            /** @enum {string} */
+            status: "UNKNOWN" | "SAVED" | "REJECTED";
             chatId?: string | null;
             messageId?: string | null;
             sequence?: string | null;
-            reason?: string | null;
+            /** @enum {string|null} */
+            reason?: "NOT_A_MEMBER" | "CHAT_NOT_FOUND" | "RECIPIENT_NOT_FOUND" | "INVALID_RECIPIENT" | "EMPTY_BODY" | "BODY_TOO_LONG" | "REQUEST_ID_CONFLICT" | "PROCESSING_FAILED" | "INVALID_REPLY_TARGET" | null;
         };
         SendStatusesResponse: {
             results: components["schemas"]["SendStatusEntry"][];
+        };
+        AdvanceReadRequest: {
+            throughSequence: string;
+        };
+        ReadProgressResponse: {
+            throughSequence: string;
+            /** Format: date-time */
+            readAt: string | null;
+            /** Format: date-time */
+            serverTime: string;
         };
         AddGroupMembersRequest: {
             memberIds: string[];
@@ -258,12 +382,14 @@ export interface components {
         };
         ChatResponse: {
             id: string;
-            kind: string;
+            /** @enum {string} */
+            kind: "DIRECT" | "GROUP";
             name?: string | null;
             members: components["schemas"]["UserResponse"][];
             /** Format: int32 */
             memberCount: number;
             lastSequence: string;
+            ownerId?: string | null;
         };
         UserResponse: {
             id: string;
@@ -280,18 +406,12 @@ export interface components {
             deviceId?: string | null;
         };
         AuthResponse: {
-            token: string;
             user: components["schemas"]["UserResponse"];
             deviceId: string;
         };
-        ChatPageResponse: {
-            chats: components["schemas"]["ChatResponse"][];
-            nextCursor?: string | null;
-        };
-        MessageHistoryResponse: {
-            messages: components["schemas"]["MessageResponse"][];
-            nextSequence: string;
-            hasMore: boolean;
+        EditMessageRequest: {
+            body: string;
+            expectedVersion: string;
         };
         MessageResponse: {
             id: string;
@@ -301,6 +421,72 @@ export interface components {
             body: string;
             /** Format: date-time */
             createdAt: string;
+            messageVersion: string;
+            /** Format: date-time */
+            editedAt: string | null;
+            /** Format: date-time */
+            deletedAt: string | null;
+            replyToMessageId: string | null;
+            replySenderId: string | null;
+            replyBody: string | null;
+            replyDeleted: boolean | null;
+            replyVersion: string | null;
+        };
+        ChatPageResponse: {
+            chats: components["schemas"]["ChatResponse"][];
+            nextCursor?: string | null;
+        };
+        ReadSummaryResponse: {
+            throughSequence: string;
+            maxOtherReadSequence: string;
+            /** Format: date-time */
+            serverTime: string;
+        };
+        MessageHistoryResponse: {
+            messages: components["schemas"]["MessageResponse"][];
+            nextSequence: string;
+            hasMore: boolean;
+            mutationRevision: string;
+        };
+        MessageReaderResponse: {
+            userId: string;
+            username: string;
+            /** Format: date-time */
+            readAt: string;
+        };
+        MessageReadsResponse: {
+            readers: components["schemas"]["MessageReaderResponse"][];
+            nextUserId: string | null;
+            detailsAvailable: boolean;
+            /** Format: date-time */
+            detailsExpiresAt: string;
+            /** Format: date-time */
+            serverTime: string;
+        };
+        MessageChangeResponse: {
+            revision: string;
+            message: components["schemas"]["MessageResponse"];
+        };
+        MessageChangesResponse: {
+            changes: components["schemas"]["MessageChangeResponse"][];
+            lastRevision: string;
+            nextRevision: string;
+            resetRequired: boolean;
+        };
+        MessageAroundResponse: {
+            anchorMessageId: string;
+            messages: components["schemas"]["MessageResponse"][];
+            hasOlder: boolean;
+            hasNewer: boolean;
+            mutationRevision: string;
+        };
+        GroupMemberPageResponse: {
+            members: components["schemas"]["UserResponse"][];
+            nextCursor: string | null;
+        };
+        DirectChatResponse: {
+            recipient: components["schemas"]["UserResponse"];
+            chat: components["schemas"]["ChatResponse"] | null;
         };
         SessionResponse: {
             userId: string;
@@ -325,7 +511,11 @@ export interface operations {
     statuses: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "X-Messenger-CSRF": "1";
+                "X-Messenger-User"?: string;
+                "X-Messenger-Device"?: string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -382,10 +572,205 @@ export interface operations {
             };
         };
     };
+    summary: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Messenger-User"?: string;
+                "X-Messenger-Device"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ReadSummaryResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    advance: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-Messenger-CSRF": "1";
+                "X-Messenger-User"?: string;
+                "X-Messenger-Device"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdvanceReadRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ReadProgressResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    members: {
+        parameters: {
+            query?: {
+                afterUserId?: string;
+                limit?: number;
+            };
+            header?: {
+                "X-Messenger-User"?: string;
+                "X-Messenger-Device"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["GroupMemberPageResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
     addMembers: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "X-Messenger-CSRF": "1";
+                "X-Messenger-User"?: string;
+                "X-Messenger-Device"?: string;
+            };
             path: {
                 id: string;
             };
@@ -445,7 +830,11 @@ export interface operations {
     group: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "X-Messenger-CSRF": "1";
+                "X-Messenger-User"?: string;
+                "X-Messenger-Device"?: string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -505,7 +894,11 @@ export interface operations {
     wsTicket: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "X-Messenger-CSRF": "1";
+                "X-Messenger-User"?: string;
+                "X-Messenger-Device"?: string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -561,7 +954,9 @@ export interface operations {
     register: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "X-Messenger-CSRF": "1";
+            };
             path?: never;
             cookie?: never;
         };
@@ -589,6 +984,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ApiProblem"];
                 };
             };
+            /** @description Invalid browser request */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
             /** @description Internal server error */
             500: {
                 headers: {
@@ -603,7 +1007,11 @@ export interface operations {
     logout: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "X-Messenger-CSRF": "1";
+                "X-Messenger-User"?: string;
+                "X-Messenger-Device"?: string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -615,6 +1023,124 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Invalid browser request */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    login: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-Messenger-CSRF": "1";
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AuthRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["AuthResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Invalid browser request */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    delete: {
+        parameters: {
+            query: {
+                expectedVersion: string;
+            };
+            header: {
+                "X-Messenger-CSRF": "1";
+                "X-Messenger-User"?: string;
+                "X-Messenger-Device"?: string;
+            };
+            path: {
+                id: string;
+                messageId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["MessageResponse"];
+                };
             };
             /** @description Invalid request */
             400: {
@@ -654,16 +1180,23 @@ export interface operations {
             };
         };
     };
-    login: {
+    edit: {
         parameters: {
             query?: never;
-            header?: never;
-            path?: never;
+            header: {
+                "X-Messenger-CSRF": "1";
+                "X-Messenger-User"?: string;
+                "X-Messenger-Device"?: string;
+            };
+            path: {
+                id: string;
+                messageId: string;
+            };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AuthRequest"];
+                "application/json": components["schemas"]["EditMessageRequest"];
             };
         };
         responses: {
@@ -673,11 +1206,29 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["AuthResponse"];
+                    "*/*": components["schemas"]["MessageResponse"];
                 };
             };
             /** @description Invalid request */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -701,7 +1252,10 @@ export interface operations {
             query?: {
                 query?: string;
             };
-            header?: never;
+            header?: {
+                "X-Messenger-User"?: string;
+                "X-Messenger-Device"?: string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -754,10 +1308,74 @@ export interface operations {
             };
         };
     };
+    get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Messenger-User"?: string;
+                "X-Messenger-Device"?: string;
+            };
+            path: {
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["UserResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
     status: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Messenger-User"?: string;
+                "X-Messenger-Device"?: string;
+            };
             path: {
                 requestId: string;
             };
@@ -818,7 +1436,10 @@ export interface operations {
                 cursor?: string;
                 limit?: number;
             };
-            header?: never;
+            header?: {
+                "X-Messenger-User"?: string;
+                "X-Messenger-Device"?: string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -871,10 +1492,13 @@ export interface operations {
             };
         };
     };
-    get: {
+    get_1: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Messenger-User"?: string;
+                "X-Messenger-Device"?: string;
+            };
             path: {
                 id: string;
             };
@@ -929,6 +1553,66 @@ export interface operations {
             };
         };
     };
+    delete_1: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-Messenger-CSRF": "1";
+                "X-Messenger-User"?: string;
+                "X-Messenger-Device"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
     messages: {
         parameters: {
             query?: {
@@ -936,7 +1620,10 @@ export interface operations {
                 beforeSeq?: string;
                 limit?: number;
             };
-            header?: never;
+            header?: {
+                "X-Messenger-User"?: string;
+                "X-Messenger-Device"?: string;
+            };
             path: {
                 id: string;
             };
@@ -991,10 +1678,267 @@ export interface operations {
             };
         };
     };
+    readers: {
+        parameters: {
+            query?: {
+                afterUserId?: string;
+                limit?: number;
+            };
+            header?: {
+                "X-Messenger-User"?: string;
+                "X-Messenger-Device"?: string;
+            };
+            path: {
+                id: string;
+                messageId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["MessageReadsResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    changes: {
+        parameters: {
+            query: {
+                afterRevision: string;
+                limit?: number;
+            };
+            header?: {
+                "X-Messenger-User"?: string;
+                "X-Messenger-Device"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["MessageChangesResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    around: {
+        parameters: {
+            query: {
+                messageId: string;
+                limit?: number;
+            };
+            header?: {
+                "X-Messenger-User"?: string;
+                "X-Messenger-Device"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["MessageAroundResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    direct: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Messenger-User"?: string;
+                "X-Messenger-Device"?: string;
+            };
+            path: {
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["DirectChatResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
     session: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Messenger-User"?: string;
+                "X-Messenger-Device"?: string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1050,7 +1994,11 @@ export interface operations {
     removeMember: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "X-Messenger-CSRF": "1";
+                "X-Messenger-User"?: string;
+                "X-Messenger-Device"?: string;
+            };
             path: {
                 id: string;
                 userId: string;

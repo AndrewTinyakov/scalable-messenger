@@ -8,8 +8,17 @@ import YAML from 'yaml';
 const root = new URL('./', import.meta.url);
 const readJSON = (path) => JSON.parse(readFileSync(new URL(path, root), 'utf8'));
 const ajv = new Ajv({ strict: false, allErrors: true });
+ajv.addKeyword({
+  keyword: 'x-messenger-group-room',
+  type: 'object',
+  validate: (enabled, value) => !enabled || value.room === `group:${value.chatId}`,
+});
+ajv.addSchema(YAML.parse(readFileSync(new URL('schemas/common/chat-kind.yaml', root), 'utf8')), new URL('schemas/common/chat-kind.yaml', root).href);
 addFormats(ajv);
-const validate = (path) => ajv.compile(YAML.parse(readFileSync(new URL(path, root), 'utf8')));
+const validate = (path) => ajv.compile({
+  ...YAML.parse(readFileSync(new URL(path, root), 'utf8')),
+  $id: new URL(path, root).href,
+});
 
 const command = validate('schemas/message/command/send-message-v1.yaml');
 const saved = validate('schemas/message/event/message-saved-v1.yaml');
@@ -54,14 +63,21 @@ test('strict contracts reject malformed command and event data', () => {
   assert.equal(command({ ...validCommand, requestId: undefined }), false);
   const directCommand = readJSON('fixtures/valid/direct-send-command.json');
   assert.equal(command({ ...directCommand, recipientId: 'not-an-ulid' }), false);
+  assert.equal(command({ ...validCommand, chatId: undefined }), false);
+  assert.equal(command({ ...validCommand, recipientId: directCommand.recipientId }), false);
   assert.equal(socketSend({ type: 'send', version: 1, recipientId: directCommand.recipientId, requestId: directCommand.requestId, body: directCommand.body }), true, JSON.stringify(socketSend.errors));
   assert.equal(socketSend({ type: 'send', version: 1, chatId: validCommand.chatId, recipientId: directCommand.recipientId, requestId: validCommand.requestId, body: validCommand.body }), false);
   assert.equal(saved({ ...validSaved, sequence: 9007199254740993 }), false);
   assert.equal(saved({ ...validSaved, sequence: '-1' }), false);
   assert.equal(rejected({ ...validRejected, reason: 'MAYBE' }), false);
+  assert.equal(rejected(readJSON('fixtures/invalid/send-rejected-both-targets.json')), false);
+  assert.equal(rejected({ ...validRejected, chatId: undefined }), false);
   const validRevocation = readJSON('fixtures/valid/session-revoked.json');
   assert.equal(sessionRevoked({ ...validRevocation, sessionId: 'invalid' }), false);
   assert.equal(sessionRevoked({ ...validRevocation, userId: 'extra-field' }), false);
+  const validRemoval = readJSON('fixtures/valid/member-removed.json');
+  assert.equal(removed({ ...validRemoval, memberId: undefined }), false);
+  assert.equal(removed({ ...validRemoval, room: `group:${validRemoval.chatId}` }), true, JSON.stringify(removed.errors));
 });
 
 test('server socket frame schemas preserve durable and replay metadata', () => {
@@ -69,13 +85,15 @@ test('server socket frame schemas preserve durable and replay metadata', () => {
   const rejectedEvent = readJSON('fixtures/valid/send-rejected.json');
   const createdEvent = readJSON('fixtures/valid/chat-created.json');
   const removedEvent = readJSON('fixtures/valid/member-removed.json');
+  assert.equal(socketRemoved({ ...removedEvent, room: `group:${removedEvent.chatId}`, epoch: 'epoch', streamId: '1-0' }), true, JSON.stringify(socketRemoved.errors));
   const cursor = { epoch: '01ARZ3NDEKTSV4RRFFQ69G5FAY', streamId: '1758877201000-0' };
   assert.equal(socketSaved({ ...savedEvent, ...cursor }), true, JSON.stringify(socketSaved.errors));
   assert.equal(socketRejected({ ...rejectedEvent, ...cursor }), true, JSON.stringify(socketRejected.errors));
   assert.equal(socketCreated({ ...createdEvent, ...cursor }), true, JSON.stringify(socketCreated.errors));
   assert.equal(socketRemoved({ ...removedEvent, ...cursor }), true, JSON.stringify(socketRemoved.errors));
-  assert.equal(socketSubscribe({ type: 'subscribe', version: 1, kind: 'group', chatId: createdEvent.chatId }), true, JSON.stringify(socketSubscribe.errors));
-  assert.equal(socketSubscribeMany({ type: 'subscribe_many', version: 1, subscriptions: [{ kind: 'group', chatId: createdEvent.chatId }] }), true, JSON.stringify(socketSubscribeMany.errors));
+  assert.equal(socketRemoved({ ...removedEvent, ...cursor, memberId: undefined }), false);
+  assert.equal(socketSubscribe({ type: 'subscribe', version: 1, kind: 'GROUP', chatId: createdEvent.chatId }), true, JSON.stringify(socketSubscribe.errors));
+  assert.equal(socketSubscribeMany({ type: 'subscribe_many', version: 1, subscriptions: [{ kind: 'GROUP', chatId: createdEvent.chatId }] }), true, JSON.stringify(socketSubscribeMany.errors));
   assert.equal(socketSubscribeMany({ type: 'subscribe_many', version: 1, subscriptions: [] }), false);
   assert.equal(socketSubscribe({ type: 'subscribe', version: 1, chatId: createdEvent.chatId }), false);
   assert.equal(socketUnsubscribe({ type: 'unsubscribe', version: 1, chatId: createdEvent.chatId }), true, JSON.stringify(socketUnsubscribe.errors));
@@ -100,4 +118,68 @@ test('server socket frame schemas preserve durable and replay metadata', () => {
   assert.equal(socketSaved({ ...savedEvent, ...cursor, sequence: 9007199254740993 }), false);
   assert.equal(socketRejected({ ...rejectedEvent, ...cursor, reason: 'MAYBE' }), false);
   assert.equal(socketQueued({ type: 'queued', version: 1, requestId: savedEvent.requestId }), false);
+});
+
+const membershipChanged = validate('schemas/message/event/membership-changed-v1.yaml');
+const socketMembershipChanged = validate('schemas/socket/frame/membership-changed-v1.yaml');
+
+test('membership invalidation requires matching group room and strict metadata', () => {
+  const event = readJSON('fixtures/valid/membership-changed.json');
+  const cursor = { epoch: 'epoch', streamId: '1758877201000-0' };
+  assert.equal(membershipChanged(event), true, JSON.stringify(membershipChanged.errors));
+  assert.equal(socketMembershipChanged({ ...event, ...cursor }), true);
+  for (const invalid of [
+    { room: `user:${event.chatId}` },
+    { room: 'group:01ARZ3NDEKTSV4RRFFQ69G5FAW' },
+    { chatId: undefined }, { eventId: 'invalid' }, { version: 2 },
+    { sequence: '1' }, { requestId: event.eventId }, { memberId: event.eventId },
+  ]) {
+    assert.equal(membershipChanged({ ...event, ...invalid }), false);
+    assert.equal(socketMembershipChanged({ ...event, ...cursor, ...invalid }), false);
+  }
+  assert.equal(membershipChanged({ ...event, ...cursor }), false);
+  assert.equal(socketMembershipChanged(event), false);
+  assert.equal(socketMembershipChanged({ ...event, ...cursor, epoch: '' }), false);
+  assert.equal(socketMembershipChanged({ ...event, ...cursor, streamId: 'invalid' }), false);
+});
+
+const changed = validate('schemas/message/event/message-changed-v1.yaml');
+const chatDeleted = validate('schemas/message/event/chat-deleted-v1.yaml');
+const readsChanged = validate('schemas/message/event/reads-changed-v1.yaml');
+const socketChanged = validate('schemas/socket/frame/message-changed-v1.yaml');
+const socketPresence = validate('schemas/socket/frame/presence-v1.yaml');
+const watchPresence = validate('schemas/socket/frame/watch-presence-v1.yaml');
+
+test('feature fixtures preserve versions, reply identity and empty tombstones', () => {
+  for (const name of ['message-saved-reply', 'message-saved-deleted-reply']) {
+    assert.equal(saved(readJSON(`fixtures/valid/${name}.json`)), true, JSON.stringify(saved.errors));
+  }
+  for (const name of ['message-changed', 'message-deleted']) {
+    const event = readJSON(`fixtures/valid/${name}.json`);
+    assert.equal(changed(event), true, JSON.stringify(changed.errors));
+    assert.equal(socketChanged({ ...event, epoch: 'epoch', streamId: '1-0' }), true, JSON.stringify(socketChanged.errors));
+    assert.equal(changed({ ...event, messageVersion: 2 }), false);
+    assert.equal(changed({ ...event, requestId: event.eventId }), false);
+  }
+  assert.equal(chatDeleted(readJSON('fixtures/valid/chat-deleted.json')), true);
+  assert.equal(readsChanged(readJSON('fixtures/valid/reads-changed.json')), true);
+  assert.equal(command(readJSON('fixtures/valid/send-reply-command.json')), true);
+  assert.equal(changed({ ...readJSON('fixtures/valid/message-deleted.json'), body: undefined }), false);
+  const quote = readJSON('fixtures/valid/message-saved-deleted-reply.json');
+  assert.equal(saved({ ...quote, replyBody: 'deleted text' }), false);
+  assert.equal(saved({ ...readJSON('fixtures/valid/message-saved.json'), replyBody: '' }), false);
+});
+
+test('presence snapshots are bounded, private to a chat and separate from durable events', () => {
+  const event = readJSON('fixtures/valid/socket-presence.json');
+  assert.equal(socketPresence(event), true, JSON.stringify(socketPresence.errors));
+  assert.equal(socketPresence({ ...event, statuses: [] }), true);
+  assert.equal(socketPresence({ ...event, validForMs: 0 }), false);
+  assert.equal(socketPresence({ ...event, statuses: [{ userId: event.chatId, state: 'maybe' }] }), false);
+  assert.equal(socketPresence({ ...event, userId: event.chatId }), false);
+  const frame = { type: 'watch_presence', version: 1, chatId: event.chatId, userIds: [event.chatId] };
+  assert.equal(watchPresence(frame), true);
+  assert.equal(watchPresence({ ...frame, userIds: [event.chatId, event.chatId] }), false);
+  assert.equal(watchPresence({ ...frame, body: '' }), false);
+  assert.equal(chatDeleted({ ...readJSON('fixtures/valid/chat-deleted.json'), observedAt: '' }), false);
 });

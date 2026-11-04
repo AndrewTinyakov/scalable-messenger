@@ -1,0 +1,13 @@
+{
+  "type": "presence",
+  "version": 1,
+  "chatId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  "observedAt": "2026-11-04T00:00:00Z",
+  "validForMs": 15000,
+  "statuses": [
+    {
+      "userId": "01ARZ3NDEKTSV4RRFFQ69G5FAX",
+      "state": "online"
+    }
+  ]
+}

@@ -1,20 +1,31 @@
 package com.andrewtinyakov.messenger.auth.service
 
-import com.andrewtinyakov.messenger.auth.model.Session
-import com.andrewtinyakov.messenger.auth.repository.AuthRepository
+import com.andrewtinyakov.messenger.auth.model.AuthenticatedSession
+import com.andrewtinyakov.messenger.auth.model.ExpectedSessionIdentity
+import com.andrewtinyakov.messenger.auth.model.SessionCredentials
+import com.andrewtinyakov.messenger.auth.model.User
+import com.andrewtinyakov.messenger.auth.model.UserSummary
+import com.andrewtinyakov.messenger.auth.repository.SessionRepository
+import com.andrewtinyakov.messenger.auth.repository.UserRepository
 import com.andrewtinyakov.messenger.auth.web.payload.AuthRequest
-import com.andrewtinyakov.messenger.auth.web.payload.AuthResponse
-import com.andrewtinyakov.messenger.auth.web.payload.SessionResponse
 import com.andrewtinyakov.messenger.generated.messaging.event.SessionRevokedEventV1
-import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxWriter
+import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseTransaction
+import com.andrewtinyakov.messenger.infrastructure.database.observability.observedExecute
+import com.andrewtinyakov.messenger.infrastructure.database.observability.observedExecuteWithoutResult
+import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxRepository
+import com.andrewtinyakov.messenger.infrastructure.redis.RoomAddress
 import com.andrewtinyakov.messenger.shared.crypto.sha256
+import com.andrewtinyakov.messenger.shared.id.DeviceId
+import com.andrewtinyakov.messenger.shared.id.EventId
+import com.andrewtinyakov.messenger.shared.id.SessionId
+import com.andrewtinyakov.messenger.shared.id.SessionToken
+import com.andrewtinyakov.messenger.shared.id.UserId
 import com.andrewtinyakov.messenger.shared.id.newId
 import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
 import com.andrewtinyakov.messenger.shared.web.ApiException
 import com.andrewtinyakov.messenger.shared.web.badRequest
 import com.andrewtinyakov.messenger.shared.web.conflict
-import com.andrewtinyakov.messenger.user.web.payload.UserResponse
-import org.jooq.exception.DataAccessException
+import org.springframework.dao.DuplicateKeyException
 import org.springframework.http.HttpStatus
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.stereotype.Service
@@ -28,82 +39,101 @@ import java.util.UUID
 
 @Service
 class AuthenticationService(
-    private val repository: AuthRepository,
+    private val userRepository: UserRepository,
+    private val sessionRepository: SessionRepository,
     private val encoder: PasswordEncoder,
     private val clock: Clock,
     private val tx: TransactionTemplate,
-    private val outbox: OutboxWriter,
+    private val outboxRepository: OutboxRepository,
     private val mapper: ObjectMapper,
 ) {
     private val random = SecureRandom()
+    private val rejectedPasswordHash = requireNotNull(encoder.encode(UUID.randomUUID().toString()))
 
-    fun register(input: AuthRequest): AuthResponse {
+    fun register(input: AuthRequest): SessionCredentials {
+        validateInput(input)
         val username = input.username.trim().lowercase()
         if (!Regex("[a-z0-9_]{3,40}").matches(username)) {
             badRequest(ApiErrorCode.INVALID_USERNAME, "Use letters, digits, or underscore")
         }
-        val user = UserResponse(newId(), username)
-        val passwordHash = requireNotNull(encoder.encode(input.password))
+        val user = User(
+            id = UserId(newId()),
+            username = username,
+            passwordHash = requireNotNull(encoder.encode(input.password)),
+        )
         try {
-            return tx.execute {
-                repository.insertUser(user.id, user.username, passwordHash)
-                issue(user, input.deviceId)
+            return tx.observedExecute(DatabaseTransaction.AUTH_REGISTER) {
+                userRepository.insertUser(user = user)
+                issue(user = user, requestedDeviceId = input.deviceId?.let(::DeviceId))
             }
-        } catch (error: DataAccessException) {
-            if (error.sqlState() != "23505") throw error
+        } catch (_: DuplicateKeyException) {
             conflict(ApiErrorCode.USERNAME_TAKEN, "Username already exists")
         }
     }
 
-    fun login(input: AuthRequest): AuthResponse {
+    fun login(input: AuthRequest): SessionCredentials {
+        validateInput(input)
         val username = input.username.trim().lowercase()
-        val row = repository.findUserByUsername(username)
-        if (row == null || !encoder.matches(input.password, row.passwordHash)) {
+        val user = userRepository.findUserByUsername(username = username)
+        val matches = encoder.matches(input.password, user?.passwordHash ?: rejectedPasswordHash)
+        if (user == null || !matches) {
             throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.INVALID_CREDENTIALS, "Invalid username or password")
         }
-        return issue(UserResponse(row.id, row.username), input.deviceId)
+        return issue(user = user, requestedDeviceId = input.deviceId?.let(::DeviceId))
     }
 
-    fun session(authorization: String?): SessionResponse = authenticatedSession(authorization).let {
-        SessionResponse(it.userId, it.username, it.deviceId)
-    }
+    fun authenticatedSession(token: SessionToken?): AuthenticatedSession =
+        sessionIfActive(token) ?: throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.UNAUTHORIZED, "Session expired or invalid")
 
-    fun authenticatedSession(authorization: String?): Session {
-        val tokenHash = sha256(requireBearer(authorization))
-        return repository.findSession(tokenHash, OffsetDateTime.now(clock))
-            ?: throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.UNAUTHORIZED, "Session expired or invalid")
-    }
+    fun sessionIfActive(token: SessionToken?): AuthenticatedSession? =
+        token?.let { sessionRepository.findSession(sessionId = SessionId(sha256(it.value)), now = OffsetDateTime.now(clock)) }
 
-    fun activeTicketSession(sessionId: String, userId: String, deviceId: String): Boolean =
-        repository.isActiveSession(sessionId, userId, deviceId, OffsetDateTime.now(clock))
-
-    fun logout(authorization: String?) {
-        val sessionId = sha256(requireBearer(authorization))
-        tx.executeWithoutResult {
-            val userId = repository.deleteSession(sessionId) ?: return@executeWithoutResult
-            val event = SessionRevokedEventV1(
-                type = "session_revoked",
-                version = 1,
+    fun logout(token: SessionToken?, expectedIdentity: ExpectedSessionIdentity = ExpectedSessionIdentity()) {
+        if (token == null) return
+        val sessionId = SessionId(sha256(token.value))
+        tx.observedExecuteWithoutResult(DatabaseTransaction.AUTH_LOGOUT) {
+            val session = sessionRepository.deleteSession(sessionId = sessionId) ?: return@observedExecuteWithoutResult
+            if (session.expiresAt > clock.instant()) requireExpectedIdentity(expectedIdentity = expectedIdentity, session = session)
+            val event = SessionRevokedEventV1.create(
                 eventId = newId(),
-                room = "user:$userId",
-                sessionId = sessionId,
+                room = RoomAddress.user(session.userId),
+                sessionId = sessionId.value,
             )
-            outbox.enqueue(event.eventId, event.room, mapper.writeValueAsString(event))
+            outboxRepository.enqueue(eventId = EventId(event.eventId), room = event.room, payload = mapper.writeValueAsString(event))
         }
     }
 
-    private fun requireBearer(authorization: String?): String =
-        authorization?.takeIf { it.startsWith("Bearer ") && it.length > 7 }?.removePrefix("Bearer ")
-            ?: throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.UNAUTHORIZED, "Bearer token required")
+    private fun issue(user: User, requestedDeviceId: DeviceId?): SessionCredentials {
+        val deviceId = requestedDeviceId ?: DeviceId(UUID.randomUUID().toString())
+        val bytes = ByteArray(32).also(random::nextBytes)
+        val token = SessionToken(Base64.getUrlEncoder().withoutPadding().encodeToString(bytes))
+        val expiresAt = OffsetDateTime.now(clock).plusDays(30)
+        val sessionId = SessionId(sha256(token.value))
+        sessionRepository.insertSession(sessionId = sessionId, userId = user.id, deviceId = deviceId, expiresAt = expiresAt)
+        return SessionCredentials(
+            token = token,
+            user = UserSummary(id = user.id, username = user.username),
+            session = AuthenticatedSession(
+                userId = user.id,
+                deviceId = deviceId,
+                sessionId = sessionId,
+                expiresAt = expiresAt.toInstant(),
+            ),
+        )
+    }
 
-    private fun issue(user: UserResponse, requestedDeviceId: String?): AuthResponse {
-        if (requestedDeviceId != null && requestedDeviceId.length !in 1..64) {
+    private fun validateInput(input: AuthRequest) {
+        if (input.password.length !in 8..100 || input.password.isBlank()) {
+            badRequest(ApiErrorCode.INVALID_REQUEST, "Password must be 8 to 100 characters")
+        }
+        if (input.deviceId != null && (input.deviceId.isBlank() || input.deviceId.length !in 1..64)) {
             badRequest(ApiErrorCode.INVALID_DEVICE_ID, "deviceId must be 1 to 64 characters")
         }
-        val deviceId = requestedDeviceId ?: UUID.randomUUID().toString()
-        val bytes = ByteArray(32).also(random::nextBytes)
-        val token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
-        repository.insertSession(sha256(token), user.id, deviceId, OffsetDateTime.now(clock).plusDays(30))
-        return AuthResponse(token, user, deviceId)
+    }
+}
+
+fun requireExpectedIdentity(expectedIdentity: ExpectedSessionIdentity, session: AuthenticatedSession) {
+    if (!expectedIdentity.matches(session)) {
+        throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.UNAUTHORIZED, "Session identity changed")
     }
 }

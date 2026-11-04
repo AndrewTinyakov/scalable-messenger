@@ -1,6 +1,7 @@
 $schema: http://json-schema.org/draft-07/schema#
 title: SocketReceivedMessageV1
 description: Acknowledge processing one live message notification without changing the durable history recovery baseline or claiming application.
+x-messenger-direction: client
 type: object
 additionalProperties: false
 required: [type, version, chatId, sequence]

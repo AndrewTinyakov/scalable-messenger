@@ -2,23 +2,33 @@ $schema: http://json-schema.org/draft-07/schema#
 title: SendMessageCommandV1
 type: object
 additionalProperties: false
-required: [version, requestId, senderId, body, sentAt]
+required:
+  - version
+  - requestId
+  - senderId
+  - body
+  - sentAt
+oneOf:
+  - required:
+      - chatId
+  - required:
+      - recipientId
 properties:
   version:
     type: integer
     const: 1
   chatId:
     type: string
-    pattern: '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'
+    pattern: ^[0-7][0-9A-HJKMNP-TV-Z]{25}$
   recipientId:
     type: string
-    pattern: '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'
+    pattern: ^[0-7][0-9A-HJKMNP-TV-Z]{25}$
   requestId:
     type: string
-    pattern: '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'
+    pattern: ^[0-7][0-9A-HJKMNP-TV-Z]{25}$
   senderId:
     type: string
-    pattern: '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'
+    pattern: ^[0-7][0-9A-HJKMNP-TV-Z]{25}$
   body:
     type: string
     minLength: 1
@@ -26,3 +36,16 @@ properties:
   sentAt:
     type: string
     format: date-time
+  replyToMessageId:
+    type: string
+    pattern: ^[0-7][0-9A-HJKMNP-TV-Z]{25}$
+allOf:
+  - if:
+      required:
+        - replyToMessageId
+    then:
+      required:
+        - chatId
+      not:
+        required:
+          - recipientId

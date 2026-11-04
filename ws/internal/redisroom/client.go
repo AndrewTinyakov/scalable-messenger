@@ -1,22 +1,25 @@
 package redisroom
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"strings"
 
 	"github.com/redis/go-redis/v9"
+
+	"messenger/ws/internal/messagecodec"
+	"messenger/ws/internal/monitoring"
 	"messenger/ws/internal/protocol"
+	"messenger/ws/internal/roomname"
 )
 
 type Client struct {
-	redis redis.UniversalClient
-	seeds []*redis.Client
-	subs  *subscriptionHub
+	metrics *monitoring.Metrics
+	redis   redis.UniversalClient
+	seeds   []*redis.Client
+	subs    *subscriptionHub
 }
 type Live struct {
 	Epoch            string         `json:"epoch"`
@@ -24,6 +27,7 @@ type Live struct {
 	PreviousStreamID string         `json:"previousStreamId,omitempty"`
 	HasPrevious      bool           `json:"-"`
 	Event            protocol.Event `json:"event"`
+	bufferBytes      int
 }
 
 func New(rawURL string, clusterNodes []string) (*Client, error) {
@@ -108,22 +112,16 @@ func (c *Client) Subscribe(ctx context.Context, room string) (*Listener, error) 
 }
 
 func decodeLive(room, payload string) (Live, error) {
-	var envelope struct {
+	envelope, err := messagecodec.Decode[struct {
 		Epoch            string          `json:"epoch"`
 		StreamID         string          `json:"streamId"`
 		PreviousStreamID *string         `json:"previousStreamId"`
 		Event            json.RawMessage `json:"event"`
-	}
-	d := json.NewDecoder(bytes.NewReader([]byte(payload)))
-	d.DisallowUnknownFields()
-	if err := d.Decode(&envelope); err != nil {
+	}]([]byte(payload))
+	if err != nil {
 		return Live{}, fmt.Errorf("decode live envelope: %w", err)
 	}
-	var extra any
-	if err := d.Decode(&extra); !errors.Is(err, io.EOF) {
-		return Live{}, errors.New("multiple live envelopes")
-	}
-	if envelope.Epoch == "" || envelope.StreamID == "" || len(envelope.Event) == 0 {
+	if envelope.Epoch == "" || envelope.StreamID == "" {
 		return Live{}, errors.New("incomplete live event")
 	}
 	event, err := protocol.DecodeEvent(envelope.Event)
@@ -145,37 +143,20 @@ func decodeLive(room, payload string) (Live, error) {
 }
 
 func (c *Client) Tail(ctx context.Context, room string) (string, string, error) {
-	epoch, err := c.redis.Get(ctx, EpochKey(room)).Result()
-	if errors.Is(err, redis.Nil) {
-		return "", "", nil
-	}
+	positions, err := c.TailBatch(ctx, []string{room})
 	if err != nil {
 		return "", "", err
 	}
-	entries, err := c.redis.XRevRangeN(ctx, StreamKey(room), "+", "-", 1).Result()
-	if err != nil {
-		return "", "", err
-	}
-	if len(entries) == 0 {
-		return epoch, "", nil
-	}
-	return epoch, entries[0].ID, nil
+	position := positions[room]
+	return position.Epoch, position.StreamID, position.Err
 }
 
 func (c *Client) Replay(ctx context.Context, room, epoch, after string, limit int64) ([]Live, error) {
-	current, _, err := c.Tail(ctx, room)
-	if err != nil {
-		return nil, err
-	}
-	if epoch == "" || after == "" || current != epoch {
+	if epoch == "" || after == "" {
 		return nil, ErrGap
 	}
-	previous, err := c.redis.XRangeN(ctx, StreamKey(room), after, after, 1).Result()
-	if err != nil {
+	if err := c.validateReplayCursor(ctx, room, epoch, after); err != nil {
 		return nil, err
-	}
-	if len(previous) != 1 || previous[0].ID != after {
-		return nil, ErrGap
 	}
 	entries, err := c.redis.XRangeN(ctx, StreamKey(room), "("+after, "+", limit+1).Result()
 	if err != nil {
@@ -184,11 +165,17 @@ func (c *Client) Replay(ctx context.Context, room, epoch, after string, limit in
 	if int64(len(entries)) > limit {
 		return nil, ErrGap
 	}
+	if err := c.validateReplayCursor(ctx, room, epoch, after); err != nil {
+		return nil, err
+	}
 	result := make([]Live, 0, len(entries))
 	for _, entry := range entries {
 		payload, ok := entry.Values["event"].(string)
 		if !ok {
 			return nil, errors.New("history event missing")
+		}
+		if len(payload) > maxLiveEventBytes {
+			return nil, errors.New("history event too large")
 		}
 		event, err := protocol.DecodeEvent([]byte(payload))
 		if err != nil {
@@ -205,11 +192,34 @@ func (c *Client) Replay(ctx context.Context, room, epoch, after string, limit in
 	return result, nil
 }
 
+func (c *Client) validateReplayCursor(ctx context.Context, room, epoch, after string) error {
+	current, err := c.redis.Get(ctx, EpochKey(room)).Result()
+	if errors.Is(err, redis.Nil) {
+		return ErrGap
+	}
+	if err != nil {
+		return err
+	}
+	if current != epoch {
+		return ErrGap
+	}
+	previous, err := c.redis.XRangeN(ctx, StreamKey(room), after, after, 1).Result()
+	if err != nil {
+		return err
+	}
+	if len(previous) != 1 || previous[0].ID != after {
+		return ErrGap
+	}
+	return nil
+}
+
 var ErrGap = errors.New("Redis history incomplete")
 
 func validRoom(room string) bool {
 	if strings.ContainsAny(room, "{} \n\r\t") {
 		return false
 	}
-	return strings.HasPrefix(room, "user:") || strings.HasPrefix(room, "group:")
+	return roomname.IsUser(room) || roomname.IsGroup(room)
 }
+
+func (c *Client) SetMetrics(metrics *monitoring.Metrics) { c.metrics = metrics }

@@ -5,14 +5,31 @@ info:
 servers:
 - url: /api
 security:
-- bearerAuth: []
+- sessionCookie: []
 paths:
   /v1/sends/status:
     post:
       tags:
       - send-status-controller
       operationId: statuses
-      parameters: []
+      parameters:
+      - name: X-Messenger-CSRF
+        in: header
+        required: true
+        schema:
+          type: string
+          enum:
+          - "1"
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
       requestBody:
         content:
           application/json:
@@ -26,6 +43,58 @@ paths:
             '*/*':
               schema:
                 $ref: "#/components/schemas/SendStatusesResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "401":
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+  /v1/chats/{id}/reads:
+    get:
+      tags:
+      - read-controller
+      operationId: summary
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ReadSummaryResponse"
         "401":
           description: Unauthorized
           content:
@@ -50,7 +119,134 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/ApiProblem"
+    post:
+      tags:
+      - read-controller
+      operationId: advance
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: X-Messenger-CSRF
+        in: header
+        required: true
+        schema:
+          type: string
+          enum:
+          - "1"
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdvanceReadRequest"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ReadProgressResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "401":
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
   /v1/chats/{id}/members:
+    get:
+      tags:
+      - chat-controller
+      operationId: members
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: afterUserId
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 50
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/GroupMemberPageResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
     post:
       tags:
       - chat-controller
@@ -59,6 +255,23 @@ paths:
       - name: id
         in: path
         required: true
+        schema:
+          type: string
+      - name: X-Messenger-CSRF
+        in: header
+        required: true
+        schema:
+          type: string
+          enum:
+          - "1"
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
         schema:
           type: string
       requestBody:
@@ -70,14 +283,14 @@ paths:
       responses:
         "204":
           description: No Content
-        "401":
-          description: Unauthorized
+        "403":
+          description: Forbidden
           content:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/ApiProblem"
-        "403":
-          description: Forbidden
+        "401":
+          description: Unauthorized
           content:
             application/problem+json:
               schema:
@@ -99,7 +312,24 @@ paths:
       tags:
       - chat-controller
       operationId: group
-      parameters: []
+      parameters:
+      - name: X-Messenger-CSRF
+        in: header
+        required: true
+        schema:
+          type: string
+          enum:
+          - "1"
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
       requestBody:
         content:
           application/json:
@@ -113,14 +343,14 @@ paths:
             '*/*':
               schema:
                 $ref: "#/components/schemas/ChatResponse"
-        "401":
-          description: Unauthorized
+        "403":
+          description: Forbidden
           content:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/ApiProblem"
-        "403":
-          description: Forbidden
+        "401":
+          description: Unauthorized
           content:
             application/problem+json:
               schema:
@@ -142,7 +372,24 @@ paths:
       tags:
       - auth-controller
       operationId: wsTicket
-      parameters: []
+      parameters:
+      - name: X-Messenger-CSRF
+        in: header
+        required: true
+        schema:
+          type: string
+          enum:
+          - "1"
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
       responses:
         "200":
           description: OK
@@ -150,14 +397,14 @@ paths:
             '*/*':
               schema:
                 $ref: "#/components/schemas/WsTicketResponse"
-        "401":
-          description: Unauthorized
+        "403":
+          description: Forbidden
           content:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/ApiProblem"
-        "403":
-          description: Forbidden
+        "401":
+          description: Unauthorized
           content:
             application/problem+json:
               schema:
@@ -179,6 +426,14 @@ paths:
       tags:
       - auth-controller
       operationId: register
+      parameters:
+      - name: X-Messenger-CSRF
+        in: header
+        required: true
+        schema:
+          type: string
+          enum:
+          - "1"
       requestBody:
         content:
           application/json:
@@ -192,6 +447,12 @@ paths:
             '*/*':
               schema:
                 $ref: "#/components/schemas/AuthResponse"
+        "403":
+          description: Invalid browser request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
         "400":
           description: Invalid request
           content:
@@ -210,52 +471,39 @@ paths:
       tags:
       - auth-controller
       operationId: logout
-      parameters: []
+      parameters:
+      - name: X-Messenger-CSRF
+        in: header
+        required: true
+        schema:
+          type: string
+          enum:
+          - "1"
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
       responses:
         "204":
           description: No Content
+        "403":
+          description: Invalid browser request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
         "401":
           description: Unauthorized
           content:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/ApiProblem"
-        "403":
-          description: Forbidden
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ApiProblem"
-        "400":
-          description: Invalid request
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ApiProblem"
-        "500":
-          description: Internal server error
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ApiProblem"
-  /v1/auth/login:
-    post:
-      tags:
-      - auth-controller
-      operationId: login
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/AuthRequest"
-        required: true
-      responses:
-        "200":
-          description: OK
-          content:
-            '*/*':
-              schema:
-                $ref: "#/components/schemas/AuthResponse"
         "400":
           description: Invalid request
           content:
@@ -269,6 +517,189 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiProblem"
       security: []
+  /v1/auth/login:
+    post:
+      tags:
+      - auth-controller
+      operationId: login
+      parameters:
+      - name: X-Messenger-CSRF
+        in: header
+        required: true
+        schema:
+          type: string
+          enum:
+          - "1"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthRequest"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "403":
+          description: Invalid browser request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+      security: []
+  /v1/chats/{id}/messages/{messageId}:
+    delete:
+      tags:
+      - message-controller
+      operationId: delete
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: messageId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: expectedVersion
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: X-Messenger-CSRF
+        in: header
+        required: true
+        schema:
+          type: string
+          enum:
+          - "1"
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "401":
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+    patch:
+      tags:
+      - message-controller
+      operationId: edit
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: messageId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: X-Messenger-CSRF
+        in: header
+        required: true
+        schema:
+          type: string
+          enum:
+          - "1"
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EditMessageRequest"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "401":
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
   /v1/users:
     get:
       tags:
@@ -281,6 +712,16 @@ paths:
         schema:
           type: string
           default: ""
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
       responses:
         "200":
           description: OK
@@ -314,6 +755,58 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/ApiProblem"
+  /v1/users/{userId}:
+    get:
+      tags:
+      - user-controller
+      operationId: get
+      parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
   /v1/sends/{requestId}:
     get:
       tags:
@@ -323,6 +816,16 @@ paths:
       - name: requestId
         in: path
         required: true
+        schema:
+          type: string
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
         schema:
           type: string
       responses:
@@ -374,6 +877,16 @@ paths:
           type: integer
           format: int32
           default: 50
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
       responses:
         "200":
           description: OK
@@ -409,11 +922,21 @@ paths:
     get:
       tags:
       - chat-controller
-      operationId: get
+      operationId: get_1
       parameters:
       - name: id
         in: path
         required: true
+        schema:
+          type: string
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
         schema:
           type: string
       responses:
@@ -431,6 +954,60 @@ paths:
                 $ref: "#/components/schemas/ApiProblem"
         "403":
           description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+    delete:
+      tags:
+      - chat-controller
+      operationId: delete_1
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: X-Messenger-CSRF
+        in: header
+        required: true
+        schema:
+          type: string
+          enum:
+          - "1"
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
+      responses:
+        "204":
+          description: No Content
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "401":
+          description: Unauthorized
           content:
             application/problem+json:
               schema:
@@ -475,6 +1052,16 @@ paths:
           type: integer
           format: int32
           default: 50
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
       responses:
         "200":
           description: OK
@@ -506,12 +1093,271 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/ApiProblem"
+  /v1/chats/{id}/messages/{messageId}/reads:
+    get:
+      tags:
+      - read-controller
+      operationId: readers
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: messageId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: afterUserId
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 50
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/MessageReadsResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+  /v1/chats/{id}/messages/changes:
+    get:
+      tags:
+      - message-controller
+      operationId: changes
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: afterRevision
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 100
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/MessageChangesResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+  /v1/chats/{id}/messages/around:
+    get:
+      tags:
+      - message-controller
+      operationId: around
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: messageId
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 50
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/MessageAroundResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+  /v1/chats/direct/{userId}:
+    get:
+      tags:
+      - chat-controller
+      operationId: direct
+      parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/DirectChatResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
   /v1/auth/session:
     get:
       tags:
       - auth-controller
       operationId: session
-      parameters: []
+      parameters:
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
       responses:
         "200":
           description: OK
@@ -559,17 +1405,34 @@ paths:
         required: true
         schema:
           type: string
+      - name: X-Messenger-CSRF
+        in: header
+        required: true
+        schema:
+          type: string
+          enum:
+          - "1"
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
       responses:
         "204":
           description: No Content
-        "401":
-          description: Unauthorized
+        "403":
+          description: Forbidden
           content:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/ApiProblem"
-        "403":
-          description: Forbidden
+        "401":
+          description: Unauthorized
           content:
             application/problem+json:
               schema:
@@ -614,6 +1477,10 @@ components:
       properties:
         status:
           type: string
+          enum:
+          - UNKNOWN
+          - SAVED
+          - REJECTED
         chatId:
           type:
           - string
@@ -630,6 +1497,16 @@ components:
           type:
           - string
           - "null"
+          enum:
+          - NOT_A_MEMBER
+          - CHAT_NOT_FOUND
+          - RECIPIENT_NOT_FOUND
+          - INVALID_RECIPIENT
+          - EMPTY_BODY
+          - BODY_TOO_LONG
+          - REQUEST_ID_CONFLICT
+          - PROCESSING_FAILED
+          - INVALID_REPLY_TARGET
       required:
       - status
     SendStatusesResponse:
@@ -641,6 +1518,30 @@ components:
             $ref: "#/components/schemas/SendStatusEntry"
       required:
       - results
+    AdvanceReadRequest:
+      type: object
+      properties:
+        throughSequence:
+          type: string
+      required:
+      - throughSequence
+    ReadProgressResponse:
+      type: object
+      properties:
+        throughSequence:
+          type: string
+        readAt:
+          type:
+          - string
+          - "null"
+          format: date-time
+        serverTime:
+          type: string
+          format: date-time
+      required:
+      - readAt
+      - serverTime
+      - throughSequence
     AddGroupMembersRequest:
       type: object
       properties:
@@ -675,6 +1576,9 @@ components:
           type: string
         kind:
           type: string
+          enum:
+          - DIRECT
+          - GROUP
         name:
           type:
           - string
@@ -688,6 +1592,10 @@ components:
           format: int32
         lastSequence:
           type: string
+        ownerId:
+          type:
+          - string
+          - "null"
       required:
       - id
       - kind
@@ -736,44 +1644,23 @@ components:
     AuthResponse:
       type: object
       properties:
-        token:
-          type: string
         user:
           $ref: "#/components/schemas/UserResponse"
         deviceId:
           type: string
       required:
       - deviceId
-      - token
       - user
-    ChatPageResponse:
+    EditMessageRequest:
       type: object
       properties:
-        chats:
-          type: array
-          items:
-            $ref: "#/components/schemas/ChatResponse"
-        nextCursor:
-          type:
-          - string
-          - "null"
-      required:
-      - chats
-    MessageHistoryResponse:
-      type: object
-      properties:
-        messages:
-          type: array
-          items:
-            $ref: "#/components/schemas/MessageResponse"
-        nextSequence:
+        body:
           type: string
-        hasMore:
-          type: boolean
+        expectedVersion:
+          type: string
       required:
-      - hasMore
-      - messages
-      - nextSequence
+      - body
+      - expectedVersion
     MessageResponse:
       type: object
       properties:
@@ -790,13 +1677,212 @@ components:
         createdAt:
           type: string
           format: date-time
+        messageVersion:
+          type: string
+        editedAt:
+          type:
+          - string
+          - "null"
+          format: date-time
+        deletedAt:
+          type:
+          - string
+          - "null"
+          format: date-time
+        replyToMessageId:
+          type:
+          - string
+          - "null"
+        replySenderId:
+          type:
+          - string
+          - "null"
+        replyBody:
+          type:
+          - string
+          - "null"
+        replyDeleted:
+          type:
+          - boolean
+          - "null"
+        replyVersion:
+          type:
+          - string
+          - "null"
       required:
       - body
       - chatId
       - createdAt
+      - deletedAt
+      - editedAt
       - id
+      - messageVersion
+      - replyBody
+      - replyDeleted
+      - replySenderId
+      - replyToMessageId
+      - replyVersion
       - senderId
       - sequence
+    ChatPageResponse:
+      type: object
+      properties:
+        chats:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChatResponse"
+        nextCursor:
+          type:
+          - string
+          - "null"
+      required:
+      - chats
+    ReadSummaryResponse:
+      type: object
+      properties:
+        throughSequence:
+          type: string
+        maxOtherReadSequence:
+          type: string
+        serverTime:
+          type: string
+          format: date-time
+      required:
+      - maxOtherReadSequence
+      - serverTime
+      - throughSequence
+    MessageHistoryResponse:
+      type: object
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/MessageResponse"
+        nextSequence:
+          type: string
+        hasMore:
+          type: boolean
+        mutationRevision:
+          type: string
+      required:
+      - hasMore
+      - messages
+      - mutationRevision
+      - nextSequence
+    MessageReaderResponse:
+      type: object
+      properties:
+        userId:
+          type: string
+        username:
+          type: string
+        readAt:
+          type: string
+          format: date-time
+      required:
+      - readAt
+      - userId
+      - username
+    MessageReadsResponse:
+      type: object
+      properties:
+        readers:
+          type: array
+          items:
+            $ref: "#/components/schemas/MessageReaderResponse"
+        nextUserId:
+          type:
+          - string
+          - "null"
+        detailsAvailable:
+          type: boolean
+        detailsExpiresAt:
+          type: string
+          format: date-time
+        serverTime:
+          type: string
+          format: date-time
+      required:
+      - detailsAvailable
+      - detailsExpiresAt
+      - nextUserId
+      - readers
+      - serverTime
+    MessageChangeResponse:
+      type: object
+      properties:
+        revision:
+          type: string
+        message:
+          $ref: "#/components/schemas/MessageResponse"
+      required:
+      - message
+      - revision
+    MessageChangesResponse:
+      type: object
+      properties:
+        changes:
+          type: array
+          items:
+            $ref: "#/components/schemas/MessageChangeResponse"
+        lastRevision:
+          type: string
+        nextRevision:
+          type: string
+        resetRequired:
+          type: boolean
+      required:
+      - changes
+      - lastRevision
+      - nextRevision
+      - resetRequired
+    MessageAroundResponse:
+      type: object
+      properties:
+        anchorMessageId:
+          type: string
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/MessageResponse"
+        hasOlder:
+          type: boolean
+        hasNewer:
+          type: boolean
+        mutationRevision:
+          type: string
+      required:
+      - anchorMessageId
+      - hasNewer
+      - hasOlder
+      - messages
+      - mutationRevision
+    GroupMemberPageResponse:
+      type: object
+      properties:
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserResponse"
+        nextCursor:
+          type:
+          - string
+          - "null"
+      required:
+      - members
+      - nextCursor
+    DirectChatResponse:
+      type: object
+      properties:
+        recipient:
+          $ref: "#/components/schemas/UserResponse"
+        chat:
+          oneOf:
+          - $ref: "#/components/schemas/ChatResponse"
+          - type: "null"
+      required:
+      - chat
+      - recipient
     SessionResponse:
       type: object
       properties:
@@ -821,7 +1907,7 @@ components:
         code:
           type: string
   securitySchemes:
-    bearerAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: opaque
+    sessionCookie:
+      type: apiKey
+      name: messenger_session
+      in: cookie

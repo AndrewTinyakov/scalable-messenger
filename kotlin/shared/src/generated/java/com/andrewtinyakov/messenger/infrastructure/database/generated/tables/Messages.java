@@ -7,6 +7,7 @@ package com.andrewtinyakov.messenger.infrastructure.database.generated.tables;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Keys;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Public;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Chats.ChatsPath;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.MessageChanges.MessageChangesPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Users.UsersPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.MessagesRecord;
 
@@ -90,6 +91,26 @@ public class Messages extends TableImpl<MessagesRecord> {
      */
     public final TableField<MessagesRecord, OffsetDateTime> CREATED_AT = createField(DSL.name("created_at"), SQLDataType.TIMESTAMPWITHTIMEZONE(6).nullable(false), this, "");
 
+    /**
+     * The column <code>public.messages.message_version</code>.
+     */
+    public final TableField<MessagesRecord, Long> MESSAGE_VERSION = createField(DSL.name("message_version"), SQLDataType.BIGINT.nullable(false).defaultValue(DSL.field(DSL.raw("1"), SQLDataType.BIGINT)), this, "");
+
+    /**
+     * The column <code>public.messages.edited_at</code>.
+     */
+    public final TableField<MessagesRecord, OffsetDateTime> EDITED_AT = createField(DSL.name("edited_at"), SQLDataType.TIMESTAMPWITHTIMEZONE(6), this, "");
+
+    /**
+     * The column <code>public.messages.deleted_at</code>.
+     */
+    public final TableField<MessagesRecord, OffsetDateTime> DELETED_AT = createField(DSL.name("deleted_at"), SQLDataType.TIMESTAMPWITHTIMEZONE(6), this, "");
+
+    /**
+     * The column <code>public.messages.reply_to_message_id</code>.
+     */
+    public final TableField<MessagesRecord, String> REPLY_TO_MESSAGE_ID = createField(DSL.name("reply_to_message_id"), SQLDataType.VARCHAR(26), this, "");
+
     private Messages(Name alias, Table<MessagesRecord> aliased) {
         this(alias, aliased, (Field<?>[]) null, null);
     }
@@ -164,12 +185,12 @@ public class Messages extends TableImpl<MessagesRecord> {
 
     @Override
     public List<UniqueKey<MessagesRecord>> getUniqueKeys() {
-        return Arrays.asList(Keys.MESSAGES_CONVERSATION_SEQUENCE_UNIQUE);
+        return Arrays.asList(Keys.MESSAGES_CHAT_ID_ID_UNIQUE, Keys.MESSAGES_CONVERSATION_SEQUENCE_UNIQUE);
     }
 
     @Override
     public List<ForeignKey<MessagesRecord, ?>> getReferences() {
-        return Arrays.asList(Keys.MESSAGES__MESSAGES_CHAT_ID_FKEY, Keys.MESSAGES__MESSAGES_SENDER_ID_FKEY);
+        return Arrays.asList(Keys.MESSAGES__MESSAGES_CHAT_ID_FKEY, Keys.MESSAGES__MESSAGES_REPLY_SAME_CHAT, Keys.MESSAGES__MESSAGES_SENDER_ID_FKEY);
     }
 
     private transient ChatsPath _chats;
@@ -184,6 +205,18 @@ public class Messages extends TableImpl<MessagesRecord> {
         return _chats;
     }
 
+    private transient MessagesPath _messages;
+
+    /**
+     * Get the implicit join path to the <code>public.messages</code> table.
+     */
+    public MessagesPath messages() {
+        if (_messages == null)
+            _messages = new MessagesPath(this, Keys.MESSAGES__MESSAGES_REPLY_SAME_CHAT, null);
+
+        return _messages;
+    }
+
     private transient UsersPath _users;
 
     /**
@@ -196,10 +229,24 @@ public class Messages extends TableImpl<MessagesRecord> {
         return _users;
     }
 
+    private transient MessageChangesPath _messageChanges;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.message_changes</code> table
+     */
+    public MessageChangesPath messageChanges() {
+        if (_messageChanges == null)
+            _messageChanges = new MessageChangesPath(this, null, Keys.MESSAGE_CHANGES__MESSAGE_CHANGES_CHAT_ID_MESSAGE_ID_FKEY.getInverseKey());
+
+        return _messageChanges;
+    }
+
     @Override
     public List<Check<MessagesRecord>> getChecks() {
         return Arrays.asList(
-            Internal.createCheck(this, DSL.name("messages_body_check"), "(((length((body)::text) >= 1) AND (length((body)::text) <= 4000)))", true),
+            Internal.createCheck(this, DSL.name("messages_body_check"), "((((deleted_at IS NULL) AND ((length((body)::text) >= 1) AND (length((body)::text) <= 4000))) OR ((deleted_at IS NOT NULL) AND ((body)::text = ''::text))))", true),
+            Internal.createCheck(this, DSL.name("messages_message_version_check"), "((message_version > 0))", true),
             Internal.createCheck(this, DSL.name("messages_sequence_check"), "((sequence > 0))", true)
         );
     }

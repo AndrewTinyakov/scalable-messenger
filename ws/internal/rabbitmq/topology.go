@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+
 	"messenger/ws/internal/messaging"
 )
 

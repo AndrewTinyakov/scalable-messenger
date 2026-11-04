@@ -4,6 +4,7 @@
 package com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records;
 
 
+import com.andrewtinyakov.messenger.infrastructure.database.generated.enums.RoomKind;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.MessengerOutboxEvents;
 
 import java.time.OffsetDateTime;
@@ -133,6 +134,34 @@ public class MessengerOutboxEventsRecord extends UpdatableRecordImpl<MessengerOu
         return (Integer) get(7);
     }
 
+    /**
+     * Setter for <code>public.messenger_outbox_events.publication_order</code>.
+     */
+    public void setPublicationOrder(Long value) {
+        set(8, value);
+    }
+
+    /**
+     * Getter for <code>public.messenger_outbox_events.publication_order</code>.
+     */
+    public Long getPublicationOrder() {
+        return (Long) get(8);
+    }
+
+    /**
+     * Setter for <code>public.messenger_outbox_events.room_kind</code>.
+     */
+    public void setRoomKind(RoomKind value) {
+        set(9, value);
+    }
+
+    /**
+     * Getter for <code>public.messenger_outbox_events.room_kind</code>.
+     */
+    public RoomKind getRoomKind() {
+        return (RoomKind) get(9);
+    }
+
     // -------------------------------------------------------------------------
     // Primary key information
     // -------------------------------------------------------------------------
@@ -156,7 +185,7 @@ public class MessengerOutboxEventsRecord extends UpdatableRecordImpl<MessengerOu
     /**
      * Create a detached, initialised MessengerOutboxEventsRecord
      */
-    public MessengerOutboxEventsRecord(String id, String room, JSONB payload, OffsetDateTime createdAt, String leaseOwner, OffsetDateTime leaseUntil, OffsetDateTime publishedAt, Integer attempts) {
+    public MessengerOutboxEventsRecord(String id, String room, JSONB payload, OffsetDateTime createdAt, String leaseOwner, OffsetDateTime leaseUntil, OffsetDateTime publishedAt, Integer attempts, Long publicationOrder, RoomKind roomKind) {
         super(MessengerOutboxEvents.MESSENGER_OUTBOX_EVENTS);
 
         setId(id);
@@ -167,6 +196,8 @@ public class MessengerOutboxEventsRecord extends UpdatableRecordImpl<MessengerOu
         setLeaseUntil(leaseUntil);
         setPublishedAt(publishedAt);
         setAttempts(attempts);
+        setPublicationOrder(publicationOrder);
+        setRoomKind(roomKind);
         resetTouchedOnNotNull();
     }
 }

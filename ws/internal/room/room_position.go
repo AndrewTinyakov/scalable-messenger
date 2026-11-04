@@ -2,18 +2,29 @@ package room
 
 import (
 	"context"
+	"errors"
 	"math/rand/v2"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"messenger/ws/internal/protocol"
 	"messenger/ws/internal/redisroom"
 )
 
+type batchPositionReader interface {
+	TailBatch(context.Context, []string) (map[string]redisroom.Position, error)
+}
+
+type positionCandidate struct {
+	entry      *localRoom
+	epoch      string
+	last       string
+	lastLiveAt time.Time
+}
+
 func (r *Rooms) RunChecks(ctx context.Context) {
-	r.wg.Add(1)
-	defer r.wg.Done()
 	jitter := time.NewTimer(time.Duration(rand.Int64N(int64(r.checkInterval))))
 	select {
 	case <-ctx.Done():
@@ -31,8 +42,7 @@ func (r *Rooms) RunChecks(ctx context.Context) {
 			started := time.Now()
 			r.checkAll(ctx)
 			pause := min(r.checkInterval, time.Second)
-			remaining := r.checkInterval - time.Since(started)
-			if remaining > pause {
+			if remaining := r.checkInterval - time.Since(started); remaining > pause {
 				pause = remaining
 			}
 			timer.Reset(pause)
@@ -40,48 +50,64 @@ func (r *Rooms) RunChecks(ctx context.Context) {
 	}
 }
 
+func (r *Rooms) snapshotRooms() []*localRoom {
+	r.mu.Lock()
+	entries := make([]*localRoom, 0, len(r.rooms))
+	for _, entry := range r.rooms {
+		entries = append(entries, entry)
+	}
+	r.mu.Unlock()
+	return entries
+}
+
 func (r *Rooms) checkAll(ctx context.Context) {
 	started := time.Now()
 	defer func() {
 		r.metrics.PositionSweep.Observe(time.Since(started).Seconds())
-		r.mu.Lock()
 		oldest := 0.0
-		for _, entry := range r.rooms {
+		for _, entry := range r.snapshotRooms() {
+			entry.mu.Lock()
 			positionAt := entry.lastPositionAt
 			if entry.lastLiveAt.After(positionAt) {
 				positionAt = entry.lastLiveAt
 			}
-			age := time.Since(positionAt).Seconds()
-			if age > oldest {
-				oldest = age
+			retired := entry.retired
+			entry.mu.Unlock()
+			if !retired {
+				oldest = max(oldest, time.Since(positionAt).Seconds())
 			}
 		}
-		r.mu.Unlock()
 		r.metrics.OldestPositionAge.Set(oldest)
 	}()
-	r.mu.Lock()
-	names := make([]string, 0, len(r.rooms))
-	for name := range r.rooms {
-		names = append(names, name)
+	entries := r.snapshotRooms()
+	candidates := make([]positionCandidate, 0, len(entries))
+	for _, entry := range entries {
+		if candidate, ok := r.quietPosition(entry); ok {
+			candidates = append(candidates, candidate)
+		}
 	}
-	r.mu.Unlock()
-	if len(names) == 0 {
+	if len(candidates) == 0 {
 		return
 	}
-	jobs := make(chan string)
+	batchSize := 1
+	if _, ok := r.redis.(batchPositionReader); ok {
+		batchSize = 128
+	}
+	batchCount := (len(candidates) + batchSize - 1) / batchSize
+	jobs := make(chan []positionCandidate)
 	var workers sync.WaitGroup
-	for range min(16, len(names)) {
+	for range min(16, batchCount) {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			for name := range jobs {
-				r.checkRoom(ctx, name)
+			for batch := range jobs {
+				r.checkPositions(ctx, batch)
 			}
 		}()
 	}
-	for _, name := range names {
+	for offset := 0; offset < len(candidates); offset += batchSize {
 		select {
-		case jobs <- name:
+		case jobs <- candidates[offset:min(offset+batchSize, len(candidates))]:
 		case <-ctx.Done():
 			close(jobs)
 			workers.Wait()
@@ -92,67 +118,104 @@ func (r *Rooms) checkAll(ctx context.Context) {
 	workers.Wait()
 }
 
+func (r *Rooms) quietPosition(entry *localRoom) (positionCandidate, bool) {
+	select {
+	case <-entry.ready:
+	default:
+		return positionCandidate{}, false
+	}
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	if entry.retired || entry.err != nil || (r.checkInterval > 0 && time.Since(entry.lastLiveAt) < r.checkInterval) {
+		return positionCandidate{}, false
+	}
+	return positionCandidate{entry: entry, epoch: entry.epoch, last: entry.lastID, lastLiveAt: entry.lastLiveAt}, true
+}
+
+func (r *Rooms) checkPositions(ctx context.Context, candidates []positionCandidate) {
+	checkCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	if batch, ok := r.redis.(batchPositionReader); ok {
+		names := make([]string, len(candidates))
+		for index, candidate := range candidates {
+			names[index] = candidate.entry.name
+		}
+		positions, err := batch.TailBatch(checkCtx, names)
+		if ctx.Err() != nil {
+			return
+		}
+		for _, candidate := range candidates {
+			position, exists := positions[candidate.entry.name]
+			if !exists {
+				position.Err = err
+				if position.Err == nil {
+					position.Err = errors.New("room position missing from batch")
+				}
+			}
+			r.applyPosition(ctx, candidate, position)
+		}
+		return
+	}
+	for _, candidate := range candidates {
+		epoch, last, err := r.redis.Tail(checkCtx, candidate.entry.name)
+		if ctx.Err() != nil {
+			return
+		}
+		r.applyPosition(ctx, candidate, redisroom.Position{Epoch: epoch, StreamID: last, Err: err})
+	}
+}
+
+func (r *Rooms) applyPosition(ctx context.Context, candidate positionCandidate, position redisroom.Position) {
+	entry := candidate.entry
+	entry.positionMu.Lock()
+	defer entry.positionMu.Unlock()
+	entry.mu.Lock()
+	if entry.retired || entry.epoch != candidate.epoch || entry.lastID != candidate.last || !entry.lastLiveAt.Equal(candidate.lastLiveAt) {
+		entry.mu.Unlock()
+		return
+	}
+	if position.Err == nil {
+		entry.lastPositionAt = time.Now()
+	}
+	entry.mu.Unlock()
+	if position.Err != nil {
+		r.failRoomEntry(entry)
+		return
+	}
+	r.reconcileRoomPosition(ctx, entry, candidate.epoch, candidate.last, position.Epoch, position.StreamID)
+}
+
 func (r *Rooms) roomPosition(name string) (*localRoom, string, string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	entry := r.rooms[name]
+	entry := r.lookup(name)
 	if entry == nil {
+		return nil, "", ""
+	}
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	if entry.retired {
 		return nil, "", ""
 	}
 	return entry, entry.epoch, entry.lastID
 }
 
-func (r *Rooms) checkRoom(ctx context.Context, name string) {
-	entry, _, _ := r.roomPosition(name)
-	if entry == nil {
-		return
+func (r *Rooms) handleLive(ctx context.Context, name string, live redisroom.Live) {
+	if entry := r.lookup(name); entry != nil {
+		r.handleLiveRoom(ctx, entry, live)
 	}
-	select {
-	case <-entry.ready:
-	default:
-		return
-	}
-	entry.positionMu.Lock()
-	defer entry.positionMu.Unlock()
-	current, oldEpoch, oldLast := r.roomPosition(name)
-	if current != entry {
-		return
-	}
-	r.mu.Lock()
-	recentLive := r.checkInterval > 0 && time.Since(entry.lastLiveAt) < r.checkInterval
-	r.mu.Unlock()
-	if recentLive {
-		return
-	}
-	checkCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	epoch, last, err := r.redis.Tail(checkCtx, name)
-	cancel()
-	if err != nil {
-		r.failRoom(name)
-		return
-	}
-	r.mu.Lock()
-	if r.rooms[name] == entry {
-		entry.lastPositionAt = time.Now()
-	}
-	r.mu.Unlock()
-	r.reconcilePosition(ctx, name, oldEpoch, oldLast, epoch, last)
 }
 
-func (r *Rooms) handleLive(ctx context.Context, name string, live redisroom.Live) {
-	if live.Event.Type == "message_saved" && live.Event.CreatedAt != "" {
+func (r *Rooms) handleLiveRoom(ctx context.Context, entry *localRoom, live redisroom.Live) {
+	if live.Event.Type == protocol.EventMessageSaved && live.Event.CreatedAt != "" {
 		if created, err := time.Parse(time.RFC3339Nano, live.Event.CreatedAt); err == nil {
 			r.metrics.SavedEventLag.Observe(max(0, time.Since(created).Seconds()))
 		}
 	}
-	entry, _, _ := r.roomPosition(name)
-	if entry == nil {
-		return
-	}
 	entry.positionMu.Lock()
 	defer entry.positionMu.Unlock()
-	current, oldEpoch, oldLast := r.roomPosition(name)
-	if current != entry {
+	entry.mu.Lock()
+	oldEpoch, oldLast, retired := entry.epoch, entry.lastID, entry.retired
+	entry.mu.Unlock()
+	if retired {
 		return
 	}
 	if oldEpoch == live.Epoch {
@@ -160,61 +223,77 @@ func (r *Rooms) handleLive(ctx context.Context, name string, live redisroom.Live
 			return
 		}
 		if oldLast != "" && (!live.HasPrevious || live.PreviousStreamID != oldLast) {
-			r.reconcilePosition(ctx, name, oldEpoch, oldLast, live.Epoch, live.StreamID)
+			r.reconcileRoomPosition(ctx, entry, oldEpoch, oldLast, live.Epoch, live.StreamID)
 			return
 		}
 		if oldLast == "" && live.HasPrevious && live.PreviousStreamID != "" {
-			r.reconcilePosition(ctx, name, oldEpoch, oldLast, live.Epoch, live.StreamID)
+			r.reconcileRoomPosition(ctx, entry, oldEpoch, oldLast, live.Epoch, live.StreamID)
 			return
 		}
 	}
-	r.dispatch(name, live.Event)
+	r.dispatchRoom(entry, live.Event)
 }
 
-// reconcilePosition runs while the room's position lock is held. Redis can
-// fill a gap only when both positions belong to the same epoch and the old
-// cursor is still retained; every other change needs SQL catch-up.
-func (r *Rooms) reconcilePosition(ctx context.Context, name, oldEpoch, oldLast, epoch, last string) {
+func (r *Rooms) reconcileRoomPosition(ctx context.Context, entry *localRoom, oldEpoch, oldLast, epoch, last string) {
 	if oldEpoch == epoch && oldLast == last {
 		return
 	}
-	if oldEpoch == epoch && oldLast != "" && last != "" && r.replayThrough(ctx, name, oldEpoch, oldLast, last) {
+	if oldEpoch == epoch && oldLast != "" && last != "" && r.replayRoomThrough(ctx, entry, oldEpoch, oldLast, last) {
 		return
 	}
-	r.failRoom(name)
-	r.setPosition(name, epoch, last)
+	r.failRoomEntry(entry)
+	r.setRoomPosition(entry, epoch, last)
 }
 
-func (r *Rooms) replayThrough(ctx context.Context, name, epoch, after, through string) bool {
+func (r *Rooms) replayRoomThrough(ctx context.Context, entry *localRoom, epoch, after, through string) bool {
 	checkCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	items, err := r.redis.Replay(checkCtx, name, epoch, after, r.replayLimit)
+	items, err := r.replay(checkCtx, entry.name, epoch, after, through, "continuity")
 	cancel()
 	if err != nil {
 		return false
 	}
-	sawThrough := false
+
 	for _, item := range items {
-		if item.StreamID == through {
-			sawThrough = true
-			break
+		if size := r.dispatchRoom(entry, item.Event); size > 0 {
+			r.metrics.ContinuityReplayEvents.Inc()
+			r.metrics.ContinuityReplayBytes.Add(float64(size))
 		}
-	}
-	if !sawThrough {
-		return false
-	}
-	for _, item := range items {
-		r.dispatch(name, item.Event)
 	}
 	return true
 }
 
-func (r *Rooms) setPosition(name, epoch, last string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if entry := r.rooms[name]; entry != nil {
-		entry.epoch = epoch
-		entry.lastID = last
+func (r *Rooms) replay(ctx context.Context, name, epoch, after, through, trigger string) (items []redisroom.Live, replayErr error) {
+	started := time.Now()
+	defer func() {
+		result := "complete"
+		switch {
+		case errors.Is(replayErr, redisroom.ErrGap):
+			result = "gap"
+		case errors.Is(replayErr, context.Canceled), errors.Is(replayErr, context.DeadlineExceeded):
+			result = "cancelled"
+		case replayErr != nil:
+			result = "failed"
+		}
+		r.metrics.ReplaySeconds.WithLabelValues(trigger, result).Observe(time.Since(started).Seconds())
+	}()
+	items, replayErr = r.redis.Replay(ctx, name, epoch, after, r.replayLimit)
+	if replayErr != nil || through == "" {
+		return items, replayErr
 	}
+	for _, item := range items {
+		if item.StreamID == through {
+			return items, nil
+		}
+	}
+	return nil, redisroom.ErrGap
+}
+
+func (r *Rooms) setRoomPosition(entry *localRoom, epoch, last string) {
+	entry.mu.Lock()
+	if !entry.retired {
+		entry.epoch, entry.lastID = epoch, last
+	}
+	entry.mu.Unlock()
 }
 
 func streamAfter(candidate, previous string) bool {

@@ -27,7 +27,7 @@ func TestIdleListenersUseOnlyInlineEventStorage(t *testing.T) {
 			t.Fatalf("idle listener %d allocated a separate event buffer", i)
 		}
 	}
-	if !listeners[0].enqueue(Live{StreamID: "1-0"}) {
+	if !listeners[0].enqueue(Live{StreamID: "1-0"}, 1) {
 		t.Fatal("first event was rejected")
 	}
 	if &listeners[0].pending[0] != &listeners[0].inline[0] {
@@ -45,7 +45,7 @@ func TestListenerEventBufferPreservesOrderAndBoundsBurst(t *testing.T) {
 	listener := newListener(group, "group:test")
 	ctx := context.Background()
 	for i := range roomEventBufferLimit / 2 {
-		if !listener.enqueue(Live{StreamID: fmt.Sprint(i)}) {
+		if !listener.enqueue(Live{StreamID: fmt.Sprint(i)}, 1) {
 			t.Fatalf("event %d was rejected before the buffer limit", i)
 		}
 	}
@@ -56,14 +56,14 @@ func TestListenerEventBufferPreservesOrderAndBoundsBurst(t *testing.T) {
 		}
 	}
 	for i := roomEventBufferLimit / 2; i < roomEventBufferLimit+roomEventBufferLimit/4; i++ {
-		if !listener.enqueue(Live{StreamID: fmt.Sprint(i)}) {
+		if !listener.enqueue(Live{StreamID: fmt.Sprint(i)}, 1) {
 			t.Fatalf("event %d was rejected before the buffer limit", i)
 		}
 	}
 	if got := listener.queued; got != roomEventBufferLimit {
 		t.Fatalf("queued events = %d, want %d", got, roomEventBufferLimit)
 	}
-	if listener.enqueue(Live{StreamID: "overflow"}) {
+	if listener.enqueue(Live{StreamID: "overflow"}, 1) {
 		t.Fatal("event beyond the buffer limit was accepted")
 	}
 	for i := roomEventBufferLimit / 4; i < roomEventBufferLimit+roomEventBufferLimit/4; i++ {
@@ -77,6 +77,23 @@ func TestListenerEventBufferPreservesOrderAndBoundsBurst(t *testing.T) {
 	}
 	if &listener.pending[0] != &listener.inline[0] {
 		t.Fatal("drained listener retained the burst buffer")
+	}
+}
+
+func TestListenerEventBufferLimitsBytes(t *testing.T) {
+	listener := newListener(&subscriptionGroup{}, "group:test")
+	size := roomEventBufferByteLimit/2 + 1
+	if !listener.enqueue(Live{StreamID: "1-0"}, size) {
+		t.Fatal("first event rejected")
+	}
+	if listener.enqueue(Live{StreamID: "2-0"}, size) {
+		t.Fatal("second event exceeded byte limit")
+	}
+	if live, err := listener.Receive(context.Background()); err != nil || live.StreamID != "1-0" {
+		t.Fatalf("receive = %+v, %v", live, err)
+	}
+	if listener.queuedBytes != 0 || !listener.enqueue(Live{StreamID: "2-0"}, size) {
+		t.Fatal("drain did not release byte capacity")
 	}
 }
 
@@ -95,7 +112,7 @@ func TestListenerReceiveWakesAndStops(t *testing.T) {
 		received <- result{live, err}
 	}()
 	group.mu.Lock()
-	listener.enqueue(Live{StreamID: "1-0"})
+	listener.enqueue(Live{StreamID: "1-0"}, 1)
 	group.mu.Unlock()
 	select {
 	case got := <-received:

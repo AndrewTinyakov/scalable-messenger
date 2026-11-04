@@ -7,18 +7,16 @@ option java_multiple_files = true;
 option go_package = "messenger/ws/internal/generated/grpc;authorization";
 
 service ChatAuthorization {
-  // Called after the WS node subscribes to the user's room. SQL session state
-  // is checked on every connection, including reconnects.
   rpc ValidateSession(ValidateSessionRequest) returns (ValidateSessionResponse);
-  // The ticket is issued by the API for this user and device. The API verifies
-  // it against current SQL session state before checking group membership.
   rpc AuthorizeGroup(AuthorizeGroupRequest) returns (AuthorizeGroupResponse);
-  // One current-session check and one membership lookup for a bounded group batch.
   rpc AuthorizeGroups(AuthorizeGroupsRequest) returns (AuthorizeGroupsResponse);
+  rpc AuthorizePresence(AuthorizePresenceRequest) returns (AuthorizePresenceResponse);
 }
 
 message ValidateSessionRequest {
-  string ws_ticket = 1;
+  reserved 1;
+  reserved "ws_ticket";
+  string session_id = 2;
 }
 
 message ValidateSessionResponse {
@@ -29,7 +27,9 @@ message ValidateSessionResponse {
 
 message AuthorizeGroupRequest {
   string chat_id = 1;
-  string ws_ticket = 2;
+  reserved 2;
+  reserved "ws_ticket";
+  string session_id = 3;
 }
 
 message AuthorizeGroupResponse {
@@ -38,9 +38,21 @@ message AuthorizeGroupResponse {
 
 message AuthorizeGroupsRequest {
   repeated string chat_ids = 1;
-  string ws_ticket = 2;
+  reserved 2;
+  reserved "ws_ticket";
+  string session_id = 3;
 }
 
 message AuthorizeGroupsResponse {
   repeated string authorized_chat_ids = 1;
+}
+
+message AuthorizePresenceRequest {
+  string session_id = 1;
+  string chat_id = 2;
+  repeated string user_ids = 3;
+}
+
+message AuthorizePresenceResponse {
+  repeated string authorized_user_ids = 1;
 }

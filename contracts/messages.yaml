@@ -6,14 +6,14 @@ messages:
     name: SendMessageCommandV1
     contentType: application/json
     correlationId:
-      $ref: '#/correlationIds/SendRequestId'
+      $ref: "#/correlationIds/SendRequestId"
     payload:
       $ref: ./schemas/message/command/send-message-v1.yaml
   MessageSavedEventV1:
     name: MessageSavedEventV1
     contentType: application/json
     correlationId:
-      $ref: '#/correlationIds/SendRequestId'
+      $ref: "#/correlationIds/SendRequestId"
     payload:
       $ref: ./schemas/message/event/message-saved-v1.yaml
   ChatCreatedEventV1:
@@ -21,6 +21,10 @@ messages:
     contentType: application/json
     payload:
       $ref: ./schemas/message/event/chat-created-v1.yaml
+  MembershipChangedEventV1:
+    name: MembershipChangedEventV1
+    payload:
+      $ref: ./schemas/message/event/membership-changed-v1.yaml
   MemberRemovedEventV1:
     name: MemberRemovedEventV1
     contentType: application/json
@@ -35,7 +39,7 @@ messages:
     name: SendRejectedEventV1
     contentType: application/json
     correlationId:
-      $ref: '#/correlationIds/SendRequestId'
+      $ref: "#/correlationIds/SendRequestId"
     payload:
       $ref: ./schemas/message/event/send-rejected-v1.yaml
   SocketSendV1:
@@ -93,6 +97,10 @@ messages:
     contentType: application/json
     payload:
       $ref: ./schemas/socket/frame/chat-created-v1.yaml
+  SocketMembershipChangedV1:
+    name: SocketMembershipChangedV1
+    payload:
+      $ref: ./schemas/socket/frame/membership-changed-v1.yaml
   SocketMemberRemovedV1:
     name: SocketMemberRemovedV1
     contentType: application/json
@@ -118,3 +126,48 @@ messages:
     contentType: application/json
     payload:
       $ref: ./schemas/socket/frame/error-v1.yaml
+  MessageChangedEventV1:
+    name: MessageChangedEventV1
+    contentType: application/json
+    payload:
+      $ref: ./schemas/message/event/message-changed-v1.yaml
+  SocketMessageChangedV1:
+    name: SocketMessageChangedV1
+    contentType: application/json
+    payload:
+      $ref: ./schemas/socket/frame/message-changed-v1.yaml
+  ChatDeletedEventV1:
+    name: ChatDeletedEventV1
+    contentType: application/json
+    payload:
+      $ref: ./schemas/message/event/chat-deleted-v1.yaml
+  SocketChatDeletedV1:
+    name: SocketChatDeletedV1
+    contentType: application/json
+    payload:
+      $ref: ./schemas/socket/frame/chat-deleted-v1.yaml
+  ReadsChangedEventV1:
+    name: ReadsChangedEventV1
+    contentType: application/json
+    payload:
+      $ref: ./schemas/message/event/reads-changed-v1.yaml
+  SocketReadsChangedV1:
+    name: SocketReadsChangedV1
+    contentType: application/json
+    payload:
+      $ref: ./schemas/socket/frame/reads-changed-v1.yaml
+  SocketWatchPresenceV1:
+    name: SocketWatchPresenceV1
+    contentType: application/json
+    payload:
+      $ref: ./schemas/socket/frame/watch-presence-v1.yaml
+  SocketUnwatchPresenceV1:
+    name: SocketUnwatchPresenceV1
+    contentType: application/json
+    payload:
+      $ref: ./schemas/socket/frame/unwatch-presence-v1.yaml
+  SocketPresenceV1:
+    name: SocketPresenceV1
+    contentType: application/json
+    payload:
+      $ref: ./schemas/socket/frame/presence-v1.yaml

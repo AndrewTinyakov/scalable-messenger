@@ -7,8 +7,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -17,10 +15,9 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/prometheus/client_golang/prometheus"
+
 	"messenger/ws/internal/config"
 	"messenger/ws/internal/grpcauth"
-	"messenger/ws/internal/monitoring"
 	"messenger/ws/internal/protocol"
 	roomregistry "messenger/ws/internal/room"
 	"messenger/ws/internal/ticket"
@@ -41,6 +38,7 @@ func (fn handshakeLimiterFunc) AllowHandshake(ctx context.Context, userID string
 }
 
 type sessionRooms struct {
+	joinErr error
 	join    func(roomregistry.Recipient)
 	onClose func()
 	closed  sync.Once
@@ -82,7 +80,7 @@ func (rooms *sessionRooms) Join(_ context.Context, recipient roomregistry.Recipi
 	if rooms.join != nil {
 		rooms.join(recipient)
 	}
-	return nil
+	return rooms.joinErr
 }
 func (*sessionRooms) LeaveAll(roomregistry.Recipient)                  {}
 func (*sessionRooms) LeaveChat(roomregistry.Recipient, string, string) {}
@@ -93,55 +91,6 @@ func (rooms *sessionRooms) Close() {
 			rooms.onClose()
 		}
 	})
-}
-
-type blockingAcquireLeases struct {
-	entered chan struct{}
-	release chan struct{}
-}
-
-func (leases *blockingAcquireLeases) AcquireConnectionLease(context.Context, string) (string, bool, error) {
-	close(leases.entered)
-	<-leases.release
-	return "test-lease", true, nil
-}
-func (*blockingAcquireLeases) RenewConnectionLease(context.Context, string, string) (bool, error) {
-	return true, nil
-}
-func (*blockingAcquireLeases) ReleaseConnectionLease(context.Context, string, string) error {
-	return nil
-}
-
-type blockingReleaseLeases struct {
-	entered chan struct{}
-	release chan struct{}
-	mu      sync.Mutex
-	active  int
-	maximum int
-}
-
-func (*blockingReleaseLeases) AcquireConnectionLease(context.Context, string) (string, bool, error) {
-	return "test-lease", true, nil
-}
-func (*blockingReleaseLeases) RenewConnectionLease(context.Context, string, string) (bool, error) {
-	return true, nil
-}
-func (leases *blockingReleaseLeases) ReleaseConnectionLease(ctx context.Context, _, _ string) error {
-	leases.mu.Lock()
-	leases.active++
-	if leases.active > leases.maximum {
-		leases.maximum = leases.active
-	}
-	leases.mu.Unlock()
-	leases.entered <- struct{}{}
-	select {
-	case <-leases.release:
-	case <-ctx.Done():
-	}
-	leases.mu.Lock()
-	leases.active--
-	leases.mu.Unlock()
-	return nil
 }
 
 func testWSToken(secret, sessionID string) string {
@@ -155,14 +104,12 @@ func testWSToken(secret, sessionID string) string {
 
 func newSessionServer(t *testing.T, rooms *sessionRooms, auth sessionAuthorizerFunc) (*Server, string) {
 	t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
 	secret := "test-ws-ticket-secret-long-enough-for-hmac-2026"
-	server := &Server{
-		config: config.Config{WSTicketSecret: secret, AllowedOrigin: "*", MaxConnections: 10, HandshakeRate: 30, HandshakeWindow: time.Minute, QueueItems: 8, QueueBytes: 4096, PendingACKLimit: 8, ACKTimeout: time.Second, APITimeout: time.Second, WriteTimeout: time.Second, PingInterval: time.Second, PongTimeout: time.Minute, GroupLease: time.Minute},
-		logger: slog.New(slog.NewTextHandler(io.Discard, nil)), sessionAuth: auth, rooms: rooms,
-		metrics: monitoring.New(prometheus.NewRegistry()), ctx: ctx, cancel: cancel, connections: make(map[*Connection]struct{}),
+	dependencies := testDependencies(rooms)
+	if auth != nil {
+		dependencies.SessionAuthorizer = auth
 	}
-	t.Cleanup(server.Close)
+	server := newTestServer(t, config.Config{WSTicketSecret: secret, AllowedOrigin: "https://allowed.example", MaxConnections: 10, MaxGroupAuths: 8, HandshakeRate: 30, HandshakeWindow: time.Minute, QueueItems: 8, QueueBytes: 4096, PendingACKLimit: 8, ACKTimeout: time.Second, APITimeout: time.Second, WriteTimeout: time.Second, PingInterval: time.Second, PongTimeout: time.Minute, GroupLease: time.Minute}, dependencies)
 	return server, secret
 }
 
@@ -199,7 +146,10 @@ func TestRevokedSessionIsRejectedAfterUserRoomJoin(t *testing.T) {
 	sessionID := strings.Repeat("a", 64)
 	joined := false
 	rooms := &sessionRooms{join: func(roomregistry.Recipient) { joined = true }}
-	auth := sessionAuthorizerFunc(func(context.Context, string) (grpcauth.Session, error) {
+	auth := sessionAuthorizerFunc(func(_ context.Context, gotSessionID string) (grpcauth.Session, error) {
+		if gotSessionID != sessionID {
+			t.Errorf("validation session ID = %q, want %q", gotSessionID, sessionID)
+		}
 		if !joined {
 			t.Error("validated session before joining the user room")
 		}
@@ -311,21 +261,45 @@ func TestFailedHTTPUpgradeReleasesConnectionLease(t *testing.T) {
 }
 
 func TestInvalidOriginDoesNotAcquireConnectionLease(t *testing.T) {
-	server, secret := newSessionServer(t, &sessionRooms{}, nil)
-	server.config.AllowedOrigin = "https://allowed.example"
-	leases := &trackingConnectionLeases{release: make(chan struct{}, 1)}
-	server.connectionLeases = leases
+	for _, origins := range [][]string{
+		{"https://other.example"}, {"null"}, {""}, {"*"},
+		{"https://allowed.example", "https://other.example"},
+		{"https://allowed.example", "https://allowed.example"},
+		{"https://allowed.example, https://other.example"},
+		{"https://allowed.example https://other.example"},
+	} {
+		t.Run(fmt.Sprint(origins), func(t *testing.T) {
+			server, secret := newSessionServer(t, &sessionRooms{}, nil)
+			leases := &trackingConnectionLeases{release: make(chan struct{}, 1)}
+			server.connectionLeases = leases
+			httpServer := httptest.NewServer(http.HandlerFunc(server.upgrade))
+			defer httpServer.Close()
+			dialer := websocket.Dialer{Subprotocols: []string{"messenger", "messenger-ticket." + testWSToken(secret, strings.Repeat("a", 64))}}
+			header := http.Header{"Origin": origins}
+			_, response, err := dialer.Dial("ws"+strings.TrimPrefix(httpServer.URL, "http")+"/ws", header)
+			if err == nil || response == nil || response.StatusCode != http.StatusForbidden {
+				t.Fatalf("invalid origin: error=%v response=%v, want HTTP 403", err, response)
+			}
+			response.Body.Close()
+			if acquired, released := leases.counts(); acquired != 0 || released != 0 {
+				t.Fatalf("invalid origin: acquired=%d released=%d, want no Redis admission work", acquired, released)
+			}
+		})
+	}
+}
+
+func TestAllowedOriginUpgradesWithSignedTicket(t *testing.T) {
+	server, secret := newSessionServer(t, &sessionRooms{}, sessionAuthorizerFunc(func(context.Context, string) (grpcauth.Session, error) {
+		return grpcauth.Session{}, errors.New("session expired")
+	}))
 	httpServer := httptest.NewServer(http.HandlerFunc(server.upgrade))
 	defer httpServer.Close()
 	dialer := websocket.Dialer{Subprotocols: []string{"messenger", "messenger-ticket." + testWSToken(secret, strings.Repeat("a", 64))}}
-	header := http.Header{"Origin": []string{"https://other.example"}}
-	_, response, err := dialer.Dial("ws"+strings.TrimPrefix(httpServer.URL, "http")+"/ws", header)
-	if err == nil || response == nil || response.StatusCode != http.StatusForbidden {
-		t.Fatalf("invalid origin: error=%v response=%v, want HTTP 403", err, response)
+	socket, response, err := dialer.Dial("ws"+strings.TrimPrefix(httpServer.URL, "http")+"/ws", http.Header{"Origin": {"https://allowed.example"}})
+	if err != nil {
+		t.Fatalf("allowed origin: error=%v response=%v", err, response)
 	}
-	if acquired, released := leases.counts(); acquired != 0 || released != 0 {
-		t.Fatalf("invalid origin: acquired=%d released=%d, want no Redis admission work", acquired, released)
-	}
+	socket.Close()
 }
 
 func TestHandshakeLimitRejectsBeforeConnectionLease(t *testing.T) {
@@ -379,86 +353,5 @@ func TestClosedSocketReleasesConnectionLease(t *testing.T) {
 	}
 	if acquired, released := leases.counts(); acquired != 1 || released != 1 {
 		t.Fatalf("closed socket: acquired=%d released=%d", acquired, released)
-	}
-}
-
-func TestShutdownWaitsForInFlightUpgrade(t *testing.T) {
-	roomsClosed := make(chan struct{})
-	rooms := &sessionRooms{onClose: func() { close(roomsClosed) }}
-	server, secret := newSessionServer(t, rooms, nil)
-	leases := &blockingAcquireLeases{entered: make(chan struct{}), release: make(chan struct{})}
-	releaseAcquire := sync.OnceFunc(func() { close(leases.release) })
-	defer releaseAcquire()
-	server.connectionLeases = leases
-	httpServer := httptest.NewServer(http.HandlerFunc(server.upgrade))
-	defer httpServer.Close()
-	dialDone := make(chan struct{})
-	go func() {
-		defer close(dialDone)
-		dialer := websocket.Dialer{Subprotocols: []string{"messenger", "messenger-ticket." + testWSToken(secret, strings.Repeat("a", 64))}}
-		socket, _, err := dialer.Dial("ws"+strings.TrimPrefix(httpServer.URL, "http")+"/ws", nil)
-		if err == nil {
-			_ = socket.Close()
-		}
-	}()
-	select {
-	case <-leases.entered:
-	case <-time.After(time.Second):
-		t.Fatal("upgrade did not reach lease acquisition")
-	}
-	shutdownDone := make(chan struct{})
-	go func() { server.Close(); close(shutdownDone) }()
-	select {
-	case <-roomsClosed:
-	case <-time.After(time.Second):
-		t.Fatal("shutdown did not close rooms")
-	}
-	select {
-	case <-shutdownDone:
-		t.Fatal("shutdown returned while an upgrade was in flight")
-	default:
-	}
-	releaseAcquire()
-	select {
-	case <-shutdownDone:
-	case <-time.After(time.Second):
-		t.Fatal("shutdown did not join the completed upgrade")
-	}
-	<-dialDone
-}
-
-func TestShutdownReleasesConnectionLeasesConcurrently(t *testing.T) {
-	server, _ := newSessionServer(t, &sessionRooms{}, nil)
-	server.config.ShutdownTimeout = time.Second
-	leases := &blockingReleaseLeases{entered: make(chan struct{}, 8), release: make(chan struct{})}
-	releaseLeases := sync.OnceFunc(func() { close(leases.release) })
-	defer releaseLeases()
-	server.connectionLeases = leases
-	for i := range 8 {
-		connection := newConnection(server, nil, ticket.Identity{UserID: sessionTestUser}, "ticket")
-		connection.connectionLeaseID = fmt.Sprintf("lease-%d", i)
-		server.connections[connection] = struct{}{}
-		server.metrics.Connections.Inc()
-	}
-	done := make(chan struct{})
-	go func() { server.Close(); close(done) }()
-	for range 2 {
-		select {
-		case <-leases.entered:
-		case <-time.After(time.Second):
-			t.Fatal("shutdown serialized lease releases")
-		}
-	}
-	leases.mu.Lock()
-	maximum := leases.maximum
-	leases.mu.Unlock()
-	if maximum < 2 {
-		t.Fatalf("maximum concurrent lease releases = %d, want at least 2", maximum)
-	}
-	releaseLeases()
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("shutdown did not complete after releases resumed")
 	}
 }

@@ -9,6 +9,8 @@ spring:
       password: ${METRICS_PASSWORD:${random.uuid}}
       roles: MONITORING
   jackson:
+    read:
+      strict-duplicate-detection: true
     deserialization:
       accept-float-as-int: false
       fail-on-unknown-properties: true
@@ -26,6 +28,9 @@ spring:
     url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/messenger}
     username: ${DATABASE_USER:messenger}
     password: ${DATABASE_PASSWORD:messenger}
+    hikari:
+      data-source-properties:
+        ApplicationName: messenger-api
   flyway:
     enabled: true
   jooq:
@@ -33,6 +38,9 @@ spring:
 management:
   metrics:
     distribution:
+      slo:
+        hikaricp.connections.acquire: 1ms,5ms,10ms,25ms,50ms,100ms,250ms,500ms,1s,2500ms,5s,10s
+        hikaricp.connections.usage: 1ms,5ms,10ms,25ms,50ms,100ms,250ms,500ms,1s,2500ms,5s,10s
       percentiles-histogram:
         http.server.requests: true
   endpoints:
@@ -42,7 +50,47 @@ management:
 messenger:
   grpc:
     port: ${MESSENGER_GRPC_PORT:9090}
+    bind-address: ${MESSENGER_GRPC_BIND_ADDRESS:127.0.0.1}
+    ca-file: ${MESSENGER_GRPC_CA_FILE:}
+    cert-file: ${MESSENGER_GRPC_CERT_FILE:}
+    key-file: ${MESSENGER_GRPC_KEY_FILE:}
+    allowed-client-identity: ${MESSENGER_GRPC_ALLOWED_CLIENT_IDENTITY:spiffe://messenger/ws}
   auth:
+    cookie-secure: ${SESSION_COOKIE_SECURE:true}
     ws-ticket-secret: ${WS_TICKET_SECRET}
+    password:
+      id-for-encode: pbkdf2-sha256-600000
+      pbkdf2:
+        pbkdf2-sha256-600000:
+          salt-length: 16
+          iterations: 600000
+          algorithm: PBKDF2WithHmacSHA256
+          encode-hash-as-base64: true
   web:
-    allowed-origin: ${CLIENT_ORIGIN:http://localhost:5173}
+    cors:
+      allowed-origins:
+        - ${CLIENT_ORIGIN:http://localhost:5173}
+      allowed-methods:
+        - GET
+        - POST
+        - PATCH
+        - DELETE
+        - OPTIONS
+      allowed-headers:
+        - Content-Type
+        - X-Messenger-CSRF
+        - X-Messenger-User
+        - X-Messenger-Device
+      allow-credentials: true
+    security:
+      preflight-paths:
+        - /**
+      public-paths:
+        - /actuator/health
+        - /v1/auth/register
+        - /v1/auth/login
+        - /v3/api-docs/**
+      monitoring-paths:
+        - /actuator/prometheus
+      denied-paths:
+        - /actuator/**

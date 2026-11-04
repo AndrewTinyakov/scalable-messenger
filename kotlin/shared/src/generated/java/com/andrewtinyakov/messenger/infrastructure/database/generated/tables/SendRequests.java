@@ -6,6 +6,8 @@ package com.andrewtinyakov.messenger.infrastructure.database.generated.tables;
 
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Keys;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Public;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.enums.SendRejectionReason;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.enums.SendResultStatus;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.SendRequestsRecord;
 
 import java.time.OffsetDateTime;
@@ -82,7 +84,7 @@ public class SendRequests extends TableImpl<SendRequestsRecord> {
     /**
      * The column <code>public.send_requests.status</code>.
      */
-    public final TableField<SendRequestsRecord, String> STATUS = createField(DSL.name("status"), SQLDataType.VARCHAR(8).nullable(false), this, "");
+    public final TableField<SendRequestsRecord, SendResultStatus> STATUS = createField(DSL.name("status"), SQLDataType.VARCHAR.nullable(false).asEnumDataType(SendResultStatus.class), this, "");
 
     /**
      * The column <code>public.send_requests.message_id</code>.
@@ -97,7 +99,7 @@ public class SendRequests extends TableImpl<SendRequestsRecord> {
     /**
      * The column <code>public.send_requests.reason</code>.
      */
-    public final TableField<SendRequestsRecord, String> REASON = createField(DSL.name("reason"), SQLDataType.VARCHAR(64), this, "");
+    public final TableField<SendRequestsRecord, SendRejectionReason> REASON = createField(DSL.name("reason"), SQLDataType.VARCHAR.asEnumDataType(SendRejectionReason.class), this, "");
 
     /**
      * The column <code>public.send_requests.created_at</code>.
@@ -146,8 +148,7 @@ public class SendRequests extends TableImpl<SendRequestsRecord> {
     @Override
     public List<Check<SendRequestsRecord>> getChecks() {
         return Arrays.asList(
-            Internal.createCheck(this, DSL.name("send_requests_result_shape"), "(((((status)::text = 'saved'::text) AND (message_id IS NOT NULL) AND (sequence IS NOT NULL) AND (reason IS NULL)) OR (((status)::text = 'rejected'::text) AND (message_id IS NULL) AND (sequence IS NULL) AND (reason IS NOT NULL))))", true),
-            Internal.createCheck(this, DSL.name("send_requests_status_check"), "(((status)::text = ANY ((ARRAY['saved'::character varying, 'rejected'::character varying])::text[])))", true),
+            Internal.createCheck(this, DSL.name("send_requests_result_shape"), "((((status = 'SAVED'::send_result_status) AND (message_id IS NOT NULL) AND (sequence IS NOT NULL) AND (reason IS NULL)) OR ((status = 'REJECTED'::send_result_status) AND (message_id IS NULL) AND (sequence IS NULL) AND (reason IS NOT NULL))))", true),
             Internal.createCheck(this, DSL.name("send_requests_target_shape"), "(((chat_id IS NOT NULL) OR (recipient_id IS NOT NULL)))", true)
         );
     }

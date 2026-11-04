@@ -2,10 +2,12 @@ package com.andrewtinyakov.messenger.infrastructure.config
 
 import io.swagger.v3.oas.models.Components
 import io.swagger.v3.oas.models.OpenAPI
+import io.swagger.v3.oas.models.PathItem
 import io.swagger.v3.oas.models.media.Content
 import io.swagger.v3.oas.models.media.MediaType
 import io.swagger.v3.oas.models.media.ObjectSchema
 import io.swagger.v3.oas.models.media.StringSchema
+import io.swagger.v3.oas.models.parameters.Parameter
 import io.swagger.v3.oas.models.responses.ApiResponse
 import io.swagger.v3.oas.models.security.SecurityRequirement
 import io.swagger.v3.oas.models.security.SecurityScheme
@@ -23,8 +25,8 @@ class OpenApiConfig {
             .components(
                 Components()
                     .addSecuritySchemes(
-                        "bearerAuth",
-                        SecurityScheme().type(SecurityScheme.Type.HTTP).scheme("bearer").bearerFormat("opaque"),
+                        "sessionCookie",
+                        SecurityScheme().type(SecurityScheme.Type.APIKEY).`in`(SecurityScheme.In.COOKIE).name("messenger_session"),
                     ).addSchemas(
                         "ApiProblem",
                         ObjectSchema()
@@ -32,7 +34,7 @@ class OpenApiConfig {
                             .addProperty("detail", StringSchema())
                             .addProperty("code", StringSchema()),
                     ),
-            ).addSecurityItem(SecurityRequirement().addList("bearerAuth"))
+            ).addSecurityItem(SecurityRequirement().addList("sessionCookie"))
 
     @Bean
     fun problemResponses(): OpenApiCustomizer = OpenApiCustomizer { document ->
@@ -44,13 +46,25 @@ class OpenApiConfig {
                 .addProperty("code", StringSchema()),
         )
         document.paths.forEach { (path, item) ->
-            item.readOperations().forEach { operation ->
+            item.readOperationsMap().forEach { (method, operation) ->
+                if (method !in setOf(PathItem.HttpMethod.GET, PathItem.HttpMethod.HEAD, PathItem.HttpMethod.OPTIONS)) {
+                    operation.addParametersItem(
+                        Parameter().`in`("header").name("X-Messenger-CSRF").required(true).schema(StringSchema()._enum(listOf("1"))),
+                    )
+                    operation.responses.addApiResponse("403", problem("Invalid browser request"))
+                }
                 operation.parameters?.removeIf { it.`in` == "header" && it.name.equals("Authorization", ignoreCase = true) }
-                if (path == "/v1/auth/register" || path == "/v1/auth/login") {
+                if (path == "/v1/auth/register" || path == "/v1/auth/login" || path == "/v1/auth/logout") {
                     operation.security = emptyList()
                 } else {
                     operation.responses.addApiResponse("401", problem("Unauthorized"))
                     operation.responses.addApiResponse("403", problem("Forbidden"))
+                }
+                if (path != "/v1/auth/register" && path != "/v1/auth/login") {
+                    listOf("X-Messenger-User", "X-Messenger-Device").forEach { name ->
+                        operation.addParametersItem(Parameter().`in`("header").name(name).required(false).schema(StringSchema()))
+                    }
+                    operation.responses.addApiResponse("401", problem("Unauthorized"))
                 }
                 operation.responses.addApiResponse("400", problem("Invalid request"))
                 operation.responses.addApiResponse("500", problem("Internal server error"))

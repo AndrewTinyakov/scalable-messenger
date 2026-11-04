@@ -5,10 +5,11 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"strings"
 	"time"
+
+	"messenger/ws/internal/messagecodec"
 )
 
 var ErrInvalid = errors.New("invalid WS ticket")
@@ -41,8 +42,11 @@ func Verify(raw string, secret []byte, now time.Time) (Identity, error) {
 	if err != nil {
 		return identity, ErrInvalid
 	}
-	var fields map[string]json.RawMessage
-	if json.Unmarshal(header, &fields) != nil || len(fields) != 2 || string(fields["alg"]) != `"HS256"` || string(fields["typ"]) != `"JWT"` {
+	fields, err := messagecodec.Decode[struct {
+		Algorithm string `json:"alg"`
+		Type      string `json:"typ"`
+	}](header)
+	if err != nil || fields.Algorithm != "HS256" || fields.Type != "JWT" {
 		return identity, ErrInvalid
 	}
 	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
@@ -58,8 +62,8 @@ func Verify(raw string, secret []byte, now time.Time) (Identity, error) {
 	if err != nil {
 		return identity, ErrInvalid
 	}
-	var value claims
-	if json.Unmarshal(payload, &value) != nil || value.Issuer != "messenger-api" || value.Audience != "messenger-ws" || value.Subject == "" || value.DeviceID == "" || !ValidSessionID(value.SessionID) || value.ExpiresAt <= now.Unix()+5 {
+	value, err := messagecodec.Decode[claims](payload)
+	if err != nil || value.Issuer != "messenger-api" || value.Audience != "messenger-ws" || value.Subject == "" || value.DeviceID == "" || !ValidSessionID(value.SessionID) || value.ExpiresAt <= now.Unix()+5 {
 		return identity, ErrInvalid
 	}
 	return Identity{UserID: value.Subject, DeviceID: value.DeviceID, SessionID: value.SessionID, ExpiresAt: time.Unix(value.ExpiresAt, 0)}, nil

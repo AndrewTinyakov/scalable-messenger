@@ -1,8 +1,3 @@
 package com.andrewtinyakov.messenger.chat.model
 
-enum class ChatKind(
-    val value: String,
-) {
-    DIRECT("direct"),
-    GROUP("group"),
-}
+typealias ChatKind = com.andrewtinyakov.messenger.generated.messaging.event.ChatKind

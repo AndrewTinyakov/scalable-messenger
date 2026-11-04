@@ -1,12 +1,9 @@
 roomEvents:
   address: messenger:{room}:live
-  description: >-
-    Redis sharded Pub/Sub channel. The publisher appends event JSON to
-    messenger:{room}:stream before SPUBLISH of
-    {epoch,streamId,previousStreamId,event}. The previous Stream ID lets a
-    subscriber detect a missed live publication without reading Redis on every
-    event; an empty value means the new epoch has no predecessor.
-    Room is user:<ULID> or group:<ULID>; the braces form a Redis hash tag.
+  description: Redis sharded Pub/Sub channel. The publisher appends event JSON to messenger:{room}:stream before SPUBLISH of
+    {epoch,streamId,previousStreamId,event}. The previous Stream ID lets a subscriber detect a missed live publication without reading Redis
+    on every event; an empty value means the new epoch has no predecessor. Room is user:<ULID> or group:<ULID>; the braces form a Redis hash
+    tag. A member_removed event in a group room revokes the named member before later events in that room reach the member's socket.
   parameters:
     room:
       description: Logical user or group room.
@@ -21,3 +18,11 @@ roomEvents:
       $ref: ../messages.yaml#/messages/MessageSavedEventV1
     SendRejectedEventV1:
       $ref: ../messages.yaml#/messages/SendRejectedEventV1
+    MembershipChangedEventV1:
+      $ref: ../messages.yaml#/messages/MembershipChangedEventV1
+    MessageChangedEventV1:
+      $ref: ../messages.yaml#/messages/MessageChangedEventV1
+    ChatDeletedEventV1:
+      $ref: ../messages.yaml#/messages/ChatDeletedEventV1
+    ReadsChangedEventV1:
+      $ref: ../messages.yaml#/messages/ReadsChangedEventV1

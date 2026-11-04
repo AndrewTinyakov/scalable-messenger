@@ -4,9 +4,11 @@
 package com.andrewtinyakov.messenger.infrastructure.database.generated.tables;
 
 
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Indexes;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Keys;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Public;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.ChatMembers.ChatMembersPath;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.ChatReadProgress.ChatReadProgressPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Chats.ChatsPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Messages.MessagesPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Sessions.SessionsPath;
@@ -20,6 +22,7 @@ import java.util.List;
 import org.jooq.Condition;
 import org.jooq.Field;
 import org.jooq.ForeignKey;
+import org.jooq.Index;
 import org.jooq.InverseForeignKey;
 import org.jooq.Name;
 import org.jooq.Path;
@@ -74,7 +77,7 @@ public class Users extends TableImpl<UsersRecord> {
     /**
      * The column <code>public.users.password_hash</code>.
      */
-    public final TableField<UsersRecord, String> PASSWORD_HASH = createField(DSL.name("password_hash"), SQLDataType.VARCHAR(100).nullable(false), this, "");
+    public final TableField<UsersRecord, String> PASSWORD_HASH = createField(DSL.name("password_hash"), SQLDataType.CLOB.nullable(false), this, "");
 
     /**
      * The column <code>public.users.created_at</code>.
@@ -149,6 +152,11 @@ public class Users extends TableImpl<UsersRecord> {
     }
 
     @Override
+    public List<Index> getIndexes() {
+        return Arrays.asList(Indexes.USERS_USERNAME_TRGM_IDX);
+    }
+
+    @Override
     public UniqueKey<UsersRecord> getPrimaryKey() {
         return Keys.USERS_PKEY;
     }
@@ -171,16 +179,43 @@ public class Users extends TableImpl<UsersRecord> {
         return _chatMembers;
     }
 
-    private transient ChatsPath _chats;
+    private transient ChatReadProgressPath _chatReadProgress;
 
     /**
-     * Get the implicit to-many join path to the <code>public.chats</code> table
+     * Get the implicit to-many join path to the
+     * <code>public.chat_read_progress</code> table
      */
-    public ChatsPath chats() {
-        if (_chats == null)
-            _chats = new ChatsPath(this, null, Keys.CHATS__CHATS_OWNER_ID_FKEY.getInverseKey());
+    public ChatReadProgressPath chatReadProgress() {
+        if (_chatReadProgress == null)
+            _chatReadProgress = new ChatReadProgressPath(this, null, Keys.CHAT_READ_PROGRESS__CHAT_READ_PROGRESS_USER_ID_FKEY.getInverseKey());
 
-        return _chats;
+        return _chatReadProgress;
+    }
+
+    private transient ChatsPath _chatsDeletedByFkey;
+
+    /**
+     * Get the implicit to-many join path to the <code>public.chats</code>
+     * table, via the <code>chats_deleted_by_fkey</code> key
+     */
+    public ChatsPath chatsDeletedByFkey() {
+        if (_chatsDeletedByFkey == null)
+            _chatsDeletedByFkey = new ChatsPath(this, null, Keys.CHATS__CHATS_DELETED_BY_FKEY.getInverseKey());
+
+        return _chatsDeletedByFkey;
+    }
+
+    private transient ChatsPath _chatsOwnerIdFkey;
+
+    /**
+     * Get the implicit to-many join path to the <code>public.chats</code>
+     * table, via the <code>chats_owner_id_fkey</code> key
+     */
+    public ChatsPath chatsOwnerIdFkey() {
+        if (_chatsOwnerIdFkey == null)
+            _chatsOwnerIdFkey = new ChatsPath(this, null, Keys.CHATS__CHATS_OWNER_ID_FKEY.getInverseKey());
+
+        return _chatsOwnerIdFkey;
     }
 
     private transient MessagesPath _messages;
@@ -207,6 +242,22 @@ public class Users extends TableImpl<UsersRecord> {
             _sessions = new SessionsPath(this, null, Keys.SESSIONS__SESSIONS_USER_ID_FKEY.getInverseKey());
 
         return _sessions;
+    }
+
+    /**
+     * Get the implicit many-to-many join path to the <code>public.chats</code>
+     * table, via the <code>chat_members_chat_id_fkey</code> key
+     */
+    public ChatsPath chatMembersChatIdFkey() {
+        return chatMembers().chats();
+    }
+
+    /**
+     * Get the implicit many-to-many join path to the <code>public.chats</code>
+     * table, via the <code>chat_read_progress_chat_id_fkey</code> key
+     */
+    public ChatsPath chatReadProgressChatIdFkey() {
+        return chatReadProgress().chats();
     }
 
     @Override

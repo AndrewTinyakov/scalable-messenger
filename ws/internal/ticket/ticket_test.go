@@ -29,6 +29,9 @@ func TestVerify(t *testing.T) {
 		name, raw string
 		at        time.Time
 	}{
+		{"duplicate claim", signedTicket(secret, `{"iss":"messenger-api","aud":"messenger-ws","sub":"first","sub":"user","deviceId":"device","sid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","exp":1800003600}`), now},
+		{"case alias", signedTicket(secret, `{"iss":"messenger-api","aud":"messenger-ws","SUB":"user","deviceId":"device","sid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","exp":1800003600}`), now},
+		{"unknown claim", signedTicket(secret, `{"iss":"messenger-api","aud":"messenger-ws","sub":"user","deviceId":"device","sid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","exp":1800003600,"extra":true}`), now},
 		{"expired", valid, now.Add(time.Hour)},
 		{"tampered", valid[:len(valid)-1] + "x", now},
 		{"wrong audience", signedTicket(secret, `{"iss":"messenger-api","aud":"other","sub":"user","deviceId":"device","exp":1800003600}`), now},

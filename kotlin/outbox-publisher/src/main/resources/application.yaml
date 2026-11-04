@@ -11,6 +11,9 @@ spring:
     url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/messenger}
     username: ${DATABASE_USER:messenger}
     password: ${DATABASE_PASSWORD:messenger}
+    hikari:
+      data-source-properties:
+        ApplicationName: messenger-outbox-publisher
   flyway:
     enabled: true
   jooq:
@@ -19,6 +22,8 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
+      timeout: ${messenger.publisher.publish-timeout-ms:1000}ms
+      connect-timeout: ${messenger.publisher.publish-timeout-ms:1000}ms
       lettuce:
         cluster:
           refresh:
@@ -33,9 +38,15 @@ messenger:
     poll-ms: 1000
     batch-size: 100
     lease-seconds: 30
+    concurrency: 16
+    batch-bytes: 4194304
+    publish-timeout-ms: 1000
 management:
   metrics:
     distribution:
+      slo:
+        hikaricp.connections.acquire: 1ms,5ms,10ms,25ms,50ms,100ms,250ms,500ms,1s,2500ms,5s,10s
+        hikaricp.connections.usage: 1ms,5ms,10ms,25ms,50ms,100ms,250ms,500ms,1s,2500ms,5s,10s
       percentiles-histogram:
         messenger.outbox.batch: true
   endpoints:

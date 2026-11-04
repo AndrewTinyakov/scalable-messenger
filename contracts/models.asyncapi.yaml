@@ -16,6 +16,10 @@ components:
       name: ChatCreatedEventV1
       payload:
         $ref: ./schemas/message/event/chat-created-v1.yaml
+    MembershipChangedEventV1:
+      name: MembershipChangedEventV1
+      payload:
+        $ref: ./schemas/message/event/membership-changed-v1.yaml
     MemberRemovedEventV1:
       name: MemberRemovedEventV1
       payload:
@@ -28,3 +32,15 @@ components:
       name: SendRejectedEventV1
       payload:
         $ref: ./schemas/message/event/send-rejected-v1.yaml
+    MessageChangedEventV1:
+      name: MessageChangedEventV1
+      payload:
+        $ref: ./schemas/message/event/message-changed-v1.yaml
+    ChatDeletedEventV1:
+      name: ChatDeletedEventV1
+      payload:
+        $ref: ./schemas/message/event/chat-deleted-v1.yaml
+    ReadsChangedEventV1:
+      name: ReadsChangedEventV1
+      payload:
+        $ref: ./schemas/message/event/reads-changed-v1.yaml

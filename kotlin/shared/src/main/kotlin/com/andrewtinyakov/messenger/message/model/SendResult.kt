@@ -1,13 +1,36 @@
 package com.andrewtinyakov.messenger.message.model
 
+import com.andrewtinyakov.messenger.generated.messaging.event.SendRejectionReason
+import com.andrewtinyakov.messenger.shared.id.ChatId
+import com.andrewtinyakov.messenger.shared.id.MessageId
+import com.andrewtinyakov.messenger.shared.id.RequestId
+import com.andrewtinyakov.messenger.shared.id.UserId
+
 data class SendResult(
-    val senderId: String,
-    val requestId: String,
-    val chatId: String?,
-    val recipientId: String?,
+    val senderId: UserId,
+    val requestId: RequestId,
+    val chatId: ChatId?,
+    val recipientId: UserId?,
     val fingerprint: String,
     val status: SendResultStatus,
-    val messageId: String?,
+    val messageId: MessageId?,
     val sequence: Long?,
-    val reason: String?,
-)
+    val reason: SendRejectionReason?,
+) {
+    init {
+        require(chatId != null || recipientId != null) { "Send result must have a target" }
+        when (status) {
+            SendResultStatus.SAVED -> {
+                require(messageId != null && sequence != null && sequence > 0 && reason == null) {
+                    "Saved result must have a message and positive sequence without a rejection reason"
+                }
+            }
+
+            SendResultStatus.REJECTED -> {
+                require(messageId == null && sequence == null && reason != null) {
+                    "Rejected result must have a rejection reason without a message or sequence"
+                }
+            }
+        }
+    }
+}

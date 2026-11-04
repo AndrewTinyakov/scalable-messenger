@@ -4,6 +4,7 @@
 package com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records;
 
 
+import com.andrewtinyakov.messenger.infrastructure.database.generated.enums.ChatKind;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Chats;
 
 import java.time.OffsetDateTime;
@@ -37,15 +38,15 @@ public class ChatsRecord extends UpdatableRecordImpl<ChatsRecord> {
     /**
      * Setter for <code>public.chats.kind</code>.
      */
-    public void setKind(String value) {
+    public void setKind(ChatKind value) {
         set(1, value);
     }
 
     /**
      * Getter for <code>public.chats.kind</code>.
      */
-    public String getKind() {
-        return (String) get(1);
+    public ChatKind getKind() {
+        return (ChatKind) get(1);
     }
 
     /**
@@ -132,6 +133,62 @@ public class ChatsRecord extends UpdatableRecordImpl<ChatsRecord> {
         return (String) get(7);
     }
 
+    /**
+     * Setter for <code>public.chats.deleted_at</code>.
+     */
+    public void setDeletedAt(OffsetDateTime value) {
+        set(8, value);
+    }
+
+    /**
+     * Getter for <code>public.chats.deleted_at</code>.
+     */
+    public OffsetDateTime getDeletedAt() {
+        return (OffsetDateTime) get(8);
+    }
+
+    /**
+     * Setter for <code>public.chats.deleted_by</code>.
+     */
+    public void setDeletedBy(String value) {
+        set(9, value);
+    }
+
+    /**
+     * Getter for <code>public.chats.deleted_by</code>.
+     */
+    public String getDeletedBy() {
+        return (String) get(9);
+    }
+
+    /**
+     * Setter for <code>public.chats.mutation_revision</code>.
+     */
+    public void setMutationRevision(Long value) {
+        set(10, value);
+    }
+
+    /**
+     * Getter for <code>public.chats.mutation_revision</code>.
+     */
+    public Long getMutationRevision() {
+        return (Long) get(10);
+    }
+
+    /**
+     * Setter for <code>public.chats.mutation_floor</code>.
+     */
+    public void setMutationFloor(Long value) {
+        set(11, value);
+    }
+
+    /**
+     * Getter for <code>public.chats.mutation_floor</code>.
+     */
+    public Long getMutationFloor() {
+        return (Long) get(11);
+    }
+
     // -------------------------------------------------------------------------
     // Primary key information
     // -------------------------------------------------------------------------
@@ -155,7 +212,7 @@ public class ChatsRecord extends UpdatableRecordImpl<ChatsRecord> {
     /**
      * Create a detached, initialised ChatsRecord
      */
-    public ChatsRecord(String id, String kind, String name, String directPairKey, Long nextSequence, Integer memberCount, OffsetDateTime createdAt, String ownerId) {
+    public ChatsRecord(String id, ChatKind kind, String name, String directPairKey, Long nextSequence, Integer memberCount, OffsetDateTime createdAt, String ownerId, OffsetDateTime deletedAt, String deletedBy, Long mutationRevision, Long mutationFloor) {
         super(Chats.CHATS);
 
         setId(id);
@@ -166,6 +223,10 @@ public class ChatsRecord extends UpdatableRecordImpl<ChatsRecord> {
         setMemberCount(memberCount);
         setCreatedAt(createdAt);
         setOwnerId(ownerId);
+        setDeletedAt(deletedAt);
+        setDeletedBy(deletedBy);
+        setMutationRevision(mutationRevision);
+        setMutationFloor(mutationFloor);
         resetTouchedOnNotNull();
     }
 }

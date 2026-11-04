@@ -2,109 +2,184 @@ package socket
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
+	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"messenger/ws/internal/monitoring"
+
 	"github.com/gorilla/websocket"
+
 	"messenger/ws/internal/grpcauth"
 	"messenger/ws/internal/protocol"
-	"messenger/ws/internal/redisroom"
+	"messenger/ws/internal/rabbitmq"
+	roomregistry "messenger/ws/internal/room"
+	"messenger/ws/internal/roomname"
 	"messenger/ws/internal/ticket"
 )
 
 type Connection struct {
+	opened            time.Time
+	lastPing          atomic.Int64
+	closeCode         int
+	closeReason       string
 	server            *Server
 	socket            *websocket.Conn
 	session           ticket.Identity
-	token             string
 	connectionLeaseID string
 	ctx               context.Context
 	cancel            context.CancelFunc
 	out               chan outbound
 	mu                sync.Mutex
 	queuedBytes       int
+	queuedItems       int
 	closed            bool
-	rooms             map[string]string
-	revocations       map[string]uint64
-	blocked           map[string]bool
-	leases            map[string]groupLease
-	leaseSerial       uint64
+	subscriptions     *chatSubscriptions
 	acks              *ackTracker
 	once              sync.Once
 	expiry            *time.Timer
+	commands          []queuedCommand
+	commandBytes      int
+	commandRunning    bool
+	commandScheduled  bool
+	nextLeaseRenewal  time.Time
+	presenceSerial    atomic.Uint64
+	presenceChatID    string
 }
 
 type outbound struct {
-	payload []byte
-	event   protocol.Event
+	frame         *protocol.EventFrame
+	groupGrant    *groupGrant
+	presenceWatch *presenceWatch
 }
 
-type groupLease struct {
-	serial uint64
-	timer  *time.Timer
-}
-
-func newConnection(server *Server, socket *websocket.Conn, session ticket.Identity, token string) *Connection {
-	ctx, cancel := context.WithCancel(server.ctx)
-	c := &Connection{server: server, socket: socket, session: session, token: token, ctx: ctx, cancel: cancel, out: make(chan outbound, server.config.QueueItems), rooms: make(map[string]string), revocations: make(map[string]uint64), blocked: make(map[string]bool), leases: make(map[string]groupLease), acks: newACKTracker(server.config.PendingACKLimit, server.config.ACKTimeout)}
+func newConnection(server *Server, socket *websocket.Conn, session ticket.Identity, leaseID string) *Connection {
+	server.startRuntime()
+	var ctx context.Context
+	var cancel context.CancelFunc
+	if session.ExpiresAt.IsZero() {
+		ctx, cancel = context.WithCancel(server.ctx)
+	} else {
+		ctx, cancel = context.WithDeadline(server.ctx, session.ExpiresAt)
+	}
+	c := &Connection{server: server, socket: socket, session: session, connectionLeaseID: leaseID, ctx: ctx, cancel: cancel, out: make(chan outbound, server.config.QueueItems), acks: newACKTracker(server.config.PendingACKLimit, server.config.ACKTimeout)}
+	c.opened = time.Now()
+	c.acks.metrics = server.metrics
+	c.subscriptions = newChatSubscriptions(c)
+	c.nextLeaseRenewal = time.Now().Add(jitteredFirstTick(30 * time.Second))
 	if !session.ExpiresAt.IsZero() {
+		c.mu.Lock()
 		c.expiry = time.AfterFunc(time.Until(session.ExpiresAt), c.Close)
+		c.mu.Unlock()
 	}
 	return c
 }
 
+func (c *Connection) admissionError() error {
+	if !c.session.ExpiresAt.IsZero() && !time.Now().Before(c.session.ExpiresAt) {
+		return grpcauth.ErrUnauthorized
+	}
+	return c.ctx.Err()
+}
+
 func (c *Connection) Enqueue(event protocol.Event) bool {
-	if event.Type == "session_revoked" {
-		if event.Room == "user:"+c.session.UserID && event.SessionID == c.session.SessionID {
+	frame, err := protocol.NewEventFrame(event)
+	if err != nil {
+		return false
+	}
+	return c.EnqueueFrame(frame)
+}
+
+func (c *Connection) EnqueueFrame(frame *protocol.EventFrame) bool {
+	return c.enqueueFrame(frame, nil)
+}
+
+func (c *Connection) enqueueFrame(frame *protocol.EventFrame, expected *groupGrant, presence ...*presenceWatch) bool {
+	var presenceWatch *presenceWatch
+	if len(presence) > 0 {
+		presenceWatch = presence[0]
+	}
+	terminalChat := frame.Event().Type == protocol.EventChatDeleted
+	event := frame.Event()
+	if expected != nil && (event.ChatID != expected.chatID || event.Room != roomname.Group(expected.chatID)) {
+		return true
+	}
+	if event.Type == protocol.EventSessionRevoked {
+		if event.Room == roomname.User(c.session.UserID) && event.SessionID == c.session.SessionID {
 			c.closeRevoked()
 		}
 		return true
 	}
-	if event.Type == "member_removed" {
-		room := c.revokeChat(event.ChatID)
-		if room != "" {
-			c.server.rooms.LeaveChat(c, room, event.ChatID)
+	if terminalChat {
+		if expected != nil {
+			c.mu.Lock()
+			current := c.subscriptions.groups[event.ChatID] == expected
+			c.mu.Unlock()
+			if !current {
+				return true
+			}
+		}
+		c.clearChatPresence(event.ChatID)
+		c.subscriptions.revokeGrant(event.ChatID, expected)
+		expected = nil
+	}
+	if event.Type == protocol.EventMemberRemoved {
+		if event.MemberID == c.session.UserID && (event.Room == roomname.User(c.session.UserID) || event.Room == roomname.Group(event.ChatID)) {
+			c.clearChatPresence(event.ChatID)
+			c.subscriptions.revokeGrant(event.ChatID, expected)
+		}
+		if roomname.IsGroup(event.Room) && event.MemberID == c.session.UserID {
+			return true
 		}
 	}
-	if event.Version == 0 {
-		event.Version = 1
-	}
-	data, err := json.Marshal(event)
-	if err != nil {
-		return false
-	}
 	c.mu.Lock()
-	if event.Room == "group:"+event.ChatID && c.blocked[event.ChatID] {
+	if expected != nil && c.subscriptions.groups[event.ChatID] != expected {
 		c.mu.Unlock()
 		return true
+	}
+	var grant *groupGrant
+	if roomname.IsGroup(event.Room) && !terminalChat {
+		grant = c.subscriptions.groupGrantLocked(event.ChatID)
+		if grant == nil || event.Room != roomname.Group(event.ChatID) {
+			if pending := c.subscriptions.groups[event.ChatID]; pending != nil && !pending.authorized && event.Type != protocol.EventSubscribed {
+				pending.missed = true
+			}
+			c.mu.Unlock()
+			return true
+		}
 	}
 	if c.closed {
 		c.mu.Unlock()
 		return false
 	}
-	if c.queuedBytes+len(data) > c.server.config.QueueBytes {
+	if c.queuedItems >= c.server.config.QueueItems || c.queuedBytes+frame.Size() > c.server.config.QueueBytes {
 		c.mu.Unlock()
 		c.server.metrics.SlowCloses.Inc()
+		c.noteClose(1006, "outbound_full")
 		c.Close()
 		return false
 	}
 	select {
-	case c.out <- outbound{payload: data, event: event}:
-		c.queuedBytes += len(data)
-		c.server.metrics.QueuedBytes.Add(float64(len(data)))
+	case c.out <- outbound{frame: frame, groupGrant: grant, presenceWatch: presenceWatch}:
+		c.queuedBytes += frame.Size()
+		c.queuedItems++
+		c.server.metrics.QueuedItems.Inc()
+		c.server.metrics.QueuedBytes.Add(float64(frame.Size()))
 		c.mu.Unlock()
 		return true
 	default:
 		c.mu.Unlock()
 		c.server.metrics.SlowCloses.Inc()
+		c.noteClose(1006, "outbound_full")
 		c.Close()
 		return false
 	}
 }
 
 func (c *Connection) closeRevoked() {
+	c.noteClose(4003, "session_revoked")
 	if c.socket != nil {
 		deadline := time.Now().Add(c.server.config.WriteTimeout)
 		_ = c.socket.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(4003, "session_revoked"), deadline)
@@ -112,100 +187,41 @@ func (c *Connection) closeRevoked() {
 	c.Close()
 }
 
-func (c *Connection) revokeChat(chatID string) string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.revocations[chatID]++
-	c.blocked[chatID] = true
-	room := c.rooms[chatID]
-	delete(c.rooms, chatID)
-	if lease, ok := c.leases[chatID]; ok {
-		lease.timer.Stop()
-		delete(c.leases, chatID)
-	}
-	return room
-}
-
-func (c *Connection) revocation(chatID string) uint64 {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.revocations[chatID]
-}
-
-func (c *Connection) allowGroupJoin(chatID string, revision uint64) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.revocations[chatID] != revision {
-		return false
-	}
-	delete(c.blocked, chatID)
-	return true
-}
-
-func (c *Connection) commitGroupJoin(chatID, room string, revision uint64) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.revocations[chatID] != revision || c.closed {
-		return false
-	}
-	c.rooms[chatID] = room
-	c.renewGroupLocked(chatID)
-	delete(c.revocations, chatID)
-	return true
-}
-
 func (c *Connection) Close() {
 	c.once.Do(func() {
+		c.acks.close()
+		c.mu.Lock()
 		if c.expiry != nil {
 			c.expiry.Stop()
 		}
-		c.mu.Lock()
-		c.closed = true
-		for _, lease := range c.leases {
-			lease.timer.Stop()
+		if c.closeReason == "" {
+			c.closeCode = 1006
+			c.closeReason = "transport_closed"
 		}
-		clear(c.leases)
+		c.server.metrics.Closes.WithLabelValues(monitoring.CloseCode(c.closeCode), c.closeReason).Inc()
+		if !c.opened.IsZero() {
+			c.server.metrics.ConnectionLifetime.Observe(time.Since(c.opened).Seconds())
+		}
+		c.closed = true
+		c.clearCommandsLocked()
+		grants := c.subscriptions.closeLocked()
 		c.server.metrics.QueuedBytes.Sub(float64(c.queuedBytes))
 		c.queuedBytes = 0
+		c.server.metrics.QueuedItems.Sub(float64(c.queuedItems))
+		c.queuedItems = 0
 		c.mu.Unlock()
 		c.cancel()
+		c.clearPresence()
 		if c.socket != nil {
 			_ = c.socket.Close()
 		}
 		c.server.rooms.LeaveAll(c)
+		for _, grant := range grants {
+			c.server.rooms.LeaveAll(grant)
+		}
 		c.server.remove(c)
 		c.server.releaseConnectionLease(c.session.UserID, c.connectionLeaseID)
 	})
-}
-
-func (c *Connection) renewConnectionLease() {
-	ticker := time.NewTicker(jitteredFirstTick(redisroom.ConnectionLeaseRenewInterval))
-	defer ticker.Stop()
-	steady := false
-	for {
-		select {
-		case <-c.ctx.Done():
-			return
-		case <-ticker.C:
-			if !steady {
-				ticker.Reset(redisroom.ConnectionLeaseRenewInterval)
-				steady = true
-			}
-			ctx, cancel := context.WithTimeout(c.ctx, c.server.config.APITimeout)
-			active, err := c.server.connectionLeases.RenewConnectionLease(ctx, c.session.UserID, c.connectionLeaseID)
-			cancel()
-			if c.ctx.Err() != nil {
-				return
-			}
-			if err != nil || !active {
-				if err != nil && c.server.logger != nil {
-					c.server.logger.Warn("renew connection lease", "error", err)
-				}
-				c.Close()
-				return
-			}
-		}
-	}
 }
 
 func (c *Connection) writeLoop() {
@@ -213,56 +229,82 @@ func (c *Connection) writeLoop() {
 	pingTicker := time.NewTicker(jitteredFirstTick(c.server.config.PingInterval))
 	defer pingTicker.Stop()
 	pingSteady := false
-	ackInterval := c.server.config.ACKTimeout / 4
-	if ackInterval > time.Second {
-		ackInterval = time.Second
-	}
-	if ackInterval < 10*time.Millisecond {
-		ackInterval = 10 * time.Millisecond
-	}
-	ackTicker := time.NewTicker(jitteredFirstTick(ackInterval))
-	defer ackTicker.Stop()
-	ackSteady := false
+	var ackTimer *time.Timer
+	defer func() {
+		if ackTimer != nil {
+			ackTimer.Stop()
+		}
+	}()
+	var armedDeadline time.Time
 	for {
-		if len(c.acks.expired(time.Now())) > 0 {
+		deadline := c.acks.nextDeadline()
+		if !deadline.IsZero() && !time.Now().Before(deadline) {
+			c.server.metrics.ACKTimeouts.Inc()
 			c.closeForRecovery()
 			return
 		}
+		var ackTick <-chan time.Time
+		if deadline.IsZero() {
+			if ackTimer != nil {
+				ackTimer.Stop()
+			}
+			armedDeadline = time.Time{}
+		} else {
+			if ackTimer == nil {
+				ackTimer = time.NewTimer(time.Until(deadline))
+				armedDeadline = deadline
+			}
+			if !deadline.Equal(armedDeadline) {
+				ackTimer.Reset(time.Until(deadline))
+				armedDeadline = deadline
+			}
+			ackTick = ackTimer.C
+		}
 		select {
 		case <-c.ctx.Done():
+			c.noteClose(1001, "context_done")
 			return
 		case next := <-c.out:
 			c.mu.Lock()
 			if !c.closed {
-				c.queuedBytes -= len(next.payload)
-				c.server.metrics.QueuedBytes.Sub(float64(len(next.payload)))
+				c.queuedBytes -= next.frame.Size()
+				c.queuedItems--
+				c.server.metrics.QueuedItems.Dec()
+				c.server.metrics.QueuedBytes.Sub(float64(next.frame.Size()))
 			}
+			allowed := !c.closed && (next.groupGrant == nil || next.groupGrant == c.subscriptions.groupGrantLocked(next.frame.Event().ChatID))
 			c.mu.Unlock()
-			if err := c.acks.markSent(next.event, time.Now()); err != nil {
+			if next.presenceWatch != nil && (c.server.presence == nil || !c.server.presence.current(c, next.presenceWatch)) {
+				allowed = false
+			}
+			if !allowed {
+				continue
+			}
+			if err := c.acks.markSent(next.frame.Event(), time.Now()); err != nil {
 				c.closeForRecovery()
 				return
 			}
 			if err := c.socket.SetWriteDeadline(time.Now().Add(c.server.config.WriteTimeout)); err != nil {
 				return
 			}
-			if err := c.socket.WriteMessage(websocket.TextMessage, next.payload); err != nil {
+			if err := c.socket.WriteMessage(websocket.TextMessage, next.frame.Payload()); err != nil {
+				c.noteClose(1006, "write_error")
 				return
 			}
-		case <-ackTicker.C:
-			if !ackSteady {
-				ackTicker.Reset(ackInterval)
-				ackSteady = true
-			}
-			if len(c.acks.expired(time.Now())) > 0 {
-				c.closeForRecovery()
-				return
-			}
+			c.server.metrics.ObserveFeatureDelivery(next.frame.Event(), time.Now())
+			c.server.metrics.Messages.WithLabelValues("outbound").Inc()
+			c.server.metrics.MessageBytes.WithLabelValues("outbound").Add(float64(next.frame.Size()))
+		case <-ackTick:
+			armedDeadline = time.Time{}
+		case <-c.acks.changed:
 		case <-pingTicker.C:
 			if !pingSteady {
 				pingTicker.Reset(c.server.config.PingInterval)
 				pingSteady = true
 			}
-			if err := c.socket.WriteControl(websocket.PingMessage, nil, time.Now().Add(c.server.config.WriteTimeout)); err != nil {
+			ping := time.Now().UnixNano()
+			c.lastPing.Store(ping)
+			if err := c.socket.WriteControl(websocket.PingMessage, []byte(strconv.FormatInt(ping, 10)), time.Now().Add(c.server.config.WriteTimeout)); err != nil {
 				return
 			}
 		}
@@ -270,6 +312,7 @@ func (c *Connection) writeLoop() {
 }
 
 func (c *Connection) closeForRecovery() {
+	c.noteClose(4001, "recovery_required")
 	c.server.metrics.RecoveryCloses.Inc()
 	deadline := time.Now().Add(c.server.config.WriteTimeout)
 	_ = c.socket.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(4001, "recovery_required"), deadline)
@@ -279,97 +322,78 @@ func (c *Connection) readLoop() {
 	defer c.Close()
 	c.socket.SetReadLimit(c.server.config.MaxFrameBytes)
 	_ = c.socket.SetReadDeadline(time.Now().Add(c.server.config.PongTimeout))
-	c.socket.SetPongHandler(func(string) error { return c.socket.SetReadDeadline(time.Now().Add(c.server.config.PongTimeout)) })
+	c.socket.SetPongHandler(func(payload string) error {
+		if sent, err := strconv.ParseInt(payload, 10, 64); err == nil && sent == c.lastPing.Load() && sent > 0 {
+			c.server.metrics.PingRTT.Observe(max(0, time.Since(time.Unix(0, sent)).Seconds()))
+		}
+		return c.socket.SetReadDeadline(time.Now().Add(c.server.config.PongTimeout))
+	})
 	for {
 		kind, data, err := c.socket.ReadMessage()
 		if err != nil {
+			var closed *websocket.CloseError
+			if errors.As(err, &closed) {
+				c.noteClose(closed.Code, "peer_close")
+			} else {
+				c.noteClose(1006, "read_error")
+			}
 			return
 		}
+		c.server.metrics.Messages.WithLabelValues("inbound").Inc()
+		c.server.metrics.MessageBytes.WithLabelValues("inbound").Add(float64(len(data)))
 		if kind != websocket.TextMessage {
-			c.error("invalid_frame", "")
+			c.error(protocol.ErrorInvalidFrame, "")
 			continue
 		}
 		frame, err := protocol.DecodeFrame(data)
 		if err != nil {
-			c.error("invalid_frame", frame.RequestID)
+			c.error(protocol.ErrorInvalidFrame, frame.RequestID)
 			continue
 		}
-		if err := c.handle(frame); err != nil {
-			code := "dependency_unavailable"
-			if errors.Is(err, grpcauth.ErrUnauthorized) {
-				code = "unauthorized"
-			}
-			if errors.Is(err, errRateLimited) {
-				code = "rate_limited"
-			}
-			if errors.Is(err, errRoomLimit) {
-				code = "room_limit"
-			}
-			if errors.Is(err, errInvalidACK) {
-				code = "invalid_frame"
-			}
-			c.error(code, frame.RequestID)
+		switch frame.Type {
+		case protocol.FrameApplied, protocol.FrameDismissed, protocol.FrameReceivedMessage:
+			err = c.handle(frame)
+		default:
+			err = c.enqueueCommand(frame, len(data))
+		}
+		if err != nil {
+			c.handleError(err, frame.RequestID)
 		}
 	}
 }
 
-func (c *Connection) error(code, requestID string) {
-	c.server.metrics.FrameErrors.WithLabelValues(code).Inc()
-	c.Enqueue(protocol.Event{Type: "error", Version: 1, Code: code, RequestID: requestID})
+func (c *Connection) handleError(err error, requestID string) {
+	code := protocol.ErrorDependencyUnavailable
+	if errors.Is(err, errPublishCommand) {
+		code = protocol.ErrorPublishFailed
+		if errors.Is(err, rabbitmq.ErrUnknownOutcome) {
+			code = protocol.ErrorPublishUnknown
+		}
+	}
+	if errors.Is(err, grpcauth.ErrUnauthorized) {
+		code = protocol.ErrorUnauthorized
+	}
+	if errors.Is(err, errRateLimited) || errors.Is(err, errCommandCapacity) {
+		code = protocol.ErrorRateLimited
+	}
+	if errors.Is(err, errRoomLimit) || errors.Is(err, roomregistry.ErrCapacity) {
+		code = protocol.ErrorRoomLimit
+	}
+	if errors.Is(err, errInvalidACK) {
+		code = protocol.ErrorInvalidFrame
+	}
+	c.error(code, requestID)
 }
 
-func (c *Connection) setRoom(chatID, room string) {
+func (c *Connection) error(code protocol.ErrorCode, requestID string) {
+	c.server.metrics.RecordFrameError(code)
+	c.Enqueue(protocol.Event{Type: protocol.EventError, Version: 1, Code: code, RequestID: requestID})
+}
+
+func (c *Connection) noteClose(code int, reason string) {
 	c.mu.Lock()
-	c.rooms[chatID] = room
+	if c.closeReason == "" {
+		c.closeCode, c.closeReason = code, reason
+	}
 	c.mu.Unlock()
-}
-func (c *Connection) room(chatID string) string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.rooms[chatID]
-}
-func (c *Connection) removeRoom(chatID string) string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	room := c.rooms[chatID]
-	delete(c.rooms, chatID)
-	if lease, ok := c.leases[chatID]; ok {
-		lease.timer.Stop()
-		delete(c.leases, chatID)
-	}
-	return room
-}
-func (c *Connection) roomCount() int { c.mu.Lock(); defer c.mu.Unlock(); return len(c.rooms) }
-
-func (c *Connection) renewGroup(chatID string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.renewGroupLocked(chatID)
-}
-
-func (c *Connection) renewGroupLocked(chatID string) {
-	if prior, ok := c.leases[chatID]; ok {
-		prior.timer.Stop()
-	}
-	c.leaseSerial++
-	serial := c.leaseSerial
-	c.leases[chatID] = groupLease{serial: serial, timer: time.AfterFunc(c.server.config.GroupLease, func() { c.expireGroup(chatID, serial) })}
-}
-
-func (c *Connection) expireGroup(chatID string, serial uint64) {
-	c.mu.Lock()
-	lease, ok := c.leases[chatID]
-	if !ok || lease.serial != serial || c.closed {
-		c.mu.Unlock()
-		return
-	}
-	room := c.rooms[chatID]
-	delete(c.leases, chatID)
-	delete(c.rooms, chatID)
-	c.mu.Unlock()
-	if room != "" {
-		c.server.rooms.LeaveChat(c, room, chatID)
-	}
-	c.server.metrics.GroupLeaseExpired.Inc()
-	c.Enqueue(protocol.Event{Type: "subscription_expired", Version: 1, ChatID: chatID})
 }

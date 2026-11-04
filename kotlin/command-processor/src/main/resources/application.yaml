@@ -8,6 +8,8 @@ spring:
       name: ${METRICS_USERNAME:metrics}
       password: ${METRICS_PASSWORD:${random.uuid}}
   jackson:
+    read:
+      strict-duplicate-detection: true
     deserialization:
       accept-float-as-int: false
       fail-on-unknown-properties: true
@@ -20,6 +22,9 @@ spring:
     url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/messenger}
     username: ${DATABASE_USER:messenger}
     password: ${DATABASE_PASSWORD:messenger}
+    hikari:
+      data-source-properties:
+        ApplicationName: messenger-command-processor
   flyway:
     enabled: true
   jooq:
@@ -32,10 +37,14 @@ spring:
     listener:
       simple:
         acknowledge-mode: manual
-        prefetch: 20
+        concurrency: ${MESSENGER_SEND_CONSUMERS:1}
+        prefetch: ${MESSENGER_SEND_PREFETCH:20}
 management:
   metrics:
     distribution:
+      slo:
+        hikaricp.connections.acquire: 1ms,5ms,10ms,25ms,50ms,100ms,250ms,500ms,1s,2500ms,5s,10s
+        hikaricp.connections.usage: 1ms,5ms,10ms,25ms,50ms,100ms,250ms,500ms,1s,2500ms,5s,10s
       percentiles-histogram:
         messenger.command.processing: true
         messenger.command.queue.delay: true
@@ -43,3 +52,6 @@ management:
     web:
       exposure:
         include: health,prometheus
+messenger:
+  messaging:
+    send-batch-size: ${MESSENGER_SEND_BATCH_SIZE:16}

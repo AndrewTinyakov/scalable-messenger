@@ -104,6 +104,62 @@ public class MessagesRecord extends UpdatableRecordImpl<MessagesRecord> {
         return (OffsetDateTime) get(5);
     }
 
+    /**
+     * Setter for <code>public.messages.message_version</code>.
+     */
+    public void setMessageVersion(Long value) {
+        set(6, value);
+    }
+
+    /**
+     * Getter for <code>public.messages.message_version</code>.
+     */
+    public Long getMessageVersion() {
+        return (Long) get(6);
+    }
+
+    /**
+     * Setter for <code>public.messages.edited_at</code>.
+     */
+    public void setEditedAt(OffsetDateTime value) {
+        set(7, value);
+    }
+
+    /**
+     * Getter for <code>public.messages.edited_at</code>.
+     */
+    public OffsetDateTime getEditedAt() {
+        return (OffsetDateTime) get(7);
+    }
+
+    /**
+     * Setter for <code>public.messages.deleted_at</code>.
+     */
+    public void setDeletedAt(OffsetDateTime value) {
+        set(8, value);
+    }
+
+    /**
+     * Getter for <code>public.messages.deleted_at</code>.
+     */
+    public OffsetDateTime getDeletedAt() {
+        return (OffsetDateTime) get(8);
+    }
+
+    /**
+     * Setter for <code>public.messages.reply_to_message_id</code>.
+     */
+    public void setReplyToMessageId(String value) {
+        set(9, value);
+    }
+
+    /**
+     * Getter for <code>public.messages.reply_to_message_id</code>.
+     */
+    public String getReplyToMessageId() {
+        return (String) get(9);
+    }
+
     // -------------------------------------------------------------------------
     // Primary key information
     // -------------------------------------------------------------------------
@@ -127,7 +183,7 @@ public class MessagesRecord extends UpdatableRecordImpl<MessagesRecord> {
     /**
      * Create a detached, initialised MessagesRecord
      */
-    public MessagesRecord(String id, String chatId, Long sequence, String senderId, String body, OffsetDateTime createdAt) {
+    public MessagesRecord(String id, String chatId, Long sequence, String senderId, String body, OffsetDateTime createdAt, Long messageVersion, OffsetDateTime editedAt, OffsetDateTime deletedAt, String replyToMessageId) {
         super(Messages.MESSAGES);
 
         setId(id);
@@ -136,6 +192,10 @@ public class MessagesRecord extends UpdatableRecordImpl<MessagesRecord> {
         setSenderId(senderId);
         setBody(body);
         setCreatedAt(createdAt);
+        setMessageVersion(messageVersion);
+        setEditedAt(editedAt);
+        setDeletedAt(deletedAt);
+        setReplyToMessageId(replyToMessageId);
         resetTouchedOnNotNull();
     }
 }

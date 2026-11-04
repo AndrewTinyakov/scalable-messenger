@@ -6,7 +6,11 @@ package com.andrewtinyakov.messenger.infrastructure.database.generated.tables;
 
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Keys;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Public;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.enums.ChatKind;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.ChatMembers.ChatMembersPath;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.ChatReadNotifications.ChatReadNotificationsPath;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.ChatReadProgress.ChatReadProgressPath;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.MessageChanges.MessageChangesPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Messages.MessagesPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Users.UsersPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.ChatsRecord;
@@ -69,7 +73,7 @@ public class Chats extends TableImpl<ChatsRecord> {
     /**
      * The column <code>public.chats.kind</code>.
      */
-    public final TableField<ChatsRecord, String> KIND = createField(DSL.name("kind"), SQLDataType.VARCHAR(8).nullable(false), this, "");
+    public final TableField<ChatsRecord, ChatKind> KIND = createField(DSL.name("kind"), SQLDataType.VARCHAR.nullable(false).asEnumDataType(ChatKind.class), this, "");
 
     /**
      * The column <code>public.chats.name</code>.
@@ -100,6 +104,26 @@ public class Chats extends TableImpl<ChatsRecord> {
      * The column <code>public.chats.owner_id</code>.
      */
     public final TableField<ChatsRecord, String> OWNER_ID = createField(DSL.name("owner_id"), SQLDataType.VARCHAR(26), this, "");
+
+    /**
+     * The column <code>public.chats.deleted_at</code>.
+     */
+    public final TableField<ChatsRecord, OffsetDateTime> DELETED_AT = createField(DSL.name("deleted_at"), SQLDataType.TIMESTAMPWITHTIMEZONE(6), this, "");
+
+    /**
+     * The column <code>public.chats.deleted_by</code>.
+     */
+    public final TableField<ChatsRecord, String> DELETED_BY = createField(DSL.name("deleted_by"), SQLDataType.VARCHAR(26), this, "");
+
+    /**
+     * The column <code>public.chats.mutation_revision</code>.
+     */
+    public final TableField<ChatsRecord, Long> MUTATION_REVISION = createField(DSL.name("mutation_revision"), SQLDataType.BIGINT.nullable(false).defaultValue(DSL.field(DSL.raw("0"), SQLDataType.BIGINT)), this, "");
+
+    /**
+     * The column <code>public.chats.mutation_floor</code>.
+     */
+    public final TableField<ChatsRecord, Long> MUTATION_FLOOR = createField(DSL.name("mutation_floor"), SQLDataType.BIGINT.nullable(false).defaultValue(DSL.field(DSL.raw("0"), SQLDataType.BIGINT)), this, "");
 
     private Chats(Name alias, Table<ChatsRecord> aliased) {
         this(alias, aliased, (Field<?>[]) null, null);
@@ -180,19 +204,33 @@ public class Chats extends TableImpl<ChatsRecord> {
 
     @Override
     public List<ForeignKey<ChatsRecord, ?>> getReferences() {
-        return Arrays.asList(Keys.CHATS__CHATS_OWNER_ID_FKEY);
+        return Arrays.asList(Keys.CHATS__CHATS_DELETED_BY_FKEY, Keys.CHATS__CHATS_OWNER_ID_FKEY);
     }
 
-    private transient UsersPath _users;
+    private transient UsersPath _chatsDeletedByFkey;
 
     /**
-     * Get the implicit join path to the <code>public.users</code> table.
+     * Get the implicit join path to the <code>public.users</code> table, via
+     * the <code>chats_deleted_by_fkey</code> key.
      */
-    public UsersPath users() {
-        if (_users == null)
-            _users = new UsersPath(this, Keys.CHATS__CHATS_OWNER_ID_FKEY, null);
+    public UsersPath chatsDeletedByFkey() {
+        if (_chatsDeletedByFkey == null)
+            _chatsDeletedByFkey = new UsersPath(this, Keys.CHATS__CHATS_DELETED_BY_FKEY, null);
 
-        return _users;
+        return _chatsDeletedByFkey;
+    }
+
+    private transient UsersPath _chatsOwnerIdFkey;
+
+    /**
+     * Get the implicit join path to the <code>public.users</code> table, via
+     * the <code>chats_owner_id_fkey</code> key.
+     */
+    public UsersPath chatsOwnerIdFkey() {
+        if (_chatsOwnerIdFkey == null)
+            _chatsOwnerIdFkey = new UsersPath(this, Keys.CHATS__CHATS_OWNER_ID_FKEY, null);
+
+        return _chatsOwnerIdFkey;
     }
 
     private transient ChatMembersPath _chatMembers;
@@ -208,6 +246,45 @@ public class Chats extends TableImpl<ChatsRecord> {
         return _chatMembers;
     }
 
+    private transient ChatReadNotificationsPath _chatReadNotifications;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.chat_read_notifications</code> table
+     */
+    public ChatReadNotificationsPath chatReadNotifications() {
+        if (_chatReadNotifications == null)
+            _chatReadNotifications = new ChatReadNotificationsPath(this, null, Keys.CHAT_READ_NOTIFICATIONS__CHAT_READ_NOTIFICATIONS_CHAT_ID_FKEY.getInverseKey());
+
+        return _chatReadNotifications;
+    }
+
+    private transient ChatReadProgressPath _chatReadProgress;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.chat_read_progress</code> table
+     */
+    public ChatReadProgressPath chatReadProgress() {
+        if (_chatReadProgress == null)
+            _chatReadProgress = new ChatReadProgressPath(this, null, Keys.CHAT_READ_PROGRESS__CHAT_READ_PROGRESS_CHAT_ID_FKEY.getInverseKey());
+
+        return _chatReadProgress;
+    }
+
+    private transient MessageChangesPath _messageChanges;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.message_changes</code> table
+     */
+    public MessageChangesPath messageChanges() {
+        if (_messageChanges == null)
+            _messageChanges = new MessageChangesPath(this, null, Keys.MESSAGE_CHANGES__MESSAGE_CHANGES_CHAT_ID_FKEY.getInverseKey());
+
+        return _messageChanges;
+    }
+
     private transient MessagesPath _messages;
 
     /**
@@ -221,12 +298,29 @@ public class Chats extends TableImpl<ChatsRecord> {
         return _messages;
     }
 
+    /**
+     * Get the implicit many-to-many join path to the <code>public.users</code>
+     * table, via the <code>chat_members_user_id_fkey</code> key
+     */
+    public UsersPath chatMembersUserIdFkey() {
+        return chatMembers().users();
+    }
+
+    /**
+     * Get the implicit many-to-many join path to the <code>public.users</code>
+     * table, via the <code>chat_read_progress_user_id_fkey</code> key
+     */
+    public UsersPath chatReadProgressUserIdFkey() {
+        return chatReadProgress().users();
+    }
+
     @Override
     public List<Check<ChatsRecord>> getChecks() {
         return Arrays.asList(
-            Internal.createCheck(this, DSL.name("chats_kind_check"), "(((kind)::text = ANY ((ARRAY['direct'::character varying, 'group'::character varying])::text[])))", true),
-            Internal.createCheck(this, DSL.name("chats_kind_shape"), "(((((kind)::text = 'direct'::text) AND (name IS NULL) AND (direct_pair_key IS NOT NULL)) OR (((kind)::text = 'group'::text) AND (name IS NOT NULL) AND (direct_pair_key IS NULL))))", true),
+            Internal.createCheck(this, DSL.name("chats_kind_shape"), "((((kind = 'DIRECT'::chat_kind) AND (name IS NULL) AND ((direct_pair_key IS NOT NULL) OR (deleted_at IS NOT NULL))) OR ((kind = 'GROUP'::chat_kind) AND (name IS NOT NULL) AND (direct_pair_key IS NULL))))", true),
             Internal.createCheck(this, DSL.name("chats_member_count_check"), "(((member_count >= 0) AND (member_count <= 100000)))", true),
+            Internal.createCheck(this, DSL.name("chats_mutation_floor_check"), "((mutation_floor >= 0))", true),
+            Internal.createCheck(this, DSL.name("chats_mutation_revision_check"), "((mutation_revision >= 0))", true),
             Internal.createCheck(this, DSL.name("chats_next_sequence_check"), "((next_sequence > 0))", true)
         );
     }

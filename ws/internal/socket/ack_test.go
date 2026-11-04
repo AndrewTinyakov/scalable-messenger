@@ -6,6 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
+
+	"messenger/ws/internal/monitoring"
 	"messenger/ws/internal/protocol"
 )
 
@@ -145,5 +149,87 @@ func TestACKTrackerBoundsClientSuppliedChatPositions(t *testing.T) {
 	}
 	if err := tracker.dismiss("chat-0", "2"); err != nil {
 		t.Fatalf("chat reuse after limit: %v", err)
+	}
+}
+
+func TestACKDeadlineFollowsOutstandingReceipts(t *testing.T) {
+	tracker := newACKTracker(4, time.Minute)
+	start := time.Now()
+	if deadline := tracker.nextDeadline(); !deadline.IsZero() {
+		t.Fatal("idle tracker has a deadline")
+	}
+	for index, chat := range []string{"first", "second"} {
+		if err := tracker.markSent(savedEvent(chat, "1"), start.Add(time.Duration(index)*time.Second)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tracker.receivedMessage("first", "1"); err != nil {
+		t.Fatal(err)
+	}
+	if deadline := tracker.nextDeadline(); !deadline.Equal(start.Add(time.Minute + time.Second)) {
+		t.Fatalf("deadline = %s", deadline)
+	}
+	if err := tracker.apply("second", "1"); err != nil {
+		t.Fatal(err)
+	}
+	if deadline := tracker.nextDeadline(); !deadline.IsZero() {
+		t.Fatal("fully acknowledged tracker has a deadline")
+	}
+}
+
+func TestACKMetricsDistinguishApplicationFromReceiptAndReleaseOnClose(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	metrics := monitoring.New(registry)
+	tracker := newACKTracker(8, time.Second)
+	tracker.metrics = metrics
+	value := func() float64 {
+		m := &dto.Metric{}
+		if err := metrics.PendingACKs.Write(m); err != nil {
+			t.Fatal(err)
+		}
+		return m.GetGauge().GetValue()
+	}
+	now := time.Now()
+	for _, sequence := range []string{"1", "2", "3"} {
+		event := savedEvent("chat", sequence)
+		event.CreatedAt = now.Add(-time.Second).Format(time.RFC3339Nano)
+		if err := tracker.markSent(event, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := value(); got != 3 {
+		t.Fatalf("pending %v", got)
+	}
+	if err := tracker.receivedMessage("chat", "1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.apply("chat", "2"); err != nil {
+		t.Fatal(err)
+	}
+	if got := value(); got != 1 {
+		t.Fatalf("pending after receipt/apply %v", got)
+	}
+	families, err := registry.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := uint64(0)
+	for _, family := range families {
+		if family.GetName() == "messenger_ws_applied_latency_seconds" {
+			for _, metric := range family.Metric {
+				count += metric.GetHistogram().GetSampleCount()
+			}
+		}
+	}
+	if count != 2 {
+		t.Fatalf("want one saved and one offered observation, got %d", count)
+	}
+	tracker.close()
+	tracker.close()
+	if got := value(); got != 0 {
+		t.Fatalf("pending after close %v", got)
+	}
+	if err := tracker.markSent(savedEvent("chat", "4"), now); err == nil {
+		t.Fatal("closed tracker admitted notification")
 	}
 }

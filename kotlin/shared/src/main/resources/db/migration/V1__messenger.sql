@@ -1,10 +1,27 @@
+CREATE SCHEMA IF NOT EXISTS extensions;
+CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA extensions;
+
+CREATE TYPE chat_kind AS ENUM ('DIRECT', 'GROUP');
+CREATE TYPE send_result_status AS ENUM ('SAVED', 'REJECTED');
+CREATE TYPE send_rejection_reason AS ENUM (
+    'NOT_A_MEMBER',
+    'CHAT_NOT_FOUND',
+    'RECIPIENT_NOT_FOUND',
+    'INVALID_RECIPIENT',
+    'EMPTY_BODY',
+    'BODY_TOO_LONG',
+    'REQUEST_ID_CONFLICT',
+    'PROCESSING_FAILED'
+);
+
 CREATE TABLE users (
     id varchar(26) PRIMARY KEY,
     username varchar(40) NOT NULL,
-    password_hash varchar(100) NOT NULL,
+    password_hash text NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT users_username_unique UNIQUE (username)
 );
+CREATE INDEX users_username_trgm_idx ON users USING gin (username extensions.gin_trgm_ops);
 CREATE TABLE sessions (
     token_hash char(64) PRIMARY KEY,
     user_id varchar(26) NOT NULL REFERENCES users(id),
@@ -15,7 +32,7 @@ CREATE TABLE sessions (
 CREATE INDEX sessions_user_idx ON sessions(user_id);
 CREATE TABLE chats (
     id varchar(26) PRIMARY KEY,
-    kind varchar(8) NOT NULL CHECK (kind IN ('direct','group')),
+    kind chat_kind NOT NULL,
     name varchar(80),
     direct_pair_key varchar(53) UNIQUE,
     next_sequence bigint NOT NULL DEFAULT 1 CHECK (next_sequence > 0),
@@ -23,8 +40,8 @@ CREATE TABLE chats (
     created_at timestamptz NOT NULL DEFAULT now(),
     owner_id varchar(26) REFERENCES users(id),
     CONSTRAINT chats_kind_shape CHECK (
-        (kind='direct' AND name IS NULL AND direct_pair_key IS NOT NULL) OR
-        (kind='group' AND name IS NOT NULL AND direct_pair_key IS NULL)
+        (kind='DIRECT' AND name IS NULL AND direct_pair_key IS NOT NULL) OR
+        (kind='GROUP' AND name IS NOT NULL AND direct_pair_key IS NULL)
     )
 );
 CREATE TABLE chat_members (
@@ -40,16 +57,16 @@ CREATE TABLE send_requests (
     sender_id varchar(26) NOT NULL,
     request_id varchar(26) NOT NULL,
     fingerprint char(64) NOT NULL,
-    status varchar(8) NOT NULL CHECK (status IN ('saved','rejected')),
+    status send_result_status NOT NULL,
     message_id varchar(26),
     sequence bigint,
-    reason varchar(64),
+    reason send_rejection_reason,
     created_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (sender_id,request_id),
     CONSTRAINT send_requests_target_shape CHECK (chat_id IS NOT NULL OR recipient_id IS NOT NULL),
     CONSTRAINT send_requests_result_shape CHECK (
-        (status='saved' AND message_id IS NOT NULL AND sequence IS NOT NULL AND reason IS NULL) OR
-        (status='rejected' AND message_id IS NULL AND sequence IS NULL AND reason IS NOT NULL)
+        (status='SAVED' AND message_id IS NOT NULL AND sequence IS NOT NULL AND reason IS NULL) OR
+        (status='REJECTED' AND message_id IS NULL AND sequence IS NULL AND reason IS NOT NULL)
     )
 );
 CREATE TABLE messages (

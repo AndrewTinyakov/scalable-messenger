@@ -3,7 +3,6 @@ package com.andrewtinyakov.messenger.infrastructure.outbox
 import jakarta.annotation.PreDestroy
 import org.postgresql.PGConnection
 import org.slf4j.LoggerFactory
-import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.context.event.ApplicationReadyEvent
 import org.springframework.context.event.EventListener
 import org.springframework.stereotype.Component
@@ -13,8 +12,8 @@ import javax.sql.DataSource
 @Component
 class OutboxPublisher(
     private val dataSource: DataSource,
-    private val outbox: OutboxPublicationService,
-    @Value("\${messenger.publisher.poll-ms:1000}") private val pollMs: Int,
+    private val outboxPublicationService: OutboxPublicationService,
+    private val properties: PublisherProperties,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -25,7 +24,6 @@ class OutboxPublisher(
 
     @EventListener(ApplicationReadyEvent::class)
     fun start() {
-        require(pollMs in 100..60000)
         running = true
         worker = Thread.ofPlatform().name("outbox-publisher").start { run() }
     }
@@ -49,10 +47,10 @@ class OutboxPublisher(
                     while (running) {
                         var published: Int
                         do {
-                            published = outbox.publishBatch()
                             postgres.getNotifications()
+                            published = outboxPublicationService.publishBatch()
                         } while (running && published > 0)
-                        if (running) postgres.getNotifications(pollMs)
+                        if (running) postgres.getNotifications(properties.pollMs)
                     }
                 }
             } catch (error: InterruptedException) {
@@ -62,7 +60,7 @@ class OutboxPublisher(
                 if (!running) return
                 log.error("Outbox publisher connection failed", error)
                 try {
-                    Thread.sleep(pollMs.toLong())
+                    Thread.sleep(properties.pollMs.toLong())
                 } catch (interrupted: InterruptedException) {
                     Thread.currentThread().interrupt()
                     return

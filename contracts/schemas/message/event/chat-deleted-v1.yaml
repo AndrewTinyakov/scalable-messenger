@@ -1,0 +1,23 @@
+$schema: http://json-schema.org/draft-07/schema#
+title: ChatDeletedEventV1
+type: object
+additionalProperties: false
+required:
+  - type
+  - version
+  - eventId
+  - room
+  - chatId
+properties:
+  type:
+    const: chat_deleted
+  version:
+    type: integer
+    const: 1
+  eventId: &a1
+    type: string
+    pattern: ^[0-7][0-9A-HJKMNP-TV-Z]{25}$
+  room:
+    type: string
+    pattern: ^(user|group):[0-7][0-9A-HJKMNP-TV-Z]{25}$
+  chatId: *a1

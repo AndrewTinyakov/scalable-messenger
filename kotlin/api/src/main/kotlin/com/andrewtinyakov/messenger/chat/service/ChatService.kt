@@ -1,5 +1,6 @@
 package com.andrewtinyakov.messenger.chat.service
 
+import com.andrewtinyakov.messenger.chat.model.Chat
 import com.andrewtinyakov.messenger.chat.model.ChatKind
 import com.andrewtinyakov.messenger.chat.repository.ChatRepository
 import com.andrewtinyakov.messenger.chat.web.payload.AddGroupMembersRequest
@@ -8,15 +9,22 @@ import com.andrewtinyakov.messenger.chat.web.payload.ChatResponse
 import com.andrewtinyakov.messenger.chat.web.payload.CreateGroupChatRequest
 import com.andrewtinyakov.messenger.chat.web.payload.toResponse
 import com.andrewtinyakov.messenger.generated.messaging.event.ChatCreatedEventV1
+import com.andrewtinyakov.messenger.generated.messaging.event.MembershipChangedEventV1
+import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseTransaction
+import com.andrewtinyakov.messenger.infrastructure.database.observability.observedExecute
+import com.andrewtinyakov.messenger.infrastructure.database.observability.observedExecuteWithoutResult
 import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxMessage
-import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxWriter
+import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxRepository
+import com.andrewtinyakov.messenger.infrastructure.redis.RoomAddress
+import com.andrewtinyakov.messenger.shared.id.ChatId
+import com.andrewtinyakov.messenger.shared.id.EventId
+import com.andrewtinyakov.messenger.shared.id.UserId
 import com.andrewtinyakov.messenger.shared.id.newId
 import com.andrewtinyakov.messenger.shared.id.requireId
 import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
 import com.andrewtinyakov.messenger.shared.web.ApiException
 import com.andrewtinyakov.messenger.shared.web.badRequest
 import com.andrewtinyakov.messenger.shared.web.notFound
-import com.andrewtinyakov.messenger.user.repository.UserRepository
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
@@ -28,112 +36,235 @@ import java.util.Base64
 @Service
 class ChatService(
     private val repository: ChatRepository,
-    private val users: UserRepository,
-    private val membership: ChatMembershipService,
-    private val outbox: OutboxWriter,
+    private val outboxRepository: OutboxRepository,
     private val mapper: ObjectMapper,
     private val tx: TransactionTemplate,
 ) {
-    fun list(userId: String, cursor: String?, limit: Int): ChatPageResponse {
-        if (limit !in 1..100) badRequest(ApiErrorCode.INVALID_LIMIT, "limit must be 1 to 100")
+    fun list(
+        userId: UserId,
+        cursor: String?,
+        limit: Int,
+    ): ChatPageResponse {
+        if (limit !in 1..100) {
+            badRequest(
+                ApiErrorCode.INVALID_LIMIT,
+                "limit must be 1 to 100",
+            )
+        }
         val position = cursor?.let(::decodeCursor)
-        val fetched = repository.findByMember(userId, position?.first, position?.second, limit + 1)
+        val fetched = repository.findByMember(
+            userId = userId,
+            beforeJoinedAt = position?.first,
+            beforeChatId = position?.second,
+            limit = limit + 1,
+        )
         val page = fetched.take(limit)
-        if (page.isEmpty()) return ChatPageResponse(emptyList(), null)
+        if (page.isEmpty()) {
+            return ChatPageResponse(
+                chats = emptyList(),
+                nextCursor = null,
+            )
+        }
         val chats = page.map { it.chat }
-        val members = repository.findMembersByChatIds(chats.filter { it.kind == ChatKind.DIRECT }.map { it.id })
-        val nextCursor = page.lastOrNull()?.takeIf { fetched.size > limit }?.let { encodeCursor(it.joinedAt, it.chat.id) }
-        return ChatPageResponse(page.map { it.chat.toResponse(members[it.chat.id].orEmpty(), it.memberCount) }, nextCursor)
+        val members = repository.findMembersByChatIds(
+            chats.filter { it.kind == ChatKind.DIRECT }
+                .map { it.id },
+        )
+        val nextCursor = page.lastOrNull()
+            ?.takeIf {
+                fetched.size > limit
+            }
+            ?.let {
+                encodeCursor(
+                    joinedAt = it.joinedAt,
+                    chatId = it.chat.id,
+                )
+            }
+        return ChatPageResponse(
+            chats = page.map {
+                it.chat.toResponse(members = members[it.chat.id].orEmpty())
+            },
+            nextCursor = nextCursor,
+        )
     }
 
-    private fun encodeCursor(joinedAt: OffsetDateTime, chatId: String): String =
-        Base64.getUrlEncoder().withoutPadding().encodeToString("$joinedAt|$chatId".toByteArray(StandardCharsets.UTF_8))
+    private fun encodeCursor(
+        joinedAt: OffsetDateTime,
+        chatId: ChatId,
+    ): String =
+        Base64.getUrlEncoder()
+            .withoutPadding()
+            .encodeToString("$joinedAt|${chatId.value}".toByteArray(StandardCharsets.UTF_8))
 
-    private fun decodeCursor(value: String): Pair<OffsetDateTime, String> {
-        if (value.length > 256) badRequest(ApiErrorCode.INVALID_SEQUENCE, "Invalid chat cursor")
+    private fun decodeCursor(value: String): Pair<OffsetDateTime, ChatId> {
+        if (value.length > 256) {
+            badRequest(
+                ApiErrorCode.INVALID_SEQUENCE,
+                "Invalid chat cursor",
+            )
+        }
         return runCatching {
-            val parts = String(Base64.getUrlDecoder().decode(value), StandardCharsets.UTF_8).split('|')
+            val parts = String(
+                Base64.getUrlDecoder()
+                    .decode(value),
+                StandardCharsets.UTF_8,
+            ).split('|')
             require(parts.size == 2)
             val joinedAt = OffsetDateTime.parse(parts[0])
             requireId(parts[1])
-            joinedAt to parts[1]
-        }.getOrElse { badRequest(ApiErrorCode.INVALID_SEQUENCE, "Invalid chat cursor") }
-    }
-
-    fun createGroup(userId: String, input: CreateGroupChatRequest): ChatResponse {
-        val name = input.name.trim()
-        if (name.length !in 1..80) badRequest(ApiErrorCode.INVALID_NAME, "Group name must be 1 to 80 characters")
-        val members = (input.memberIds + userId).distinct()
-        if (members.size !in 2..1000) badRequest(ApiErrorCode.INVALID_MEMBERS, "Initial group needs 2 to 1000 members")
-        members.forEach(::requireId)
-        requireUsers(members)
-        val id = tx.execute {
-            requireGroupCapacity(members)
-            val created = newId()
-            repository.insertGroup(created, name, userId)
-            repository.insertMembers(created, members)
-            notifyCreated(created, members)
-            created
+            joinedAt to ChatId(parts[1])
+        }.getOrElse {
+            badRequest(
+                ApiErrorCode.INVALID_SEQUENCE,
+                "Invalid chat cursor",
+            )
         }
-        return get(id, userId)
     }
 
-    fun get(chatId: String, userId: String): ChatResponse {
-        membership.requireMember(chatId, userId)
-        val chat = repository.findById(chatId) ?: notFound()
-        return chat.toResponse(repository.findMembers(chatId), repository.countMembers(chatId))
+    fun createGroup(
+        userId: UserId,
+        input: CreateGroupChatRequest,
+    ): ChatResponse {
+        val name = input.name.trim()
+        if (name.length !in 1..80) {
+            badRequest(
+                ApiErrorCode.INVALID_NAME,
+                "Group name must be 1 to 80 characters",
+            )
+        }
+        val members = (input.memberIds.map { UserId(requireId(it)) } + userId).distinct()
+        if (members.size !in 2..1000) {
+            badRequest(
+                ApiErrorCode.INVALID_MEMBERS,
+                "Initial group needs 2 to 1000 members",
+            )
+        }
+        return tx.observedExecute(DatabaseTransaction.CHAT_CREATE_GROUP) {
+            requireUsersAndLock(members)
+            requireGroupCapacity(members)
+            val chat = Chat(
+                id = ChatId(newId()),
+                kind = ChatKind.GROUP,
+                name = name,
+                lastSequence = 0,
+                ownerId = userId,
+                memberCount = members.size,
+            )
+            repository.insertGroupWithMembersAndEvents(
+                id = chat.id,
+                name = name,
+                ownerId = userId,
+                members = members,
+                events = createdEvents(
+                    chatId = chat.id,
+                    members = members,
+                ),
+            )
+            chat.toResponse(members = repository.findMembers(chatId = chat.id))
+        }
     }
 
-    fun addMembers(chatId: String, actorId: String, input: AddGroupMembersRequest) {
-        requireId(chatId)
-        val requested = input.memberIds.distinct()
-        requested.forEach(::requireId)
-        requireUsers(requested)
-        tx.executeWithoutResult {
-            val owner = repository.findGroupOwnerForUpdate(chatId) ?: notFound()
-            if (owner != actorId) throw ApiException(HttpStatus.FORBIDDEN, ApiErrorCode.FORBIDDEN, "Only the group owner can add members")
-            val existing = repository.existingMemberIds(chatId, requested)
+    fun get(
+        chatId: ChatId,
+        userId: UserId,
+    ): ChatResponse {
+        val details = repository.findMemberDetails(
+            chatId = chatId,
+            userId = userId,
+        ) ?: notFound()
+        return details.chat.toResponse(members = details.members)
+    }
+
+    fun addMembers(
+        chatId: ChatId,
+        actorId: UserId,
+        input: AddGroupMembersRequest,
+    ) {
+        val requested = input.memberIds.map { UserId(requireId(it)) }
+            .distinct()
+        tx.observedExecuteWithoutResult(DatabaseTransaction.CHAT_ADD_MEMBERS) {
+            val chat = repository.findByIdForUpdate(chatId = chatId)
+                ?.takeIf { it.kind == ChatKind.GROUP } ?: notFound()
+            if (chat.ownerId !=
+                actorId
+            ) {
+                throw ApiException(
+                    HttpStatus.FORBIDDEN,
+                    ApiErrorCode.FORBIDDEN,
+                    "Only the group owner can add members",
+                )
+            }
+            requireUsersAndLock(requested)
+            val existing = repository.existingMemberIds(
+                chatId = chatId,
+                userIds = requested,
+            )
             val additions = requested.filterNot(existing::contains)
-            if (repository.countMembers(chatId) + additions.size > 100_000) {
-                badRequest(ApiErrorCode.INVALID_MEMBERS, "Group cannot exceed 100000 members")
+            if (chat.memberCount + additions.size > 100_000) {
+                badRequest(
+                    ApiErrorCode.INVALID_MEMBERS,
+                    "Group cannot exceed 100000 members",
+                )
             }
             if (additions.isNotEmpty()) {
                 requireGroupCapacity(additions)
-                repository.insertMembers(chatId, additions)
-                notifyCreated(chatId, additions)
+                repository.insertMembersAndIncrementCount(
+                    chatId = chatId,
+                    userIds = additions,
+                )
+                val event = MembershipChangedEventV1.create(
+                    eventId = newId(),
+                    room = RoomAddress.group(chatId),
+                    chatId = chatId.value,
+                )
+                outboxRepository.enqueue(
+                    messages = createdEvents(
+                        chatId = chatId,
+                        members = additions,
+                    ) + OutboxMessage(
+                        id = EventId(event.eventId),
+                        room = event.room,
+                        payload = mapper.writeValueAsString(event),
+                    ),
+                )
             }
         }
     }
 
-    private fun requireUser(userId: String) {
-        if (!users.existsById(userId)) throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.USER_NOT_FOUND, "User not found")
-    }
-
-    private fun requireUsers(userIds: List<String>) {
-        if (users.countExisting(userIds) != userIds.size) {
-            throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.USER_NOT_FOUND, "User not found")
+    private fun requireUsersAndLock(userIds: List<UserId>) {
+        if (repository.lockUsers(userIds = userIds).size != userIds.size) {
+            throw ApiException(
+                HttpStatus.NOT_FOUND,
+                ApiErrorCode.USER_NOT_FOUND,
+                "User not found",
+            )
         }
     }
 
-    private fun requireGroupCapacity(userIds: List<String>) {
-        repository.lockUsers(userIds)
-        if (repository.groupCountsByUser(userIds).values.any { it >= 200 }) {
-            badRequest(ApiErrorCode.INVALID_MEMBERS, "A member cannot join more than 200 groups")
+    private fun requireGroupCapacity(userIds: List<UserId>) {
+        if (repository.groupCountsByUser(userIds = userIds).values.any { it >= 200 }) {
+            badRequest(
+                ApiErrorCode.INVALID_MEMBERS,
+                "A member cannot join more than 200 groups",
+            )
         }
     }
 
-    private fun notifyCreated(chatId: String, members: List<String>) {
-        val messages = members.map { userId ->
-            val event = ChatCreatedEventV1(
-                type = "chat_created",
-                version = 1,
+    private fun createdEvents(
+        chatId: ChatId,
+        members: List<UserId>,
+    ): List<OutboxMessage> =
+        members.map { userId ->
+            val event = ChatCreatedEventV1.create(
                 eventId = newId(),
-                room = "user:$userId",
-                chatId = chatId,
+                room = RoomAddress.user(userId),
+                chatId = chatId.value,
                 requestId = null,
             )
-            OutboxMessage(event.eventId, event.room, mapper.writeValueAsString(event))
+            OutboxMessage(
+                id = EventId(event.eventId),
+                room = event.room,
+                payload = mapper.writeValueAsString(event),
+            )
         }
-        messages.chunked(500).forEach(outbox::enqueue)
-    }
 }

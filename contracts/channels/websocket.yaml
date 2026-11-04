@@ -1,38 +1,11 @@
 socketFrames:
   address: /ws
-  description: >-
-    A one-hour signed WS ticket is supplied in the WebSocket subprotocol during
-    upgrade. One socket can subscribe
-    to authorized chats; the authenticated user's room joins on connect.
-    A client frame is limited to 32768 bytes by default. The server checks session
-    group authorization through gRPC on join and renewal. A subscribe_many frame
-    can join up to ten chats; it charges the rate limit per chat and checks group
-    membership with one gRPC call and one membership query after session validation.
-    A group subscription
-    expires after ten minutes without renewal; the browser renews its selected
-    group every eight minutes. A committed member_removed personal-room event
-    removes an active group subscription on every interested WS node. It sends
-    ping every 25 seconds and closes a connection that misses the 60-second pong
-    deadline. Outbound queues are bounded by count and bytes; a slow client is
-    closed and must reconnect and fetch SQL history. A queued frame follows a
-    Rabbit publisher confirm; a message_saved or send_rejected frame follows the
-    committed SQL result. Client application acknowledgement never follows from
-    a socket write alone. The browser sends received_message for each processed
-    live notification to release socket backpressure, including while it retains
-    an older recovery gap. This exact receipt does not advance SQL catch-up or
-    claim application. A cumulative applied frame records messages incorporated
-    into the device view. On a first chat opening or a user-triggered Jump
-    across an existing gap, dismissed resolves only the unseen prefix through
-    the first visible SQL sequence minus one. The visible tail is applied
-    separately. Dismissal releases socket backpressure and advances future
-    catch-up without claiming device application. Older messages remain
-    available through SQL history. A direct send can target recipientId before a chat
-    exists; selecting a recipient alone does not create one. chat_created
-    announces committed direct and group chats to each member's user room.
-    The default pending window is 256 frames and the
-    default acknowledgement timeout is 30 seconds; either limit closes the socket
-    with code 4001 (recovery_required). recovery_failed requires SQL history
-    catch-up.
+  description: A signed ticket in the WebSocket subprotocol authenticates the upgrade. The user's room joins before the API validates its
+    persisted session. Internal authorization uses session IDs over mutually authenticated gRPC. Group subscriptions require current
+    membership authorization and renewal. queued follows a RabbitMQ publisher confirm; message_saved and send_rejected follow a committed
+    SQL result. received_message releases one live notification without advancing recovery. applied records device application; dismissed
+    advances the recovery baseline without claiming application. Clients catch up from SQL history after recovery_failed or a slow-client
+    disconnect.
   messages:
     SocketSendV1:
       $ref: ../messages.yaml#/messages/SocketSendV1
@@ -66,3 +39,17 @@ socketFrames:
       $ref: ../messages.yaml#/messages/SocketRecoveryFailedV1
     SocketErrorV1:
       $ref: ../messages.yaml#/messages/SocketErrorV1
+    SocketMembershipChangedV1:
+      $ref: ../messages.yaml#/messages/SocketMembershipChangedV1
+    SocketMessageChangedV1:
+      $ref: ../messages.yaml#/messages/SocketMessageChangedV1
+    SocketChatDeletedV1:
+      $ref: ../messages.yaml#/messages/SocketChatDeletedV1
+    SocketReadsChangedV1:
+      $ref: ../messages.yaml#/messages/SocketReadsChangedV1
+    SocketWatchPresenceV1:
+      $ref: ../messages.yaml#/messages/SocketWatchPresenceV1
+    SocketUnwatchPresenceV1:
+      $ref: ../messages.yaml#/messages/SocketUnwatchPresenceV1
+    SocketPresenceV1:
+      $ref: ../messages.yaml#/messages/SocketPresenceV1

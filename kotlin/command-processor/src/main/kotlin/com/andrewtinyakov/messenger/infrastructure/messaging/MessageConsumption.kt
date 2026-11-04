@@ -12,27 +12,69 @@ internal fun consumeMessage(
     channel: Channel,
     logger: Logger,
     metrics: MeterRegistry,
-    kind: String,
+    kind: CommandKind,
+    sample: Timer.Sample = Timer.start(metrics),
     action: () -> Unit,
 ) {
     val tag = message.messageProperties.deliveryTag
-    val sample = Timer.start(metrics)
+    var processingOutcome = CommandProcessingOutcome.FAILED
+    try {
+        try {
+            action()
+        } catch (error: Exception) {
+            val permanent = error is IllegalArgumentException || error is JacksonException
+            val outcome = if (permanent) CommandConsumptionOutcome.PERMANENT_FAILURE else CommandConsumptionOutcome.RETRY
+            metrics.counter(
+                "messenger.command.consumed",
+                "kind",
+                kind.metricValue,
+                "outcome",
+                outcome.metricValue,
+            ).increment()
+            logger.error(
+                "Message handling failed: routingKey={}, permanent={}",
+                message.messageProperties.receivedRoutingKey,
+                permanent,
+                error,
+            )
+            recordAcknowledgement(metrics, kind, "reject") { channel.basicReject(tag, !permanent) }
+            return
+        }
+        recordAcknowledgement(metrics, kind, "ack") { channel.basicAck(tag, false) }
+        metrics.counter(
+            "messenger.command.consumed",
+            "kind",
+            kind.metricValue,
+            "outcome",
+            CommandConsumptionOutcome.ACKNOWLEDGED.metricValue,
+        ).increment()
+        processingOutcome = CommandProcessingOutcome.ACKNOWLEDGED
+    } finally {
+        sample.stop(
+            Timer.builder("messenger.command.processing")
+                .description(
+                    "Per-delivery decode start through broker acknowledgement attempt, including subsequent batch sequencing waits",
+                )
+                .tags("kind", kind.metricValue, "outcome", processingOutcome.metricValue)
+                .register(metrics),
+        )
+    }
+}
+
+private inline fun recordAcknowledgement(metrics: MeterRegistry, kind: CommandKind, operation: String, action: () -> Unit) {
+    var result = "failure"
     try {
         action()
-    } catch (error: Exception) {
-        val permanent = error is IllegalArgumentException || error is JacksonException
-        metrics.counter("messenger.command.consumed", "kind", kind, "outcome", if (permanent) "permanent_failure" else "retry").increment()
-        logger.error(
-            "Message handling failed: routingKey={}, permanent={}",
-            message.messageProperties.receivedRoutingKey,
-            permanent,
-            error,
-        )
-        channel.basicReject(tag, !permanent)
-        sample.stop(metrics.timer("messenger.command.processing", "kind", kind, "outcome", "failed"))
-        return
+        result = "success"
+    } finally {
+        metrics.counter(
+            "messenger.command.acknowledgement",
+            "kind",
+            kind.metricValue,
+            "operation",
+            operation,
+            "result",
+            result,
+        ).increment()
     }
-    channel.basicAck(tag, false)
-    metrics.counter("messenger.command.consumed", "kind", kind, "outcome", "acknowledged").increment()
-    sample.stop(metrics.timer("messenger.command.processing", "kind", kind, "outcome", "acknowledged"))
 }

@@ -9,4 +9,30 @@ data class SendMessageCommandV1(
     val senderId: String,
     val body: String,
     val sentAt: java.time.OffsetDateTime,
-)
+    val replyToMessageId: String? = null,
+) {
+    init {
+        require(version == 1)
+    }
+
+    companion object {
+        fun create(
+            chatId: String? = null,
+            recipientId: String? = null,
+            requestId: String,
+            senderId: String,
+            body: String,
+            sentAt: java.time.OffsetDateTime,
+            replyToMessageId: String? = null,
+        ): SendMessageCommandV1 = SendMessageCommandV1(
+            version = 1,
+            chatId = chatId,
+            recipientId = recipientId,
+            requestId = requestId,
+            senderId = senderId,
+            body = body,
+            sentAt = sentAt,
+            replyToMessageId = replyToMessageId,
+        )
+    }
+}

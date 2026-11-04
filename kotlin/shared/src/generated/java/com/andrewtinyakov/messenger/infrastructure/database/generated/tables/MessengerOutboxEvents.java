@@ -7,6 +7,7 @@ package com.andrewtinyakov.messenger.infrastructure.database.generated.tables;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Indexes;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Keys;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Public;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.enums.RoomKind;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.MessengerOutboxEventsRecord;
 
 import java.time.OffsetDateTime;
@@ -17,6 +18,7 @@ import java.util.List;
 import org.jooq.Check;
 import org.jooq.Condition;
 import org.jooq.Field;
+import org.jooq.Identity;
 import org.jooq.Index;
 import org.jooq.JSONB;
 import org.jooq.Name;
@@ -97,6 +99,16 @@ public class MessengerOutboxEvents extends TableImpl<MessengerOutboxEventsRecord
      */
     public final TableField<MessengerOutboxEventsRecord, Integer> ATTEMPTS = createField(DSL.name("attempts"), SQLDataType.INTEGER.nullable(false).defaultValue(DSL.field(DSL.raw("0"), SQLDataType.INTEGER)), this, "");
 
+    /**
+     * The column <code>public.messenger_outbox_events.publication_order</code>.
+     */
+    public final TableField<MessengerOutboxEventsRecord, Long> PUBLICATION_ORDER = createField(DSL.name("publication_order"), SQLDataType.BIGINT.nullable(false).generatedAlwaysAsIdentity(), this, "");
+
+    /**
+     * The column <code>public.messenger_outbox_events.room_kind</code>.
+     */
+    public final TableField<MessengerOutboxEventsRecord, RoomKind> ROOM_KIND = createField(DSL.name("room_kind"), SQLDataType.VARCHAR.nullable(false).asEnumDataType(RoomKind.class), this, "");
+
     private MessengerOutboxEvents(Name alias, Table<MessengerOutboxEventsRecord> aliased) {
         this(alias, aliased, (Field<?>[]) null, null);
     }
@@ -135,7 +147,12 @@ public class MessengerOutboxEvents extends TableImpl<MessengerOutboxEventsRecord
 
     @Override
     public List<Index> getIndexes() {
-        return Arrays.asList(Indexes.MESSENGER_OUTBOX_EVENTS_PENDING_IDX);
+        return Arrays.asList(Indexes.MESSENGER_OUTBOX_EVENTS_PENDING_IDX, Indexes.MESSENGER_OUTBOX_EVENTS_PENDING_ROOM_ORDER_IDX, Indexes.MESSENGER_OUTBOX_EVENTS_PUBLICATION_ORDER_IDX);
+    }
+
+    @Override
+    public Identity<MessengerOutboxEventsRecord, Long> getIdentity() {
+        return (Identity<MessengerOutboxEventsRecord, Long>) super.getIdentity();
     }
 
     @Override

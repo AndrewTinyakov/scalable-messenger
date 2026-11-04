@@ -1,0 +1,15 @@
+{
+  "type": "message_changed",
+  "version": 1,
+  "eventId": "01ARZ3NDEKTSV4RRFFQ69G5FAY",
+  "room": "user:01ARZ3NDEKTSV4RRFFQ69G5FAX",
+  "chatId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  "messageId": "01ARZ3NDEKTSV4RRFFQ69G5FAZ",
+  "sequence": "9007199254740993",
+  "senderId": "01ARZ3NDEKTSV4RRFFQ69G5FAX",
+  "body": "Edited message",
+  "createdAt": "2026-09-26T09:00:01Z",
+  "messageVersion": "2",
+  "mutationRevision": "1",
+  "editedAt": "2026-11-04T00:00:00Z"
+}

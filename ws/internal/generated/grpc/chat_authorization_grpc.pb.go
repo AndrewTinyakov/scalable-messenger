@@ -19,23 +19,20 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ChatAuthorization_ValidateSession_FullMethodName = "/messenger.authorization.v1.ChatAuthorization/ValidateSession"
-	ChatAuthorization_AuthorizeGroup_FullMethodName  = "/messenger.authorization.v1.ChatAuthorization/AuthorizeGroup"
-	ChatAuthorization_AuthorizeGroups_FullMethodName = "/messenger.authorization.v1.ChatAuthorization/AuthorizeGroups"
+	ChatAuthorization_ValidateSession_FullMethodName   = "/messenger.authorization.v1.ChatAuthorization/ValidateSession"
+	ChatAuthorization_AuthorizeGroup_FullMethodName    = "/messenger.authorization.v1.ChatAuthorization/AuthorizeGroup"
+	ChatAuthorization_AuthorizeGroups_FullMethodName   = "/messenger.authorization.v1.ChatAuthorization/AuthorizeGroups"
+	ChatAuthorization_AuthorizePresence_FullMethodName = "/messenger.authorization.v1.ChatAuthorization/AuthorizePresence"
 )
 
 // ChatAuthorizationClient is the client API for ChatAuthorization service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ChatAuthorizationClient interface {
-	// Called after the WS node subscribes to the user's room. SQL session state
-	// is checked on every connection, including reconnects.
 	ValidateSession(ctx context.Context, in *ValidateSessionRequest, opts ...grpc.CallOption) (*ValidateSessionResponse, error)
-	// The ticket is issued by the API for this user and device. The API verifies
-	// it against current SQL session state before checking group membership.
 	AuthorizeGroup(ctx context.Context, in *AuthorizeGroupRequest, opts ...grpc.CallOption) (*AuthorizeGroupResponse, error)
-	// One current-session check and one membership lookup for a bounded group batch.
 	AuthorizeGroups(ctx context.Context, in *AuthorizeGroupsRequest, opts ...grpc.CallOption) (*AuthorizeGroupsResponse, error)
+	AuthorizePresence(ctx context.Context, in *AuthorizePresenceRequest, opts ...grpc.CallOption) (*AuthorizePresenceResponse, error)
 }
 
 type chatAuthorizationClient struct {
@@ -76,18 +73,24 @@ func (c *chatAuthorizationClient) AuthorizeGroups(ctx context.Context, in *Autho
 	return out, nil
 }
 
+func (c *chatAuthorizationClient) AuthorizePresence(ctx context.Context, in *AuthorizePresenceRequest, opts ...grpc.CallOption) (*AuthorizePresenceResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AuthorizePresenceResponse)
+	err := c.cc.Invoke(ctx, ChatAuthorization_AuthorizePresence_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ChatAuthorizationServer is the server API for ChatAuthorization service.
 // All implementations must embed UnimplementedChatAuthorizationServer
 // for forward compatibility.
 type ChatAuthorizationServer interface {
-	// Called after the WS node subscribes to the user's room. SQL session state
-	// is checked on every connection, including reconnects.
 	ValidateSession(context.Context, *ValidateSessionRequest) (*ValidateSessionResponse, error)
-	// The ticket is issued by the API for this user and device. The API verifies
-	// it against current SQL session state before checking group membership.
 	AuthorizeGroup(context.Context, *AuthorizeGroupRequest) (*AuthorizeGroupResponse, error)
-	// One current-session check and one membership lookup for a bounded group batch.
 	AuthorizeGroups(context.Context, *AuthorizeGroupsRequest) (*AuthorizeGroupsResponse, error)
+	AuthorizePresence(context.Context, *AuthorizePresenceRequest) (*AuthorizePresenceResponse, error)
 	mustEmbedUnimplementedChatAuthorizationServer()
 }
 
@@ -106,6 +109,9 @@ func (UnimplementedChatAuthorizationServer) AuthorizeGroup(context.Context, *Aut
 }
 func (UnimplementedChatAuthorizationServer) AuthorizeGroups(context.Context, *AuthorizeGroupsRequest) (*AuthorizeGroupsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AuthorizeGroups not implemented")
+}
+func (UnimplementedChatAuthorizationServer) AuthorizePresence(context.Context, *AuthorizePresenceRequest) (*AuthorizePresenceResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AuthorizePresence not implemented")
 }
 func (UnimplementedChatAuthorizationServer) mustEmbedUnimplementedChatAuthorizationServer() {}
 func (UnimplementedChatAuthorizationServer) testEmbeddedByValue()                           {}
@@ -182,6 +188,24 @@ func _ChatAuthorization_AuthorizeGroups_Handler(srv interface{}, ctx context.Con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ChatAuthorization_AuthorizePresence_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AuthorizePresenceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatAuthorizationServer).AuthorizePresence(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChatAuthorization_AuthorizePresence_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatAuthorizationServer).AuthorizePresence(ctx, req.(*AuthorizePresenceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ChatAuthorization_ServiceDesc is the grpc.ServiceDesc for ChatAuthorization service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -200,6 +224,10 @@ var ChatAuthorization_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AuthorizeGroups",
 			Handler:    _ChatAuthorization_AuthorizeGroups_Handler,
+		},
+		{
+			MethodName: "AuthorizePresence",
+			Handler:    _ChatAuthorization_AuthorizePresence_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

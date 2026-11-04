@@ -14,10 +14,12 @@ import (
 
 type localRoom struct {
 	name           string
+	mu             sync.Mutex
 	positionMu     sync.Mutex
 	ready          chan struct{}
 	err            error
 	cancel         context.CancelFunc
+	retired        bool
 	members        map[Recipient]*roomMember
 	epoch          string
 	lastID         string
@@ -26,134 +28,300 @@ type localRoom struct {
 }
 
 type Rooms struct {
-	mu            sync.Mutex
-	rooms         map[string]*localRoom
-	closed        bool
-	redis         roomStore
-	logger        *slog.Logger
-	replayLimit   int64
-	bufferLimit   int
-	checkInterval time.Duration
-	metrics       *monitoring.Metrics
-	wg            sync.WaitGroup
+	mu              sync.Mutex
+	rooms           map[string]*localRoom
+	memberships     map[Recipient]map[string]*localRoom
+	membershipCount int
+	maxRooms        int
+	maxMemberships  int
+	closed          bool
+	redis           roomStore
+	logger          *slog.Logger
+	replayLimit     int64
+	bufferLimit     int
+	bufferBytes     int
+	checkInterval   time.Duration
+	metrics         *monitoring.Metrics
+	wg              sync.WaitGroup
 }
 
+var ErrCapacity = errors.New("room capacity reached")
+var errMembershipLeft = errors.New("room membership left during join")
+
 type roomStore interface {
-	Subscribe(context.Context, string) (*redisroom.Listener, error)
+	Subscribe(context.Context, string) (roomFeed, error)
 	Tail(context.Context, string) (string, string, error)
 	Replay(context.Context, string, string, string, int64) ([]redisroom.Live, error)
 }
 
-func NewRooms(redis *redisroom.Client, logger *slog.Logger, replayLimit int64, bufferLimit int, checkInterval time.Duration, metrics *monitoring.Metrics) *Rooms {
-	return &Rooms{rooms: make(map[string]*localRoom), redis: redis, logger: logger, replayLimit: replayLimit, bufferLimit: bufferLimit, checkInterval: checkInterval, metrics: metrics}
+type roomFeed interface {
+	Receive(context.Context) (redisroom.Live, error)
+	Close() error
 }
 
-func (r *Rooms) Join(ctx context.Context, connection Recipient, room, chatID, epoch, streamID string) error {
-	r.mu.Lock()
-	if r.closed {
-		r.mu.Unlock()
-		return errors.New("room registry closed")
+type redisRoomStore struct{ client *redisroom.Client }
+
+func (store redisRoomStore) Subscribe(ctx context.Context, room string) (roomFeed, error) {
+	return store.client.Subscribe(ctx, room)
+}
+
+func (store redisRoomStore) Tail(ctx context.Context, room string) (string, string, error) {
+	return store.client.Tail(ctx, room)
+}
+
+func (store redisRoomStore) TailBatch(ctx context.Context, names []string) (map[string]redisroom.Position, error) {
+	return store.client.TailBatch(ctx, names)
+}
+
+func (store redisRoomStore) Replay(ctx context.Context, room, epoch, after string, limit int64) ([]redisroom.Live, error) {
+	return store.client.Replay(ctx, room, epoch, after, limit)
+}
+
+func NewRooms(redis *redisroom.Client, logger *slog.Logger, replayLimit int64, bufferLimit, bufferBytes int, checkInterval time.Duration, metrics *monitoring.Metrics, maxRooms, maxMemberships int) *Rooms {
+	rooms := newRooms(redisRoomStore{client: redis}, logger, replayLimit, bufferLimit, bufferBytes, checkInterval, metrics)
+	rooms.maxRooms, rooms.maxMemberships = maxRooms, maxMemberships
+	return rooms
+}
+
+func newRooms(store roomStore, logger *slog.Logger, replayLimit int64, bufferLimit, bufferBytes int, checkInterval time.Duration, metrics *monitoring.Metrics) *Rooms {
+	return &Rooms{rooms: make(map[string]*localRoom), memberships: make(map[Recipient]map[string]*localRoom), maxRooms: 100000, maxMemberships: 1000000, redis: store, logger: logger, replayLimit: replayLimit, bufferLimit: bufferLimit, bufferBytes: bufferBytes, checkInterval: checkInterval, metrics: metrics}
+}
+
+func (r *Rooms) Join(ctx context.Context, connection Recipient, name, chatID, epoch, streamID string) (joinErr error) {
+	started := time.Now()
+	result := "complete"
+	defer func() {
+		if joinErr != nil {
+			result = "failed"
+		}
+		r.metrics.CatchupSeconds.WithLabelValues(result).Observe(time.Since(started).Seconds())
+	}()
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-	entry := r.rooms[room]
-	if entry == nil {
-		owner, cancel := context.WithCancel(context.Background())
-		entry = &localRoom{name: room, ready: make(chan struct{}), cancel: cancel, members: make(map[Recipient]*roomMember), lastPositionAt: time.Now()}
-		r.rooms[room] = entry
-		r.metrics.RoomSubscriptions.Inc()
-		r.wg.Add(1)
-		go r.listen(owner, entry)
+	entry, member, err := r.beginJoin(connection, name, chatID)
+	if err != nil {
+		return err
 	}
-	member := entry.members[connection]
-	if member == nil {
-		member = newRoomMember()
-		entry.members[connection] = member
-	}
-	member.chatIDs[chatID] = true
-	member.catching.Store(true)
-	r.mu.Unlock()
+	defer member.joinMu.Unlock()
 	select {
 	case <-entry.ready:
 	case <-ctx.Done():
-		r.LeaveChat(connection, room, chatID)
+		r.leaveMemberChat(connection, entry, member, chatID)
 		return ctx.Err()
 	}
-	if entry.err != nil {
-		r.LeaveChat(connection, room, chatID)
-		return entry.err
+	entry.mu.Lock()
+	feedErr := entry.err
+	left := entry.retired || entry.members[connection] != member || member.left.Load()
+	entry.mu.Unlock()
+	if left {
+		return errMembershipLeft
+	}
+	if feedErr != nil {
+		r.leaveMemberChat(connection, entry, member, chatID)
+		return feedErr
 	}
 	var replayEvents []protocol.Event
 	if epoch != "" && streamID != "" {
-		items, err := r.redis.Replay(ctx, room, epoch, streamID, r.replayLimit)
+		items, err := r.replay(ctx, name, epoch, streamID, "", "subscribe")
 		if err != nil {
-			r.metrics.Replay.WithLabelValues("fallback").Inc()
-			r.failMember(connection, room, chatID)
-			r.finish(connection, room, nil)
+			result = "fallback"
+		}
+		if member.left.Load() {
+			return errMembershipLeft
+		}
+		if err != nil {
+			r.metrics.RecordReplay(monitoring.ReplayFallback)
+			r.failMember(connection, name, chatID)
+			r.finishMember(connection, entry, member, nil)
 			return nil
 		}
-		r.metrics.Replay.WithLabelValues("complete").Inc()
+		r.metrics.RecordReplay(monitoring.ReplayComplete)
 		for _, item := range items {
-			if !connection.Enqueue(item.Event) {
-				r.Leave(connection, room)
+			if member.left.Load() {
+				return errMembershipLeft
+			}
+			frame, err := protocol.NewEventFrame(item.Event)
+			if err != nil || !enqueueFrame(connection, frame) {
+				r.leaveMember(connection, entry, member)
 				return errors.New("slow client")
 			}
+			r.metrics.ReplayEvents.Inc()
+			r.metrics.ReplayBytes.Add(float64(frame.Size()))
 			replayEvents = append(replayEvents, item.Event)
 		}
 	} else if chatID != "" {
-		// A client with no retained Redis cursor must fetch SQL history.
-		r.failMember(connection, room, chatID)
+		result = "fallback"
+		r.failMember(connection, name, chatID)
 	}
-	r.finish(connection, room, replayEvents)
+	r.finishMember(connection, entry, member, replayEvents)
+	if member.left.Load() {
+		return errMembershipLeft
+	}
 	return nil
 }
 
-func (r *Rooms) Leave(c Recipient, room string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	entry := r.rooms[room]
-	if entry == nil {
-		return
-	}
-	delete(entry.members, c)
-	if len(entry.members) == 0 {
-		delete(r.rooms, room)
-		r.metrics.RoomSubscriptions.Dec()
-		entry.cancel()
+func (r *Rooms) beginJoin(connection Recipient, name, chatID string) (*localRoom, *roomMember, error) {
+	for {
+		r.mu.Lock()
+		if r.closed {
+			r.mu.Unlock()
+			return nil, nil, errors.New("room registry closed")
+		}
+		entry := r.rooms[name]
+		if entry == nil {
+			if len(r.rooms) >= r.maxRooms || r.membershipCount >= r.maxMemberships {
+				r.mu.Unlock()
+				return nil, nil, ErrCapacity
+			}
+			owner, cancel := context.WithCancel(context.Background())
+			entry = &localRoom{name: name, ready: make(chan struct{}), cancel: cancel, members: make(map[Recipient]*roomMember), lastPositionAt: time.Now()}
+			r.rooms[name] = entry
+			r.metrics.RoomSubscriptions.Inc()
+			r.wg.Add(1)
+			go r.listen(owner, entry)
+		}
+		entry.mu.Lock()
+		member := entry.members[connection]
+		if member == nil {
+			if r.membershipCount >= r.maxMemberships {
+				entry.mu.Unlock()
+				r.mu.Unlock()
+				return nil, nil, ErrCapacity
+			}
+			member = newRoomMember()
+			member.joinMu.Lock()
+			entry.members[connection] = member
+			if r.memberships[connection] == nil {
+				r.memberships[connection] = make(map[string]*localRoom)
+			}
+			r.memberships[connection][name] = entry
+			r.membershipCount++
+			r.metrics.RoomMemberships.Inc()
+		} else {
+			entry.mu.Unlock()
+			r.mu.Unlock()
+			member.joinMu.Lock()
+			r.mu.Lock()
+			if r.closed || r.rooms[name] != entry {
+				r.mu.Unlock()
+				member.joinMu.Unlock()
+				continue
+			}
+			entry.mu.Lock()
+			if entry.members[connection] != member || member.left.Load() {
+				entry.mu.Unlock()
+				r.mu.Unlock()
+				member.joinMu.Unlock()
+				continue
+			}
+		}
+		member.chatIDs[chatID] = true
+		member.catching.Store(true)
+		entry.mu.Unlock()
+		r.mu.Unlock()
+		return entry, member, nil
 	}
 }
 
-func (r *Rooms) LeaveChat(c Recipient, room, chatID string) {
+func (r *Rooms) lookup(name string) *localRoom {
+	r.mu.Lock()
+	entry := r.rooms[name]
+	r.mu.Unlock()
+	return entry
+}
+
+func (r *Rooms) Leave(c Recipient, name string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	entry := r.rooms[room]
-	if entry == nil {
+	if entry := r.rooms[name]; entry != nil {
+		entry.mu.Lock()
+		r.removeMemberLocked(c, entry, entry.members[c])
+		entry.mu.Unlock()
+	}
+}
+
+func (r *Rooms) leaveMember(c Recipient, entry *localRoom, member *roomMember) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.rooms[entry.name] != entry {
 		return
 	}
-	m := entry.members[c]
-	if m == nil {
+	entry.mu.Lock()
+	if entry.members[c] == member {
+		r.removeMemberLocked(c, entry, member)
+	}
+	entry.mu.Unlock()
+}
+
+func (r *Rooms) LeaveChat(c Recipient, name, chatID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if entry := r.rooms[name]; entry != nil {
+		entry.mu.Lock()
+		r.removeChatLocked(c, entry, entry.members[c], chatID)
+		entry.mu.Unlock()
+	}
+}
+
+func (r *Rooms) leaveMemberChat(c Recipient, entry *localRoom, member *roomMember, chatID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.rooms[entry.name] != entry {
 		return
 	}
-	delete(m.chatIDs, chatID)
-	if len(m.chatIDs) == 0 {
-		delete(entry.members, c)
+	entry.mu.Lock()
+	if entry.members[c] == member {
+		r.removeChatLocked(c, entry, member, chatID)
+	}
+	entry.mu.Unlock()
+}
+
+func (r *Rooms) removeChatLocked(c Recipient, entry *localRoom, member *roomMember, chatID string) {
+	if member == nil {
+		return
+	}
+	delete(member.chatIDs, chatID)
+	if len(member.chatIDs) == 0 {
+		r.removeMemberLocked(c, entry, member)
+	}
+}
+
+func (r *Rooms) removeMemberLocked(c Recipient, entry *localRoom, member *roomMember) {
+	if member == nil {
+		return
+	}
+	member.left.Store(true)
+	delete(entry.members, c)
+	if memberships := r.memberships[c]; memberships != nil {
+		if memberships[entry.name] == entry {
+			delete(memberships, entry.name)
+			r.membershipCount--
+			r.metrics.RoomMemberships.Dec()
+		}
+		if len(memberships) == 0 {
+			delete(r.memberships, c)
+		}
 	}
 	if len(entry.members) == 0 {
-		delete(r.rooms, room)
+		delete(r.rooms, entry.name)
+		entry.retired = true
 		r.metrics.RoomSubscriptions.Dec()
-		entry.cancel()
+		if entry.cancel != nil {
+			entry.cancel()
+		}
 	}
 }
 
 func (r *Rooms) LeaveAll(c Recipient) {
 	r.mu.Lock()
-	var names []string
-	for name, entry := range r.rooms {
-		if _, ok := entry.members[c]; ok {
-			names = append(names, name)
+	defer r.mu.Unlock()
+	for name, entry := range r.memberships[c] {
+		if r.rooms[name] == entry {
+			entry.mu.Lock()
+			r.removeMemberLocked(c, entry, entry.members[c])
+			entry.mu.Unlock()
 		}
-	}
-	r.mu.Unlock()
-	for _, name := range names {
-		r.Leave(c, name)
 	}
 }
 
@@ -161,8 +329,21 @@ func (r *Rooms) Close() {
 	r.mu.Lock()
 	r.closed = true
 	for _, entry := range r.rooms {
-		entry.cancel()
+		entry.mu.Lock()
+		entry.retired = true
+		for _, member := range entry.members {
+			member.left.Store(true)
+		}
+		if entry.cancel != nil {
+			entry.cancel()
+		}
+		entry.mu.Unlock()
 	}
+	r.metrics.RoomSubscriptions.Sub(float64(len(r.rooms)))
+	r.metrics.RoomMemberships.Sub(float64(r.membershipCount))
+	clear(r.rooms)
+	clear(r.memberships)
+	r.membershipCount = 0
 	r.mu.Unlock()
 	r.wg.Wait()
 }

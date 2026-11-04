@@ -10,14 +10,14 @@ public interface ValidateSessionRequestOrBuilder extends
     com.google.protobuf.MessageOrBuilder {
 
   /**
-   * <code>string ws_ticket = 1;</code>
-   * @return The wsTicket.
+   * <code>string session_id = 2;</code>
+   * @return The sessionId.
    */
-  java.lang.String getWsTicket();
+  java.lang.String getSessionId();
   /**
-   * <code>string ws_ticket = 1;</code>
-   * @return The bytes for wsTicket.
+   * <code>string session_id = 2;</code>
+   * @return The bytes for sessionId.
    */
   com.google.protobuf.ByteString
-      getWsTicketBytes();
+      getSessionIdBytes();
 }

@@ -5,8 +5,13 @@ package com.andrewtinyakov.messenger.infrastructure.database.generated;
 
 
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.ChatMembers;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.ChatReadNotifications;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.ChatReadProgress;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.ChatReadRanges;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.MessageChanges;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.MessengerOutboxEvents;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Sessions;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Users;
 
 import org.jooq.Index;
 import org.jooq.OrderField;
@@ -25,6 +30,13 @@ public class Indexes {
     // -------------------------------------------------------------------------
 
     public static final Index CHAT_MEMBERS_USER_JOINED_IDX = Internal.createIndex(DSL.name("chat_members_user_joined_idx"), ChatMembers.CHAT_MEMBERS, new OrderField[] { ChatMembers.CHAT_MEMBERS.USER_ID, ChatMembers.CHAT_MEMBERS.JOINED_AT.desc(), ChatMembers.CHAT_MEMBERS.CHAT_ID.desc() }, false);
+    public static final Index CHAT_READ_NOTIFICATIONS_EXPIRY_IDX = Internal.createIndex(DSL.name("chat_read_notifications_expiry_idx"), ChatReadNotifications.CHAT_READ_NOTIFICATIONS, new OrderField[] { ChatReadNotifications.CHAT_READ_NOTIFICATIONS.EXPIRES_AT, ChatReadNotifications.CHAT_READ_NOTIFICATIONS.CHAT_ID, ChatReadNotifications.CHAT_READ_NOTIFICATIONS.BUCKET }, false);
+    public static final Index CHAT_READ_PROGRESS_HIGHEST_IDX = Internal.createIndex(DSL.name("chat_read_progress_highest_idx"), ChatReadProgress.CHAT_READ_PROGRESS, new OrderField[] { ChatReadProgress.CHAT_READ_PROGRESS.CHAT_ID, ChatReadProgress.CHAT_READ_PROGRESS.THROUGH_SEQUENCE.desc(), ChatReadProgress.CHAT_READ_PROGRESS.USER_ID }, false);
+    public static final Index CHAT_READ_RANGES_EXPIRY_IDX = Internal.createIndex(DSL.name("chat_read_ranges_expiry_idx"), ChatReadRanges.CHAT_READ_RANGES, new OrderField[] { ChatReadRanges.CHAT_READ_RANGES.EXPIRES_AT, ChatReadRanges.CHAT_READ_RANGES.CHAT_ID, ChatReadRanges.CHAT_READ_RANGES.USER_ID, ChatReadRanges.CHAT_READ_RANGES.CREATION_DAY, ChatReadRanges.CHAT_READ_RANGES.THROUGH_SEQUENCE }, false);
+    public static final Index MESSAGE_CHANGES_RETENTION_IDX = Internal.createIndex(DSL.name("message_changes_retention_idx"), MessageChanges.MESSAGE_CHANGES, new OrderField[] { MessageChanges.MESSAGE_CHANGES.CHANGED_AT, MessageChanges.MESSAGE_CHANGES.CHAT_ID, MessageChanges.MESSAGE_CHANGES.REVISION }, false);
     public static final Index MESSENGER_OUTBOX_EVENTS_PENDING_IDX = Internal.createIndex(DSL.name("messenger_outbox_events_pending_idx"), MessengerOutboxEvents.MESSENGER_OUTBOX_EVENTS, new OrderField[] { MessengerOutboxEvents.MESSENGER_OUTBOX_EVENTS.CREATED_AT, MessengerOutboxEvents.MESSENGER_OUTBOX_EVENTS.ID }, false);
+    public static final Index MESSENGER_OUTBOX_EVENTS_PENDING_ROOM_ORDER_IDX = Internal.createIndex(DSL.name("messenger_outbox_events_pending_room_order_idx"), MessengerOutboxEvents.MESSENGER_OUTBOX_EVENTS, new OrderField[] { MessengerOutboxEvents.MESSENGER_OUTBOX_EVENTS.ROOM, MessengerOutboxEvents.MESSENGER_OUTBOX_EVENTS.PUBLICATION_ORDER }, false);
+    public static final Index MESSENGER_OUTBOX_EVENTS_PUBLICATION_ORDER_IDX = Internal.createIndex(DSL.name("messenger_outbox_events_publication_order_idx"), MessengerOutboxEvents.MESSENGER_OUTBOX_EVENTS, new OrderField[] { MessengerOutboxEvents.MESSENGER_OUTBOX_EVENTS.PUBLICATION_ORDER }, true);
     public static final Index SESSIONS_USER_IDX = Internal.createIndex(DSL.name("sessions_user_idx"), Sessions.SESSIONS, new OrderField[] { Sessions.SESSIONS.USER_ID }, false);
+    public static final Index USERS_USERNAME_TRGM_IDX = Internal.createIndex(DSL.name("users_username_trgm_idx"), Users.USERS, new OrderField[] { Users.USERS.USERNAME }, false);
 }

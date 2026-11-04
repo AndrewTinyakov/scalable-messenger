@@ -1,10 +1,7 @@
 package socket
 
 import (
-	"context"
 	"errors"
-	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,20 +9,13 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/prometheus/client_golang/prometheus"
+
 	"messenger/ws/internal/config"
-	"messenger/ws/internal/monitoring"
-	roomregistry "messenger/ws/internal/room"
 	"messenger/ws/internal/ticket"
 )
 
 func TestMissingAppliedACKClosesSocketForRecovery(t *testing.T) {
-	registry := prometheus.NewRegistry()
-	metrics := monitoring.New(registry)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	server := &Server{config: config.Config{QueueItems: 8, QueueBytes: 4096, PendingACKLimit: 8, ACKTimeout: 80 * time.Millisecond, WriteTimeout: time.Second, PingInterval: time.Hour}, metrics: metrics, rooms: roomregistry.NewRooms(nil, logger, 1, 8, time.Minute, metrics), ctx: ctx, cancel: cancel, connections: make(map[*Connection]struct{})}
+	server := newTestServer(t, config.Config{MaxGroupAuths: 8, QueueItems: 8, QueueBytes: 4096, PendingACKLimit: 8, ACKTimeout: 80 * time.Millisecond, WriteTimeout: time.Second, PingInterval: time.Hour}, testDependencies(&sessionRooms{}))
 	accepted := make(chan *websocket.Conn, 1)
 	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		socket, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
@@ -45,7 +35,7 @@ func TestMissingAppliedACKClosesSocketForRecovery(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("server did not accept socket")
 	}
-	connection := newConnection(server, socket, ticket.Identity{}, "token")
+	connection := newConnection(server, socket, ticket.Identity{}, "")
 	server.connections[connection] = struct{}{}
 	writerDone := make(chan struct{})
 	go func() { connection.writeLoop(); close(writerDone) }()

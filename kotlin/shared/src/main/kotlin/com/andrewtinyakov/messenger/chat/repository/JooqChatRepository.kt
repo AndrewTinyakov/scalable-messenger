@@ -1,207 +1,596 @@
 package com.andrewtinyakov.messenger.chat.repository
 
+import com.andrewtinyakov.messenger.auth.model.UserSummary
 import com.andrewtinyakov.messenger.chat.model.Chat
 import com.andrewtinyakov.messenger.chat.model.ChatKind
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Routines
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHATS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHAT_MEMBERS
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSENGER_OUTBOX_EVENTS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.USERS
-import com.andrewtinyakov.messenger.user.model.User
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.ChatsRecord
+import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseObservation
+import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseOperation
+import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxMessage
+import com.andrewtinyakov.messenger.shared.id.ChatId
+import com.andrewtinyakov.messenger.shared.id.UserId
 import org.jooq.DSLContext
+import org.jooq.JSONB
+import org.jooq.Query
+import org.jooq.impl.DSL
 import org.springframework.stereotype.Repository
 import java.time.OffsetDateTime
+import com.andrewtinyakov.messenger.infrastructure.database.generated.enums.ChatKind as DbChatKind
 
 @Repository
 class JooqChatRepository(
     private val db: DSLContext,
 ) : ChatRepository {
     override fun findByMember(
-        userId: String,
+        userId: UserId,
         beforeJoinedAt: OffsetDateTime?,
-        beforeChatId: String?,
+        beforeChatId: ChatId?,
         limit: Int,
-    ): List<MemberChat> =
-        db.select(CHATS.ID, CHATS.KIND, CHATS.NAME, CHATS.NEXT_SEQUENCE, CHAT_MEMBERS.JOINED_AT, CHATS.MEMBER_COUNT)
+    ): List<MemberChat> = DatabaseObservation.query(DatabaseOperation.CHAT_FIND_BY_MEMBER) {
+        db.select(
+            CHATS.ID,
+            CHATS.KIND,
+            CHATS.NAME,
+            CHATS.NEXT_SEQUENCE,
+            CHAT_MEMBERS.JOINED_AT,
+            CHATS.MEMBER_COUNT,
+            CHATS.OWNER_ID,
+        )
             .from(CHAT_MEMBERS)
-            .join(CHATS).on(CHATS.ID.eq(CHAT_MEMBERS.CHAT_ID))
-            .where(CHAT_MEMBERS.USER_ID.eq(userId))
+            .join(CHATS)
+            .on(CHATS.ID.eq(CHAT_MEMBERS.CHAT_ID))
+            .where(CHAT_MEMBERS.USER_ID.eq(userId.value), CHATS.DELETED_AT.isNull)
             .and(
                 if (beforeJoinedAt != null && beforeChatId != null) {
-                    CHAT_MEMBERS.JOINED_AT.lt(beforeJoinedAt).or(
-                        CHAT_MEMBERS.JOINED_AT.eq(beforeJoinedAt).and(CHAT_MEMBERS.CHAT_ID.lt(beforeChatId)),
-                    )
+                    CHAT_MEMBERS.JOINED_AT.lt(beforeJoinedAt)
+                        .or(
+                            CHAT_MEMBERS.JOINED_AT.eq(beforeJoinedAt)
+                                .and(CHAT_MEMBERS.CHAT_ID.lt(beforeChatId.value)),
+                        )
                 } else {
-                    org.jooq.impl.DSL.trueCondition()
+                    DSL.trueCondition()
                 },
             )
-            .orderBy(CHAT_MEMBERS.JOINED_AT.desc(), CHAT_MEMBERS.CHAT_ID.desc())
+            .orderBy(
+                CHAT_MEMBERS.JOINED_AT.desc(),
+                CHAT_MEMBERS.CHAT_ID.desc(),
+            )
             .limit(limit)
             .fetch { row ->
                 MemberChat(
-                    Chat(
-                        id = row.value1()!!,
-                        kind = ChatKind.valueOf(row.value2()!!.uppercase()),
-                        name = row.value3(),
-                        lastSequence = row.value4()!! - 1,
+                    chat = Chat(
+                        id = ChatId(row.get(CHATS.ID)!!),
+                        kind = ChatKind.valueOf(row.get(CHATS.KIND)!!.name),
+                        name = row.get(CHATS.NAME),
+                        lastSequence = row.get(CHATS.NEXT_SEQUENCE)!! - 1,
+                        ownerId = row.get(CHATS.OWNER_ID)
+                            ?.let(::UserId),
+                        memberCount = row.get(CHATS.MEMBER_COUNT)!!,
                     ),
-                    row.value5()!!,
-                    row.value6()!!,
+                    joinedAt = row.get(CHAT_MEMBERS.JOINED_AT)!!,
                 )
             }
+    }
 
-    override fun findMembersByChatIds(chatIds: List<String>): Map<String, List<User>> {
+    override fun findMembersByChatIds(chatIds: List<ChatId>): Map<ChatId, List<UserSummary>> = DatabaseObservation.query(
+        DatabaseOperation.CHAT_FIND_MEMBERS_BY_CHAT_IDS,
+    ) {
         if (chatIds.isEmpty()) return emptyMap()
-        val placeholders = chatIds.joinToString(",") { "?" }
-        return db.fetch(
-            """select chat_id, id, username from (
-                select cm.chat_id, u.id, u.username,
-                       row_number() over (partition by cm.chat_id order by u.username) as rank
-                from chat_members cm join users u on u.id = cm.user_id
-                where cm.chat_id in ($placeholders)
-            ) ranked where rank <= 50 order by chat_id, username""",
-            *chatIds.toTypedArray(),
-        ).groupBy(
-            { it.get("chat_id", String::class.java)!! },
-            { User(it.get("id", String::class.java)!!, it.get("username", String::class.java)!!) },
+        val rank = DSL.rowNumber()
+            .over()
+            .partitionBy(CHAT_MEMBERS.CHAT_ID)
+            .orderBy(USERS.USERNAME)
+            .`as`("rank")
+        val ranked = db.select(
+            CHAT_MEMBERS.CHAT_ID,
+            USERS.ID,
+            USERS.USERNAME,
+            rank,
         )
-    }
-
-    override fun countMembers(chatId: String): Int =
-        db.select(CHATS.MEMBER_COUNT).from(CHATS).where(CHATS.ID.eq(chatId)).fetchOne(CHATS.MEMBER_COUNT)!!
-
-    override fun existingMemberIds(chatId: String, userIds: List<String>): Set<String> =
-        db.select(CHAT_MEMBERS.USER_ID).from(CHAT_MEMBERS)
-            .where(CHAT_MEMBERS.CHAT_ID.eq(chatId), CHAT_MEMBERS.USER_ID.`in`(userIds))
-            .fetch(CHAT_MEMBERS.USER_ID).filterNotNull().toSet()
-
-    override fun lockUsers(userIds: List<String>) {
-        db.select(USERS.ID).from(USERS).where(USERS.ID.`in`(userIds)).orderBy(USERS.ID).forUpdate().fetch()
-    }
-
-    override fun groupCountsByUser(userIds: List<String>): Map<String, Int> =
-        db.select(CHAT_MEMBERS.USER_ID, org.jooq.impl.DSL.count())
-            .from(CHAT_MEMBERS).join(CHATS).on(CHATS.ID.eq(CHAT_MEMBERS.CHAT_ID))
-            .where(CHAT_MEMBERS.USER_ID.`in`(userIds), CHATS.KIND.eq("group"))
-            .groupBy(CHAT_MEMBERS.USER_ID)
-            .fetchMap(CHAT_MEMBERS.USER_ID, org.jooq.impl.DSL.count())
-
-    override fun findByDirectKey(key: String): String? =
-        db.select(CHATS.ID)
-            .from(CHATS)
-            .where(CHATS.DIRECT_PAIR_KEY.eq(key))
-            .fetchOne(CHATS.ID)
-
-    override fun lockDirectPair(key: String) {
-        db.fetch("select pg_advisory_xact_lock(hashtextextended(?, 0))", "direct:$key")
-    }
-
-    override fun findKindForUpdate(chatId: String): ChatKind? =
-        db.selectFrom(CHATS)
-            .where(CHATS.ID.eq(chatId))
-            .forUpdate()
-            .fetchOne()?.kind?.let { ChatKind.valueOf(it.uppercase()) }
-
-    override fun insertDirect(id: String, key: String) {
-        check(
-            db.insertInto(CHATS)
-                .set(CHATS.ID, id)
-                .set(CHATS.KIND, "direct")
-                .set(CHATS.DIRECT_PAIR_KEY, key)
-                .execute() == 1,
-        )
-    }
-
-    override fun insertGroup(id: String, name: String, ownerId: String) {
-        check(
-            db.insertInto(CHATS)
-                .set(CHATS.ID, id)
-                .set(CHATS.KIND, "group")
-                .set(CHATS.NAME, name)
-                .set(CHATS.OWNER_ID, ownerId)
-                .execute() == 1,
-        )
-    }
-
-    override fun insertMembers(chatId: String, userIds: List<String>) {
-        if (userIds.isEmpty()) return
-        userIds.chunked(500).forEach { chunk ->
-            val query = db.insertInto(CHAT_MEMBERS, CHAT_MEMBERS.CHAT_ID, CHAT_MEMBERS.USER_ID)
-            chunk.forEach { query.values(chatId, it) }
-            check(query.execute() == chunk.size)
-            check(
-                db.update(CHATS).set(CHATS.MEMBER_COUNT, CHATS.MEMBER_COUNT.plus(chunk.size))
-                    .where(CHATS.ID.eq(chatId)).execute() == 1,
-            )
-        }
-    }
-
-    override fun findById(chatId: String): Chat? =
-        db.selectFrom(CHATS)
-            .where(CHATS.ID.eq(chatId))
-            .fetchOne()?.let { Chat(it.id!!, ChatKind.valueOf(it.kind!!.uppercase()), it.name, it.nextSequence!! - 1) }
-
-    override fun findMembers(chatId: String): List<User> =
-        db.fetch(
-            """select u.id, u.username from (
-                select user_id from chat_members where chat_id = ? order by user_id limit 50
-            ) preview join users u on u.id = preview.user_id order by preview.user_id""",
+            .from(CHAT_MEMBERS)
+            .join(USERS)
+            .on(USERS.ID.eq(CHAT_MEMBERS.USER_ID))
+            .where(CHAT_MEMBERS.CHAT_ID.`in`(chatIds.map(ChatId::value)))
+            .asTable("ranked")
+        val chatId = ranked.field(CHAT_MEMBERS.CHAT_ID)!!
+        val userId = ranked.field(USERS.ID)!!
+        val username = ranked.field(USERS.USERNAME)!!
+        return db.select(
             chatId,
-        ).map { User(it.get("id", String::class.java)!!, it.get("username", String::class.java)!!) }
-
-    override fun isMember(chatId: String, userId: String): Boolean =
-        db.fetchExists(
-            db.selectOne().from(CHAT_MEMBERS).where(
-                CHAT_MEMBERS.CHAT_ID.eq(chatId),
-                CHAT_MEMBERS.USER_ID.eq(userId),
-            ),
+            userId,
+            username,
         )
-
-    override fun isGroupMember(chatId: String, userId: String): Boolean =
-        db.fetchExists(
-            db.selectOne().from(CHAT_MEMBERS).join(CHATS).on(CHATS.ID.eq(CHAT_MEMBERS.CHAT_ID))
-                .where(CHAT_MEMBERS.CHAT_ID.eq(chatId), CHAT_MEMBERS.USER_ID.eq(userId), CHATS.KIND.eq("group")),
-        )
-
-    override fun groupMemberships(chatIds: List<String>, userId: String): Set<String> {
-        if (chatIds.isEmpty()) return emptySet()
-        return db.select(CHAT_MEMBERS.CHAT_ID).from(CHAT_MEMBERS)
-            .join(CHATS).on(CHATS.ID.eq(CHAT_MEMBERS.CHAT_ID))
-            .where(CHAT_MEMBERS.USER_ID.eq(userId), CHAT_MEMBERS.CHAT_ID.`in`(chatIds), CHATS.KIND.eq("group"))
-            .fetch(CHAT_MEMBERS.CHAT_ID).filterNotNull().toSet()
+            .from(ranked)
+            .where(
+                ranked.field(rank)!!
+                    .le(50),
+            )
+            .orderBy(
+                chatId,
+                username,
+            )
+            .fetch()
+            .groupBy(
+                keySelector = { ChatId(it.get(chatId)!!) },
+                valueTransform = {
+                    UserSummary(
+                        id = UserId(it.get(userId)!!),
+                        username = it.get(username)!!,
+                    )
+                },
+            )
     }
 
-    override fun allocateSequence(chatId: String): Long =
-        db.update(CHATS)
-            .set(CHATS.NEXT_SEQUENCE, CHATS.NEXT_SEQUENCE.plus(1L))
-            .where(CHATS.ID.eq(chatId))
-            .returning(CHATS.NEXT_SEQUENCE)
-            .fetchOne()?.nextSequence?.minus(1L)
-            ?: error("Chat disappeared while allocating sequence")
-
-    override fun findMemberIds(chatId: String): List<String> =
+    override fun existingMemberIds(
+        chatId: ChatId,
+        userIds: List<UserId>,
+    ): Set<UserId> = DatabaseObservation.query(DatabaseOperation.CHAT_EXISTING_MEMBER_IDS) {
         db.select(CHAT_MEMBERS.USER_ID)
             .from(CHAT_MEMBERS)
-            .where(CHAT_MEMBERS.CHAT_ID.eq(chatId))
+            .join(CHATS).on(CHATS.ID.eq(CHAT_MEMBERS.CHAT_ID))
+            .where(
+                CHAT_MEMBERS.CHAT_ID.eq(chatId.value),
+                CHAT_MEMBERS.USER_ID.`in`(userIds.map(UserId::value)),
+                CHATS.DELETED_AT.isNull,
+            )
             .fetch(CHAT_MEMBERS.USER_ID)
+            .filterNotNull()
+            .map(::UserId)
+            .toSet()
+    }
 
-    override fun findGroupOwnerForUpdate(chatId: String): String? =
+    override fun lockUsers(userIds: List<UserId>): Set<UserId> = DatabaseObservation.query(DatabaseOperation.CHAT_LOCK_USERS) {
+        db.select(USERS.ID)
+            .from(USERS)
+            .where(USERS.ID.`in`(userIds.map(UserId::value)))
+            .orderBy(USERS.ID)
+            .forNoKeyUpdate()
+            .fetch(USERS.ID)
+            .map { UserId(requireNotNull(it)) }
+            .toSet()
+    }
+
+    override fun groupCountsByUser(userIds: List<UserId>): Map<UserId, Int> = DatabaseObservation.query(
+        DatabaseOperation.CHAT_GROUP_COUNTS_BY_USER,
+    ) {
+        db.select(
+            CHAT_MEMBERS.USER_ID,
+            DSL.count(),
+        )
+            .from(CHAT_MEMBERS)
+            .join(CHATS)
+            .on(CHATS.ID.eq(CHAT_MEMBERS.CHAT_ID))
+            .where(
+                CHAT_MEMBERS.USER_ID.`in`(userIds.map(UserId::value)),
+                CHATS.KIND.eq(DbChatKind.GROUP),
+                CHATS.DELETED_AT.isNull,
+            )
+            .groupBy(CHAT_MEMBERS.USER_ID)
+            .fetchMap(
+                CHAT_MEMBERS.USER_ID,
+                DSL.count(),
+            )
+            .mapKeys { (userId, _) -> UserId(userId!!) }
+    }
+
+    override fun findByDirectKey(key: String): ChatId? = DatabaseObservation.query(DatabaseOperation.CHAT_FIND_BY_DIRECT_KEY) {
+        db.select(CHATS.ID)
+            .from(CHATS)
+            .where(CHATS.DIRECT_PAIR_KEY.eq(key), CHATS.DELETED_AT.isNull)
+            .fetchOne(CHATS.ID)
+            ?.let(::ChatId)
+    }
+
+    override fun lockDirectPair(key: String) = DatabaseObservation.query(DatabaseOperation.CHAT_LOCK_DIRECT_PAIR) {
+        Routines.acquireTransactionLock(db.configuration(), "direct:$key")
+    }
+
+    override fun findByIdForUpdate(chatId: ChatId): Chat? = DatabaseObservation.query(DatabaseOperation.CHAT_FIND_BY_ID_FOR_UPDATE) {
         db.selectFrom(CHATS)
-            .where(CHATS.ID.eq(chatId), CHATS.KIND.eq("group"))
-            .forUpdate()
-            .fetchOne()?.ownerId
+            .where(CHATS.ID.eq(chatId.value), CHATS.DELETED_AT.isNull)
+            .forNoKeyUpdate()
+            .fetchOne()
+            ?.toModel()
+    }
 
-    override fun deleteMember(chatId: String, userId: String): Boolean =
-        (
-            db.deleteFrom(CHAT_MEMBERS)
-                .where(
-                    CHAT_MEMBERS.CHAT_ID.eq(chatId),
-                    CHAT_MEMBERS.USER_ID.eq(userId),
-                ).execute() == 1
-        ).also { deleted ->
-            if (deleted) {
-                check(
-                    db.update(CHATS).set(CHATS.MEMBER_COUNT, CHATS.MEMBER_COUNT.minus(1))
-                        .where(CHATS.ID.eq(chatId)).execute() == 1,
+    override fun insertDirectWithMembersAndEvents(
+        id: ChatId,
+        key: String,
+        members: List<UserId>,
+        events: List<OutboxMessage>,
+    ) = DatabaseObservation.query(DatabaseOperation.CHAT_INSERT_DIRECT_WITH_MEMBERS_AND_EVENTS) {
+        require(members.size == 2 && members.distinct().size == 2)
+        val chat = db.insertInto(CHATS)
+            .set(
+                CHATS.ID,
+                id.value,
+            )
+            .set(
+                CHATS.KIND,
+                DbChatKind.DIRECT,
+            )
+            .set(
+                CHATS.DIRECT_PAIR_KEY,
+                key,
+            )
+            .set(
+                CHATS.MEMBER_COUNT,
+                members.size,
+            )
+        insertChatWithMembersAndEvents(
+            chat = chat,
+            chatId = id,
+            members = members,
+            events = events,
+        )
+    }
+
+    override fun insertGroupWithMembersAndEvents(
+        id: ChatId,
+        name: String,
+        ownerId: UserId,
+        members: List<UserId>,
+        events: List<OutboxMessage>,
+    ) = DatabaseObservation.query(DatabaseOperation.CHAT_INSERT_GROUP_WITH_MEMBERS_AND_EVENTS) {
+        require(members.size in 2..1000 && members.distinct().size == members.size && ownerId in members)
+        val chat = db.insertInto(CHATS)
+            .set(
+                CHATS.ID,
+                id.value,
+            )
+            .set(
+                CHATS.KIND,
+                DbChatKind.GROUP,
+            )
+            .set(
+                CHATS.NAME,
+                name,
+            )
+            .set(
+                CHATS.OWNER_ID,
+                ownerId.value,
+            )
+            .set(
+                CHATS.MEMBER_COUNT,
+                members.size,
+            )
+        insertChatWithMembersAndEvents(
+            chat = chat,
+            chatId = id,
+            members = members,
+            events = events,
+        )
+    }
+
+    private fun insertChatWithMembersAndEvents(
+        chat: Query,
+        chatId: ChatId,
+        members: List<UserId>,
+        events: List<OutboxMessage>,
+    ) {
+        require(events.size == members.size)
+        require(events.sumOf { it.payload.toByteArray(Charsets.UTF_8).size.toLong() } <= 1_048_576)
+        val statements = mutableListOf(chat)
+        val expectedCounts = mutableListOf(1)
+        members.chunked(500)
+            .forEach { chunk ->
+                val insert = db.insertInto(
+                    CHAT_MEMBERS,
+                    CHAT_MEMBERS.CHAT_ID,
+                    CHAT_MEMBERS.USER_ID,
+                )
+                chunk.forEach {
+                    insert.values(
+                        chatId.value,
+                        it.value,
+                    )
+                }
+                statements.add(insert)
+                expectedCounts.add(chunk.size)
+            }
+        events.chunked(500)
+            .forEach { chunk ->
+                val insert = db.insertInto(
+                    MESSENGER_OUTBOX_EVENTS,
+                    MESSENGER_OUTBOX_EVENTS.ID,
+                    MESSENGER_OUTBOX_EVENTS.ROOM,
+                    MESSENGER_OUTBOX_EVENTS.PAYLOAD,
+                )
+                chunk.forEach {
+                    insert.values(
+                        it.id.value,
+                        it.room,
+                        JSONB.valueOf(it.payload),
+                    )
+                }
+                statements.add(insert)
+                expectedCounts.add(chunk.size)
+            }
+        val actualCounts = db.batch(statements)
+            .execute()
+        check(actualCounts.toList() == expectedCounts) { "Chat creation affected unexpected row counts: ${actualCounts.toList()}" }
+    }
+
+    override fun insertMembersAndIncrementCount(
+        chatId: ChatId,
+        userIds: List<UserId>,
+    ) = DatabaseObservation.query(DatabaseOperation.CHAT_INSERT_MEMBERS_AND_INCREMENT_COUNT) {
+        if (userIds.isEmpty()) return@query
+        userIds.chunked(500)
+            .forEach { chunk ->
+                val insert = db.insertInto(
+                    CHAT_MEMBERS,
+                    CHAT_MEMBERS.CHAT_ID,
+                    CHAT_MEMBERS.USER_ID,
+                )
+                chunk.forEach {
+                    insert.values(
+                        chatId.value,
+                        it.value,
+                    )
+                }
+                check(insert.execute() == chunk.size)
+            }
+        val updated = db.update(CHATS)
+            .set(
+                CHATS.MEMBER_COUNT,
+                CHATS.MEMBER_COUNT.plus(userIds.size),
+            )
+            .where(CHATS.ID.eq(chatId.value), CHATS.DELETED_AT.isNull)
+            .execute()
+        check(updated == 1)
+    }
+
+    override fun findById(chatId: ChatId): Chat? = DatabaseObservation.query(DatabaseOperation.CHAT_FIND_BY_ID) {
+        db.selectFrom(CHATS)
+            .where(CHATS.ID.eq(chatId.value), CHATS.DELETED_AT.isNull)
+            .fetchOne()
+            ?.toModel()
+    }
+
+    override fun findMemberDetails(
+        chatId: ChatId,
+        userId: UserId,
+    ): MemberChatDetails? = DatabaseObservation.query(DatabaseOperation.CHAT_FIND_MEMBER_DETAILS) {
+        val members = DSL.multiset(
+            DSL.select(
+                USERS.ID,
+                USERS.USERNAME,
+            )
+                .from(CHAT_MEMBERS)
+                .join(USERS)
+                .on(USERS.ID.eq(CHAT_MEMBERS.USER_ID))
+                .where(CHAT_MEMBERS.CHAT_ID.eq(CHATS.ID))
+                .orderBy(CHAT_MEMBERS.USER_ID)
+                .limit(50),
+        )
+            .convertFrom { rows ->
+                rows.map {
+                    UserSummary(
+                        id = UserId(it.value1()!!),
+                        username = it.value2()!!,
+                    )
+                }
+            }
+        return db.select(
+            CHATS.asterisk(),
+            members,
+        )
+            .from(CHATS)
+            .where(CHATS.ID.eq(chatId.value), CHATS.DELETED_AT.isNull)
+            .and(
+                DSL.exists(
+                    DSL.selectOne()
+                        .from(CHAT_MEMBERS)
+                        .where(
+                            CHAT_MEMBERS.CHAT_ID.eq(CHATS.ID),
+                            CHAT_MEMBERS.USER_ID.eq(userId.value),
+                        ),
+                ),
+            )
+            .fetchOne { row ->
+                MemberChatDetails(
+                    chat = row.into(CHATS)
+                        .toModel(),
+                    members = row.get(members),
                 )
             }
+    }
+
+    override fun findGroupMemberPage(
+        chatId: ChatId,
+        viewerId: UserId,
+        afterUserId: UserId?,
+        limit: Int,
+    ): List<UserSummary>? = DatabaseObservation.query(DatabaseOperation.CHAT_FIND_GROUP_MEMBER_PAGE) {
+        val members = DSL.multiset(
+            DSL.select(USERS.ID, USERS.USERNAME)
+                .from(CHAT_MEMBERS)
+                .join(USERS)
+                .on(USERS.ID.eq(CHAT_MEMBERS.USER_ID))
+                .where(CHAT_MEMBERS.CHAT_ID.eq(CHATS.ID))
+                .and(afterUserId?.let { CHAT_MEMBERS.USER_ID.gt(it.value) } ?: DSL.trueCondition())
+                .orderBy(CHAT_MEMBERS.USER_ID)
+                .limit(limit),
+        ).convertFrom { rows ->
+            rows.map { UserSummary(id = UserId(it.value1()!!), username = it.value2()!!) }
         }
+        return db.select(members)
+            .from(CHATS)
+            .where(CHATS.ID.eq(chatId.value), CHATS.KIND.eq(DbChatKind.GROUP), CHATS.DELETED_AT.isNull)
+            .and(
+                DSL.exists(
+                    DSL.selectOne()
+                        .from(CHAT_MEMBERS)
+                        .where(
+                            CHAT_MEMBERS.CHAT_ID.eq(CHATS.ID),
+                            CHAT_MEMBERS.USER_ID.eq(viewerId.value),
+                        ),
+                ),
+            )
+            .fetchOne { it.get(members) }
+    }
+
+    override fun findMembers(chatId: ChatId): List<UserSummary> = DatabaseObservation.query(DatabaseOperation.CHAT_FIND_MEMBERS) {
+        val preview = db.select(CHAT_MEMBERS.USER_ID)
+            .from(CHAT_MEMBERS)
+            .where(CHAT_MEMBERS.CHAT_ID.eq(chatId.value))
+            .orderBy(CHAT_MEMBERS.USER_ID)
+            .limit(50)
+            .asTable("preview")
+        val previewUserId = preview.field(CHAT_MEMBERS.USER_ID)!!
+        return db.select(
+            USERS.ID,
+            USERS.USERNAME,
+        )
+            .from(preview)
+            .join(USERS)
+            .on(USERS.ID.eq(previewUserId))
+            .orderBy(previewUserId)
+            .fetch {
+                UserSummary(
+                    id = UserId(it.get(USERS.ID)!!),
+                    username = it.get(USERS.USERNAME)!!,
+                )
+            }
+    }
+
+    override fun isMember(
+        chatId: ChatId,
+        userId: UserId,
+    ): Boolean = DatabaseObservation.query(DatabaseOperation.CHAT_IS_MEMBER) {
+        db.fetchExists(
+            db.selectOne()
+                .from(CHAT_MEMBERS)
+                .join(CHATS).on(CHATS.ID.eq(CHAT_MEMBERS.CHAT_ID))
+                .where(
+                    CHAT_MEMBERS.CHAT_ID.eq(chatId.value),
+                    CHAT_MEMBERS.USER_ID.eq(userId.value),
+                    CHATS.DELETED_AT.isNull,
+                ),
+        )
+    }
+
+    override fun isGroupMember(
+        chatId: ChatId,
+        userId: UserId,
+    ): Boolean = DatabaseObservation.query(DatabaseOperation.CHAT_IS_GROUP_MEMBER) {
+        db.fetchExists(
+            db.selectOne()
+                .from(CHAT_MEMBERS)
+                .join(CHATS)
+                .on(CHATS.ID.eq(CHAT_MEMBERS.CHAT_ID))
+                .where(
+                    CHAT_MEMBERS.CHAT_ID.eq(chatId.value),
+                    CHAT_MEMBERS.USER_ID.eq(userId.value),
+                    CHATS.KIND.eq(DbChatKind.GROUP),
+                    CHATS.DELETED_AT.isNull,
+                ),
+        )
+    }
+
+    override fun groupMemberships(
+        chatIds: List<ChatId>,
+        userId: UserId,
+    ): Set<ChatId> = DatabaseObservation.query(DatabaseOperation.CHAT_GROUP_MEMBERSHIPS) {
+        if (chatIds.isEmpty()) return emptySet()
+        return db.select(CHAT_MEMBERS.CHAT_ID)
+            .from(CHAT_MEMBERS)
+            .join(CHATS)
+            .on(CHATS.ID.eq(CHAT_MEMBERS.CHAT_ID))
+            .where(
+                CHAT_MEMBERS.USER_ID.eq(userId.value),
+                CHAT_MEMBERS.CHAT_ID.`in`(chatIds.map(ChatId::value)),
+                CHATS.KIND.eq(DbChatKind.GROUP),
+                CHATS.DELETED_AT.isNull,
+            )
+            .fetch(CHAT_MEMBERS.CHAT_ID)
+            .filterNotNull()
+            .map(::ChatId)
+            .toSet()
+    }
+
+    override fun allocateSequenceForMember(
+        chatId: ChatId,
+        userId: UserId,
+    ): Long? = DatabaseObservation.query(DatabaseOperation.CHAT_ALLOCATE_SEQUENCE_FOR_MEMBER) {
+        allocateSequencesForMembers(chatId, listOf(userId))
+    }
+
+    override fun allocateSequencesForMembers(chatId: ChatId, userIds: List<UserId>): Long? = DatabaseObservation.query(
+        DatabaseOperation.CHAT_ALLOCATE_SEQUENCES_FOR_MEMBERS,
+    ) {
+        require(userIds.size in 1..16) { "Sequence allocation must contain one to sixteen senders" }
+        val distinctUsers = userIds.distinct()
+        return db.update(CHATS)
+            .set(
+                CHATS.NEXT_SEQUENCE,
+                CHATS.NEXT_SEQUENCE.plus(userIds.size.toLong()),
+            )
+            .where(CHATS.ID.eq(chatId.value), CHATS.DELETED_AT.isNull)
+            .and(
+                DSL.field(
+                    db.select(DSL.countDistinct(CHAT_MEMBERS.USER_ID))
+                        .from(CHAT_MEMBERS)
+                        .where(
+                            CHAT_MEMBERS.CHAT_ID.eq(chatId.value),
+                            CHAT_MEMBERS.USER_ID.`in`(distinctUsers.map(UserId::value)),
+                        ),
+                ).eq(distinctUsers.size),
+            )
+            .returning(CHATS.NEXT_SEQUENCE)
+            .fetchOne()?.nextSequence?.minus(userIds.size.toLong())
+    }
+
+    override fun findMemberIds(chatId: ChatId): List<UserId> = DatabaseObservation.query(DatabaseOperation.CHAT_FIND_MEMBER_IDS) {
+        db.select(CHAT_MEMBERS.USER_ID)
+            .from(CHAT_MEMBERS)
+            .where(CHAT_MEMBERS.CHAT_ID.eq(chatId.value))
+            .fetch(CHAT_MEMBERS.USER_ID)
+            .filterNotNull()
+            .map(::UserId)
+    }
+
+    override fun deleteMemberAndDecrementCount(
+        chatId: ChatId,
+        userId: UserId,
+    ): Boolean = DatabaseObservation.query(DatabaseOperation.CHAT_DELETE_MEMBER_AND_DECREMENT_COUNT) {
+        val removed = DSL.name("removed")
+            .`as`(
+                db.deleteFrom(CHAT_MEMBERS)
+                    .where(
+                        CHAT_MEMBERS.CHAT_ID.eq(chatId.value),
+                        CHAT_MEMBERS.USER_ID.eq(userId.value),
+                    )
+                    .returningResult(CHAT_MEMBERS.CHAT_ID),
+            )
+        val removedChatId = removed.field(CHAT_MEMBERS.CHAT_ID)!!
+        val updated = db.with(removed)
+            .update(CHATS)
+            .set(
+                CHATS.MEMBER_COUNT,
+                CHATS.MEMBER_COUNT.minus(1),
+            )
+            .from(removed)
+            .where(CHATS.ID.eq(removedChatId))
+            .returning(CHATS.ID)
+            .fetch()
+        check(updated.size <= 1)
+        return updated.isNotEmpty()
+    }
 }
+
+private fun ChatsRecord.toModel(): Chat =
+    Chat(
+        id = ChatId(id!!),
+        kind = ChatKind.valueOf(kind!!.name),
+        name = name,
+        lastSequence = nextSequence!! - 1,
+        ownerId = ownerId?.let(::UserId),
+        memberCount = memberCount!!,
+    )

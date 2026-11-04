@@ -1,6 +1,8 @@
 package com.andrewtinyakov.messenger.infrastructure.outbox
 
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSENGER_OUTBOX_EVENTS
+import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseObservation
+import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseOperation
 import io.micrometer.core.instrument.MeterRegistry
 import org.jooq.DSLContext
 import org.jooq.impl.DSL.count
@@ -36,10 +38,12 @@ class OutboxBacklogMetrics(
     @Scheduled(fixedDelay = 15000)
     fun sample() {
         try {
-            val row = db.select(count(), min(MESSENGER_OUTBOX_EVENTS.CREATED_AT))
-                .from(MESSENGER_OUTBOX_EVENTS)
-                .where(MESSENGER_OUTBOX_EVENTS.PUBLISHED_AT.isNull)
-                .fetchOne() ?: return
+            val row = DatabaseObservation.query(DatabaseOperation.OUTBOX_BACKLOG_SAMPLE) {
+                db.select(count(), min(MESSENGER_OUTBOX_EVENTS.CREATED_AT))
+                    .from(MESSENGER_OUTBOX_EVENTS)
+                    .where(MESSENGER_OUTBOX_EVENTS.PUBLISHED_AT.isNull)
+                    .fetchOne()
+            } ?: return
             pending.set(row.value1().toLong())
             oldestCreatedAt.set(row.value2()?.toEpochSecond() ?: 0L)
             sampleHealthy.set(1)

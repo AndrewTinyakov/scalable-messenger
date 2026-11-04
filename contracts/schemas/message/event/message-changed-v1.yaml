@@ -1,0 +1,98 @@
+$schema: http://json-schema.org/draft-07/schema#
+title: MessageChangedEventV1
+type: object
+additionalProperties: false
+required:
+  - type
+  - version
+  - eventId
+  - room
+  - chatId
+  - messageId
+  - sequence
+  - senderId
+  - body
+  - createdAt
+  - messageVersion
+  - mutationRevision
+properties:
+  type:
+    const: message_changed
+  version:
+    type: integer
+    const: 1
+  eventId: &a1
+    type: string
+    pattern: ^[0-7][0-9A-HJKMNP-TV-Z]{25}$
+  room:
+    type: string
+    pattern: ^(user|group):[0-7][0-9A-HJKMNP-TV-Z]{25}$
+  chatId: *a1
+  messageId: *a1
+  sequence: &a2
+    type: string
+    pattern: ^[1-9][0-9]{0,18}$
+  senderId: *a1
+  body:
+    type: string
+    maxLength: 4000
+  createdAt: &a3
+    type: string
+    format: date-time
+  messageVersion: *a2
+  mutationRevision: *a2
+  editedAt: *a3
+  deletedAt: *a3
+  replyToMessageId: *a1
+  replySenderId: *a1
+  replyBody:
+    type: string
+    maxLength: 160
+  replyDeleted:
+    type: boolean
+  replyVersion: *a2
+allOf:
+  - if:
+      anyOf:
+        - required:
+            - replyToMessageId
+        - required:
+            - replySenderId
+        - required:
+            - replyBody
+        - required:
+            - replyDeleted
+        - required:
+            - replyVersion
+    then:
+      required:
+        - replyToMessageId
+        - replySenderId
+        - replyBody
+        - replyDeleted
+        - replyVersion
+  - if:
+      required:
+        - replyDeleted
+      properties:
+        replyDeleted:
+          const: true
+    then:
+      properties:
+        replyBody:
+          const: ""
+    else:
+      properties:
+        replyBody:
+          minLength: 1
+  - if:
+      required:
+        - deletedAt
+    then:
+      properties:
+        body:
+          const: ""
+    else:
+      properties:
+        body:
+          minLength: 1

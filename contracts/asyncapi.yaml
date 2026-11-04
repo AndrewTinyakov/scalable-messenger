@@ -4,19 +4,6 @@ info:
   version: 1.0.0
   description: Confirmed send commands, saved room events, and client socket frames.
 defaultContentType: application/json
-servers:
-  rabbitmq:
-    host: rabbitmq:5672
-    pathname: /
-    protocol: amqp
-    protocolVersion: 0-9-1
-  redis:
-    host: redis:6379
-    protocol: redis
-  websocket:
-    host: localhost:8080
-    pathname: /ws
-    protocol: wss
 channels:
   sendCommand:
     $ref: ./channels/commands.yaml#/sendCommand

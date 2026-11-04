@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"messenger/ws/internal/grpcauth"
+	"messenger/ws/internal/monitoring"
 	"messenger/ws/internal/protocol"
+	"messenger/ws/internal/roomname"
 )
 
 type subscriptionMode uint8
@@ -24,38 +26,46 @@ type subscriptionAuthorization struct {
 	release func()
 }
 
-func (c *Connection) subscribeOne(subscription protocol.Subscription) error {
-	return c.subscribe([]protocol.Subscription{subscription}, singleSubscription)
+func (subscriptions *chatSubscriptions) subscribeOne(subscription protocol.Subscription) error {
+	return subscriptions.subscribe([]protocol.Subscription{subscription}, singleSubscription)
 }
 
-func (c *Connection) subscribeMany(subscriptions []protocol.Subscription) error {
-	return c.subscribe(subscriptions, batchSubscription)
+func (subscriptions *chatSubscriptions) subscribeMany(items []protocol.Subscription) error {
+	return subscriptions.subscribe(items, batchSubscription)
 }
 
-func (c *Connection) subscribe(subscriptions []protocol.Subscription, mode subscriptionMode) error {
+func (subscriptions *chatSubscriptions) subscribe(items []protocol.Subscription, mode subscriptionMode) error {
+	return subscriptions.subscribeContext(subscriptions.connection.ctx, items, mode)
+}
+
+func (subscriptions *chatSubscriptions) subscribeContext(base context.Context, items []protocol.Subscription, mode subscriptionMode) error {
+	if err := base.Err(); err != nil {
+		return err
+	}
 	newRooms := 0
-	groupIDs := make([]string, 0, len(subscriptions))
-	revisions := make(map[string]uint64, len(subscriptions))
-	for _, subscription := range subscriptions {
-		if c.room(subscription.ChatID) == "" {
+	groupIDs := make([]string, 0, len(items))
+	grants := make(map[string]*groupGrant, len(items))
+	defer subscriptions.finishGroupAuthorizations(grants)
+	for _, subscription := range items {
+		if subscriptions.room(subscription.ChatID) == "" {
 			newRooms++
 		}
-		if subscription.Kind == "group" {
+		if subscription.Kind == protocol.ChatGroup {
 			groupIDs = append(groupIDs, subscription.ChatID)
-			revisions[subscription.ChatID] = c.revocation(subscription.ChatID)
+			grants[subscription.ChatID] = subscriptions.beginGroupAuthorization(subscription.ChatID)
 		}
 	}
-	if c.roomCount()+newRooms > c.server.config.MaxRoomsPerConnection {
+	if subscriptions.count()+newRooms > subscriptions.config.MaxRoomsPerConnection {
 		return errRoomLimit
 	}
-	if err := c.chargeSubscriptionAttempts(len(subscriptions), mode); err != nil {
+	if err := subscriptions.chargeSubscriptionAttempts(base, len(items), mode); err != nil {
 		return err
 	}
 
-	authorization, err := c.authorizeSubscriptions(groupIDs, mode)
+	authorization, err := subscriptions.authorizeSubscriptions(base, groupIDs, mode)
 	defer authorization.release()
 	for _, chatID := range authorization.denied {
-		c.leaveChat(chatID)
+		subscriptions.leave(chatID)
 	}
 	if err != nil {
 		return err
@@ -63,24 +73,27 @@ func (c *Connection) subscribe(subscriptions []protocol.Subscription, mode subsc
 	if len(authorization.denied) > 0 {
 		return grpcauth.ErrUnauthorized
 	}
-	return c.joinSubscriptions(subscriptions, revisions, authorization)
+	if mode == batchSubscription {
+		return subscriptions.joinSubscriptionBatch(base, items, grants, authorization)
+	}
+	return subscriptions.joinSubscriptions(base, items, grants, authorization)
 }
 
-func (c *Connection) chargeSubscriptionAttempts(count int, mode subscriptionMode) error {
-	if c.server.subscribeLimiter == nil {
+func (subscriptions *chatSubscriptions) chargeSubscriptionAttempts(base context.Context, count int, mode subscriptionMode) error {
+	if subscriptions.subscribeLimiter == nil {
 		return nil
 	}
-	if mode == batchSubscription && count > c.server.config.SubscribeRate {
+	if mode == batchSubscription && count > subscriptions.config.SubscribeRate {
 		return errRateLimited
 	}
-	ctx, cancel := context.WithTimeout(c.ctx, c.server.config.APITimeout)
+	ctx, cancel := context.WithTimeout(base, subscriptions.config.APITimeout)
 	defer cancel()
 	var allowed bool
 	var err error
 	if mode == batchSubscription {
-		allowed, err = c.server.subscribeLimiter.AllowSubscribeBatch(ctx, c.session.UserID, count, c.server.config.SubscribeRate, c.server.config.SubscribeWindow)
+		allowed, err = subscriptions.subscribeLimiter.AllowSubscribeBatch(ctx, subscriptions.connection.session.UserID, count, subscriptions.config.SubscribeRate, subscriptions.config.SubscribeWindow)
 	} else {
-		allowed, err = c.server.subscribeLimiter.AllowSubscribe(ctx, c.session.UserID, c.server.config.SubscribeRate, c.server.config.SubscribeWindow)
+		allowed, err = subscriptions.subscribeLimiter.AllowSubscribe(ctx, subscriptions.connection.session.UserID, subscriptions.config.SubscribeRate, subscriptions.config.SubscribeWindow)
 	}
 	if err != nil {
 		return fmt.Errorf("limit subscriptions: %w", err)
@@ -91,15 +104,15 @@ func (c *Connection) chargeSubscriptionAttempts(count int, mode subscriptionMode
 	return nil
 }
 
-func (c *Connection) authorizeSubscriptions(groupIDs []string, mode subscriptionMode) (subscriptionAuthorization, error) {
+func (subscriptions *chatSubscriptions) authorizeSubscriptions(base context.Context, groupIDs []string, mode subscriptionMode) (subscriptionAuthorization, error) {
 	if mode == batchSubscription {
-		return c.authorizeSubscriptionBatch(groupIDs)
+		return subscriptions.authorizeSubscriptionBatch(base, groupIDs)
 	}
-	return c.authorizeSingleSubscription(groupIDs)
+	return subscriptions.authorizeSingleSubscription(base, groupIDs)
 }
 
-func (c *Connection) authorizeSingleSubscription(groupIDs []string) (subscriptionAuthorization, error) {
-	ctx, cancel := context.WithTimeout(c.ctx, c.server.config.APITimeout)
+func (subscriptions *chatSubscriptions) authorizeSingleSubscription(base context.Context, groupIDs []string) (subscriptionAuthorization, error) {
+	ctx, cancel := context.WithTimeout(base, subscriptions.config.APITimeout)
 	authorization := subscriptionAuthorization{
 		rooms:   make(map[string]string, len(groupIDs)),
 		joinCtx: ctx,
@@ -108,11 +121,19 @@ func (c *Connection) authorizeSingleSubscription(groupIDs []string) (subscriptio
 	if len(groupIDs) == 0 {
 		return authorization, nil
 	}
-	if c.server.groupAuthSlots != nil {
+	cancel()
+	ctx, cancel, err := subscriptions.groupAuthorizationContext(base)
+	if err != nil {
+		authorization.denied = append(authorization.denied, groupIDs...)
+		return authorization, err
+	}
+	authorization.release = cancel
+	authorization.joinCtx = ctx
+	if subscriptions.groupAuthSlots != nil {
 		select {
-		case c.server.groupAuthSlots <- struct{}{}:
+		case subscriptions.groupAuthSlots <- struct{}{}:
 			authorization.release = func() {
-				<-c.server.groupAuthSlots
+				<-subscriptions.groupAuthSlots
 				cancel()
 			}
 		default:
@@ -120,8 +141,11 @@ func (c *Connection) authorizeSingleSubscription(groupIDs []string) (subscriptio
 		}
 	}
 	started := time.Now()
-	room, err := c.server.groupAuth.AuthorizeGroup(ctx, c.token, groupIDs[0])
-	c.observeGroupAuthorization(started, err)
+	room, err := subscriptions.groupAuth.AuthorizeGroup(ctx, subscriptions.connection.session.SessionID, groupIDs[0])
+	if err == nil {
+		err = subscriptions.groupAuthorizationError(ctx)
+	}
+	subscriptions.observeGroupAuthorization(started, err)
 	if errors.Is(err, grpcauth.ErrUnauthorized) {
 		authorization.denied = append(authorization.denied, groupIDs[0])
 	}
@@ -131,7 +155,7 @@ func (c *Connection) authorizeSingleSubscription(groupIDs []string) (subscriptio
 	return authorization, err
 }
 
-func (c *Connection) authorizeSubscriptionBatch(groupIDs []string) (subscriptionAuthorization, error) {
+func (subscriptions *chatSubscriptions) authorizeSubscriptionBatch(base context.Context, groupIDs []string) (subscriptionAuthorization, error) {
 	authorization := subscriptionAuthorization{
 		rooms:   make(map[string]string, len(groupIDs)),
 		release: func() {},
@@ -139,27 +163,37 @@ func (c *Connection) authorizeSubscriptionBatch(groupIDs []string) (subscription
 	if len(groupIDs) == 0 {
 		return authorization, nil
 	}
-	if c.server.groupAuthSlots != nil {
+	if subscriptions.groupAuthSlots != nil {
 		select {
-		case c.server.groupAuthSlots <- struct{}{}:
-			defer func() { <-c.server.groupAuthSlots }()
-		case <-c.ctx.Done():
-			return authorization, c.ctx.Err()
+		case subscriptions.groupAuthSlots <- struct{}{}:
+			defer func() { <-subscriptions.groupAuthSlots }()
+		case <-subscriptions.connection.ctx.Done():
+			return authorization, subscriptions.connection.ctx.Err()
 		default:
 			return authorization, errRateLimited
 		}
 	}
-	ctx, cancel := context.WithTimeout(c.ctx, c.server.config.APITimeout)
-	started := time.Now()
-	allowed, err := c.server.groupAuth.AuthorizeGroups(ctx, c.token, groupIDs)
-	cancel()
-	c.observeGroupAuthorization(started, err)
+	ctx, cancel, err := subscriptions.groupAuthorizationContext(base)
 	if err != nil {
+		authorization.denied = append(authorization.denied, groupIDs...)
+		return authorization, err
+	}
+	started := time.Now()
+	allowed, err := subscriptions.groupAuth.AuthorizeGroups(ctx, subscriptions.connection.session.SessionID, groupIDs)
+	if err == nil {
+		err = subscriptions.groupAuthorizationError(ctx)
+	}
+	cancel()
+	subscriptions.observeGroupAuthorization(started, err)
+	if err != nil {
+		if errors.Is(err, grpcauth.ErrUnauthorized) {
+			authorization.denied = append(authorization.denied, groupIDs...)
+		}
 		return authorization, err
 	}
 	for _, chatID := range groupIDs {
 		if allowed[chatID] {
-			authorization.rooms[chatID] = "group:" + chatID
+			authorization.rooms[chatID] = roomname.Group(chatID)
 		} else {
 			authorization.denied = append(authorization.denied, chatID)
 		}
@@ -167,28 +201,28 @@ func (c *Connection) authorizeSubscriptionBatch(groupIDs []string) (subscription
 	return authorization, nil
 }
 
-func (c *Connection) observeGroupAuthorization(started time.Time, err error) {
-	result := "authorized"
+func (subscriptions *chatSubscriptions) observeGroupAuthorization(started time.Time, err error) {
+	result := monitoring.AuthorizationAuthorized
 	if errors.Is(err, grpcauth.ErrUnauthorized) {
-		result = "denied"
+		result = monitoring.AuthorizationDenied
 	} else if err != nil {
-		result = "error"
+		result = monitoring.AuthorizationError
 	}
-	c.server.metrics.GroupAuthSeconds.WithLabelValues(result).Observe(time.Since(started).Seconds())
+	subscriptions.metrics.ObserveGroupAuthorization(time.Since(started), result)
 }
 
-func (c *Connection) joinSubscriptions(subscriptions []protocol.Subscription, revisions map[string]uint64, authorization subscriptionAuthorization) error {
-	for _, subscription := range subscriptions {
-		room := "user:" + c.session.UserID
-		if subscription.Kind == "group" {
+func (subscriptions *chatSubscriptions) joinSubscriptions(base context.Context, items []protocol.Subscription, grants map[string]*groupGrant, authorization subscriptionAuthorization) error {
+	for _, subscription := range items {
+		room := roomname.User(subscriptions.connection.session.UserID)
+		if subscription.Kind == protocol.ChatGroup {
 			room = authorization.rooms[subscription.ChatID]
 		}
 		ctx := authorization.joinCtx
 		cancel := func() {}
 		if ctx == nil {
-			ctx, cancel = context.WithTimeout(c.ctx, c.server.config.APITimeout)
+			ctx, cancel = context.WithTimeout(base, subscriptions.config.APITimeout)
 		}
-		err := c.joinAuthorized(ctx, subscription.ChatID, subscription.Kind, subscription.Epoch, subscription.StreamID, room, revisions[subscription.ChatID])
+		err := subscriptions.joinAuthorized(ctx, subscription.ChatID, subscription.Kind, subscription.Epoch, subscription.StreamID, room, grants[subscription.ChatID])
 		cancel()
 		if err != nil {
 			return err
@@ -197,35 +231,84 @@ func (c *Connection) joinSubscriptions(subscriptions []protocol.Subscription, re
 	return nil
 }
 
-func (c *Connection) leaveChat(chatID string) {
-	if old := c.removeRoom(chatID); old != "" {
-		c.server.rooms.LeaveChat(c, old, chatID)
+func (subscriptions *chatSubscriptions) joinAuthorized(ctx context.Context, chatID string, kind protocol.ChatKind, epoch, streamID, room string, grant *groupGrant) error {
+	if err := subscriptions.connection.ctx.Err(); err != nil {
+		return err
 	}
-}
-
-func (c *Connection) joinAuthorized(ctx context.Context, chatID, kind, epoch, streamID, room string, revision uint64) error {
-	if kind == "group" && !c.allowGroupJoin(chatID, revision) {
+	if kind == protocol.ChatGroup && !subscriptions.allowGroupJoin(chatID, grant) {
 		return grpcauth.ErrUnauthorized
 	}
-	if current := c.room(chatID); current != "" {
+	if current := subscriptions.room(chatID); current != "" {
 		if current != room {
 			return errors.New("subscription kind changed")
 		}
-		if kind == "group" && !c.commitGroupJoin(chatID, room, revision) {
+		if kind == protocol.ChatGroup && !subscriptions.commitGroupJoin(chatID, room, grant) {
 			return grpcauth.ErrUnauthorized
 		}
 		return nil
 	}
-	if err := c.server.rooms.Join(ctx, c, room, chatID, epoch, streamID); err != nil {
+	recipient := subscriptions.recipient(grant)
+	if err := subscriptions.roomCoordinator.Join(ctx, recipient, room, chatID, epoch, streamID); err != nil {
 		return err
 	}
-	if kind == "group" {
-		if !c.commitGroupJoin(chatID, room, revision) {
-			c.server.rooms.LeaveChat(c, room, chatID)
+	if kind == protocol.ChatGroup {
+		if !subscriptions.allowGroupJoin(chatID, grant) {
+			subscriptions.roomCoordinator.LeaveChat(recipient, room, chatID)
 			return grpcauth.ErrUnauthorized
 		}
+		validateCtx, cancel, err := subscriptions.groupAuthorizationContext(ctx)
+		if err != nil {
+			subscriptions.roomCoordinator.LeaveChat(recipient, room, chatID)
+			return err
+		}
+		validatedRoom, err := subscriptions.groupAuth.AuthorizeGroup(validateCtx, subscriptions.connection.session.SessionID, chatID)
+		if err == nil {
+			err = subscriptions.groupAuthorizationError(validateCtx)
+		}
+		cancel()
+		if err != nil || validatedRoom != room {
+			subscriptions.roomCoordinator.LeaveChat(recipient, room, chatID)
+			if err == nil {
+				return grpcauth.ErrUnauthorized
+			}
+			return err
+		}
+		if !subscriptions.commitGroupJoin(chatID, room, grant) {
+			subscriptions.roomCoordinator.LeaveChat(recipient, room, chatID)
+			return grpcauth.ErrUnauthorized
+		}
+		if subscriptions.groupJoinMissed(chatID, grant) {
+			grant.Enqueue(protocol.Event{Type: protocol.EventRecoveryFailed, Version: 1, Room: room, ChatID: chatID})
+		}
+		grant.Enqueue(protocol.Event{Type: protocol.EventSubscribed, Version: 1, Room: room, ChatID: chatID})
 	} else {
-		c.setRoom(chatID, room)
+		if !subscriptions.setDirectRoom(chatID, room) {
+			subscriptions.roomCoordinator.LeaveChat(subscriptions.connection, room, chatID)
+			return context.Canceled
+		}
 	}
 	return nil
+}
+
+func (subscriptions *chatSubscriptions) groupAuthorizationContext(base context.Context) (context.Context, context.CancelFunc, error) {
+	if err := subscriptions.connection.admissionError(); err != nil {
+		return nil, func() {}, err
+	}
+	deadline := time.Now().Add(subscriptions.config.APITimeout)
+	if admission := subscriptions.connection.session.ExpiresAt; !admission.IsZero() && admission.Before(deadline) {
+		deadline = admission
+	}
+	ctx, cancel := context.WithDeadline(base, deadline)
+	if err := subscriptions.groupAuthorizationError(ctx); err != nil {
+		cancel()
+		return nil, func() {}, err
+	}
+	return ctx, cancel, nil
+}
+
+func (subscriptions *chatSubscriptions) groupAuthorizationError(ctx context.Context) error {
+	if err := subscriptions.connection.admissionError(); err != nil {
+		return err
+	}
+	return ctx.Err()
 }

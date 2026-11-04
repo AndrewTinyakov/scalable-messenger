@@ -1,6 +1,6 @@
 package com.andrewtinyakov.messenger.auth.web.payload
 
-import com.andrewtinyakov.messenger.user.web.payload.UserResponse
+import com.andrewtinyakov.messenger.auth.model.SessionCredentials
 import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.Size
@@ -16,8 +16,6 @@ data class AuthRequest(
 )
 
 data class AuthResponse(
-    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
-    val token: String,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val user: UserResponse,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
@@ -38,4 +36,9 @@ data class WsTicketResponse(
     val token: String,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val expiresAt: Long,
+)
+
+fun SessionCredentials.toAuthResponse(): AuthResponse = AuthResponse(
+    user = UserResponse(id = user.id.value, username = user.username),
+    deviceId = session.deviceId.value,
 )

@@ -35,10 +35,17 @@ redis.call('ZREMRANGEBYSCORE',KEYS[1],'-inf',now)
 if not redis.call('ZSCORE',KEYS[1],ARGV[2]) then return 0 end
 redis.call('ZADD',KEYS[1],now+tonumber(ARGV[1]),ARGV[2])
 redis.call('PEXPIRE',KEYS[1],ARGV[1])
+redis.call('ZREMRANGEBYSCORE',KEYS[2],'-inf',now)
+if redis.call('ZSCORE',KEYS[2],ARGV[2]) then
+redis.call('ZADD',KEYS[2],now+tonumber(ARGV[1]),ARGV[2])
+redis.call('PEXPIRE',KEYS[2],ARGV[1])
+end
 return 1`)
 	releaseConnectionScript = redis.NewScript(`
 redis.call('ZREM',KEYS[1],ARGV[1])
 if redis.call('ZCARD',KEYS[1])==0 then redis.call('DEL',KEYS[1]) end
+redis.call('ZREM',KEYS[2],ARGV[1])
+if redis.call('ZCARD',KEYS[2])==0 then redis.call('DEL',KEYS[2]) end
 return 1`)
 	allowAttemptScript = redis.NewScript(`
 local t=redis.call('TIME')
@@ -101,7 +108,7 @@ func (c *Client) RenewConnectionLease(ctx context.Context, userID, leaseID strin
 	if !validConnectionUserID(userID) || leaseID == "" {
 		return false, errors.New("invalid connection lease")
 	}
-	result, err := renewConnectionScript.Run(ctx, c.redis, []string{connectionLeaseKey(userID)}, ConnectionLeaseTTL.Milliseconds(), leaseID).Int64()
+	result, err := renewConnectionScript.Run(ctx, c.redis, []string{connectionLeaseKey(userID), connectionOnlineKey(userID)}, ConnectionLeaseTTL.Milliseconds(), leaseID).Int64()
 	if err != nil {
 		return false, fmt.Errorf("renew connection lease: %w", err)
 	}
@@ -114,7 +121,7 @@ func (c *Client) ReleaseConnectionLease(ctx context.Context, userID, leaseID str
 	if !validConnectionUserID(userID) || leaseID == "" {
 		return errors.New("invalid connection lease")
 	}
-	if err := releaseConnectionScript.Run(ctx, c.redis, []string{connectionLeaseKey(userID)}, leaseID).Err(); err != nil {
+	if err := releaseConnectionScript.Run(ctx, c.redis, []string{connectionLeaseKey(userID), connectionOnlineKey(userID)}, leaseID).Err(); err != nil {
 		return fmt.Errorf("release connection lease: %w", err)
 	}
 	return nil
@@ -144,10 +151,7 @@ func (c *Client) allowAttempt(ctx context.Context, userID string, cost, limit in
 	if !validConnectionUserID(userID) || limit <= 0 || cost <= 0 || cost > limit || window < time.Millisecond || window/time.Microsecond < time.Duration(limit) {
 		return false, fmt.Errorf("invalid %s limit", operation)
 	}
-	key := subscribeLimitKey(userID)
-	if operation == "handshake" {
-		key = handshakeLimitKey(userID)
-	}
+	key := connectionUserKey(userID, operation)
 	result, err := allowAttemptScript.Run(ctx, c.redis, []string{key}, window.Microseconds(), limit, window.Milliseconds(), cost).Int64()
 	if err != nil {
 		return false, fmt.Errorf("limit %s attempts: %w", operation, err)

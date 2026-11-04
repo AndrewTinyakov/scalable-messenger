@@ -23,7 +23,7 @@ export interface SendRequestAdapters {
 }
 
 const MAX_REJECTED_SENDS = 100
-const MAX_UNRESOLVED_SENDS = 100
+const MAX_UNRESOLVED_SENDS = 256
 const SEND_STATUS_BATCH_SIZE = 100
 const sendStates = new Set(['sending', 'retryable', 'queued', 'saved', 'rejected'])
 
@@ -87,10 +87,12 @@ function readStored(storage: Pick<Storage, 'getItem'>, key: string): PendingSend
     const parsed: unknown = value ? JSON.parse(value) : []
     if (!Array.isArray(parsed)) return []
     const seen = new Set<string>()
+    let unresolved = 0
     return retain(
       parsed.filter(isStoredSend).filter((send) => {
         if (send.status === 'saved') return false
         if (seen.has(send.requestId)) return false
+        if (send.status !== 'rejected' && ++unresolved > MAX_UNRESOLVED_SENDS) return false
         seen.add(send.requestId)
         return true
       }),
@@ -102,6 +104,75 @@ function readStored(storage: Pick<Storage, 'getItem'>, key: string): PendingSend
 
 export class SendRequests {
   private sends: PendingSend[]
+  private outbound: string[] = []
+  private active?: string
+  private timer?: ReturnType<typeof setTimeout>
+  private nextSendAt = 0
+  private backoff = 0
+
+  disconnected(): void {
+    clearTimeout(this.timer)
+    this.timer = undefined
+    this.outbound = []
+    this.active = undefined
+  }
+
+  private enqueue(requestId: string): void {
+    if (this.active === requestId || this.outbound.includes(requestId)) return
+    this.outbound.push(requestId)
+    this.drain()
+  }
+
+  private drain(): void {
+    if (this.active || this.timer || !this.adapters.isConnected()) return
+    const delay = this.nextSendAt - this.adapters.now()
+    if (delay > 0) {
+      this.timer = setTimeout(() => {
+        this.timer = undefined
+        this.drain()
+      }, delay)
+      return
+    }
+    const requestId = this.outbound.shift()
+    if (!requestId) return
+    const send = this.sends.find((item) => item.requestId === requestId)
+    if (!send || send.status !== 'sending') {
+      this.drain()
+      return
+    }
+    this.active = requestId
+    this.nextSendAt = this.adapters.now() + 75
+    try {
+      this.adapters.send(send)
+      if (!this.adapters.isConnected()) this.disconnected()
+    } catch {
+      this.disconnected()
+    }
+  }
+
+  transient(requestId: string): void {
+    if (!this.sends.some((send) => send.requestId === requestId && send.status === 'sending'))
+      return
+    if (this.active === requestId) this.active = undefined
+    this.outbound = this.outbound.filter((id) => id !== requestId)
+    this.outbound.unshift(requestId)
+    this.backoff = Math.min(this.backoff + 1, 6)
+    this.nextSendAt =
+      this.adapters.now() + Math.min(500 * 2 ** this.backoff, 30000) + Math.random() * 250
+    clearTimeout(this.timer)
+    this.timer = undefined
+    this.drain()
+  }
+
+  private release(requestId: string): void {
+    if (this.active === requestId) {
+      this.active = undefined
+      this.backoff = 0
+    }
+    this.outbound = this.outbound.filter((id) => id !== requestId)
+    this.drain()
+  }
+
   private reconciling = false
   private pollFailures = 0
   private nextPollAt = 0
@@ -125,13 +196,8 @@ export class SendRequests {
   start(chatId: string, body: string, replyToMessageId?: string): { ok: boolean; error?: string } {
     const trimmed = body.trim()
     if (!trimmed || [...trimmed].length > 4000) return { ok: false }
-    if (!this.adapters.isConnected())
-      return { ok: false, error: 'Reconnecting. Your message has not been sent yet.' }
     if (this.sends.filter((send) => this.unresolved(send)).length >= MAX_UNRESOLVED_SENDS) {
-      return {
-        ok: false,
-        error: 'Too many messages are waiting for a result. Try again after some are resolved.',
-      }
+      return { ok: false }
     }
     const recipientId = chatId.startsWith('draft:') ? chatId.slice(6) : undefined
     const send: PendingSend = {
@@ -144,13 +210,8 @@ export class SendRequests {
       status: 'sending',
     }
     this.commit([...this.sends, send])
-    try {
-      this.adapters.send(send)
-      return { ok: true }
-    } catch {
-      this.retryable(send.requestId, 'The message could not be queued. Try again.')
-      return { ok: false, error: 'The message could not be queued. Try again.' }
-    }
+    this.enqueue(send.requestId)
+    return { ok: true }
   }
 
   queued(requestId: string): void {
@@ -166,15 +227,18 @@ export class SendRequests {
     const send = this.sends.find((item) => item.requestId === requestId)
     if (!send || send.status === 'saved' || send.status === 'rejected') return undefined
     this.advance(requestId, 'saved', { chatId, messageId, sequence })
+    this.release(requestId)
     return { chatId, ...(send.recipientId ? { draftChatId: send.chatId } : {}) }
   }
 
   rejected(requestId: string, reason?: string): void {
     this.advance(requestId, 'rejected', { reason: reason || 'The message could not be saved.' })
+    this.release(requestId)
   }
 
   retryable(requestId: string, reason: string): void {
     this.advance(requestId, 'retryable', { reason })
+    this.release(requestId)
   }
 
   async reconcile(retryUnknown = false): Promise<SavedSend[]> {
@@ -207,6 +271,8 @@ export class SendRequests {
             if (outcome) saved.push(outcome)
           } else if (result.status === 'REJECTED') {
             this.rejected(send.requestId, result.reason || undefined)
+          } else if (send.status === 'queued' && !this.active) {
+            this.active = send.requestId
           } else if (
             shouldRetryUnknown &&
             (send.status === 'sending' || send.status === 'retryable')
@@ -229,14 +295,7 @@ export class SendRequests {
             break
           }
           if (!current || (current.status !== 'sending' && current.status !== 'retryable')) continue
-          try {
-            this.adapters.send(current)
-          } catch {
-            this.retryable(current.requestId, 'The message could not be queued. Try again.')
-            throw new Error('The message could not be queued')
-          }
-          await (this.adapters.pause?.(60) ??
-            new Promise<void>((resolve) => setTimeout(resolve, 60)))
+          this.enqueue(current.requestId)
         }
       }
       if (shouldRetryUnknown && retryHandled && this.adapters.isConnected())
@@ -268,12 +327,7 @@ export class SendRequests {
     const current = this.sends.find((item) => item.requestId === requestId)
     if (!current || current.status !== 'retryable' || !this.adapters.isConnected()) return undefined
     this.advance(requestId, 'sending', { reason: undefined })
-    try {
-      this.adapters.send(current)
-    } catch (cause) {
-      this.retryable(requestId, 'The message could not be queued. Try again.')
-      throw cause
-    }
+    this.enqueue(requestId)
     return undefined
   }
 
@@ -283,6 +337,8 @@ export class SendRequests {
         (send) => send.chatId !== chatId && (!recipientId || send.recipientId !== recipientId),
       ),
     )
+    if (this.active && !this.sends.some((send) => send.requestId === this.active))
+      this.release(this.active)
   }
 
   revised(messageId: string): void {

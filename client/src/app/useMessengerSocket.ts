@@ -45,12 +45,8 @@ function websocketUrl(): string {
 
 function socketErrorMessage(code?: string): string {
   switch (code) {
-    case 'rate_limited':
-      return 'Sending too quickly. Wait a moment and try again.'
     case 'unauthorized':
       return 'You can no longer send to this chat.'
-    case 'room_limit':
-      return 'Too many active chats. Try again shortly.'
     case 'publish_unknown':
       return 'Queue confirmation was lost. Check status before retrying.'
     case 'dependency_unavailable':
@@ -219,7 +215,13 @@ export function useMessengerSocket({
         } else if (frame.type === EventType.SEND_REJECTED) {
           requests.rejected(frame.requestId, frame.reason)
         } else if (frame.type === EventType.ERROR && frame.requestId) {
-          requests.retryable(frame.requestId, socketErrorMessage(frame.code))
+          if (
+            ['rate_limited', 'room_limit', 'dependency_unavailable', 'publish_failed'].includes(
+              frame.code ?? '',
+            )
+          )
+            requests.transient(frame.requestId)
+          else requests.retryable(frame.requestId, socketErrorMessage(frame.code))
         } else if (
           frame.type === EventType.ERROR &&
           !frame.requestId &&
@@ -264,6 +266,7 @@ export function useMessengerSocket({
         focusFreshAtRef.current = 0
         focusRequestRef.current = null
         createdChatRef.current = null
+        requests.disconnected()
         socketRef.current = null
         recovery.onSocketClosed()
         window.clearTimeout(groupRetryRef.current)

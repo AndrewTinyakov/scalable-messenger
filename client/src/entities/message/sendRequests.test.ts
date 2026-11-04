@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { PendingSend } from './model'
 import { SendRequests, type SendRequestAdapters, type SendResult } from './sendRequests'
 
@@ -78,7 +78,87 @@ function pending(
   }
 }
 
+afterEach(() => vi.useRealTimers())
+
 describe('send requests', () => {
+  it('holds later persisted intents behind a queued request until its SQL result is known', async () => {
+    const fixture = setup([pending(id(1), 'queued'), pending(id(2))])
+    await fixture.requests.reconcile(true)
+    expect(fixture.sent).toEqual([])
+    fixture.requests.saved(id(1), chatId, messageId)
+    expect(fixture.sent.map((send) => send.requestId)).toEqual([id(2)])
+  })
+
+  it('unblocks other chats when an active send is forgotten', async () => {
+    vi.useFakeTimers()
+    const fixture = setup()
+    fixture.adapters.now = Date.now
+    fixture.requests.start(chatId, 'removed')
+    fixture.requests.start(resolvedChatId, 'retained')
+    fixture.requests.forget(chatId)
+    await vi.advanceTimersByTimeAsync(75)
+    expect(fixture.sent.map((send) => send.body)).toEqual(['removed', 'retained'])
+  })
+
+  it('waits for SQL save before publishing the next intent even after queue confirmation', async () => {
+    vi.useFakeTimers()
+    const fixture = setup()
+    fixture.adapters.now = Date.now
+    fixture.requests.start(chatId, 'first')
+    fixture.requests.start(chatId, 'second')
+    fixture.requests.queued(id(1))
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(fixture.sent.map((send) => send.body)).toEqual(['first'])
+    fixture.requests.saved(id(1), chatId, messageId)
+    expect(fixture.sent.map((send) => send.body)).toEqual(['first', 'second'])
+  })
+
+  it('paces 200 immediate intents in order and keeps transient retries pending with the same ID', async () => {
+    vi.useFakeTimers()
+    const fixture = setup()
+    fixture.adapters.now = Date.now
+    fixture.adapters.send = (send) => {
+      fixture.sent.push(send)
+      if (fixture.sent.length === 1) fixture.requests.transient(send.requestId)
+      else fixture.requests.saved(send.requestId, chatId, messageId)
+    }
+    for (let index = 0; index < 200; index++)
+      expect(fixture.requests.start(chatId, String(index))).toEqual({ ok: true })
+    expect(fixture.sent).toHaveLength(1)
+    expect(fixture.requests.list().every((send) => send.status === 'sending')).toBe(true)
+    await vi.advanceTimersByTimeAsync(20000)
+    expect(fixture.sent.map((send) => send.body)).toEqual([
+      '0',
+      ...Array.from({ length: 200 }, (_, i) => String(i)),
+    ])
+    expect(new Set(fixture.sent.map((send) => send.requestId)).size).toBe(200)
+    expect(fixture.requests.list().every((send) => send.status === 'saved')).toBe(true)
+  })
+
+  it('retains unsent intents through disconnect and reload without showing a failure at capacity', async () => {
+    vi.useFakeTimers()
+    const fixture = setup()
+    fixture.disconnect()
+    for (let index = 0; index < 256; index++)
+      expect(fixture.requests.start(chatId, 'waiting')).toEqual({ ok: true })
+    expect(fixture.requests.start(chatId, 'keep in composer')).toEqual({ ok: false })
+    expect(fixture.sent).toEqual([])
+    const reloaded = new SendRequests('relay.user.device', fixture.adapters)
+    fixture.adapters.now = Date.now
+    fixture.adapters.send = (send) => {
+      fixture.sent.push(send)
+      reloaded.saved(send.requestId, chatId, messageId)
+    }
+    fixture.connect()
+    await reloaded.reconcile(true)
+    await vi.advanceTimersByTimeAsync(20000)
+    expect(fixture.sent).toHaveLength(256)
+    expect(fixture.sent.map((send) => send.requestId)).toEqual(
+      Array.from({ length: 256 }, (_, index) => id(index + 1)),
+    )
+    expect(reloaded.list().every((send) => send.status === 'saved')).toBe(true)
+  })
+
   it('retains reply identity and request fingerprint through storage and unknown retries, then removes deleted-chat intents', async () => {
     const fixture = setup()
     fixture.requests.start(chatId, 'A reply', messageId)
@@ -276,7 +356,9 @@ describe('send requests', () => {
   })
 
   it('keeps retry intent when the socket disconnects before every resend', async () => {
+    vi.useFakeTimers()
     const fixture = setup([pending(id(1)), pending(id(2))])
+    fixture.adapters.now = Date.now
     fixture.adapters.send = (send) => {
       fixture.sent.push(send)
       fixture.disconnect()
@@ -286,8 +368,10 @@ describe('send requests', () => {
     fixture.connect()
     fixture.adapters.send = (send) => {
       fixture.sent.push(send)
+      fixture.requests.saved(send.requestId, chatId, messageId)
     }
     await fixture.requests.reconcile()
+    await vi.advanceTimersByTimeAsync(200)
     expect(fixture.sent.map((send) => send.requestId)).toEqual([id(1), id(1), id(2)])
   })
 })

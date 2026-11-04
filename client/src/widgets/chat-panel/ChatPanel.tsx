@@ -201,7 +201,7 @@ export function ChatPanel({
         setEdit(undefined)
       } else onBack()
     },
-    { enabled: Boolean(chat), ignoreInputs: false },
+    { enabled: Boolean(chat), ignoreInputs: false, stopPropagation: false, preventDefault: false },
   )
 
   useEffect(() => {

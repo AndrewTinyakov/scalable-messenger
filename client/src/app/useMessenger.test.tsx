@@ -339,6 +339,7 @@ describe('messenger request coordination', () => {
   it('clears the selected badge immediately while a read request waits and resists a stale summary', async () => {
     vi.useFakeTimers()
     fakeUnread = 4
+    window.history.replaceState(null, '', `/groups/${chatId}`)
     await renderMessenger()
     await act(async () => sockets[0].open())
     expect(messenger.chats.find((chat) => chat.id === chatId)?.unreadCount).toBe(4)
@@ -401,6 +402,7 @@ describe('messenger request coordination', () => {
 
   it('debounces sidebar targets, expires presence to unknown and restores the watch after reconnect', async () => {
     vi.useFakeTimers()
+    window.history.replaceState(null, '', `/groups/${chatId}`)
     await renderMessenger()
     await act(async () => {
       sockets[0].open()

@@ -57,6 +57,8 @@ export function useMessageViewport({
   const anchorRef = useRef<{ id: string; top: number } | null>(null)
   const restoredAnchor = useRef<{ id: string; offset: number } | null>(null)
   const atBottomRef = useRef(true)
+  const scrollInputUntil = useRef(0)
+  const lastScrollTop = useRef(0)
   const previousViewRef = useRef<{
     chatId?: string
     jumpRevision: number
@@ -93,10 +95,16 @@ export function useMessageViewport({
   const options = useRef({ chatId, hasNewer, onLocationChange })
   options.current = { chatId, hasNewer, onLocationChange }
 
+  function pinToBottom(scroller: HTMLElement) {
+    scroller.scrollTop = scroller.scrollHeight
+    lastScrollTop.current = scroller.scrollTop
+  }
+
   function captureLocation() {
     const scroller = scrollRef.current
     const current = options.current
     if (!scroller || !current.chatId || pendingRestore.current) return
+    lastScrollTop.current = scroller.scrollTop
     const bounds = scroller.getBoundingClientRect()
     const target = [...scroller.querySelectorAll<HTMLElement>('[data-message-id]')].find((row) => {
       const rect = row.getBoundingClientRect()
@@ -146,13 +154,14 @@ export function useMessageViewport({
     const locationChanged = previous.locationRevision !== locationRevision
     previousViewRef.current = { chatId, jumpRevision, locationRevision }
     if (switched || jumped || locationChanged) {
+      scrollInputUntil.current = 0
       anchorRef.current = null
       restoredAnchor.current = null
       autoPageRef.current = {}
       failedUntil.current = {}
       pendingRestore.current = readingLocation && !jumped ? readingLocation : null
       if (!pendingRestore.current) {
-        scroller.scrollTop = scroller.scrollHeight
+        pinToBottom(scroller)
         atBottomRef.current = true
         onViewPositionChange(!hasNewer)
         captureLocation()
@@ -162,7 +171,7 @@ export function useMessageViewport({
     const location = pendingRestore.current
     if (location) {
       if (location.atLatest) {
-        scroller.scrollTop = scroller.scrollHeight
+        pinToBottom(scroller)
         atBottomRef.current = true
       } else {
         const rows = [...scroller.querySelectorAll<HTMLElement>('[data-message-id]')]
@@ -188,7 +197,7 @@ export function useMessageViewport({
         (element) => element.dataset.messageId === anchor.id,
       )
     if (anchor && target) scroller.scrollTop += target.getBoundingClientRect().top - anchor.top
-    else if (atBottomRef.current && !hasNewer) scroller.scrollTop = scroller.scrollHeight
+    else if (atBottomRef.current && !hasNewer) pinToBottom(scroller)
     atBottomRef.current = distanceToBottom(scroller) < BOTTOM_THRESHOLD
     onViewPositionChange(atBottomRef.current && !hasNewer)
     captureLocation()
@@ -198,9 +207,13 @@ export function useMessageViewport({
     const scroller = scrollRef.current
     if (!scroller) return
     const intentional = () => {
+      scrollInputUntil.current = Date.now() + 1500
       restoredAnchor.current = null
       pendingRestore.current = null
       scroller.dispatchEvent(new Event('reading-settled'))
+    }
+    const dragging = (event: PointerEvent) => {
+      if (event.buttons) scrollInputUntil.current = Date.now() + 1500
     }
     const keyboard = (event: KeyboardEvent) => {
       if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key))
@@ -209,6 +222,10 @@ export function useMessageViewport({
     const resize =
       typeof ResizeObserver !== 'undefined'
         ? new ResizeObserver(() => {
+            if (atBottomRef.current && !options.current.hasNewer && !pendingRestore.current) {
+              pinToBottom(scroller)
+              return
+            }
             const anchor = restoredAnchor.current
             if (!anchor) return
             const target = [...scroller.querySelectorAll<HTMLElement>('[data-message-id]')].find(
@@ -227,13 +244,17 @@ export function useMessageViewport({
     if (scroller.firstElementChild) resize?.observe(scroller.firstElementChild)
     scroller.addEventListener('wheel', intentional, { passive: true })
     scroller.addEventListener('touchstart', intentional, { passive: true })
+    scroller.addEventListener('touchmove', intentional, { passive: true })
     scroller.addEventListener('pointerdown', intentional)
+    scroller.addEventListener('pointermove', dragging)
     scroller.addEventListener('keydown', keyboard)
     return () => {
       resize?.disconnect()
       scroller.removeEventListener('wheel', intentional)
       scroller.removeEventListener('touchstart', intentional)
+      scroller.removeEventListener('touchmove', intentional)
       scroller.removeEventListener('pointerdown', intentional)
+      scroller.removeEventListener('pointermove', dragging)
       scroller.removeEventListener('keydown', keyboard)
     }
   }, [chatId])
@@ -279,13 +300,19 @@ export function useMessageViewport({
     anchorRef.current = null
     restoredAnchor.current = null
     atBottomRef.current = true
-    scroller.scrollTop = scroller.scrollHeight
+    pinToBottom(scroller)
   }
 
   function handleScroll() {
     const scroller = scrollRef.current
     if (!scroller || pendingRestore.current) return
-    atBottomRef.current = distanceToBottom(scroller) < BOTTOM_THRESHOLD
+    const atBottom = distanceToBottom(scroller) < BOTTOM_THRESHOLD
+    const userMoved =
+      Date.now() <= scrollInputUntil.current &&
+      (!atBottomRef.current || atBottom || scroller.scrollTop < lastScrollTop.current)
+    if (userMoved) atBottomRef.current = atBottom
+    else if (atBottomRef.current && !hasNewer) pinToBottom(scroller)
+    lastScrollTop.current = scroller.scrollTop
     onViewPositionChange(atBottomRef.current && !hasNewer)
     captureLocation()
     autoPage()

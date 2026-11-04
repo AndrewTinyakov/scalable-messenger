@@ -591,6 +591,9 @@ describe('viewport and run geometry', () => {
     const a = rows(100)
     await render(a)
     const viewport = container.querySelector<HTMLElement>('.chat-body')!
+    await act(async () =>
+      viewport.dispatchEvent(new dom.window.WheelEvent('wheel', { deltaY: -300 })),
+    )
     viewport.scrollTop = 1234
     await act(async () => viewport.dispatchEvent(new dom.window.Event('scroll')))
     const bookmark = { ...saved.get(direct.id)! }

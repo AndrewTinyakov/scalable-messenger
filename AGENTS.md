@@ -1,9 +1,11 @@
-# Project guidance
+# Repository rules
 
-Read [CONTEXT.md](CONTEXT.md) for domain terminology and [the broker decision](docs/adr/0001-messenger-broker-split.md) for the selected architecture.
+Read [CONTEXT.md](CONTEXT.md) for terms and [the broker decision](docs/adr/0001-messenger-broker-split.md) before changing delivery or recovery guarantees.
 
-- Before implementing or reviewing Kotlin API, SQL repository, consumer, or outbox code, read [Kotlin API coding standards](docs/coding-standards/kotlin-api.md).
-- Before implementing or reviewing Go WebSocket code, read [Go WebSocket coding standards](docs/coding-standards/go-websocket.md).
-- Before changing HTTP endpoints, WebSocket frames, broker topology, serialization, schemas, or generated models, read [API and messaging contract standards](docs/coding-standards/contracts.md).
+- Keep code self-explanatory. Add comments only when requested.
+- Group Kotlin by feature. Use concrete use cases, typed IDs, generated jOOQ tables, and interfaces at persistence or transport seams. Keep SQL in repositories and transactions explicit through `TransactionTemplate`.
+- Preserve SQL-enforced request deduplication, membership checks, and the transaction containing the message, request result, chat sequence, and outbox events. ACK consumed commands after commit.
+- Keep Go interfaces in consuming packages. Give each socket one reader and one writer, bound queues by items and bytes, propagate cancellation, and join owned goroutines on shutdown. Run the race detector for concurrency changes.
+- Test existing interfaces. Use real infrastructure for transaction and broker guarantees; run checks in CI.
 
-The standards derive from the file-upload-system project and identify Messenger-specific adaptations. This repository currently contains design documents; the application layouts and build commands in the standards are targets for implementation.
+Generate HTTP models from Kotlin controllers/payloads, jOOQ tables from Flyway migrations, broker models from AsyncAPI schemas in `contracts/`, and gRPC models from `contracts/grpc/chat_authorization.proto`. Change sources or generators, then regenerate affected languages. Decode external data strictly and share wire fixtures. SQL chat sequences travel as decimal strings; Redis cursors are separate.

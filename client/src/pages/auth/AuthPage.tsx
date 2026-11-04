@@ -32,7 +32,7 @@ export function AuthPage({ onSession }: { onSession: (session: Session) => void 
   return (
     <main className="auth-layout">
       <section className="auth-card">
-        <BrandMark size={84} />
+        <BrandMark size={56} />
         <h1>{mode === 'login' ? 'Welcome back' : 'Create your account'}</h1>
         <p className="auth-lede">
           {mode === 'login'

@@ -5,27 +5,26 @@
   min-width: 196px;
   max-width: min(320px, calc(100vw - 16px));
   max-height: calc(100dvh - 16px);
-  padding: 6px;
+  padding: 5px;
   overflow-y: auto;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-m);
   background: var(--bg-menu);
-  backdrop-filter: blur(22px) saturate(1.4);
   box-shadow: var(--shadow-pop);
   animation: menu-in 130ms var(--ease) both;
 }
 .menu-item {
   display: flex;
   width: 100%;
-  height: 40px;
-  padding: 0 14px 0 10px;
+  height: 36px;
+  padding: 0 12px 0 9px;
   align-items: center;
-  gap: 14px;
+  gap: 11px;
   border: 0;
-  border-radius: 9px;
+  border-radius: 6px;
   background: none;
-  font-size: 14.5px;
-  font-weight: 500;
+  font-size: 14px;
+  font-weight: 450;
   text-align: left;
   white-space: nowrap;
 }
@@ -37,7 +36,7 @@
 }
 .menu-item:hover,
 .menu-item:focus-visible {
-  background: rgb(255 255 255 / 8%);
+  background: var(--bg-active);
   outline: none;
 }
 .menu-item.danger-text:hover,

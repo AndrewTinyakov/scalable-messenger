@@ -1,7 +1,7 @@
 :root {
   color-scheme: dark;
   font-family:
-    'Onest Variable',
+    'Geist Variable',
     system-ui,
     -apple-system,
     'Segoe UI',
@@ -9,49 +9,48 @@
   font-size: 15px;
   line-height: 1.4;
   font-synthesis: none;
-  font-optical-sizing: auto;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 
-  --bg-rail: #0a0f15;
-  --bg-sidebar: #0f151d;
-  --bg-panel: #0d131b;
-  --bg-raised: #18212c;
-  --bg-input: #17202b;
-  --bg-hover: #18212c;
-  --bg-active: #212d3b;
-  --bg-menu: rgb(28 38 50 / 86%);
-  --bubble-in: #1b2632;
-  --bubble-out: #2b6de0;
-  --bubble-out-text: #f4f8ff;
-  --bubble-out-meta: rgb(236 244 255 / 72%);
-  --line: rgb(255 255 255 / 7%);
-  --line-strong: rgb(255 255 255 / 12%);
-  --text: #eaf0f6;
-  --text-2: #9aa9b9;
-  --text-3: #7c8b9c;
-  --accent: #4fa3ff;
-  --accent-strong: #2b6de0;
-  --accent-soft: rgb(79 163 255 / 14%);
-  --online: #3fd68a;
-  --danger: #ff6f69;
-  --danger-soft: rgb(255 111 105 / 13%);
-  --shadow-pop: 0 12px 36px rgb(0 0 0 / 46%), 0 2px 8px rgb(0 0 0 / 30%);
-  --radius-s: 10px;
-  --radius-m: 14px;
-  --radius-l: 18px;
+  --bg-rail: #000;
+  --bg-sidebar: #0a0a0a;
+  --bg-panel: #000;
+  --bg-raised: #111;
+  --bg-input: #161616;
+  --bg-hover: #141414;
+  --bg-active: #1f1f1f;
+  --bg-menu: #111;
+  --bubble-in: #171717;
+  --bubble-out: #2c2c2c;
+  --bubble-out-text: #ededed;
+  --bubble-out-meta: #9a9a9a;
+  --line: #1f1f1f;
+  --line-strong: #2e2e2e;
+  --text: #ededed;
+  --text-2: #a1a1a1;
+  --text-3: #7a7a7a;
+  --primary: #ededed;
+  --primary-text: #0a0a0a;
+  --accent: #52a8ff;
+  --online: #3fb950;
+  --danger: #ff6166;
+  --danger-soft: rgb(255 97 102 / 12%);
+  --shadow-pop: 0 8px 28px rgb(0 0 0 / 60%);
+  --radius-s: 8px;
+  --radius-m: 10px;
+  --radius-l: 14px;
   --ease: cubic-bezier(0.22, 0.9, 0.3, 1);
-  --rail-width: 80px;
-  --sidebar-width: 372px;
-  --tone-0: #ff8a65;
-  --tone-1: #f6b44c;
-  --tone-2: #b58cff;
-  --tone-3: #4cd08a;
-  --tone-4: #4dd0e1;
-  --tone-5: #5eb0ff;
-  --tone-6: #ff7eb6;
-  --tone-7: #a3d65c;
+  --rail-width: 76px;
+  --sidebar-width: 360px;
+  --tone-0: #d9a08b;
+  --tone-1: #d4b483;
+  --tone-2: #b3a4d6;
+  --tone-3: #8fbf9f;
+  --tone-4: #8fbcc4;
+  --tone-5: #93b1d6;
+  --tone-6: #cf9db5;
+  --tone-7: #aebf8a;
 }
 
 * {
@@ -113,7 +112,7 @@ p {
   scrollbar-color: transparent transparent;
 }
 *:hover {
-  scrollbar-color: rgb(255 255 255 / 16%) transparent;
+  scrollbar-color: #333 transparent;
 }
 
 .visually-hidden {
@@ -133,34 +132,35 @@ p {
   flex: none;
   place-items: center;
   border-radius: 50%;
-  color: #fff;
-  font-weight: 600;
+  background: color-mix(in srgb, var(--tone) 17%, #0a0a0a);
+  color: var(--tone);
+  font-weight: 550;
   letter-spacing: 0.01em;
   line-height: 1;
 }
 .avatar-tone-0 {
-  background: linear-gradient(160deg, #ff9d7a, #e8603c);
+  --tone: var(--tone-0);
 }
 .avatar-tone-1 {
-  background: linear-gradient(160deg, #fbc55f, #e8912f);
+  --tone: var(--tone-1);
 }
 .avatar-tone-2 {
-  background: linear-gradient(160deg, #bb9bff, #7c54e6);
+  --tone: var(--tone-2);
 }
 .avatar-tone-3 {
-  background: linear-gradient(160deg, #6fdc9c, #2ba866);
+  --tone: var(--tone-3);
 }
 .avatar-tone-4 {
-  background: linear-gradient(160deg, #6adbe6, #2199b8);
+  --tone: var(--tone-4);
 }
 .avatar-tone-5 {
-  background: linear-gradient(160deg, #74bcff, #2f7be6);
+  --tone: var(--tone-5);
 }
 .avatar-tone-6 {
-  background: linear-gradient(160deg, #ff9cc6, #e0508f);
+  --tone: var(--tone-6);
 }
 .avatar-tone-7 {
-  background: linear-gradient(160deg, #b5e070, #6aa82e);
+  --tone: var(--tone-7);
 }
 .avatar-online {
   position: absolute;
@@ -231,7 +231,7 @@ p {
   justify-content: center;
   gap: 8px;
   border: 0;
-  border-radius: 12px;
+  border-radius: var(--radius-s);
   background: var(--bg-active);
   color: var(--text);
   font-weight: 550;
@@ -250,8 +250,8 @@ p {
   opacity: 0.5;
 }
 .button-primary {
-  background: var(--accent-strong);
-  color: #fff;
+  background: var(--primary);
+  color: var(--primary-text);
 }
 .button-danger {
   background: transparent;
@@ -263,10 +263,10 @@ p {
 }
 .button-ghost {
   background: transparent;
-  color: var(--accent);
+  color: var(--text);
 }
 .button-ghost:hover:not(:disabled) {
-  background: var(--accent-soft);
+  background: var(--bg-active);
   filter: none;
 }
 .button-danger-ghost {
@@ -282,7 +282,7 @@ p {
   padding: 0;
   border: 0;
   background: none;
-  color: var(--accent);
+  color: var(--text);
   font-weight: 550;
 }
 .danger-text {

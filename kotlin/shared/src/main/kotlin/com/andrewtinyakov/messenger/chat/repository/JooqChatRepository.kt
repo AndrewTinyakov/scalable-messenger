@@ -33,7 +33,7 @@ class JooqChatRepository(
 ) : ChatRepository {
     override fun findByMember(
         userId: UserId,
-        beforeJoinedAt: OffsetDateTime?,
+        beforeActivityAt: OffsetDateTime?,
         beforeChatId: ChatId?,
         limit: Int,
     ): List<MemberChat> = DatabaseObservation.query(DatabaseOperation.CHAT_FIND_BY_MEMBER) {
@@ -46,7 +46,6 @@ class JooqChatRepository(
             CHATS.KIND,
             CHATS.NAME,
             CHATS.NEXT_SEQUENCE,
-            CHAT_MEMBERS.JOINED_AT,
             CHATS.MEMBER_COUNT,
             CHATS.OWNER_ID,
         )
@@ -56,10 +55,10 @@ class JooqChatRepository(
             .where(CHAT_MEMBERS.USER_ID.eq(userId.value), CHATS.DELETED_AT.isNull)
             .and(CHAT_MEMBERS.HIDDEN_THROUGH_SEQUENCE.isNull.or(CHATS.NEXT_SEQUENCE.minus(1L).gt(CHAT_MEMBERS.HIDDEN_THROUGH_SEQUENCE)))
             .and(
-                if (beforeJoinedAt != null && beforeChatId != null) {
-                    activityAt.lt(beforeJoinedAt)
+                if (beforeActivityAt != null && beforeChatId != null) {
+                    activityAt.lt(beforeActivityAt)
                         .or(
-                            activityAt.eq(beforeJoinedAt)
+                            activityAt.eq(beforeActivityAt)
                                 .and(CHAT_MEMBERS.CHAT_ID.lt(beforeChatId.value)),
                         )
                 } else {
@@ -86,7 +85,7 @@ class JooqChatRepository(
                         unreadCount = row.get(summary).unreadCount,
                         unreadCountCapped = row.get(summary).unreadCountCapped,
                     ),
-                    joinedAt = row.get(activityAt)!!,
+                    activityAt = row.get(activityAt)!!,
                 )
             }
     }

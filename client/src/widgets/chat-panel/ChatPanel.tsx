@@ -1,3 +1,4 @@
+import { useHotkey } from '@tanstack/react-hotkeys'
 import { ChevronDown, Trash2, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Chat } from '../../entities/chat/model'
@@ -91,6 +92,7 @@ export function ChatPanel({
   } | null>(null)
   const [busy, setBusy] = useState(false)
   const busyRef = useRef(false)
+  const drafts = useRef(new Map<string, string>())
   const actionGeneration = useRef(0)
   const [actionError, setActionError] = useState<string | null>(null)
   const [announcement, setAnnouncement] = useState('')
@@ -155,7 +157,7 @@ export function ChatPanel({
     }
   }, [reply?.id, edit?.id, features?.revisionKey, features?.resolveTarget])
 
-  const { scrollRef, highlight, rememberAnchor, handleScroll, stickToLatest } = useMessageViewport({
+  const { scrollRef, highlight, handleScroll, stickToLatest } = useMessageViewport({
     chatId: chat?.id,
     userId: currentUser.id,
     messages,
@@ -187,6 +189,39 @@ export function ChatPanel({
   }
 
   const selection = useMessageSelection(scrollRef, messages, chat?.id)
+  const composerRegion = useRef<HTMLDivElement>(null)
+
+  useHotkey(
+    'Escape',
+    () => {
+      if (document.querySelector('[role="dialog"]')) return
+      if (selection.enabled) selection.clear()
+      else if (reply || edit) {
+        setReply(undefined)
+        setEdit(undefined)
+      } else onBack()
+    },
+    { enabled: Boolean(chat), ignoreInputs: false },
+  )
+
+  useEffect(() => {
+    const redirect = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement
+      if (event.key.length !== 1 || event.metaKey || event.ctrlKey || event.altKey) return
+      if (target.closest('input, textarea, button, [role="dialog"], .menu')) return
+      if (selection.enabled) return
+      composerRegion.current?.querySelector('textarea')?.focus()
+    }
+    window.addEventListener('keydown', redirect)
+    return () => window.removeEventListener('keydown', redirect)
+  }, [selection.enabled])
+
+  function editLastMessage() {
+    const last = [...messages]
+      .reverse()
+      .find((message) => message.senderId === currentUser.id && !message.deletedAt)
+    if (last) setEdit(last)
+  }
   useEffect(() => {
     if (selection.enabled) setPopup(null)
   }, [selection.enabled])
@@ -211,6 +246,14 @@ export function ChatPanel({
     setEdit(undefined)
     setReply(target)
   }, [])
+  function quoteAuthor(senderId: string | null | undefined) {
+    return senderId === currentUser.id ? currentUser.username : senderNames.get(senderId ?? '')
+  }
+  function pendingTarget(send: PendingSend | undefined) {
+    return send?.replyToMessageId
+      ? messages.find((message) => message.id === send.replyToMessageId)
+      : undefined
+  }
   const entries = useMemo(
     () => (chat ? messageEntries(chat.id, recipient, messages, pending, hasNewer) : []),
     [chat?.id, recipient, messages, pending, hasNewer],
@@ -289,18 +332,7 @@ export function ChatPanel({
         {...selection.handlers}
       >
         <div className="chat-body-inner">
-          {hasOlder && (
-            <button
-              className="history-page-button"
-              onClick={() => {
-                rememberAnchor('older')
-                onLoadOlder()
-              }}
-              disabled={loadingOlder}
-            >
-              {loadingOlder ? 'Loading…' : 'Load earlier messages'}
-            </button>
-          )}
+          {loadingOlder && <span className="history-spinner" role="status" aria-label="Loading" />}
           {days.map((day) => (
             <section className="message-day" key={day.key}>
               <div className="message-day-label">
@@ -333,11 +365,10 @@ export function ChatPanel({
                     selectionMode={selection.enabled}
                     selected={Boolean(message && selection.selected.has(message.id))}
                     onQuote={features ? jumpToQuote : undefined}
-                    quoteSender={
-                      message?.replySenderId === currentUser.id
-                        ? currentUser.username
-                        : senderNames.get(message?.replySenderId ?? '')
-                    }
+                    quoteSender={quoteAuthor(
+                      message?.replySenderId ?? pendingTarget(send)?.senderId,
+                    )}
+                    quoteText={pendingTarget(send)?.body}
                     quoteLoading={Boolean(
                       message?.replyToMessageId &&
                       features?.jumpLoading === message.replyToMessageId,
@@ -351,29 +382,11 @@ export function ChatPanel({
           {entries.length === 0 && chat.lastSequence === '0' && (
             <p className="chat-hint chat-hint-center">No messages here yet</p>
           )}
-          {(hasNewer || hasUnresolvedGap) && (
-            <div className="history-newer-controls">
-              {hasNewer && (
-                <button
-                  className="history-page-button"
-                  onClick={() => {
-                    rememberAnchor('newer')
-                    onLoadNewer()
-                  }}
-                  disabled={loadingNewer}
-                >
-                  {loadingNewer ? 'Loading…' : 'Load newer messages'}
-                </button>
-              )}
-              <button className="history-jump-button" onClick={onJumpToLatest}>
-                {hasNewer ? 'Jump to latest' : 'Continue from here'}
-              </button>
-            </div>
-          )}
+          {loadingNewer && <span className="history-spinner" role="status" aria-label="Loading" />}
         </div>
       </div>
 
-      {(detached || hasNewer) && (
+      {(detached || hasNewer || hasUnresolvedGap) && (
         <button className="fixed-latest" onClick={onJumpToLatest} aria-label="Back to latest">
           <ChevronDown size={24} />
         </button>
@@ -406,9 +419,12 @@ export function ChatPanel({
           </button>
         </div>
       )}
-      <div className="chat-composer-region" hidden={selection.enabled}>
+      <div className="chat-composer-region" ref={composerRegion} hidden={selection.enabled}>
         <MessageComposer
           key={modeKey}
+          initialDraft={drafts.current.get(modeKey ?? '')}
+          onDraftChange={(draft) => drafts.current.set(modeKey ?? '', draft)}
+          onEditLast={features ? editLastMessage : undefined}
           chatId={chat.id}
           connected={connection === 'connected'}
           onSend={sendFromComposer}

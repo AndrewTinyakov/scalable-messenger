@@ -21,6 +21,9 @@ interface Props {
   edit?: Message
   onCancelMode?: () => void
   onSave?: (message: Message, body: string) => Promise<void>
+  initialDraft?: string
+  onDraftChange?: (draft: string) => void
+  onEditLast?: () => void
 }
 
 export function MessageComposer({
@@ -31,20 +34,30 @@ export function MessageComposer({
   edit,
   onCancelMode,
   onSave,
+  initialDraft = '',
+  onDraftChange,
+  onEditLast,
 }: Props) {
-  const [draft, setDraft] = useState('')
+  const [draft, setDraftState] = useState(initialDraft)
   const [editDraft, setEditDraft] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const active = useRef(true)
   const text = edit ? editDraft : draft
+  function setDraft(next: string) {
+    setDraftState(next)
+    onDraftChange?.(next)
+  }
   const length = [...text].length
   useEffect(() => {
     active.current = true
     return () => {
       active.current = false
     }
+  }, [])
+  useEffect(() => {
+    if (window.matchMedia?.('(pointer: fine)').matches) textareaRef.current?.focus()
   }, [])
   useEffect(() => {
     if (edit) setEditDraft(edit.body)
@@ -86,7 +99,12 @@ export function MessageComposer({
     if (event.nativeEvent.isComposing || event.keyCode === 229) return
     if (event.key === 'Escape' && (edit || reply) && !saving) {
       event.preventDefault()
+      event.stopPropagation()
       onCancelMode?.()
+    }
+    if (event.key === 'ArrowUp' && !text && !edit && !reply && onEditLast) {
+      event.preventDefault()
+      onEditLast()
     }
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()

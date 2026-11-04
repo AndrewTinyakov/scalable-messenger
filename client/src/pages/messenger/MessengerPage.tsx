@@ -116,7 +116,13 @@ export function MessengerPage({ session, onSignOut, onSessionRevoked }: Props) {
           connection={messenger.connection}
           onSend={messenger.sendMessage}
           onRetry={(id) => void messenger.retryMessage(id)}
-          onBack={messenger.closeChat}
+          onBack={() => {
+            const chatId = selected?.id
+            messenger.closeChat()
+            requestAnimationFrame(() =>
+              document.querySelector<HTMLElement>(`[data-chat-id="${chatId}"]`)?.focus(),
+            )
+          }}
           onMembers={() => setManagingMembers(true)}
           lookupUser={messenger.lookupUser}
           hasOlder={messenger.hasOlderMessages}

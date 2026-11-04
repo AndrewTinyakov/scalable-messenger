@@ -99,10 +99,10 @@
 }
 @keyframes reveal {
   0%,
-  45% {
-    background: rgb(255 255 255 / 10%);
+  35% {
+    filter: brightness(2);
   }
   100% {
-    background: transparent;
+    filter: none;
   }
 }

@@ -3,7 +3,7 @@ import { act, type ComponentProps } from 'react'
 import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Chat } from '../../entities/chat/model'
-import type { Message } from '../../entities/message/model'
+import type { Message, PendingSend } from '../../entities/message/model'
 import type { ReadingLocation } from '../../entities/message/readingLocation'
 import type { useConversationFeatures } from '../../features/conversation/useConversationFeatures'
 import type { ChatPanel as ChatPanelComponent } from './ChatPanel'
@@ -178,8 +178,15 @@ function button(text: string) {
   expect(found, `button ${text}`).toBeDefined()
   return found!
 }
+async function rightClick(target: HTMLElement) {
+  await act(async () =>
+    target.dispatchEvent(
+      new dom.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }),
+    ),
+  )
+}
 async function open(index = 0) {
-  await click(container.querySelectorAll<HTMLElement>('.message-bubble')[index])
+  await rightClick(container.querySelectorAll<HTMLElement>('.message-bubble')[index])
 }
 async function select(index = 0) {
   await open(index)
@@ -220,7 +227,7 @@ describe('message actions and scoped deletion', () => {
     expect(container.querySelector('[aria-label="Selected messages"]')).toBeNull()
   })
 
-  it('opens relevant actions on left click, loads own read times inline and shows a single read status', async () => {
+  it('opens relevant actions on right click, loads own read times inline and shows a single read status', async () => {
     const messages = rows(2).map((row) => ({ ...row, senderId: alice.id }))
     features.summary.maxOtherReadSequence = '1'
     await render(messages)
@@ -321,6 +328,71 @@ describe('message actions and scoped deletion', () => {
   })
 })
 
+describe('keyboard', () => {
+  async function escape() {
+    await act(async () =>
+      document.body.dispatchEvent(
+        new dom.window.KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }),
+      ),
+    )
+  }
+
+  it('leaves select mode first and the chat on the next Escape', async () => {
+    const back = vi.fn()
+    await render(rows(4), direct, { onBack: back })
+    await select(0)
+    await escape()
+    expect(container.querySelector('[aria-label="Selected messages"]')).toBeNull()
+    expect(back).not.toHaveBeenCalled()
+    await escape()
+    expect(back).toHaveBeenCalledOnce()
+  })
+
+  it('cancels a reply before leaving the chat and leaves a dialog to itself', async () => {
+    const back = vi.fn()
+    await render(rows(4), direct, { onBack: back })
+    await open(1)
+    await click(button('Reply'))
+    await escape()
+    expect(container.querySelector('.composer-mode')).toBeNull()
+    expect(back).not.toHaveBeenCalled()
+    await open(1)
+    await click(button('Delete'))
+    await escape()
+    expect(back).not.toHaveBeenCalled()
+  })
+})
+
+describe('direct chat presentation', () => {
+  it('shows the peer avatar on the last incoming message of a run only', async () => {
+    const incoming = rows(3).map((row) => ({ ...row, senderId: bob.id }))
+    await render(incoming)
+    const avatars = [...container.querySelectorAll('.message-avatar')]
+    expect(avatars.map((item) => item.classList.contains('avatar-spacer'))).toEqual([
+      true,
+      true,
+      false,
+    ])
+    expect(container.querySelector('.message-sender')).toBeNull()
+  })
+
+  it('shows what a pending reply is replying to', async () => {
+    const messages = rows(2).map((row) => ({ ...row, senderId: bob.id }))
+    const send = {
+      requestId: '01ARZ3NDEKTSV4RRFFQ69G5FB0',
+      chatId: direct.id,
+      body: 'answer',
+      replyToMessageId: messages[0].id,
+      status: 'queued',
+      createdAt: '2026-11-04T10:30:00Z',
+    } as PendingSend
+    await render(messages, direct, { pending: [send] })
+    const quote = container.querySelector('.message-row.mine .message-quote')
+    expect(quote?.textContent).toContain(bob.username)
+    expect(quote?.textContent).toContain(messages[0].body)
+  })
+})
+
 describe('sending while reading history', () => {
   async function submit(text: string) {
     const input = container.querySelector('textarea')!
@@ -396,13 +468,20 @@ describe('list selection', () => {
     expect(container.querySelector('[aria-label="Selected messages"]')).toBeNull()
   })
 
-  it('keeps an ordinary left click available and cancels an automatically started drag', async () => {
+  it('opens actions only by right click on the bubble and cancels an automatically started drag', async () => {
     await render(rows(5))
     const first = container.querySelector<HTMLElement>('[data-message-id]')!
     await pointer('pointerdown', first, 30, 150)
     await pointer('pointerup', first, 30, 150)
     await click(first.querySelector('time')!)
+    expect(document.querySelector('[role="menu"]')).toBeNull()
+    await rightClick(first)
+    expect(document.querySelector('[role="menu"]')).toBeNull()
+    await rightClick(first.querySelector<HTMLElement>('.message-bubble')!)
     expect(document.querySelector('[role="menu"]')).not.toBeNull()
+    await act(async () =>
+      document.body.dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true })),
+    )
     await pointer('pointerdown', first.querySelector('.message-text')!, 30, 150)
     await pointer('pointermove', document.body, 160, 5)
     expect(selectedIds()).toHaveLength(3)
@@ -562,7 +641,7 @@ describe('viewport and run geometry', () => {
     ).toBe(true)
   })
 
-  it('puts the incoming sender at run start and avatar/tail at run end, splitting at ten minutes and day boundaries', async () => {
+  it('puts the incoming sender at run start and avatar/tail at run end, splitting at ten minutes and day boundaries but not on clock skew', async () => {
     const messages = rows(6, group.id).map((row, index) => ({
       ...row,
       createdAt: [
@@ -581,14 +660,14 @@ describe('viewport and run geometry', () => {
       true,
       false,
       true,
-      true,
+      false,
       false,
     ])
     expect(elements.map((row) => row.classList.contains('run-end'))).toEqual([
       true,
       false,
       true,
-      true,
+      false,
       false,
       true,
     ])
@@ -597,13 +676,13 @@ describe('viewport and run geometry', () => {
       true,
       false,
       true,
-      true,
+      false,
       false,
     ])
     expect(
       elements.map((row) =>
         row.querySelector('.message-avatar')?.classList.contains('avatar-spacer'),
       ),
-    ).toEqual([false, true, false, false, true, false])
+    ).toEqual([false, true, false, true, true, false])
   })
 })

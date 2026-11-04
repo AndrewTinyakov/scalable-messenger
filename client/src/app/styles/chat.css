@@ -95,8 +95,7 @@
   font-weight: 500;
 }
 
-.history-page-button,
-.history-jump-button {
+.history-page-button {
   align-self: center;
   margin: 8px auto;
   padding: 5px 14px;
@@ -107,10 +106,15 @@
   font-size: 13px;
   font-weight: 500;
 }
-.history-newer-controls {
-  display: flex;
-  justify-content: center;
-  gap: 8px;
+.history-spinner {
+  width: 18px;
+  height: 18px;
+  margin: 10px auto;
+  flex: none;
+  border: 2px solid var(--line-strong);
+  border-top-color: var(--text-2);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
 }
 
 .message-row {
@@ -127,20 +131,12 @@
 .message-row.mine {
   justify-content: flex-end;
 }
-.message-row::before {
-  position: absolute;
-  z-index: -1;
-  inset: -1px -100vw;
-  background: transparent;
-  content: '';
-  transition: background 140ms;
-}
 .message-row:focus-visible .message-bubble {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
-.message-revealed::before {
-  animation: reveal 1.6s ease-out;
+.message-revealed .message-bubble {
+  animation: reveal 1.5s ease-out;
 }
 .message-row:has(.message-selection-mark) {
   padding-right: 38px;

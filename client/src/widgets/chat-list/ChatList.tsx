@@ -1,5 +1,6 @@
+import { useHotkey } from '@tanstack/react-hotkeys'
 import { Pencil, Search, X } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { chatPeer, chatTitle, hasUnread, type Chat } from '../../entities/chat/model'
 import type { Message } from '../../entities/message/model'
 import type { User } from '../../entities/session/model'
@@ -126,6 +127,7 @@ export function ChatList({
 }: Props) {
   const [filter, setFilter] = useState('')
   const listRef = useRef<HTMLElement>(null)
+  const searchRef = useRef<HTMLInputElement>(null)
   const query = filter.trim().toLowerCase()
   const visible = useMemo(
     () =>
@@ -144,16 +146,43 @@ export function ChatList({
   useVisibleChats(listRef, visibleIds, onVisibleChats)
   const loadMoreRef = useEndReached(hasMore && !loadingMore, onLoadMore)
 
+  function step(offset: number) {
+    if (!visible.length) return
+    const index = visible.findIndex((chat) => chat.id === selectedId)
+    const next = index < 0 ? (offset > 0 ? 0 : visible.length - 1) : index + offset
+    const chat = visible[next]
+    if (chat) onSelect(chat.id)
+  }
+  function moveFocus(event: KeyboardEvent<HTMLElement>) {
+    if (!['ArrowDown', 'ArrowUp'].includes(event.key)) return
+    const rows = [...(listRef.current?.querySelectorAll<HTMLElement>('.chat-item') ?? [])]
+    const index = rows.indexOf(document.activeElement as HTMLElement)
+    const next = rows[index + (event.key === 'ArrowDown' ? 1 : -1)]
+    event.preventDefault()
+    if (next) next.focus()
+    else if (event.key === 'ArrowUp') searchRef.current?.focus()
+  }
+
+  useHotkey('Mod+K', () => searchRef.current?.focus(), { ignoreInputs: false })
+  useHotkey('Alt+ArrowDown', () => step(1), { ignoreInputs: false })
+  useHotkey('Alt+ArrowUp', () => step(-1), { ignoreInputs: false })
+
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
         <label className="sidebar-search">
           <Search size={18} />
           <input
+            ref={searchRef}
             value={filter}
             onChange={(event) => setFilter(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === 'Escape') setFilter('')
+              if (event.key === 'Escape' && filter) {
+                event.stopPropagation()
+                setFilter('')
+              }
+              if (event.key === 'ArrowDown') moveFocus(event)
+              if (event.key === 'Enter' && visible[0]) onSelect(visible[0].id)
             }}
             placeholder="Search"
             aria-label="Search chats and people"
@@ -170,7 +199,7 @@ export function ChatList({
           )}
         </label>
       </div>
-      <nav className="chat-list" aria-label="Chats" ref={listRef}>
+      <nav className="chat-list" aria-label="Chats" ref={listRef} onKeyDown={moveFocus}>
         {loading &&
           chats.length === 0 &&
           [0, 1, 2, 3, 4, 5, 6].map((index) => (

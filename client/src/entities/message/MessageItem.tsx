@@ -19,6 +19,7 @@ interface Props {
   onReply?: (message: Message) => void
   onQuote?: (messageId: string, keyboard: boolean) => void
   quoteSender?: string
+  quoteText?: string
   quoteLoading?: boolean
   highlighted?: boolean
   runStart?: boolean
@@ -49,6 +50,7 @@ export const MessageItem = memo(function MessageItem({
   onReply,
   onQuote,
   quoteSender,
+  quoteText,
   quoteLoading,
   highlighted,
   runStart = true,
@@ -57,7 +59,7 @@ export const MessageItem = memo(function MessageItem({
   selected = false,
 }: Props) {
   const bubbleRef = useRef<HTMLDivElement>(null)
-  const pointer = useRef({ x: 0, y: 0, moved: false })
+  const pointer = useRef({ x: 0, y: 0, moved: false, touch: false })
   const state = send?.status || (mine ? 'saved' : undefined)
   const timestamp = useRef(send?.createdAt ?? message?.createdAt ?? '')
   const statusLabel =
@@ -76,6 +78,9 @@ export const MessageItem = memo(function MessageItem({
     message?.replyToMessageId &&
     (message.replyDeleted || message.replySenderId == null || message.replyBody == null),
   )
+  function onBubble(target: EventTarget) {
+    return Boolean(bubbleRef.current?.contains(target as Node))
+  }
   function openActions(keyboard: boolean, point?: MenuPoint) {
     if (message && !deleted && !selectionMode && bubbleRef.current)
       onActions?.(message, bubbleRef.current, keyboard, point)
@@ -92,7 +97,12 @@ export const MessageItem = memo(function MessageItem({
       aria-haspopup={!selectionMode && onActions && !deleted ? 'menu' : undefined}
       onPointerDown={(event) => {
         if (event.button === 0)
-          pointer.current = { x: event.clientX, y: event.clientY, moved: false }
+          pointer.current = {
+            x: event.clientX,
+            y: event.clientY,
+            moved: false,
+            touch: event.pointerType === 'touch',
+          }
       }}
       onPointerMove={(event) => {
         if (
@@ -102,17 +112,17 @@ export const MessageItem = memo(function MessageItem({
           pointer.current.moved = true
       }}
       onClick={(event) => {
-        if (event.button !== 0 || (event.target as HTMLElement).closest('button, a')) return
-        if (event.detail > 1 || pointer.current.moved) return
+        if (!pointer.current.touch || pointer.current.moved || !onBubble(event.target)) return
+        if ((event.target as HTMLElement).closest('button, a')) return
         openActions(false)
       }}
       onContextMenu={(event) => {
         event.preventDefault()
-        if (!message || deleted) return
+        if (!message || deleted || !onBubble(event.target)) return
         openActions(false, { x: event.clientX, y: event.clientY })
       }}
       onDoubleClick={(event) => {
-        if (selectionMode || !message || deleted) return
+        if (selectionMode || !message || deleted || !onBubble(event.target)) return
         if (pointer.current.moved || (event.target as HTMLElement).closest('button, a')) return
         onReply?.(message)
       }}
@@ -132,7 +142,7 @@ export const MessageItem = memo(function MessageItem({
           {selected && <Check size={14} strokeWidth={3} />}
         </span>
       )}
-      {group && !mine && (
+      {!mine && (
         <span className={`message-avatar ${runEnd ? '' : 'avatar-spacer'}`}>
           {runEnd && <Avatar seed={senderId} name={sender} size={36} />}
         </span>
@@ -144,6 +154,16 @@ export const MessageItem = memo(function MessageItem({
         >
           {group && !mine && runStart && (
             <span className={`message-sender peer-tone-${colorIndex(senderId)}`}>{sender}</span>
+          )}
+          {send && !message && send.replyToMessageId && (
+            <button
+              className={`message-quote peer-tone-${colorIndex(quoteSender ?? '')}`}
+              disabled
+              aria-label={`Replying to ${quoteSender ?? 'Member'}`}
+            >
+              <strong>{quoteSender ?? 'Member'}</strong>
+              <span>{quoteText ?? 'Original message'}</span>
+            </button>
           )}
           {message?.replyToMessageId && !deleted && (
             <button

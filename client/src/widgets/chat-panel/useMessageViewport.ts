@@ -285,5 +285,5 @@ export function useMessageViewport({
     }
   }
 
-  return { scrollRef, highlight, rememberAnchor, handleScroll, stickToLatest }
+  return { scrollRef, highlight, handleScroll, stickToLatest }
 }

@@ -44,11 +44,11 @@ it.each(['older', 'newer', 'empty older', 'empty newer'] as const)(
       expect(load).toHaveBeenCalledTimes(1)
       loading = false
       await act(async () => root.render(createElement(Harness)))
-      await act(async () => vi.advanceTimersByTime(250))
+      await act(async () => vi.advanceTimersByTime(500))
       expect(load).toHaveBeenCalledTimes(2)
-      await act(async () => vi.advanceTimersByTime(750))
+      await act(async () => vi.advanceTimersByTime(500))
       expect(load).toHaveBeenCalledTimes(2)
-      await act(async () => vi.advanceTimersByTime(250))
+      await act(async () => vi.advanceTimersByTime(500))
       expect(load).toHaveBeenCalledTimes(3)
     } finally {
       await act(async () => root.unmount())

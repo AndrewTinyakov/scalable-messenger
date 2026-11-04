@@ -63,6 +63,13 @@ export function useMessageViewport({
   }>({ chatId: undefined, jumpRevision, locationRevision })
   const pendingRestore = useRef<ReadingLocation | null>(null)
   const autoPageRef = useRef<Partial<Record<'older' | 'newer', { anchor: string; at: number }>>>({})
+  const pageFinishedAt = useRef(0)
+  const wasPaging = useRef(false)
+  useLayoutEffect(() => {
+    const paging = loadingOlder || loadingNewer
+    if (wasPaging.current && !paging) pageFinishedAt.current = Date.now()
+    wasPaging.current = paging
+  }, [loadingOlder, loadingNewer])
   const pageRef = useRef<() => void>(() => {})
   const captured = useRef<{ chatId: string; location: ReadingLocation } | null>(null)
   const options = useRef({ chatId, hasNewer, onLocationChange })
@@ -278,6 +285,12 @@ export function useMessageViewport({
     const anchor =
       (direction === 'older' ? messages[0]?.sequence : messages.at(-1)?.sequence) ?? '0'
     const previous = autoPageRef.current[direction]
+    const lastPageAt = Math.max(
+      pageFinishedAt.current,
+      autoPageRef.current.older?.at ?? 0,
+      autoPageRef.current.newer?.at ?? 0,
+    )
+    if (Date.now() - lastPageAt < 300) return
     if (previous?.anchor === anchor && Date.now() - previous.at < 1000) return
     autoPageRef.current[direction] = { anchor, at: Date.now() }
     rememberAnchor(direction)

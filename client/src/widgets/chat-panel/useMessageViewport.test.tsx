@@ -59,3 +59,42 @@ describe('message viewport position', () => {
     expect(report).toHaveBeenLastCalledWith(true)
   })
 })
+
+function PagingViewport({ sequence, load }: { sequence: string; load(): void }) {
+  const { scrollRef, handleScroll } = useMessageViewport({
+    chatId: 'chat',
+    userId: 'me',
+    messages: [message(sequence)],
+    pendingState: '',
+    jumpRevision: 0,
+    hasOlder: true,
+    hasNewer: false,
+    loadingOlder: false,
+    loadingNewer: false,
+    onLoadOlder: load,
+    onLoadNewer: () => {},
+    onViewPositionChange: () => {},
+    announce: () => {},
+  })
+  return <div ref={scrollRef} onScroll={handleScroll} />
+}
+
+it('spaces pages even when each response changes the history anchor', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  try {
+    const load = vi.fn()
+    await act(async () => root.render(<PagingViewport sequence="2" load={load} />))
+    const scroller = container.firstElementChild!
+    await act(async () => scroller.dispatchEvent(new dom.window.Event('scroll')))
+    expect(load).toHaveBeenCalledTimes(1)
+    vi.setSystemTime(Date.now() + 100)
+    await act(async () => root.render(<PagingViewport sequence="1" load={load} />))
+    await act(async () => scroller.dispatchEvent(new dom.window.Event('scroll')))
+    expect(load).toHaveBeenCalledTimes(1)
+    vi.setSystemTime(Date.now() + 200)
+    await act(async () => scroller.dispatchEvent(new dom.window.Event('scroll')))
+    expect(load).toHaveBeenCalledTimes(2)
+  } finally {
+    vi.useRealTimers()
+  }
+})

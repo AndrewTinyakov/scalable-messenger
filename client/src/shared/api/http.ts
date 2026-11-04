@@ -79,12 +79,13 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    public retryAfter = 0,
   ) {
     super(message)
   }
 }
 
-async function request<T>(
+async function attempt<T>(
   path: string,
   decode: (value: unknown) => T,
   options: RequestInit = {},
@@ -120,7 +121,13 @@ async function request<T>(
           if (typeof detail === 'string') message = detail
         }
       } catch {}
-      throw new ApiError(response.status, message)
+      const value = response.headers.get('Retry-After')
+      const retryAfter = value
+        ? /^\d+(\.\d+)?$/.test(value)
+          ? Number(value) * 1000
+          : Math.max(0, Date.parse(value) - Date.now()) || 0
+        : 0
+      throw new ApiError(response.status, message, retryAfter)
     }
     return decode(response.status === 204 ? undefined : ((await response.json()) as unknown))
   } catch (cause) {
@@ -128,6 +135,40 @@ async function request<T>(
     throw cause
   } finally {
     clearTimeout(timer)
+  }
+}
+
+async function request<T>(
+  path: string,
+  decode: (value: unknown) => T,
+  options: RequestInit = {},
+): Promise<T> {
+  const background = !options.method || /\/(ws-ticket|reads|resolve|status)$/.test(path)
+  const retryBudget = options.method === 'POST' && !/\/deletions$/.test(path) ? 0 : 3
+  let failures = 0
+  for (;;) {
+    try {
+      return await attempt(path, decode, options)
+    } catch (cause) {
+      const limited = cause instanceof ApiError && cause.status === 429
+      const transient =
+        cause instanceof ApiError
+          ? [500, 502, 503, 504].includes(cause.status)
+          : cause instanceof TypeError ||
+            (cause instanceof Error && cause.message === 'Request timed out. Try again.')
+      if (!limited && (!transient || (!background && failures >= retryBudget))) throw cause
+      failures += 1
+      const delay = Math.min(500 * 2 ** Math.min(failures - 1, 6), 30000)
+      await new Promise<void>((resolve) =>
+        setTimeout(
+          resolve,
+          Math.max(
+            delay * (0.75 + Math.random() * 0.5),
+            cause instanceof ApiError ? cause.retryAfter : 0,
+          ),
+        ),
+      )
+    }
   }
 }
 

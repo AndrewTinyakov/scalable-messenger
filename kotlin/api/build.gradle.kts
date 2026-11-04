@@ -88,3 +88,16 @@ openApi {
         )
     }
 }
+
+val sidebarBenchmark by sourceSets.creating {
+    kotlin.srcDir("../../tests/sidebar-benchmark/kotlin")
+    compileClasspath += sourceSets.main.get().output
+    runtimeClasspath += sourceSets.main.get().output
+}
+configurations[sidebarBenchmark.implementationConfigurationName].extendsFrom(configurations.testImplementation.get())
+configurations[sidebarBenchmark.runtimeOnlyConfigurationName].extendsFrom(configurations.testRuntimeOnly.get())
+tasks.register<Test>("sidebarBenchmark") {
+    description = "Measure sidebar queries against an explicitly seeded isolated database"
+    testClassesDirs = sidebarBenchmark.output.classesDirs
+    classpath = sidebarBenchmark.runtimeClasspath
+}

@@ -185,7 +185,7 @@ beforeEach(() => {
     if (path.endsWith('/deletions')) {
       const body = JSON.parse(String(options?.body))
       deletionCalls.push({ chatId: requestedChat, ...body })
-      if (failDeletion) return Response.json({ message: 'Unavailable' }, { status: 503 })
+      if (failDeletion) return Response.json({ message: 'Unavailable' }, { status: 403 })
       return Response.json({
         operationId: body.requestId,
         scope: body.scope,
@@ -254,7 +254,7 @@ beforeEach(() => {
     if (path.endsWith('/messages')) {
       if (failHistoryRequest) {
         failHistoryRequest = false
-        return Response.json({ message: 'Unavailable' }, { status: 503 })
+        return Response.json({ message: 'Unavailable' }, { status: 403 })
       }
       const after = new URL(input, 'http://localhost').searchParams.get('afterSeq')
       const before = new URL(input, 'http://localhost').searchParams.get('beforeSeq')
@@ -299,7 +299,7 @@ beforeEach(() => {
     if (path.endsWith('/chats')) {
       if (failChatRequest) {
         failChatRequest = false
-        return Response.json({ message: 'Unavailable' }, { status: 503 })
+        return Response.json({ message: 'Unavailable' }, { status: 403 })
       }
       if (holdChatRequests)
         return new Promise<Response>((resolve) => {
@@ -478,6 +478,29 @@ describe('messenger request coordination', () => {
     expect(paths.some((path) => path.endsWith('/messages'))).toBe(false)
   })
 
+  it.each(['rate_limited', 'room_limit', 'dependency_unavailable', 'publish_failed'])(
+    'silently retries %s sends with their original request ID',
+    async (code) => {
+      vi.useFakeTimers()
+      await renderMessenger()
+      await act(async () => {
+        sockets[0].open()
+        messenger.sendMessage(chatId, 'Keep waiting')
+      })
+      const sends = () =>
+        sockets[0].sent.map((raw) => JSON.parse(raw)).filter((frame) => frame.type === 'send')
+      const requestId = sends()[0].requestId
+      await act(async () => sockets[0].event({ type: 'error', version: 1, requestId, code }))
+      expect(messenger.pending[0].status).toBe('sending')
+      expect(messenger.error).toBeNull()
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1500)
+      })
+      expect(sends().map((send) => send.requestId)).toEqual([requestId, requestId])
+      expect(messenger.error).toBeNull()
+    },
+  )
+
   it('debounces sidebar targets, expires presence to unknown and restores the watch after reconnect', async () => {
     vi.useFakeTimers()
     window.history.replaceState(null, '', `/groups/${chatId}`)
@@ -489,7 +512,7 @@ describe('messenger request coordination', () => {
       messenger.watchSidebarPeers([chatId, direct.id])
     })
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(250)
+      await vi.advanceTimersByTimeAsync(1750)
     })
     const watches = () =>
       sockets[0].sent
@@ -519,7 +542,7 @@ describe('messenger request coordination', () => {
       sockets[1].open()
     })
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(250)
+      await vi.advanceTimersByTimeAsync(1750)
     })
     expect(
       sockets[1].sent
@@ -530,7 +553,7 @@ describe('messenger request coordination', () => {
       messenger.watchSidebarPeers([])
     })
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(250)
+      await vi.advanceTimersByTimeAsync(1750)
     })
     expect(messenger.sidebarPresence).toEqual({})
   })
@@ -646,7 +669,7 @@ describe('messenger request coordination', () => {
     await act(async () => {
       online = false
       window.dispatchEvent(new dom.window.Event('offline'))
-      chatRequests[0](Response.json({ message: 'Failed to fetch' }, { status: 503 }))
+      chatRequests[0](Response.json({ message: 'Failed to fetch' }, { status: 403 }))
       await refresh
     })
     expect(messenger.chats).toEqual(chats)

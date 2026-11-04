@@ -16,6 +16,7 @@ import {
   type OutgoingSocketFrame,
 } from '../shared/api/socket'
 import type { ConnectionState } from '../shared/api/socketConnection'
+import { WatchPacer } from '../shared/api/watchPacer'
 import { isNetworkOnline } from '../shared/lib/network'
 import { createMessengerSendRequests } from './messengerSendRequests'
 import { useChatDirectory } from './useChatDirectory'
@@ -94,15 +95,38 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     leaveHistory,
   } = useChatHistory(recovery, setError)
 
-  const sendConnectedFrame = useCallback((frame: OutgoingSocketFrame | null) => {
-    const socket = socketRef.current
-    if (!frame || socket?.readyState !== WebSocket.OPEN) return
-    try {
-      sendSocketFrame(socket, frame)
-    } catch {
-      socket.close()
-    }
-  }, [])
+  const watchPacer = useMemo(
+    () =>
+      new WatchPacer((frame) => {
+        const socket = socketRef.current
+        if (socket?.readyState !== WebSocket.OPEN) return
+        try {
+          sendSocketFrame(socket, frame)
+        } catch {
+          socket.close()
+        }
+      }),
+    [],
+  )
+
+  useEffect(() => () => watchPacer.reset(), [watchPacer, connectionGeneration])
+
+  const sendConnectedFrame = useCallback(
+    (frame: OutgoingSocketFrame | null) => {
+      const socket = socketRef.current
+      if (!frame || socket?.readyState !== WebSocket.OPEN) return
+      if (['watch_presence', 'watch_sidebar', 'unwatch_presence'].includes(frame.type)) {
+        watchPacer.offer(frame)
+        return
+      }
+      try {
+        sendSocketFrame(socket, frame)
+      } catch {
+        socket.close()
+      }
+    },
+    [watchPacer],
+  )
 
   const recordLatest = useCallback(
     (chatId: string, sequence: string) => {

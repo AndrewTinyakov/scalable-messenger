@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { MutationRecovery } from '../../features/conversation/mutationRecovery'
+import { ApiError } from '../../shared/api/http'
 import type { RecoveryHistory } from './chatRecovery'
 import { baselineStorage, connectedRecovery, message } from './chatRecovery.fixtures'
 import type { Message } from './model'
@@ -637,4 +638,53 @@ it('fetches the bounded latest page when coalesced replies cross the catch-up li
   expect(recovery.visibleWindows().chat.at(-1)).toMatchObject(canonical(601))
   expect(recovery.baseline('chat')).toBe('601')
   recovery.dispose()
+})
+
+it.each([
+  new ApiError(403, 'forbidden'),
+  new ApiError(404, 'missing'),
+  new Error('Invalid response from server'),
+])('suspends failed paging until navigation changes: %s', async (cause) => {
+  const older = vi.fn(async () => {
+    throw cause
+  })
+  const { recovery } = connectedRecovery({
+    latest: async () => ({ messages: page(51) }),
+    after: async () => ({ messages: [], hasMore: false, nextSequence: '100' }),
+    older,
+  })
+  await recovery.catchUp('chat', true)
+  await expect(recovery.loadOlder('chat')).rejects.toBe(cause)
+  for (let i = 0; i < 5; i++) await recovery.loadOlder('chat')
+  expect(older).toHaveBeenCalledTimes(1)
+  recovery.beginNavigation()
+  await expect(recovery.loadOlder('chat')).rejects.toBe(cause)
+  expect(older).toHaveBeenCalledTimes(2)
+  recovery.dispose()
+})
+
+it('backs off transient paging failures without losing the edge', async () => {
+  vi.useFakeTimers()
+  const older = vi.fn(async () => {
+    throw new ApiError(503, 'unavailable')
+  })
+  const { recovery } = connectedRecovery({
+    latest: async () => ({ messages: page(51) }),
+    after: async () => ({ messages: [], hasMore: false, nextSequence: '100' }),
+    older,
+  })
+  try {
+    await recovery.catchUp('chat', true)
+    await expect(recovery.loadOlder('chat')).rejects.toMatchObject({ status: 503 })
+    await recovery.loadOlder('chat')
+    expect(older).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1000)
+    await expect(recovery.loadOlder('chat')).rejects.toMatchObject({ status: 503 })
+    await vi.advanceTimersByTimeAsync(1000)
+    await recovery.loadOlder('chat')
+    expect(older).toHaveBeenCalledTimes(2)
+  } finally {
+    recovery.dispose()
+    vi.useRealTimers()
+  }
 })

@@ -1,0 +1,1222 @@
+{
+  "tags": [
+    "messenger"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 41,
+  "refresh": "15s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "editable": false,
+  "graphTooltip": 1,
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  },
+  "links": [
+    {
+      "title": "Overview",
+      "url": "/d/messenger-overview/messenger-overview",
+      "type": "link",
+      "includeVars": true,
+      "keepTime": true
+    },
+    {
+      "title": "WebSocket delivery",
+      "url": "/d/messenger-websocket/messenger-websocket",
+      "type": "link",
+      "includeVars": true,
+      "keepTime": true
+    },
+    {
+      "title": "SQL and brokers",
+      "url": "/d/messenger-backend/messenger-backend",
+      "type": "link",
+      "includeVars": true,
+      "keepTime": true
+    },
+    {
+      "title": "Prometheus targets",
+      "url": "http://localhost:9090/targets",
+      "type": "link",
+      "targetBlank": true
+    },
+    {
+      "title": "Alertmanager",
+      "url": "http://localhost:9093/#/alerts",
+      "type": "link",
+      "targetBlank": true
+    },
+    {
+      "type": "link",
+      "title": "Database operations",
+      "url": "/d/messenger-database/messenger-database",
+      "includeVars": false,
+      "keepTime": true,
+      "targetBlank": false
+    },
+    {
+      "type": "link",
+      "title": "Chat features",
+      "url": "/d/messenger-features/messenger-chat-features",
+      "includeVars": false,
+      "keepTime": true,
+      "targetBlank": false
+    }
+  ],
+  "description": "Operational triage for the local Messenger deployment. Scrape coverage, workload and timing boundaries are distinct signals.",
+  "uid": "messenger-features",
+  "title": "Messenger chat features",
+  "version": 1,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Presence and node aggregation",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 2,
+      "title": "Active watches and shared peers",
+      "description": "References count socket-to-peer watches; targets count unique peers queried once per node. Compare them to see node-level query sharing.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(messenger_ws_presence_watches)",
+          "legendFormat": "watch sets",
+          "refId": "A",
+          "instant": false
+        },
+        {
+          "expr": "sum(messenger_ws_presence_references)",
+          "legendFormat": "peer references",
+          "refId": "B",
+          "instant": false
+        },
+        {
+          "expr": "sum(messenger_ws_presence_targets)",
+          "legendFormat": "unique peer targets",
+          "refId": "C",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Presence query p95 and p99",
+      "description": "Redis batches contain at most100 unique peers with bounded worker concurrency. Empty charts mean no observation, rather than zero latency.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 1,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95,sum by(le)(rate(messenger_ws_presence_query_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "p95",
+          "refId": "A",
+          "instant": false
+        },
+        {
+          "expr": "histogram_quantile(0.99,sum by(le)(rate(messenger_ws_presence_query_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "p99",
+          "refId": "B",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Snapshot and authorization outcomes",
+      "description": "Failed snapshots produce unknown status. Authorization is rechecked before the30-second grant expires; missing or expired grants stop delivery.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 1,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by(result)(rate(messenger_ws_presence_snapshots_total[$__rate_interval]))",
+          "legendFormat": "snapshot {{result}}",
+          "refId": "A",
+          "instant": false
+        },
+        {
+          "expr": "sum by(result)(rate(messenger_ws_presence_authorization_seconds_count[$__rate_interval]))",
+          "legendFormat": "authorization {{result}}",
+          "refId": "B",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Presence changes and delivered heartbeats",
+      "description": "State counters count changes; feature deliveries also include empty freshness heartbeats. No user or chat ID labels.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 9,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by(state)(rate(messenger_ws_presence_states_total[$__rate_interval]))",
+          "legendFormat": "{{state}} changes",
+          "refId": "A",
+          "instant": false
+        },
+        {
+          "expr": "sum(rate(messenger_ws_feature_deliveries_total{type=\"presence\"}[$__rate_interval]))",
+          "legendFormat": "presence frames",
+          "refId": "B",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Presence sweep duration",
+      "description": "One node-owned sweep joins all bounded workers; long sweeps can delay the next observation. Client freshness expires after15seconds.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 9,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99,sum by(le)(rate(messenger_ws_presence_sweep_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "p99 sweep",
+          "refId": "A",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Watch query sharing",
+      "description": "Ratio of authorized peer references to unique queried peers across the fleet. A value above1 represents deduplicated repeated watches.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 9,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(messenger_ws_presence_references) / clamp_min(sum(messenger_ws_presence_targets),1)",
+          "legendFormat": "references / unique peers",
+          "refId": "A",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Human reads and retained timestamp ranges",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 17,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 9,
+      "title": "Read advances and retries",
+      "description": "Account frontiers advance monotonically. Repeated or backward progress is unchanged and inserts no timestamp ranges.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 18,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by(outcome)(rate(messenger_read_requests_total[$__rate_interval]))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Read request p95 and p99",
+      "description": "Use operation labels to distinguish advance, summary, lazy reader details and cleanup. These durations include the observed use-case work.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 18,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95,sum by(le,operation)(rate(messenger_read_duration_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "{{operation}} p95",
+          "refId": "A",
+          "instant": false
+        },
+        {
+          "expr": "histogram_quantile(0.99,sum by(le,operation)(rate(messenger_read_duration_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "{{operation}} p99",
+          "refId": "B",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "title": "Timestamp writes per advance",
+      "description": "Creation-day intervals insert up to8 rows per new prefix and avoid expanding crossed message sequences. This is an attempt-level ratio; transaction outcome panels reveal rollbacks.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 18,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(messenger_read_ranges_total{outcome=\"inserted\"}[$__rate_interval])) / clamp_min(sum(rate(messenger_read_requests_total{outcome=\"advanced\"}[$__rate_interval])),0.000001)",
+          "legendFormat": "range rows / advance",
+          "refId": "A",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "title": "Read invalidation coalescing",
+      "description": "One invalidation per active chat per2-second bucket, independent of the number of readers. Direct chats publish to two personal rooms. A trailing refresh repairs same-bucket timing.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 26,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by(outcome)(rate(messenger_read_notifications_total[$__rate_interval]))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A",
+          "instant": false
+        },
+        {
+          "expr": "sum(rate(messenger_ws_feature_deliveries_total{type=\"reads_changed\"}[$__rate_interval]))",
+          "legendFormat": "socket invalidations",
+          "refId": "B",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "title": "Expired timestamp cleanup",
+      "description": "Each coordinated cleanup transaction deletes bounded indexed batches. Old timestamp details are suppressed by message creation age even while cleanup lags.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 26,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by(outcome)(rate(messenger_read_cleanup_rows_total[$__rate_interval]))",
+          "legendFormat": "{{outcome}} rows",
+          "refId": "A",
+          "instant": false
+        },
+        {
+          "expr": "sum by(outcome)(rate(messenger_read_cleanup_batches_total[$__rate_interval]))",
+          "legendFormat": "{{outcome}} batches",
+          "refId": "B",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "title": "Expired range backlog and lag",
+      "description": "Maximum across replica samples, with each backlog sample capped at10001 rows. Oldest expiry age is seconds; inspect both units when assessing a cleanup backlog.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 26,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "oldest expired seconds"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "max(messenger_read_cleanup_backlog)",
+          "legendFormat": "expired rows, capped10001",
+          "refId": "A",
+          "instant": false
+        },
+        {
+          "expr": "max(messenger_read_cleanup_oldest_age_seconds)",
+          "legendFormat": "oldest expired seconds",
+          "refId": "B",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "title": "Message mutations, deletion and recovery",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 34,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 16,
+      "title": "Edit and delete outcomes",
+      "description": "Author-only versioned mutations preserve original creation sequence. Conflicts and permission failures are visible separately from committed operations.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 35,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by(kind,outcome)(rate(messenger_message_mutations_total[$__rate_interval]))",
+          "legendFormat": "{{kind}} {{outcome}}",
+          "refId": "A",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "title": "Global chat deletion outcomes",
+      "description": "Either direct participant or a group creator may delete for everyone. Deleted-chat history and new writes are rejected.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 35,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by(outcome)(rate(messenger_chat_deletions_total[$__rate_interval]))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "title": "Mutation to socket p95 and p99",
+      "description": "From accepted edit/deletion time to successful WebSocket write, including transaction, outbox, Redis and queueing. This is distinct from immutable message age.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 35,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95,sum by(le)(rate(messenger_ws_mutation_lag_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "p95",
+          "refId": "A",
+          "instant": false
+        },
+        {
+          "expr": "histogram_quantile(0.99,sum by(le)(rate(messenger_ws_mutation_lag_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "p99",
+          "refId": "B",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "title": "Feature frame delivery",
+      "description": "Successfully written frames, including coalesced read invalidations and approximate presence snapshots. Compare frame rates with database writes and gateway fanout.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 43,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by(type)(rate(messenger_ws_feature_deliveries_total[$__rate_interval]))",
+          "legendFormat": "{{type}}",
+          "refId": "A",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "title": "Mutation log cleanup",
+      "description": "Retained edit/delete revisions support offline repair. A client behind the retained floor must refresh its bounded windows.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 43,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(messenger_message_changes_pruned_total[$__rate_interval]))",
+          "legendFormat": "pruned revisions",
+          "refId": "A",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "title": "Feature transaction outcomes",
+      "description": "Transactions are SQL-observed and include rollback/commit outcomes. Attempt counters alone do not prove a durable state change.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 43,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by(operation,outcome)(rate(messenger_database_transaction_seconds_count{operation=~\"read.*|message.*|chat.delete\"}[$__rate_interval]))",
+          "legendFormat": "{{operation}} {{outcome}}",
+          "refId": "A",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 22,
+      "title": "Bounded history, around-message jumps and SQL",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 51,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 23,
+      "title": "History page p95 and p99",
+      "description": "Directions include before/after/around/changes. An old reply jump performs bounded indexed retrieval instead of walking intermediate pages.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 52,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95,sum by(le,direction)(rate(messenger_history_page_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "{{direction}} p95",
+          "refId": "A",
+          "instant": false
+        },
+        {
+          "expr": "histogram_quantile(0.99,sum by(le,direction)(rate(messenger_history_page_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "{{direction}} p99",
+          "refId": "B",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 24,
+      "title": "Feature database query p99",
+      "description": "Fixed operation labels locate SQL costs for read authorization, frontier updates, detail seeks, mutations and presence authorization. Open Database operations for query timing and waits.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 52,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99,sum by(le,operation)(rate(messenger_database_query_seconds_bucket{operation=~\"read.*|message.*|presence.*|chat.delete\"}[$__rate_interval])))",
+          "legendFormat": "{{operation}}",
+          "refId": "A",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 25,
+      "title": "History output and recovery fallback",
+      "description": "Bounded page output and fallback requests help distinguish query latency from reconnection or event-loss repairs.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 52,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by(direction)(rate(messenger_history_messages_total[$__rate_interval]))",
+          "legendFormat": "{{direction}} messages",
+          "refId": "A",
+          "instant": false
+        },
+        {
+          "expr": "sum(rate(messenger_ws_sql_fallback_total[$__rate_interval]))",
+          "legendFormat": "SQL recovery fallbacks",
+          "refId": "B",
+          "instant": false
+        }
+      ]
+    }
+  ]
+}

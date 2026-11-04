@@ -26,9 +26,9 @@ tests:
 
   - interval: 1m
     input_series:
-      - series: 'messenger_command_queue_delay_seconds_bucket{le="30"}'
+      - series: 'messenger_command_queue_delay_seconds_bucket{le="30.0"}'
         values: '0+0x15'
-      - series: 'messenger_command_queue_delay_seconds_bucket{le="120"}'
+      - series: 'messenger_command_queue_delay_seconds_count'
         values: '0+1x15'
       - series: 'messenger_command_queue_delay_seconds_bucket{le="+Inf"}'
         values: '0+1x15'
@@ -39,5 +39,237 @@ tests:
           - exp_labels:
               severity: warning
             exp_annotations:
-              summary: Processed send commands have waited over one minute at p95
+              summary: Over 5 percent of processed send commands waited longer than 30 seconds
               description: Check send queue depth, processor throughput, and PostgreSQL contention.
+
+  - interval: 1m
+    input_series:
+      - series: messenger_ws_ack_timeouts_total
+        values: '0+2x10'
+      - series: redis_memory_max_bytes{instance="redis-test"}
+        values: '0+0x10'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: MessengerWsAckTimeouts
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: MessengerWsAckTimeouts
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: Clients are exceeding the applied acknowledgement deadline
+              description: Inspect pending ACK age and client read rates.
+      - eval_time: 8m
+        alertname: MessengerRedisMemoryUnbounded
+        exp_alerts:
+          - exp_labels: {severity: warning, instance: redis-test}
+            exp_annotations:
+              summary: A Redis node has no configured memory limit
+              description: Configure a finite maxmemory budget and retain noeviction for shared admission state.
+
+  - interval: 1m
+    input_series:
+      - series: 'up{job="containers",instance="cadvisor:8080"}'
+        values: '0+0x5'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: MessengerTargetDown
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: MessengerTargetDown
+        exp_alerts:
+          - exp_labels: {job: containers, instance: 'cadvisor:8080', severity: critical}
+            exp_annotations:
+              summary: containers target is down
+              description: Prometheus cannot scrape cadvisor:8080.
+
+  - interval: 1m
+    input_series:
+      - series: 'messenger_command_queue_delay_seconds_bucket{le="0.20132659"}'
+        values: '0+80x10'
+      - series: 'messenger_command_queue_delay_seconds_bucket{le="0.268435456"}'
+        values: '0+100x10'
+      - series: 'messenger_command_queue_delay_seconds_bucket{le="30.0"}'
+        values: '0+100x10'
+      - series: 'messenger_command_queue_delay_seconds_bucket{le="+Inf"}'
+        values: '0+100x10'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: MessengerSendQueueLatency
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: MessengerSendQueueLatency
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: Command queue latency exceeds 200 milliseconds at p95
+              description: Compare queue depth, batch size, chat lock duration, and transaction completion.
+
+  - name: Product API failures are visible despite monitoring traffic
+    interval: 1m
+    input_series:
+      - series: 'http_server_requests_seconds_count{job="api",uri="/v1/chats",status="200"}'
+        values: '0+54x10'
+      - series: 'http_server_requests_seconds_count{job="api",uri="/v1/chats",status="500"}'
+        values: '0+6x10'
+      - series: 'http_server_requests_seconds_count{job="api",uri="/actuator/prometheus",status="200"}'
+        values: '0+600x10'
+      - series: 'http_server_requests_seconds_count{job="api",uri="/api/actuator/prometheus",status="200"}'
+        values: '0+600x10'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MessengerApiServerErrors
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: API 5xx rate exceeds 5 percent
+              description: Check API logs and request latency.
+
+  - name: Monitoring failures alone do not trigger product API alerts
+    interval: 1m
+    input_series:
+      - series: 'http_server_requests_seconds_count{job="api",uri="/actuator/prometheus",status="500"}'
+        values: '0+60x10'
+      - series: 'http_server_requests_seconds_count{job="api",uri="/api/actuator/prometheus",status="500"}'
+        values: '0+60x10'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MessengerApiServerErrors
+        exp_alerts: []
+
+  - name: Monitoring volume does not satisfy the product request threshold
+    interval: 1m
+    input_series:
+      - series: 'http_server_requests_seconds_count{job="api",uri="/v1/chats",status="500"}'
+        values: '0+2x10'
+      - series: 'http_server_requests_seconds_count{job="api",uri="/actuator/prometheus",status="500"}'
+        values: '0+60x10'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MessengerApiServerErrors
+        exp_alerts: []
+
+  - name: Local scrape minimum policy includes every monitored job
+    interval: 1m
+    promql_expr_test:
+      - expr: messenger:minimum_scrape_targets
+        eval_time: 1m
+        exp_samples:
+          - labels: 'messenger:minimum_scrape_targets{job="api"}'
+            value: 2
+          - labels: 'messenger:minimum_scrape_targets{job="command-processor"}'
+            value: 2
+          - labels: 'messenger:minimum_scrape_targets{job="outbox-publisher"}'
+            value: 2
+          - labels: 'messenger:minimum_scrape_targets{job="ws"}'
+            value: 2
+          - labels: 'messenger:minimum_scrape_targets{job="rabbitmq"}'
+            value: 3
+          - labels: 'messenger:minimum_scrape_targets{job="rabbitmq-queues"}'
+            value: 3
+          - labels: 'messenger:minimum_scrape_targets{job="redis"}'
+            value: 6
+          - labels: 'messenger:minimum_scrape_targets{job="postgres"}'
+            value: 1
+          - labels: 'messenger:minimum_scrape_targets{job="ingress"}'
+            value: 3
+          - labels: 'messenger:minimum_scrape_targets{job="containers"}'
+            value: 1
+          - labels: 'messenger:minimum_scrape_targets{job="alertmanager"}'
+            value: 1
+          - labels: 'messenger:minimum_scrape_targets{job="prometheus"}'
+            value: 1
+
+  - name: WS discovery loses one replica
+    interval: 1m
+    input_series:
+      - series: 'up{job="ws",instance="ws-1:8081"}'
+        values: '1+0x4'
+      - series: 'up{job="ws",instance="ws-2:8081"}'
+        values: '1 1 stale _ _'
+    promql_expr_test:
+      - expr: 'messenger:unavailable_scrape_targets{job="ws"}'
+        eval_time: 2m
+        exp_samples:
+          - labels: 'messenger:unavailable_scrape_targets{job="ws"}'
+            value: 1
+
+  - name: WS replica remains discovered but cannot be scraped
+    interval: 1m
+    input_series:
+      - series: 'up{job="ws",instance="ws-1:8081"}'
+        values: '1+0x4'
+      - series: 'up{job="ws",instance="ws-2:8081"}'
+        values: '1 1 0 0 0'
+    promql_expr_test:
+      - expr: 'messenger:unavailable_scrape_targets{job="ws"}'
+        eval_time: 2m
+        exp_samples:
+          - labels: 'messenger:unavailable_scrape_targets{job="ws"}'
+            value: 1
+
+  - name: Whole WS job disappears from discovery
+    interval: 1m
+    input_series:
+      - series: 'up{job="ws",instance="ws-1:8081"}'
+        values: '1 1 stale _ _'
+      - series: 'up{job="ws",instance="ws-2:8081"}'
+        values: '1 1 stale _ _'
+    promql_expr_test:
+      - expr: 'messenger:unavailable_scrape_targets{job="ws"}'
+        eval_time: 2m
+        exp_samples:
+          - labels: 'messenger:unavailable_scrape_targets{job="ws"}'
+            value: 2
+
+  - name: An extra healthy WS replica does not create a deficit
+    interval: 1m
+    input_series:
+      - series: 'up{job="ws",instance="ws-1:8081"}'
+        values: '1+0x4'
+      - series: 'up{job="ws",instance="ws-2:8081"}'
+        values: '1+0x4'
+      - series: 'up{job="ws",instance="ws-3:8081"}'
+        values: '1+0x4'
+    promql_expr_test:
+      - expr: 'messenger:unavailable_scrape_targets{job="ws"}'
+        eval_time: 2m
+        exp_samples:
+          - labels: 'messenger:unavailable_scrape_targets{job="ws"}'
+            value: 0
+
+  - name: Database recording failure remains observable with healthy scrapes
+    interval: 1m
+    input_series:
+      - series: 'messenger_database_instrumentation_failures{job="api",instance="api-1:8080"}'
+        values: '0 0 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: MessengerDatabaseInstrumentationFailure
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: api
+              instance: api-1:8080
+            exp_annotations:
+              summary: Database timing observations are being lost
+              description: Inspect the database recorder on api-1:8080. Application work continues, but timing and operation counts may be incomplete.
+
+  - name: Brief lock waits do not fire but persistent old queries do
+    interval: 1m
+    input_series:
+      - series: 'messenger_postgres_activity_oldest_lock_query_age_seconds{instance="postgres:9187"}'
+        values: '0 6 0 6 7 8 9'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: MessengerPostgresLockWait
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: MessengerPostgresLockWait
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: postgres:9187
+            exp_annotations:
+              summary: PostgreSQL queries are persistently waiting for locks
+              description: Check transaction age, chat contention and the database wait panels. Query age includes time before the lock wait.

@@ -1,0 +1,91 @@
+messenger_postgres_wal:
+  query: |
+    SELECT wal_bytes::double precision AS bytes_total,
+           wal_write AS writes_total,
+           wal_sync AS syncs_total,
+           wal_write_time / 1000.0 AS write_seconds_total,
+           wal_sync_time / 1000.0 AS sync_seconds_total
+    FROM pg_stat_wal
+  metrics:
+    - bytes_total:
+        usage: COUNTER
+        description: Bytes generated in the PostgreSQL write-ahead log.
+    - writes_total:
+        usage: COUNTER
+        description: PostgreSQL WAL write operations.
+    - syncs_total:
+        usage: COUNTER
+        description: PostgreSQL WAL synchronization operations.
+    - write_seconds_total:
+        usage: COUNTER
+        description: Time spent writing WAL with track_wal_io_timing enabled.
+    - sync_seconds_total:
+        usage: COUNTER
+        description: Time spent synchronizing WAL with track_wal_io_timing enabled.
+messenger_postgres_activity:
+  query: |
+    SELECT count(*) FILTER (WHERE state = 'active') AS active,
+           count(*) FILTER (WHERE wait_event_type = 'Lock') AS lock_waiting,
+           count(*) FILTER (WHERE state = 'active' AND wait_event_type = 'IO') AS io_waiting,
+           count(*) FILTER (WHERE state = 'active' AND wait_event_type = 'Client') AS client_waiting,
+           COALESCE(max(EXTRACT(EPOCH FROM clock_timestamp() - query_start)) FILTER (WHERE wait_event_type = 'Lock'), 0) AS oldest_lock_query_age_seconds,
+           COALESCE(max(EXTRACT(EPOCH FROM clock_timestamp() - query_start)) FILTER (WHERE state = 'active'), 0) AS oldest_active_query_age_seconds,
+           COALESCE(max(EXTRACT(EPOCH FROM clock_timestamp() - xact_start)), 0) AS oldest_transaction_age_seconds,
+           COALESCE(max(EXTRACT(EPOCH FROM clock_timestamp() - xact_start)) FILTER (WHERE state IN ('idle in transaction', 'idle in transaction (aborted)')), 0) AS oldest_idle_transaction_age_seconds
+    FROM pg_stat_activity
+    WHERE datname = current_database()
+      AND backend_type = 'client backend'
+      AND pid <> pg_backend_pid()
+  metrics:
+    - active:
+        usage: GAUGE
+        description: Active client backends in the messenger database, sampled at scrape time.
+    - lock_waiting:
+        usage: GAUGE
+        description: Client backends currently waiting for a PostgreSQL lock.
+    - io_waiting:
+        usage: GAUGE
+        description: Active client backends currently waiting for I/O.
+    - client_waiting:
+        usage: GAUGE
+        description: Active client backends currently waiting for client I/O.
+    - oldest_lock_query_age_seconds:
+        usage: GAUGE
+        description: Age of the oldest query currently waiting for a lock, not exact lock-wait duration.
+    - oldest_active_query_age_seconds:
+        usage: GAUGE
+        description: Age of the oldest active client query.
+    - oldest_transaction_age_seconds:
+        usage: GAUGE
+        description: Age of the oldest open client transaction.
+    - oldest_idle_transaction_age_seconds:
+        usage: GAUGE
+        description: Age of the oldest idle or aborted idle client transaction.
+messenger_postgres_statements:
+  query: |
+    SELECT CASE WHEN 'pg_stat_statements' = ANY(string_to_array(replace(current_setting('shared_preload_libraries'), ' ', ''), ',')) THEN 1 ELSE 0 END AS preloaded,
+           CASE WHEN EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements' AND extnamespace = 'observability'::regnamespace) THEN 1 ELSE 0 END AS installed,
+           CASE WHEN current_setting('pg_stat_statements.track_planning') = 'off' THEN 1 ELSE 0 END AS planning_disabled,
+           current_setting('pg_stat_statements.max')::bigint AS max_entries,
+           dealloc AS deallocations_total,
+           EXTRACT(EPOCH FROM stats_reset) AS reset_timestamp_seconds
+    FROM observability.pg_stat_statements_info
+  metrics:
+    - preloaded:
+        usage: GAUGE
+        description: One when pg_stat_statements is in shared_preload_libraries.
+    - installed:
+        usage: GAUGE
+        description: One when pg_stat_statements is installed in the observability schema.
+    - planning_disabled:
+        usage: GAUGE
+        description: One when statement planning tracking is disabled.
+    - max_entries:
+        usage: GAUGE
+        description: Configured maximum number of tracked statement entries.
+    - deallocations_total:
+        usage: COUNTER
+        description: Times PostgreSQL evicted least-used statement entries.
+    - reset_timestamp_seconds:
+        usage: GAUGE
+        description: Unix timestamp of the most recent statement statistics reset.

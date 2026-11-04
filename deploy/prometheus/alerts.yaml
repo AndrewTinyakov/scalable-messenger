@@ -1,8 +1,61 @@
 groups:
+  - name: messenger-scrape-availability
+    rules:
+      - record: messenger:minimum_scrape_targets
+        expr: vector(2)
+        labels:
+          job: api
+      - record: messenger:minimum_scrape_targets
+        expr: vector(2)
+        labels:
+          job: command-processor
+      - record: messenger:minimum_scrape_targets
+        expr: vector(2)
+        labels:
+          job: outbox-publisher
+      - record: messenger:minimum_scrape_targets
+        expr: vector(2)
+        labels:
+          job: ws
+      - record: messenger:minimum_scrape_targets
+        expr: vector(3)
+        labels:
+          job: rabbitmq
+      - record: messenger:minimum_scrape_targets
+        expr: vector(3)
+        labels:
+          job: rabbitmq-queues
+      - record: messenger:minimum_scrape_targets
+        expr: vector(6)
+        labels:
+          job: redis
+      - record: messenger:minimum_scrape_targets
+        expr: vector(1)
+        labels:
+          job: postgres
+      - record: messenger:minimum_scrape_targets
+        expr: vector(3)
+        labels:
+          job: ingress
+      - record: messenger:minimum_scrape_targets
+        expr: vector(1)
+        labels:
+          job: containers
+      - record: messenger:minimum_scrape_targets
+        expr: vector(1)
+        labels:
+          job: alertmanager
+      - record: messenger:minimum_scrape_targets
+        expr: vector(1)
+        labels:
+          job: prometheus
+      - record: messenger:unavailable_scrape_targets
+        expr: clamp_min(messenger:minimum_scrape_targets - on (job) (count by (job) (up == 1) or on (job) (0 * messenger:minimum_scrape_targets)), 0)
+
   - name: messenger-availability
     rules:
       - alert: MessengerTargetDown
-        expr: up{job=~"api|command-processor|outbox-publisher|ws|rabbitmq|rabbitmq-queues|redis|postgres|ingress|alertmanager"} == 0
+        expr: up{job=~"api|command-processor|outbox-publisher|ws|rabbitmq|rabbitmq-queues|redis|postgres|ingress|alertmanager|containers"} == 0
         for: 2m
         labels:
           severity: critical
@@ -40,7 +93,7 @@ groups:
   - name: messenger-api-and-ws
     rules:
       - alert: MessengerApiServerErrors
-        expr: (sum(rate(http_server_requests_seconds_count{job="api",status=~"5.."}[5m])) / clamp_min(sum(rate(http_server_requests_seconds_count{job="api"}[5m])), 0.001)) > 0.05 and sum(increase(http_server_requests_seconds_count{job="api"}[5m])) >= 20
+        expr: (sum(rate(http_server_requests_seconds_count{job="api",uri!~".*/actuator(/.*)?",status=~"5.."}[5m])) / clamp_min(sum(rate(http_server_requests_seconds_count{job="api",uri!~".*/actuator(/.*)?"}[5m])), 0.001)) > 0.05 and sum(increase(http_server_requests_seconds_count{job="api",uri!~".*/actuator(/.*)?"}[5m])) >= 20
         for: 5m
         labels:
           severity: warning
@@ -58,12 +111,12 @@ groups:
           description: Check outbound queue bytes, fanout rate, and client network speed.
 
       - alert: MessengerWsNodeNearCapacity
-        expr: messenger_ws_connections > 8000
+        expr: messenger_ws_connections / on (instance) messenger_ws_capacity{resource="connections"} > 0.8
         for: 5m
         labels:
           severity: warning
         annotations:
-          summary: A WS node is above 80 percent of its 10,000-connection local cap
+          summary: A WS node is above 80 percent of its configured connection cap
           description: Add WS capacity before new handshakes are rejected.
 
       - alert: MessengerWsProxyConnectionsHigh
@@ -141,12 +194,12 @@ groups:
           description: Check processor throughput, consumers, and PostgreSQL latency.
 
       - alert: MessengerSendQueueDelay
-        expr: histogram_quantile(0.95, sum by (le) (rate(messenger_command_queue_delay_seconds_bucket[5m]))) > 60
+        expr: (sum(rate(messenger_command_queue_delay_seconds_count[5m])) - sum(rate(messenger_command_queue_delay_seconds_bucket{le="30.0"}[5m]))) / clamp_min(sum(rate(messenger_command_queue_delay_seconds_count[5m])), 0.000001) > 0.05
         for: 5m
         labels:
           severity: warning
         annotations:
-          summary: Processed send commands have waited over one minute at p95
+          summary: Over 5 percent of processed send commands waited longer than 30 seconds
           description: Check send queue depth, processor throughput, and PostgreSQL contention.
 
       - alert: MessengerSendQueueUnackedHigh
@@ -277,6 +330,23 @@ groups:
           summary: "{{ $labels.job }} has requests waiting for a JDBC connection"
           description: Check slow SQL, transaction length, and pool sizing.
 
+      - alert: MessengerDatabaseInstrumentationFailure
+        expr: increase(messenger_database_instrumentation_failures{job=~"api|command-processor|outbox-publisher"}[5m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: Database timing observations are being lost
+          description: Inspect the database recorder on {{ $labels.instance }}. Application work continues, but timing and operation counts may be incomplete.
+
+      - alert: MessengerPostgresLockWait
+        expr: messenger_postgres_activity_oldest_lock_query_age_seconds > 5
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: PostgreSQL queries are persistently waiting for locks
+          description: Check transaction age, chat contention and the database wait panels. Query age includes time before the lock wait.
+
       - alert: MessengerRedisEvictions
         expr: sum(increase(redis_evicted_keys_total[5m])) > 0
         labels:
@@ -284,3 +354,91 @@ groups:
         annotations:
           summary: Redis has evicted keys
           description: Short history may disappear early and force SQL recovery.
+
+  - name: messenger-telemetry
+    rules:
+      - alert: MessengerWsAppliedSlow
+        expr: histogram_quantile(0.95, sum by (le, origin) (rate(messenger_ws_applied_latency_seconds_bucket{origin="saved"}[5m]))) > 1
+        for: 2m
+        labels: {severity: warning}
+        annotations:
+          summary: Device applied latency exceeds one second at p95
+          description: Inspect gateway command waiting, SQL, publisher lag, and pending acknowledgements.
+      - alert: MessengerWsAckTimeouts
+        expr: sum(increase(messenger_ws_ack_timeouts_total[5m])) > 5
+        for: 2m
+        labels: {severity: warning}
+        annotations:
+          summary: Clients are exceeding the applied acknowledgement deadline
+          description: Inspect pending ACK age and client read rates.
+      - alert: MessengerWsCommandWaiting
+        expr: histogram_quantile(0.95, sum by (le) (rate(messenger_ws_command_queue_wait_seconds_bucket[5m]))) > 0.2
+        for: 2m
+        labels: {severity: warning}
+        annotations:
+          summary: Gateway commands wait over 200 milliseconds at p95
+          description: Compare worker service, Redis admission, and Rabbit confirmation timings.
+      - alert: MessengerSendLockSlow
+        expr: histogram_quantile(0.95, sum by (le) (rate(messenger_send_chat_lock_acquire_seconds_bucket[5m]))) > 0.1
+        for: 2m
+        labels: {severity: warning}
+        annotations:
+          summary: Chat lock acquisition exceeds 100 milliseconds at p95
+          description: Inspect hot chat traffic and transaction hold and completion duration.
+      - alert: MessengerRedisMemoryUnbounded
+        expr: redis_memory_max_bytes == 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: A Redis node has no configured memory limit
+          description: Configure a finite maxmemory budget and retain noeviction for shared admission state.
+      - alert: MessengerAlertDeliveryFailed
+        expr: sum(increase(alertmanager_notifications_failed_total[5m])) > 0
+        labels: {severity: warning}
+        annotations:
+          summary: Alertmanager failed to deliver a notification
+          description: Inspect the notification destination and Alertmanager logs.
+      - alert: MessengerPrometheusScrapeSlow
+        expr: scrape_duration_seconds > 4
+        for: 2m
+        labels: {severity: warning}
+        annotations:
+          summary: A scrape nearly exceeds the local scrape interval
+          description: Inspect exporter duration and reduce collection pressure if necessary.
+
+  - name: messenger-latency
+    rules:
+      - alert: MessengerSendQueueLatency
+        expr: histogram_quantile(0.95, sum by (le) (rate(messenger_command_queue_delay_seconds_bucket[5m]))) > 0.2
+        for: 2m
+        labels: {severity: warning}
+        annotations:
+          summary: Command queue latency exceeds 200 milliseconds at p95
+          description: Compare queue depth, batch size, chat lock duration, and transaction completion.
+      - alert: MessengerPostSaveLatency
+        expr: histogram_quantile(0.95, sum by (le) (rate(messenger_ws_saved_event_lag_seconds_bucket[5m]))) > 0.2
+        for: 2m
+        labels: {severity: warning}
+        annotations:
+          summary: SQL save to gateway latency exceeds 200 milliseconds at p95
+          description: Inspect outbox age, publication latency, Redis feed health, and gateway resource pressure.
+
+  - name: messenger-chat-features
+    rules:
+      - alert: MessengerPresenceSnapshotsFailing
+        expr: sum(rate(messenger_ws_presence_snapshots_total{result="failed"}[5m])) / clamp_min(sum(rate(messenger_ws_presence_snapshots_total[5m])), 0.000001) > 0.1 and sum(increase(messenger_ws_presence_snapshots_total[5m])) > 20
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Presence snapshots are returning unknown states
+          description: Check Redis health, batch timeouts and the presence sweep duration in Chat features.
+
+      - alert: MessengerReadCleanupBehind
+        expr: max(messenger_read_cleanup_oldest_age_seconds) > 300 and max(messenger_read_cleanup_backlog) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Expired read timestamp cleanup is falling behind
+          description: Timestamp details remain hidden at the exact seven-day boundary. Inspect cleanup failures, database waits and the capped backlog sample.

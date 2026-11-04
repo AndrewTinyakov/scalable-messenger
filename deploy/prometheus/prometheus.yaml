@@ -1,6 +1,6 @@
 global:
-  scrape_interval: 15s
-  evaluation_interval: 15s
+  scrape_interval: 5s
+  evaluation_interval: 5s
   external_labels:
     environment: local
 
@@ -48,8 +48,11 @@ scrape_configs:
         refresh_interval: 15s
 
   - job_name: ws
-    static_configs:
-      - targets: [ws-1:8081, ws-2:8081]
+    dns_sd_configs:
+      - names: [ws]
+        type: A
+        port: 8081
+        refresh_interval: 5s
 
   - job_name: rabbitmq
     static_configs:
@@ -93,6 +96,10 @@ scrape_configs:
         labels: {tier: api}
       - targets: [nginx-exporter-ws:9113]
         labels: {tier: ws}
+
+  - job_name: containers
+    static_configs:
+      - targets: [cadvisor:8080]
 
   - job_name: alertmanager
     static_configs:

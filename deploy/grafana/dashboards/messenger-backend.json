@@ -6,56 +6,60 @@
   ],
   "timezone": "browser",
   "schemaVersion": 41,
-  "version": 1,
+  "version": 2,
   "refresh": "15s",
   "time": {
     "from": "now-1h",
     "to": "now"
   },
-  "editable": true,
+  "editable": false,
   "graphTooltip": 1,
   "panels": [
     {
       "id": 1,
-      "title": "API and Kotlin processes",
+      "title": "Product API and JVM saturation",
       "type": "row",
       "collapsed": false,
       "gridPos": {
-        "h": 1,
-        "w": 24,
         "x": 0,
-        "y": 0
+        "y": 0,
+        "w": 24,
+        "h": 1
       }
     },
     {
       "id": 2,
-      "title": "API 5xx requests per second",
-      "description": "",
+      "title": "Product API 5xx requests per second",
+      "description": "Excludes actuator monitoring. Shows zero while API telemetry is available and no 5xx occurred; absent telemetry is not converted to success.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 8,
-        "w": 8,
         "x": 0,
-        "y": 1
+        "y": 1,
+        "w": 8,
+        "h": 7
       },
       "fieldConfig": {
         "defaults": {
           "unit": "reqps",
           "color": {
             "mode": "palette-classic"
-          }
+          },
+          "min": 0
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "displayMode": "list",
+          "displayMode": "table",
           "placement": "bottom",
-          "calcs": []
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
         },
         "tooltip": {
           "mode": "multi",
@@ -64,7 +68,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(http_server_requests_seconds_count{job=\"api\",status=~\"5..\"}[$__rate_interval]))",
+          "expr": "(sum(rate(http_server_requests_seconds_count{job=\"api\",uri!~\".*/actuator(/.*)?\",status=~\"5..\"}[$__rate_interval])) or vector(0)) and on() (max(up{job=\"api\"})==1)",
           "legendFormat": "5xx",
           "refId": "A",
           "instant": false
@@ -72,23 +76,24 @@
       ]
     },
     {
-      "id": 3,
-      "title": "JVM heap used by service",
-      "description": "",
+      "id": 46,
+      "title": "Product API latency",
       "type": "timeseries",
+      "description": "Excludes actuator scrapes. No percentile exists when no product requests were observed. Compare product request volume on the overview.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 8,
-        "w": 8,
         "x": 8,
-        "y": 1
+        "y": 1,
+        "w": 12,
+        "h": 7
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "bytes",
+          "unit": "s",
+          "min": 0,
           "color": {
             "mode": "palette-classic"
           }
@@ -97,9 +102,67 @@
       },
       "options": {
         "legend": {
-          "displayMode": "list",
+          "displayMode": "table",
           "placement": "bottom",
-          "calcs": []
+          "calcs": [
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95,sum by(le)(rate(http_server_requests_seconds_bucket{job=\"api\",uri!~\".*/actuator(/.*)?\"}[$__rate_interval])))",
+          "legendFormat": "p95",
+          "refId": "A",
+          "instant": false,
+          "range": true
+        },
+        {
+          "expr": "histogram_quantile(0.99,sum by(le)(rate(http_server_requests_seconds_bucket{job=\"api\",uri!~\".*/actuator(/.*)?\"}[$__rate_interval])))",
+          "legendFormat": "p99",
+          "refId": "B",
+          "instant": false,
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "JVM heap used by service",
+      "description": "Use the selected time range to correlate this signal with workload, scrape health and related stages. Idle event counters may have no series until their first event.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 8,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
         },
         "tooltip": {
           "mode": "multi",
@@ -118,32 +181,36 @@
     {
       "id": 4,
       "title": "JVM process CPU",
-      "description": "",
+      "description": "Use the selected time range to correlate this signal with workload, scrape health and related stages. Idle event counters may have no series until their first event.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 8,
+        "x": 8,
+        "y": 8,
         "w": 8,
-        "x": 16,
-        "y": 1
+        "h": 7
       },
       "fieldConfig": {
         "defaults": {
           "unit": "percentunit",
           "color": {
             "mode": "palette-classic"
-          }
+          },
+          "min": 0
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "displayMode": "list",
+          "displayMode": "table",
           "placement": "bottom",
-          "calcs": []
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
         },
         "tooltip": {
           "mode": "multi",
@@ -162,32 +229,36 @@
     {
       "id": 5,
       "title": "JVM GC overhead",
-      "description": "",
+      "description": "Use the selected time range to correlate this signal with workload, scrape health and related stages. Idle event counters may have no series until their first event.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 8,
+        "x": 16,
+        "y": 8,
         "w": 8,
-        "x": 0,
-        "y": 9
+        "h": 7
       },
       "fieldConfig": {
         "defaults": {
           "unit": "percentunit",
           "color": {
             "mode": "palette-classic"
-          }
+          },
+          "min": 0
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "displayMode": "list",
+          "displayMode": "table",
           "placement": "bottom",
-          "calcs": []
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
         },
         "tooltip": {
           "mode": "multi",
@@ -206,32 +277,36 @@
     {
       "id": 6,
       "title": "JDBC active connections",
-      "description": "",
+      "description": "Use the selected time range to correlate this signal with workload, scrape health and related stages. Idle event counters may have no series until their first event.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 8,
+        "x": 0,
+        "y": 15,
         "w": 8,
-        "x": 8,
-        "y": 9
+        "h": 7
       },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
           "color": {
             "mode": "palette-classic"
-          }
+          },
+          "min": 0
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "displayMode": "list",
+          "displayMode": "table",
           "placement": "bottom",
-          "calcs": []
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
         },
         "tooltip": {
           "mode": "multi",
@@ -250,32 +325,36 @@
     {
       "id": 7,
       "title": "JDBC pending connections",
-      "description": "",
+      "description": "Use the selected time range to correlate this signal with workload, scrape health and related stages. Idle event counters may have no series until their first event.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 8,
+        "x": 8,
+        "y": 15,
         "w": 8,
-        "x": 16,
-        "y": 9
+        "h": 7
       },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
           "color": {
             "mode": "palette-classic"
-          }
+          },
+          "min": 0
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "displayMode": "list",
+          "displayMode": "table",
           "placement": "bottom",
-          "calcs": []
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
         },
         "tooltip": {
           "mode": "multi",
@@ -293,45 +372,49 @@
     },
     {
       "id": 8,
-      "title": "Command processors",
+      "title": "Commands waiting for SQL",
       "type": "row",
       "collapsed": false,
       "gridPos": {
-        "h": 1,
-        "w": 24,
         "x": 0,
-        "y": 17
+        "y": 22,
+        "w": 24,
+        "h": 1
       }
     },
     {
       "id": 9,
       "title": "Send queue depth by partition",
-      "description": "",
+      "description": "Use the selected time range to correlate this signal with workload, scrape health and related stages. Idle event counters may have no series until their first event.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 8,
-        "w": 8,
         "x": 0,
-        "y": 18
+        "y": 23,
+        "w": 8,
+        "h": 7
       },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
           "color": {
             "mode": "palette-classic"
-          }
+          },
+          "min": 0
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "displayMode": "list",
+          "displayMode": "table",
           "placement": "bottom",
-          "calcs": []
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
         },
         "tooltip": {
           "mode": "multi",
@@ -350,32 +433,36 @@
     {
       "id": 10,
       "title": "Consumers by queue",
-      "description": "",
+      "description": "Use the selected time range to correlate this signal with workload, scrape health and related stages. Idle event counters may have no series until their first event.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 8,
-        "w": 8,
         "x": 8,
-        "y": 18
+        "y": 23,
+        "w": 8,
+        "h": 7
       },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
           "color": {
             "mode": "palette-classic"
-          }
+          },
+          "min": 0
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "displayMode": "list",
+          "displayMode": "table",
           "placement": "bottom",
-          "calcs": []
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
         },
         "tooltip": {
           "mode": "multi",
@@ -394,32 +481,36 @@
     {
       "id": 11,
       "title": "Unacknowledged commands",
-      "description": "",
+      "description": "Use the selected time range to correlate this signal with workload, scrape health and related stages. Idle event counters may have no series until their first event.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 8,
-        "w": 8,
         "x": 16,
-        "y": 18
+        "y": 23,
+        "w": 8,
+        "h": 7
       },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
           "color": {
             "mode": "palette-classic"
-          }
+          },
+          "min": 0
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "displayMode": "list",
+          "displayMode": "table",
           "placement": "bottom",
-          "calcs": []
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
         },
         "tooltip": {
           "mode": "multi",
@@ -438,32 +529,36 @@
     {
       "id": 12,
       "title": "Command outcomes",
-      "description": "",
+      "description": "Use the selected time range to correlate this signal with workload, scrape health and related stages. Idle event counters may have no series until their first event.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 8,
-        "w": 8,
         "x": 0,
-        "y": 26
+        "y": 30,
+        "w": 8,
+        "h": 7
       },
       "fieldConfig": {
         "defaults": {
           "unit": "ops",
           "color": {
             "mode": "palette-classic"
-          }
+          },
+          "min": 0
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "displayMode": "list",
+          "displayMode": "table",
           "placement": "bottom",
-          "calcs": []
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
         },
         "tooltip": {
           "mode": "multi",
@@ -482,32 +577,36 @@
     {
       "id": 13,
       "title": "Saved, rejected and duplicate sends",
-      "description": "",
+      "description": "Use the selected time range to correlate this signal with workload, scrape health and related stages. Idle event counters may have no series until their first event.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 8,
-        "w": 8,
         "x": 8,
-        "y": 26
+        "y": 30,
+        "w": 8,
+        "h": 7
       },
       "fieldConfig": {
         "defaults": {
           "unit": "ops",
           "color": {
             "mode": "palette-classic"
-          }
+          },
+          "min": 0
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "displayMode": "list",
+          "displayMode": "table",
           "placement": "bottom",
-          "calcs": []
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
         },
         "tooltip": {
           "mode": "multi",
@@ -526,32 +625,35 @@
     {
       "id": 14,
       "title": "Command processing p95",
-      "description": "",
+      "description": "Per-delivery decode start through the broker acknowledgement attempt, including subsequent decoding and group sequencing waits. Includes SQL work and ACK/reject transport failures.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 8,
-        "w": 8,
         "x": 16,
-        "y": 26
+        "y": 30,
+        "w": 8,
+        "h": 7
       },
       "fieldConfig": {
         "defaults": {
           "unit": "s",
           "color": {
             "mode": "palette-classic"
-          }
+          },
+          "min": 0
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "displayMode": "list",
+          "displayMode": "table",
           "placement": "bottom",
-          "calcs": []
+          "calcs": [
+            "max"
+          ]
         },
         "tooltip": {
           "mode": "multi",
@@ -570,32 +672,35 @@
     {
       "id": 15,
       "title": "Queue arrival delay p95",
-      "description": "",
+      "description": "Gateway publication timestamp through per-delivery decoding during listener handling, including broker retry residence, batch assembly and earlier delivery handling. This is not only ready-queue waiting.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 8,
-        "w": 8,
         "x": 0,
-        "y": 34
+        "y": 37,
+        "w": 8,
+        "h": 7
       },
       "fieldConfig": {
         "defaults": {
           "unit": "s",
           "color": {
             "mode": "palette-classic"
-          }
+          },
+          "min": 0
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "displayMode": "list",
+          "displayMode": "table",
           "placement": "bottom",
-          "calcs": []
+          "calcs": [
+            "max"
+          ]
         },
         "tooltip": {
           "mode": "multi",
@@ -614,32 +719,36 @@
     {
       "id": 16,
       "title": "Dead-letter queue depth",
-      "description": "",
+      "description": "Use the selected time range to correlate this signal with workload, scrape health and related stages. Idle event counters may have no series until their first event.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 8,
-        "w": 8,
         "x": 8,
-        "y": 34
+        "y": 37,
+        "w": 8,
+        "h": 7
       },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
           "color": {
             "mode": "palette-classic"
-          }
+          },
+          "min": 0
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "displayMode": "list",
+          "displayMode": "table",
           "placement": "bottom",
-          "calcs": []
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
         },
         "tooltip": {
           "mode": "multi",
@@ -656,46 +765,258 @@
       ]
     },
     {
-      "id": 17,
-      "title": "Outbox publishers",
-      "type": "row",
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 42
-      }
-    },
-    {
-      "id": 18,
-      "title": "Pending events",
-      "description": "",
+      "id": 40,
+      "title": "Commands per committed SQL batch",
+      "description": "Shared transactions contain at most sixteen commands for one target.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 8,
+        "x": 16,
+        "y": 37,
         "w": 8,
-        "x": 0,
-        "y": 43
+        "h": 7
       },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
           "color": {
             "mode": "palette-classic"
-          }
+          },
+          "min": 0
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "displayMode": "list",
+          "displayMode": "table",
           "placement": "bottom",
-          "calcs": []
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(messenger_send_batch_size_sum{outcome=\"committed\"}[$__rate_interval])) / clamp_min(sum(rate(messenger_send_batch_size_count{outcome=\"committed\"}[$__rate_interval])),0.000001)",
+          "legendFormat": "commands / commit",
+          "refId": "A",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 41,
+      "title": "SQL send batch transactions",
+      "description": "Shared transactions contain at most sixteen commands for one target.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 44,
+        "w": 8,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by(outcome)(rate(messenger_send_batch_transaction_seconds_count[$__rate_interval]))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 42,
+      "title": "Batch transaction completion p95",
+      "description": "Shared transactions contain at most sixteen commands for one target.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 44,
+        "w": 8,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95,sum by(le,outcome)(rate(messenger_send_batch_completion_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 36,
+      "title": "Send transaction stages p95",
+      "description": "Use the selected time range to correlate this signal with workload, scrape health and related stages. Idle event counters may have no series until their first event.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 51,
+        "w": 12,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95,sum by(le)(rate(messenger_send_transaction_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "transaction",
+          "refId": "A",
+          "instant": false
+        },
+        {
+          "expr": "histogram_quantile(0.95,sum by(le)(rate(messenger_send_chat_lock_acquire_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "chat_lock_acquire",
+          "refId": "B",
+          "instant": false
+        },
+        {
+          "expr": "histogram_quantile(0.95,sum by(le)(rate(messenger_send_transaction_hold_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "transaction_hold",
+          "refId": "C",
+          "instant": false
+        },
+        {
+          "expr": "histogram_quantile(0.95,sum by(le)(rate(messenger_send_transaction_completion_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "transaction_completion",
+          "refId": "D",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "title": "Outbox publication and sampling",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 58,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 18,
+      "title": "Pending events",
+      "description": "Use the selected time range to correlate this signal with workload, scrape health and related stages. Idle event counters may have no series until their first event.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 59,
+        "w": 8,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
         },
         "tooltip": {
           "mode": "multi",
@@ -714,32 +1035,35 @@
     {
       "id": 19,
       "title": "Oldest pending event",
-      "description": "",
+      "description": "Use the selected time range to correlate this signal with workload, scrape health and related stages. Idle event counters may have no series until their first event.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 8,
-        "w": 8,
         "x": 8,
-        "y": 43
+        "y": 59,
+        "w": 8,
+        "h": 7
       },
       "fieldConfig": {
         "defaults": {
           "unit": "s",
           "color": {
             "mode": "palette-classic"
-          }
+          },
+          "min": 0
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "displayMode": "list",
+          "displayMode": "table",
           "placement": "bottom",
-          "calcs": []
+          "calcs": [
+            "max"
+          ]
         },
         "tooltip": {
           "mode": "multi",
@@ -756,34 +1080,105 @@
       ]
     },
     {
+      "id": 23,
+      "title": "Backlog sampler healthy",
+      "description": "Use the selected time range to correlate this signal with workload, scrape health and related stages. Idle event counters may have no series until their first event.",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 59,
+        "w": 8,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          },
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "expr": "messenger_outbox_backlog_sample_healthy",
+          "legendFormat": "{{instance}}",
+          "refId": "A",
+          "instant": true
+        }
+      ]
+    },
+    {
       "id": 20,
       "title": "Redis publication results",
-      "description": "",
+      "description": "Use the selected time range to correlate this signal with workload, scrape health and related stages. Idle event counters may have no series until their first event.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 8,
+        "x": 0,
+        "y": 66,
         "w": 8,
-        "x": 16,
-        "y": 43
+        "h": 7
       },
       "fieldConfig": {
         "defaults": {
           "unit": "ops",
           "color": {
             "mode": "palette-classic"
-          }
+          },
+          "min": 0
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "displayMode": "list",
+          "displayMode": "table",
           "placement": "bottom",
-          "calcs": []
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
         },
         "tooltip": {
           "mode": "multi",
@@ -802,32 +1197,36 @@
     {
       "id": 21,
       "title": "Claimed events per second",
-      "description": "",
+      "description": "Use the selected time range to correlate this signal with workload, scrape health and related stages. Idle event counters may have no series until their first event.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 8,
+        "x": 8,
+        "y": 66,
         "w": 8,
-        "x": 0,
-        "y": 51
+        "h": 7
       },
       "fieldConfig": {
         "defaults": {
           "unit": "ops",
           "color": {
             "mode": "palette-classic"
-          }
+          },
+          "min": 0
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "displayMode": "list",
+          "displayMode": "table",
           "placement": "bottom",
-          "calcs": []
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
         },
         "tooltip": {
           "mode": "multi",
@@ -845,33 +1244,36 @@
     },
     {
       "id": 22,
-      "title": "Batch p95 duration",
-      "description": "",
+      "title": "Active outbox batch p95",
+      "description": "Nonempty work and failed attempts, separated by outcome. Empty polls are excluded. Claim failures are included as failed attempts even when no rows could be claimed.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 8,
+        "x": 16,
+        "y": 66,
         "w": 8,
-        "x": 8,
-        "y": 51
+        "h": 7
       },
       "fieldConfig": {
         "defaults": {
           "unit": "s",
           "color": {
             "mode": "palette-classic"
-          }
+          },
+          "min": 0
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "displayMode": "list",
+          "displayMode": "table",
           "placement": "bottom",
-          "calcs": []
+          "calcs": [
+            "max"
+          ]
         },
         "tooltip": {
           "mode": "multi",
@@ -880,99 +1282,260 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(messenger_outbox_batch_seconds_bucket[$__rate_interval])))",
-          "legendFormat": "p95",
+          "expr": "histogram_quantile(0.95, sum by (le, outcome) (rate(messenger_outbox_batch_seconds_bucket{outcome=~\"work|failed\"}[$__rate_interval])))",
+          "legendFormat": "{{outcome}}",
           "refId": "A",
           "instant": false
         }
       ]
     },
     {
-      "id": 23,
-      "title": "Backlog sampler healthy",
-      "description": "",
-      "type": "stat",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 51
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "color": {
-            "mode": "palette-classic"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        }
-      },
-      "targets": [
-        {
-          "expr": "messenger_outbox_backlog_sample_healthy",
-          "legendFormat": "{{instance}}",
-          "refId": "A",
-          "instant": true
-        }
-      ]
-    },
-    {
-      "id": 24,
-      "title": "RabbitMQ, Redis, PostgreSQL",
-      "type": "row",
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 59
-      }
-    },
-    {
-      "id": 25,
-      "title": "RabbitMQ node memory",
-      "description": "",
+      "id": 39,
+      "title": "Individual outbox publication p95",
+      "description": "Excludes idle empty batch polling.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 8,
-        "w": 8,
         "x": 0,
-        "y": 60
+        "y": 73,
+        "w": 8,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95,sum by(le,outcome)(rate(messenger_outbox_publication_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 47,
+      "title": "SQL history recovery",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 87,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 37,
+      "title": "SQL history page duration p95",
+      "description": "Use the selected time range to correlate this signal with workload, scrape health and related stages. Idle event counters may have no series until their first event.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 88,
+        "w": 8,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95,sum by(le,direction,outcome)(rate(messenger_history_page_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "{{direction}} {{outcome}}",
+          "refId": "A",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 38,
+      "title": "SQL history recovery messages",
+      "description": "Use the selected time range to correlate this signal with workload, scrape health and related stages. Idle event counters may have no series until their first event.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 88,
+        "w": 8,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by(direction)(rate(messenger_history_messages_total[$__rate_interval]))",
+          "legendFormat": "{{direction}} messages/s",
+          "refId": "A",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 45,
+      "title": "SQL history recovery body bytes",
+      "description": "Use the selected time range to correlate this signal with workload, scrape health and related stages. Idle event counters may have no series until their first event.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 88,
+        "w": 8,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by(direction)(rate(messenger_history_body_bytes_total[$__rate_interval]))",
+          "legendFormat": "{{direction}} body bytes/s",
+          "refId": "A",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 24,
+      "title": "RabbitMQ, Redis and PostgreSQL",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 95,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 25,
+      "title": "RabbitMQ node memory",
+      "description": "Use the selected time range to correlate this signal with workload, scrape health and related stages. Idle event counters may have no series until their first event.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 96,
+        "w": 8,
+        "h": 7
       },
       "fieldConfig": {
         "defaults": {
           "unit": "bytes",
           "color": {
             "mode": "palette-classic"
-          }
+          },
+          "min": 0
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "displayMode": "list",
+          "displayMode": "table",
           "placement": "bottom",
-          "calcs": []
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
         },
         "tooltip": {
           "mode": "multi",
@@ -991,32 +1554,36 @@
     {
       "id": 26,
       "title": "Redis memory by node",
-      "description": "",
+      "description": "Use the selected time range to correlate this signal with workload, scrape health and related stages. Idle event counters may have no series until their first event.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 8,
-        "w": 8,
         "x": 8,
-        "y": 60
+        "y": 96,
+        "w": 8,
+        "h": 7
       },
       "fieldConfig": {
         "defaults": {
           "unit": "bytes",
           "color": {
             "mode": "palette-classic"
-          }
+          },
+          "min": 0
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "displayMode": "list",
+          "displayMode": "table",
           "placement": "bottom",
-          "calcs": []
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
         },
         "tooltip": {
           "mode": "multi",
@@ -1035,32 +1602,36 @@
     {
       "id": 27,
       "title": "Redis commands per second",
-      "description": "",
+      "description": "Use the selected time range to correlate this signal with workload, scrape health and related stages. Idle event counters may have no series until their first event.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 8,
-        "w": 8,
         "x": 16,
-        "y": 60
+        "y": 96,
+        "w": 8,
+        "h": 7
       },
       "fieldConfig": {
         "defaults": {
           "unit": "ops",
           "color": {
             "mode": "palette-classic"
-          }
+          },
+          "min": 0
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "displayMode": "list",
+          "displayMode": "table",
           "placement": "bottom",
-          "calcs": []
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
         },
         "tooltip": {
           "mode": "multi",
@@ -1079,32 +1650,36 @@
     {
       "id": 28,
       "title": "Redis connected clients",
-      "description": "",
+      "description": "Use the selected time range to correlate this signal with workload, scrape health and related stages. Idle event counters may have no series until their first event.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 8,
-        "w": 8,
         "x": 0,
-        "y": 68
+        "y": 103,
+        "w": 8,
+        "h": 7
       },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
           "color": {
             "mode": "palette-classic"
-          }
+          },
+          "min": 0
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "displayMode": "list",
+          "displayMode": "table",
           "placement": "bottom",
-          "calcs": []
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
         },
         "tooltip": {
           "mode": "multi",
@@ -1123,32 +1698,36 @@
     {
       "id": 29,
       "title": "Redis network output",
-      "description": "",
+      "description": "Use the selected time range to correlate this signal with workload, scrape health and related stages. Idle event counters may have no series until their first event.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 8,
-        "w": 8,
         "x": 8,
-        "y": 68
+        "y": 103,
+        "w": 8,
+        "h": 7
       },
       "fieldConfig": {
         "defaults": {
           "unit": "Bps",
           "color": {
             "mode": "palette-classic"
-          }
+          },
+          "min": 0
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "displayMode": "list",
+          "displayMode": "table",
           "placement": "bottom",
-          "calcs": []
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
         },
         "tooltip": {
           "mode": "multi",
@@ -1167,32 +1746,36 @@
     {
       "id": 30,
       "title": "Redis cluster slots failed",
-      "description": "",
+      "description": "Use the selected time range to correlate this signal with workload, scrape health and related stages. Idle event counters may have no series until their first event.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 8,
-        "w": 8,
         "x": 16,
-        "y": 68
+        "y": 103,
+        "w": 8,
+        "h": 7
       },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
           "color": {
             "mode": "palette-classic"
-          }
+          },
+          "min": 0
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "displayMode": "list",
+          "displayMode": "table",
           "placement": "bottom",
-          "calcs": []
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
         },
         "tooltip": {
           "mode": "multi",
@@ -1211,32 +1794,36 @@
     {
       "id": 31,
       "title": "PostgreSQL connections",
-      "description": "",
+      "description": "Use the selected time range to correlate this signal with workload, scrape health and related stages. Idle event counters may have no series until their first event.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 8,
-        "w": 8,
         "x": 0,
-        "y": 76
+        "y": 110,
+        "w": 8,
+        "h": 7
       },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
           "color": {
             "mode": "palette-classic"
-          }
+          },
+          "min": 0
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "displayMode": "list",
+          "displayMode": "table",
           "placement": "bottom",
-          "calcs": []
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
         },
         "tooltip": {
           "mode": "multi",
@@ -1255,32 +1842,36 @@
     {
       "id": 32,
       "title": "PostgreSQL committed transactions per second",
-      "description": "",
+      "description": "Use the selected time range to correlate this signal with workload, scrape health and related stages. Idle event counters may have no series until their first event.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 8,
-        "w": 8,
         "x": 8,
-        "y": 76
+        "y": 110,
+        "w": 8,
+        "h": 7
       },
       "fieldConfig": {
         "defaults": {
           "unit": "ops",
           "color": {
             "mode": "palette-classic"
-          }
+          },
+          "min": 0
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "displayMode": "list",
+          "displayMode": "table",
           "placement": "bottom",
-          "calcs": []
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
         },
         "tooltip": {
           "mode": "multi",
@@ -1299,32 +1890,36 @@
     {
       "id": 33,
       "title": "PostgreSQL deadlocks per second",
-      "description": "",
+      "description": "Use the selected time range to correlate this signal with workload, scrape health and related stages. Idle event counters may have no series until their first event.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 8,
-        "w": 8,
         "x": 16,
-        "y": 76
+        "y": 110,
+        "w": 8,
+        "h": 7
       },
       "fieldConfig": {
         "defaults": {
           "unit": "ops",
           "color": {
             "mode": "palette-classic"
-          }
+          },
+          "min": 0
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "displayMode": "list",
+          "displayMode": "table",
           "placement": "bottom",
-          "calcs": []
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
         },
         "tooltip": {
           "mode": "multi",
@@ -1343,32 +1938,36 @@
     {
       "id": 34,
       "title": "PostgreSQL locks by mode",
-      "description": "",
+      "description": "Use the selected time range to correlate this signal with workload, scrape health and related stages. Idle event counters may have no series until their first event.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 8,
-        "w": 8,
         "x": 0,
-        "y": 84
+        "y": 117,
+        "w": 12,
+        "h": 7
       },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
           "color": {
             "mode": "palette-classic"
-          }
+          },
+          "min": 0
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "displayMode": "list",
+          "displayMode": "table",
           "placement": "bottom",
-          "calcs": []
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
         },
         "tooltip": {
           "mode": "multi",
@@ -1387,32 +1986,36 @@
     {
       "id": 35,
       "title": "PostgreSQL database size",
-      "description": "",
+      "description": "Use the selected time range to correlate this signal with workload, scrape health and related stages. Idle event counters may have no series until their first event.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 84
+        "x": 12,
+        "y": 117,
+        "w": 12,
+        "h": 7
       },
       "fieldConfig": {
         "defaults": {
           "unit": "bytes",
           "color": {
             "mode": "palette-classic"
-          }
+          },
+          "min": 0
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "displayMode": "list",
+          "displayMode": "table",
           "placement": "bottom",
-          "calcs": []
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
         },
         "tooltip": {
           "mode": "multi",
@@ -1427,6 +2030,397 @@
           "instant": false
         }
       ]
+    },
+    {
+      "id": 43,
+      "title": "PostgreSQL WAL synchronization mean",
+      "description": "Global WAL activity, including send, outbox and other SQL transactions. Requires WAL I/O timing.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 124,
+        "w": 8,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(messenger_postgres_wal_sync_seconds_total[$__rate_interval])) / clamp_min(sum(rate(messenger_postgres_wal_syncs_total[$__rate_interval])),0.000001)",
+          "legendFormat": "sync duration",
+          "refId": "A",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 44,
+      "title": "PostgreSQL WAL operations",
+      "description": "Global WAL activity, including send, outbox and other SQL transactions. Requires WAL I/O timing.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 124,
+        "w": 8,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(messenger_postgres_wal_syncs_total[$__rate_interval]))",
+          "legendFormat": "syncs/s",
+          "refId": "A",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 48,
+      "title": "Broker acknowledgement attempts",
+      "description": "ACK success follows completed action or SQL commit. ACK transport failure can follow committed work and never triggers rejection. Reject failures are separate from action failures.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 44,
+        "w": 8,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by(operation,result)(rate(messenger_command_acknowledgement_total[$__rate_interval]))",
+          "legendFormat": "{{operation}} {{result}}",
+          "refId": "A",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 49,
+      "title": "Outbox phases p95",
+      "description": "Claim includes transaction commit. Publish covers one claimed room prefix, including deadline checks. Complete includes SQL transaction commit. These overlapping or concurrent percentiles cannot be added.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 73,
+        "w": 8,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95,sum by(le,phase,outcome)(rate(messenger_outbox_stage_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "{{phase}} {{outcome}}",
+          "refId": "A",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 50,
+      "title": "Outbox batch outcomes",
+      "description": "Each attempt records once: empty means no claimed rows, work means claimed work without dependency failure, failed includes claim, Redis publication or SQL completion failure. Work can leave rows unattempted at the deadline.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 73,
+        "w": 8,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by(outcome)(rate(messenger_outbox_batch_seconds_count[$__rate_interval]))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 51,
+      "title": "Claimed rows retained for retry",
+      "description": "Rows left pending by each attempt: failed publication and unattempted room tail, unattempted deadline work, or Redis-confirmed rows whose SQL completion failed. Counts can repeat across retries; this is not the backlog gauge or a unique-event count.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 80,
+        "w": 12,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by(reason)(rate(messenger_outbox_retained_total[$__rate_interval]))",
+          "legendFormat": "{{reason}}",
+          "refId": "A",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 52,
+      "title": "Outbox row age at publication start",
+      "description": "Time from persisted SQL created_at to each Redis publication attempt. The database default uses transaction start, so age includes work before commit, claim waiting and earlier events in the room. Missing and future timestamps are excluded and counted by messenger_outbox_publication_age_invalid_total. These percentiles overlap other stages and cannot be added.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 80,
+        "w": 12,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95,sum by(le,room_kind)(rate(messenger_outbox_publication_age_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "{{room_kind}} p95",
+          "refId": "A",
+          "instant": false
+        },
+        {
+          "expr": "histogram_quantile(0.99,sum by(le,room_kind)(rate(messenger_outbox_publication_age_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "{{room_kind}} p99",
+          "refId": "B",
+          "instant": false
+        },
+        {
+          "expr": "sum by(room_kind)(rate(messenger_outbox_publication_age_seconds_sum[$__rate_interval])) / sum by(room_kind)(rate(messenger_outbox_publication_age_seconds_count[$__rate_interval]))",
+          "legendFormat": "{{room_kind}} mean",
+          "refId": "C",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 53,
+      "title": "Maximum current quorum-queue commit latency",
+      "description": "At each scrape, the RabbitMQ collector takes the maximum reported commit latency across quorum queues on each node. A queue value can remain unchanged while idle. This is not a time-window maximum or p99, and does not isolate disk fsync. Compare with publisher confirmation and SQL commit timing.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 131,
+        "w": 24,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "rabbitmq_raft_max_commit_latency_seconds{job=\"rabbitmq\",ra_system=\"quorum_queues\"}",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ]
     }
   ],
   "templating": {
@@ -1434,5 +2428,57 @@
   },
   "annotations": {
     "list": []
-  }
+  },
+  "links": [
+    {
+      "title": "Overview",
+      "url": "/d/messenger-overview/messenger-overview",
+      "type": "link",
+      "includeVars": true,
+      "keepTime": true
+    },
+    {
+      "title": "WebSocket delivery",
+      "url": "/d/messenger-websocket/messenger-websocket",
+      "type": "link",
+      "includeVars": true,
+      "keepTime": true
+    },
+    {
+      "title": "SQL and brokers",
+      "url": "/d/messenger-backend/messenger-backend",
+      "type": "link",
+      "includeVars": true,
+      "keepTime": true
+    },
+    {
+      "title": "Prometheus targets",
+      "url": "http://localhost:9090/targets",
+      "type": "link",
+      "targetBlank": true
+    },
+    {
+      "title": "Alertmanager",
+      "url": "http://localhost:9093/#/alerts",
+      "type": "link",
+      "targetBlank": true
+    },
+    {
+      "type": "link",
+      "title": "Database operations",
+      "url": "/d/messenger-database/messenger-database",
+      "includeVars": false,
+      "keepTime": true,
+      "targetBlank": false
+    },
+    {
+      "type": "link",
+      "title": "Chat features",
+      "url": "/d/messenger-features/messenger-chat-features",
+      "includeVars": false,
+      "keepTime": true,
+      "targetBlank": false
+    }
+  ],
+  "description": "Operational triage for the local Messenger deployment. Scrape coverage, workload and timing boundaries are distinct signals."
 }

@@ -1,10 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { WifiOff } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { discardLegacySession, type Session } from '../entities/session/model'
 import { AuthPage } from '../pages/auth/AuthPage'
 import { MessengerPage } from '../pages/messenger/MessengerPage'
 import { api, ApiError } from '../shared/api/http'
+import { isNetworkOnline, subscribeNetwork } from '../shared/lib/network'
 
 export function App() {
+  const online = useSyncExternalStore(subscribeNetwork, isNetworkOnline)
   const [session, setSession] = useState<Session | null>(null)
   const [restoring, setRestoring] = useState(true)
   const [restoreError, setRestoreError] = useState<string | null>(null)
@@ -29,6 +32,7 @@ export function App() {
   }
 
   const restoreSession = useCallback((options: { forceFresh?: boolean } = {}): Promise<void> => {
+    if (!isNetworkOnline()) return Promise.resolve()
     if (!options.forceFresh && restoreRequest.current?.revision === revision.current)
       return restoreRequest.current.promise
     const currentRevision = ++revision.current
@@ -52,7 +56,8 @@ export function App() {
       } catch (error) {
         if (revision.current !== currentRevision) return
         if (error instanceof ApiError && error.status === 401) setSession(null)
-        else setRestoreError('Could not check your session. Please try again.')
+        else if (isNetworkOnline())
+          setRestoreError('Could not check your session. Please try again.')
       } finally {
         if (revision.current === currentRevision) setRestoring(false)
       }
@@ -85,7 +90,6 @@ export function App() {
 
   useEffect(() => {
     discardLegacySession()
-    void restoreSession()
     const onFocus = () => {
       void restoreSession()
     }
@@ -96,7 +100,30 @@ export function App() {
     }
   }, [restoreSession])
 
-  if (restoring)
+  useEffect(() => {
+    setRestoring(true)
+    if (online) void restoreSession()
+    else {
+      revision.current += 1
+      setRestoreError(null)
+      setSignOutError(null)
+    }
+  }, [online, restoreSession])
+
+  if (!session && !online)
+    return (
+      <main className="auth-layout">
+        <section className="auth-form-card" role="status">
+          <WifiOff size={28} aria-hidden="true" />
+          <h1>You're offline</h1>
+          <p>
+            Waiting for a connection. We'll check your session automatically when you're back
+            online.
+          </p>
+        </section>
+      </main>
+    )
+  if (restoring && !session)
     return (
       <main className="auth-layout" aria-label="Checking session">
         <div className="loading-spinner" />

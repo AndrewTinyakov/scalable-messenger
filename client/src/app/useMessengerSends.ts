@@ -2,6 +2,7 @@ import { useCallback, useEffect, type Dispatch, type SetStateAction } from 'reac
 import type { Chat } from '../entities/chat/model'
 import type { PendingSend } from '../entities/message/model'
 import type { SavedSend, SendRequests } from '../entities/message/sendRequests'
+import { isNetworkOnline } from '../shared/lib/network'
 
 interface Options {
   pending: PendingSend[]
@@ -32,6 +33,7 @@ export function useMessengerSends({
 
   const reconcilePending = useCallback(
     async (retryUnknown = false) => {
+      if (!isNetworkOnline()) return
       const saved = await requests.reconcile(retryUnknown)
       if (saved.map(selectResolvedDraft).some(Boolean)) await refreshChats(false, true)
       for (const chatId of new Set(saved.map((result) => result.chatId))) await catchUp(chatId)

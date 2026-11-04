@@ -1,4 +1,32 @@
 /* Workspace shell */
+.messenger-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+}
+.messenger-shell > .workspace {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+}
+.connection-notice {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 10px 18px;
+  background: #f0f1e9;
+  border-bottom: 1px solid #e0e4d9;
+  color: #64745d;
+  font-size: 12px;
+}
+.connection-notice svg {
+  flex: none;
+}
+.connection-notice strong {
+  margin-right: 8px;
+}
 .workspace {
   display: grid;
   grid-template-columns: 348px minmax(0, 1fr);

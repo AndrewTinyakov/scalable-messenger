@@ -16,6 +16,7 @@ import {
   type OutgoingSocketFrame,
 } from '../shared/api/socket'
 import type { ConnectionState } from '../shared/api/socketConnection'
+import { isNetworkOnline } from '../shared/lib/network'
 import { createMessengerSendRequests } from './messengerSendRequests'
 import { useChatDirectory } from './useChatDirectory'
 import { useChatHistory } from './useChatHistory'
@@ -42,7 +43,10 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
   const [connection, setConnection] = useState<ConnectionState>('connecting')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [draftChat, setDraftChat] = useState<Chat | undefined>()
-  const [error, setError] = useState<string | null>(null)
+  const [error, setErrorState] = useState<string | null>(null)
+  const setError = useCallback((message: string | null) => {
+    if (!message || isNetworkOnline()) setErrorState(message)
+  }, [])
   const socketRef = useRef<WebSocket | null>(null)
   const sessionApi = useMemo(() => api.forSession(session), [session.user.id, session.deviceId])
   const requestsRef = useRef<{ prefix: string; value: SendRequests } | null>(null)
@@ -236,7 +240,7 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
       focusFreshAtRef.current = 0
       setError(message)
     },
-    recovered: (message) => setError((current) => (current === message ? null : current)),
+    recovered: (message) => setErrorState((current) => (current === message ? null : current)),
     hidden: hideConversation,
     locationRestored: (chatId) => {
       if (selectedRef.current === chatId) setLocationRevision((value) => value + 1)
@@ -326,7 +330,7 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
 
   useEffect(() => {
     const timer = window.setInterval(() => {
-      void refreshChats(true, true)
+      if (isNetworkOnline()) void refreshChats(true, true)
     }, 30000)
     return () => window.clearInterval(timer)
   }, [refreshChats])

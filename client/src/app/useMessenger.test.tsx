@@ -301,6 +301,55 @@ afterEach(async () => {
 })
 
 describe('messenger request coordination', () => {
+  it('pauses directory and pending-send polling for the whole offline interval', async () => {
+    vi.useFakeTimers()
+    let online = true
+    vi.spyOn(dom.window.navigator, 'onLine', 'get').mockImplementation(() => online)
+    await renderMessenger()
+    await act(async () => {
+      sockets[0].open()
+      messenger.sendMessage(chatId, 'Waiting for a result')
+    })
+    paths = []
+    await act(async () => {
+      online = false
+      window.dispatchEvent(new dom.window.Event('offline'))
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(90000)
+    })
+    expect(paths).toEqual([])
+    expect(messenger.pending).toHaveLength(1)
+    expect(messenger.error).toBeNull()
+    await act(async () => {
+      online = true
+      window.dispatchEvent(new dom.window.Event('online'))
+      await vi.advanceTimersByTimeAsync(1000)
+      sockets[1].open()
+    })
+    expect(paths.some((path) => path.includes('/sends/status'))).toBe(true)
+  })
+
+  it('keeps cached chats without a toast when an in-flight refresh fails offline', async () => {
+    let online = true
+    vi.spyOn(dom.window.navigator, 'onLine', 'get').mockImplementation(() => online)
+    await renderMessenger()
+    const chats = messenger.chats
+    holdChatRequests = true
+    let refresh!: Promise<unknown>
+    await act(async () => {
+      refresh = messenger.refreshChats()
+    })
+    await act(async () => {
+      online = false
+      window.dispatchEvent(new dom.window.Event('offline'))
+      chatRequests[0](Response.json({ message: 'Failed to fetch' }, { status: 503 }))
+      await refresh
+    })
+    expect(messenger.chats).toEqual(chats)
+    expect(messenger.error).toBeNull()
+  })
+
   it('hides another device history and sidebar, then resurfaces the same chat with its cutoff', async () => {
     historyMessages = ['1', '2'].map((sequence) => ({
       id: sequence.padStart(26, '0'),
@@ -689,6 +738,90 @@ describe('messenger request coordination', () => {
       window.dispatchEvent(new dom.window.Event('focus'))
     })
     expect(sessionRequests).toHaveLength(2)
+  })
+
+  it('keeps the current chat offline, skips focus requests, and validates the session on reconnect', async () => {
+    let online = true
+    vi.spyOn(dom.window.navigator, 'onLine', 'get').mockImplementation(() => online)
+    await act(async () => {
+      root.render(<App />)
+    })
+    await act(async () => {
+      sessionRequests[0](Response.json({ userId, username: 'alice', deviceId: 'device' }))
+      sockets[0]?.open()
+    })
+    const workspace = container.querySelector('.workspace')
+    expect(workspace).not.toBeNull()
+    paths = []
+    await act(async () => {
+      online = false
+      window.dispatchEvent(new dom.window.Event('offline'))
+      window.dispatchEvent(new dom.window.Event('focus'))
+    })
+    expect(container.querySelector('.workspace')).toBe(workspace)
+    expect(container.textContent).toContain("You're offline")
+    expect(container.querySelector('.toast')).toBeNull()
+    expect(paths).toEqual([])
+    expect(sessionRequests).toHaveLength(1)
+    await act(async () => {
+      online = true
+      window.dispatchEvent(new dom.window.Event('online'))
+    })
+    expect(sessionRequests).toHaveLength(2)
+    await act(async () => {
+      sessionRequests[1](Response.json({ message: 'Unauthorized' }, { status: 401 }))
+    })
+    expect(container.querySelector('h1')?.textContent).toBe('Sign in')
+  })
+
+  it('waits offline on startup and restores automatically without showing the sign-in form', async () => {
+    let online = false
+    vi.spyOn(dom.window.navigator, 'onLine', 'get').mockImplementation(() => online)
+    await act(async () => {
+      root.render(<App />)
+    })
+    expect(sessionRequests).toHaveLength(0)
+    expect(container.textContent).toContain("You're offline")
+    expect(container.querySelector('form')).toBeNull()
+    await act(async () => {
+      online = true
+      window.dispatchEvent(new dom.window.Event('online'))
+    })
+    expect(sessionRequests).toHaveLength(1)
+    await act(async () => {
+      sessionRequests[0](Response.json({ userId, username: 'alice', deviceId: 'device' }))
+    })
+    expect(container.querySelector('.workspace')).not.toBeNull()
+  })
+
+  it('rechecks after reconnect without waiting for an old session request or accepting its late response', async () => {
+    let online = true
+    vi.spyOn(dom.window.navigator, 'onLine', 'get').mockImplementation(() => online)
+    await act(async () => {
+      root.render(<App />)
+    })
+    await act(async () => {
+      sessionRequests[0](Response.json({ userId, username: 'alice', deviceId: 'device' }))
+    })
+    await act(async () => {
+      window.dispatchEvent(new dom.window.Event('focus'))
+    })
+    expect(sessionRequests).toHaveLength(2)
+    await act(async () => {
+      online = false
+      window.dispatchEvent(new dom.window.Event('offline'))
+    })
+    await act(async () => {
+      online = true
+      window.dispatchEvent(new dom.window.Event('online'))
+    })
+    expect(sessionRequests).toHaveLength(3)
+    await act(async () => {
+      sessionRequests[2](Response.json({ userId, username: 'alice', deviceId: 'device' }))
+      sessionRequests[1](Response.json({ message: 'Old authorization' }, { status: 401 }))
+    })
+    expect(container.querySelector('.workspace')).not.toBeNull()
+    expect(container.querySelector('.toast')).toBeNull()
   })
 
   it('checks fresh session state after logout races an older focus response', async () => {

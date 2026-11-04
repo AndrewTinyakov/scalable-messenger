@@ -1,3 +1,4 @@
+import { isNetworkOnline, subscribeNetwork } from '../lib/network'
 import { reconnectDelay } from '../lib/reconnect'
 import { ApiError } from './http'
 import { decodeSocketEvent, type SocketEvent } from './socket'
@@ -22,21 +23,42 @@ export function connectSocket(options: SocketConnectionOptions): () => void {
   let handshakeTimer: ReturnType<typeof setTimeout> | undefined
   let stableTimer: ReturnType<typeof setTimeout> | undefined
   let attempts = 0
+  let generation = 0
+  let connecting = false
+  let revoked = false
+
+  function clearTimers(): void {
+    clearTimeout(reconnectTimer)
+    clearTimeout(handshakeTimer)
+    clearTimeout(stableTimer)
+    reconnectTimer = undefined
+  }
+
+  function revokeSession(): void {
+    revoked = true
+    options.onSessionRevoked()
+  }
 
   function retry(): void {
-    if (disposed) return
+    if (disposed || revoked || !isNetworkOnline() || reconnectTimer !== undefined) return
     options.onState('offline')
     reconnectTimer = setTimeout(() => {
+      reconnectTimer = undefined
       void connect()
     }, reconnectDelay(++attempts))
   }
 
   async function connect(): Promise<void> {
-    if (disposed) return
+    if (disposed || revoked || connecting || socket || !isNetworkOnline()) return
+    connecting = true
+    const current = ++generation
+    const currentAttempt = () => !disposed && current === generation
     options.onState('connecting')
     try {
-      if (!ticket || ticket.expiresAt <= Date.now() / 1000 + 60) ticket = await options.ticket()
-      if (disposed) return
+      const freshTicket =
+        !ticket || ticket.expiresAt <= Date.now() / 1000 + 60 ? await options.ticket() : ticket
+      if (!currentAttempt() || !isNetworkOnline()) return
+      ticket = freshTicket
       const active = new WebSocket(options.url, ['messenger', `messenger-ticket.${ticket.token}`])
       socket = active
       const owned = () => !disposed && socket === active
@@ -46,7 +68,7 @@ export function connectSocket(options: SocketConnectionOptions): () => void {
         clearTimeout(handshakeTimer)
         clearTimeout(stableTimer)
         options.onClose()
-        if (revoked) options.onSessionRevoked()
+        if (revoked) revokeSession()
         else retry()
       }
       handshakeTimer = setTimeout(() => {
@@ -74,19 +96,36 @@ export function connectSocket(options: SocketConnectionOptions): () => void {
         if (owned()) active.close()
       }
     } catch (error) {
-      if (disposed) return
-      if (error instanceof ApiError && error.status === 401) options.onSessionRevoked()
+      if (!currentAttempt()) return
+      if (error instanceof ApiError && error.status === 401) revokeSession()
       else retry()
+    } finally {
+      if (currentAttempt()) connecting = false
     }
   }
 
-  void connect()
+  const unsubscribe = subscribeNetwork(() => {
+    if (disposed || revoked) return
+    if (isNetworkOnline()) {
+      if (!socket && !connecting) retry()
+      return
+    }
+    generation += 1
+    connecting = false
+    clearTimers()
+    const previous = socket
+    socket = null
+    previous?.close()
+    if (previous) options.onClose()
+    options.onState('offline')
+  })
+  if (isNetworkOnline()) void connect()
+  else options.onState('offline')
   return () => {
     if (disposed) return
     disposed = true
-    clearTimeout(reconnectTimer)
-    clearTimeout(handshakeTimer)
-    clearTimeout(stableTimer)
+    unsubscribe()
+    clearTimers()
     socket?.close()
     socket = null
     options.onClose()

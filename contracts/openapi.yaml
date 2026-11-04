@@ -2030,6 +2030,11 @@ components:
           oneOf:
           - $ref: "#/components/schemas/ChatLastMessageResponse"
           - type: "null"
+        unreadCount:
+          type: integer
+          format: int32
+        unreadCountCapped:
+          type: boolean
       required:
       - id
       - kind

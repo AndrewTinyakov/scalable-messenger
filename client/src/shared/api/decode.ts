@@ -83,7 +83,7 @@ export function decodeChat(value: unknown): Chat {
   fields(
     value,
     ['id', 'kind', 'members', 'memberCount', 'lastSequence'],
-    ['name', 'ownerId', 'lastMessage'],
+    ['name', 'ownerId', 'lastMessage', 'unreadCount', 'unreadCountCapped'],
   )
   if (
     !isId(value.id) ||
@@ -97,6 +97,8 @@ export function decodeChat(value: unknown): Chat {
     !isSequence(value.lastSequence)
   )
     invalid()
+  if (value.unreadCount !== undefined && (typeof value.unreadCount !== 'number' || !Number.isInteger(value.unreadCount) || value.unreadCount < 0 || value.unreadCount > 256)) invalid()
+  if (value.unreadCountCapped !== undefined && typeof value.unreadCountCapped !== 'boolean') invalid()
   if (value.lastMessage != null) {
     fields(value.lastMessage, [
       'id',
@@ -126,7 +128,7 @@ export function decodeChat(value: unknown): Chat {
       invalid()
   }
   value.members.forEach(decodeUser)
-  return value as Chat
+  return { unreadCount: 0, unreadCountCapped: false, ...value } as Chat
 }
 
 export function decodeGroupMembers(

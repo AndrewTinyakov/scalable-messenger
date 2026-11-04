@@ -516,6 +516,9 @@ export interface components {
             lastSequence: string;
             ownerId?: string | null;
             lastMessage?: components["schemas"]["ChatLastMessageResponse"] | null;
+            /** Format: int32 */
+            unreadCount?: number;
+            unreadCountCapped?: boolean;
         };
         UserResponse: {
             id: string;

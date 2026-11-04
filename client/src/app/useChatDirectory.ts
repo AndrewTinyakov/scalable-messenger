@@ -221,7 +221,7 @@ export function useChatDirectory({
         return
       const next = chatsRef.current.map((item) =>
         item.id === chatId
-          ? { ...item, lastMessage: chat.lastMessage, lastSequence: chat.lastSequence }
+          ? { ...item, lastMessage: chat.lastMessage, lastSequence: chat.lastSequence, unreadCount: chat.unreadCount, unreadCountCapped: chat.unreadCountCapped }
           : item,
       )
       chatsRef.current = next

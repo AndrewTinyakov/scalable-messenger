@@ -27,6 +27,10 @@ data class ChatResponse(
     @field:Schema(requiredMode = Schema.RequiredMode.NOT_REQUIRED, nullable = true)
     @field:JsonInclude(JsonInclude.Include.ALWAYS)
     val lastMessage: ChatLastMessageResponse? = null,
+    @field:Schema(requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+    val unreadCount: Int = 0,
+    @field:Schema(requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+    val unreadCountCapped: Boolean = false,
 )
 
 data class DirectChatResponse(
@@ -75,6 +79,8 @@ fun Chat.toResponse(members: List<UserSummary>): ChatResponse = ChatResponse(
     memberCount = memberCount,
     lastSequence = lastSequence.toString(),
     ownerId = ownerId?.value,
+    unreadCount = unreadCount,
+    unreadCountCapped = unreadCountCapped,
     lastMessage = lastMessage?.let {
         ChatLastMessageResponse(it.id, it.sequence.toString(), it.senderId, it.senderUsername, it.createdAt, it.bodyPreview, it.deleted)
     },

@@ -11,6 +11,8 @@ data class Chat(
     val ownerId: UserId?,
     val memberCount: Int,
     val lastMessage: ChatLastMessage? = null,
+    val unreadCount: Int = 0,
+    val unreadCountCapped: Boolean = false,
 ) {
     init {
         require(lastSequence >= 0) { "Chat sequence must be nonnegative" }

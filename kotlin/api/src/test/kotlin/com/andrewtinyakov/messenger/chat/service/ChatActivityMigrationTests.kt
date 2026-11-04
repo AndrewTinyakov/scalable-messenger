@@ -46,7 +46,7 @@ class ChatActivityMigrationTests {
                 sender.createStatement().execute("SELECT id FROM chats WHERE id='second' FOR UPDATE")
                 val executor = Executors.newSingleThreadExecutor()
                 try {
-                    val backfill = executor.submit<Int> { migration().migrate().migrationsExecuted }
+                    val backfill = executor.submit<Int> { migration("11").migrate().migrationsExecuted }
                     val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30)
                     while (db.queryForObject(
                             "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type='Lock' AND query LIKE 'CALL backfill_chat_activity%'",
@@ -71,7 +71,7 @@ class ChatActivityMigrationTests {
                         OffsetDateTime.parse("2026-01-01T00:00:00Z"),
                         db.queryForObject("SELECT last_activity_at FROM chats WHERE id='second'", OffsetDateTime::class.java),
                     )
-                    assertEquals(0, migration().migrate().migrationsExecuted)
+                    assertEquals(0, migration("11").migrate().migrationsExecuted)
                 } finally {
                     sender.rollback()
                     executor.shutdownNow()

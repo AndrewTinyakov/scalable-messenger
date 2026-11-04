@@ -98,3 +98,86 @@ it('spaces pages even when each response changes the history anchor', async () =
     vi.useRealTimers()
   }
 })
+
+it('keeps bottom intent through append, trim, and pending resolution scroll events until user input', async () => {
+  const resizeCallbacks: (() => void)[] = []
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      constructor(callback: () => void) {
+        resizeCallbacks.push(callback)
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  )
+  const report = vi.fn()
+  let rows = Array.from({ length: 200 }, (_, index) => message(String(index + 1)))
+  let pending = 'pending'
+  function Harness() {
+    const { scrollRef, handleScroll } = useMessageViewport({
+      chatId: 'chat',
+      userId: 'me',
+      messages: rows,
+      pendingState: pending,
+      jumpRevision: 0,
+      hasOlder: false,
+      hasNewer: false,
+      loadingOlder: false,
+      loadingNewer: false,
+      onLoadOlder: () => {},
+      onLoadNewer: () => {},
+      onViewPositionChange: report,
+      announce: () => {},
+    })
+    return (
+      <div ref={scrollRef} onScroll={handleScroll}>
+        <div />
+      </div>
+    )
+  }
+  await act(async () => root.render(<Harness />))
+  const scroller = container.firstElementChild as HTMLElement
+  let height = 10000
+  let top = 0
+  Object.defineProperties(scroller, {
+    scrollHeight: { get: () => height },
+    clientHeight: { get: () => 600 },
+    scrollTop: {
+      get: () => top,
+      set: (value: number) => {
+        top = Math.max(0, Math.min(value, height - 600))
+      },
+    },
+  })
+  pending = 'pending-2'
+  await act(async () => root.render(<Harness />))
+  expect(top).toBe(9400)
+  report.mockClear()
+  await act(async () => scroller.dispatchEvent(new dom.window.WheelEvent('wheel', { deltaY: 100 })))
+  height += 196
+  await act(async () => scroller.dispatchEvent(new dom.window.Event('scroll')))
+  expect(report).toHaveBeenLastCalledWith(true)
+  rows = [...rows.slice(1), message('201')]
+  pending = ''
+  await act(async () => root.render(<Harness />))
+  expect(top).toBe(height - 600)
+  expect(report.mock.calls.every(([latest]) => latest === true)).toBe(true)
+  height += 77
+  await act(async () => {
+    for (const resize of resizeCallbacks) resize()
+  })
+  expect(top).toBe(height - 600)
+  await act(async () =>
+    scroller.dispatchEvent(new dom.window.WheelEvent('wheel', { deltaY: -300 })),
+  )
+  top -= 300
+  await act(async () => scroller.dispatchEvent(new dom.window.Event('scroll')))
+  expect(report).toHaveBeenLastCalledWith(false)
+  const readingTop = top
+  rows = [...rows.slice(1), message('202')]
+  height += 100
+  await act(async () => root.render(<Harness />))
+  expect(top).toBe(readingTop)
+})

@@ -124,7 +124,7 @@ export function useMessengerSocket({
     }
     const close = connectSocket({
       url: websocketUrl(),
-      ticket: () => sessionApi.wsTicket(),
+      ticket: (signal) => sessionApi.wsTicket(signal),
       onState: setConnection,
       onRetryScheduled: setNextRetryAt,
       onSessionRevoked,
@@ -221,6 +221,7 @@ export function useMessengerSocket({
             )
           )
             requests.transient(frame.requestId)
+          else if (frame.code === 'publish_unknown') requests.unknown(frame.requestId)
           else requests.retryable(frame.requestId, socketErrorMessage(frame.code))
         } else if (
           frame.type === EventType.ERROR &&

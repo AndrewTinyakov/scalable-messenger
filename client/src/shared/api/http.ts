@@ -85,6 +85,13 @@ export class ApiError extends Error {
   }
 }
 
+export function isWaitingFailure(cause: unknown): boolean {
+  return cause instanceof ApiError
+    ? cause.status === 429 || [500, 502, 503, 504].includes(cause.status)
+    : cause instanceof TypeError ||
+        (cause instanceof Error && cause.message === 'Request timed out. Try again.')
+}
+
 async function attempt<T>(
   path: string,
   decode: (value: unknown) => T,
@@ -98,7 +105,9 @@ async function attempt<T>(
   try {
     const response = await fetch(`${apiBase}${path}`, {
       ...options,
-      signal: controller.signal,
+      signal: options.signal
+        ? AbortSignal.any([options.signal, controller.signal])
+        : controller.signal,
       cache: 'no-store',
       credentials: 'include',
       redirect: 'error',
@@ -143,31 +152,44 @@ async function request<T>(
   decode: (value: unknown) => T,
   options: RequestInit = {},
 ): Promise<T> {
-  const background = !options.method || /\/(ws-ticket|reads|resolve|status)$/.test(path)
-  const retryBudget = options.method === 'POST' && !/\/deletions$/.test(path) ? 0 : 3
-  let failures = 0
-  for (;;) {
+  const retryBudget =
+    !options.method || (options.method === 'POST' && /\/deletions$/.test(path)) ? 3 : 0
+  for (let failures = 0; ; failures++) {
+    options.signal?.throwIfAborted()
     try {
       return await attempt(path, decode, options)
     } catch (cause) {
-      const limited = cause instanceof ApiError && cause.status === 429
-      const transient =
+      options.signal?.throwIfAborted()
+      const retryable =
         cause instanceof ApiError
-          ? [500, 502, 503, 504].includes(cause.status)
+          ? [429, 500, 502, 503, 504].includes(cause.status)
           : cause instanceof TypeError ||
             (cause instanceof Error && cause.message === 'Request timed out. Try again.')
-      if (!limited && (!transient || (!background && failures >= retryBudget))) throw cause
-      failures += 1
-      const delay = Math.min(500 * 2 ** Math.min(failures - 1, 6), 30000)
-      await new Promise<void>((resolve) =>
-        setTimeout(
-          resolve,
-          Math.max(
-            delay * (0.75 + Math.random() * 0.5),
-            cause instanceof ApiError ? cause.retryAfter : 0,
-          ),
-        ),
+      if (
+        !retryable ||
+        failures >= (cause instanceof ApiError && cause.status === 429 ? 3 : retryBudget)
       )
+        throw cause
+      const retryAfter =
+        cause instanceof ApiError && Number.isFinite(cause.retryAfter)
+          ? Math.max(0, cause.retryAfter)
+          : 0
+      const delay = Math.min(
+        30000,
+        Math.max(500 * 2 ** failures * (0.75 + Math.random() * 0.5), retryAfter),
+      )
+      await new Promise<void>((resolve, reject) => {
+        const abort = () => {
+          clearTimeout(timer)
+          reject(options.signal?.reason)
+        }
+        const timer = setTimeout(() => {
+          options.signal?.removeEventListener('abort', abort)
+          resolve()
+        }, delay)
+        options.signal?.addEventListener('abort', abort, { once: true })
+        if (options.signal?.aborted) abort()
+      })
     }
   }
 }
@@ -207,8 +229,8 @@ export const api = {
       logout(): Promise<void> {
         return authenticated(endpoint(routes.logout), noContent, { method: 'POST' })
       },
-      wsTicket() {
-        return authenticated(endpoint(routes.wsTicket), decodeTicket, { method: 'POST' })
+      wsTicket(signal?: AbortSignal) {
+        return authenticated(endpoint(routes.wsTicket), decodeTicket, { method: 'POST', signal })
       },
       addGroupMembers(chatId: string, memberIds: string[]) {
         const body: components['schemas']['AddGroupMembersRequest'] = { memberIds }
@@ -395,11 +417,12 @@ export const api = {
       sendStatus(requestId: string) {
         return authenticated(endpoint(routes.sendStatus, { requestId }), decodeSendStatus)
       },
-      sendStatuses(requestIds: string[]) {
+      sendStatuses(requestIds: string[], signal?: AbortSignal) {
         const body: components['schemas']['SendStatusesRequest'] = { requestIds }
         return authenticated(endpoint(routes.sendStatuses), decodeSendStatuses, {
           method: 'POST',
           body: JSON.stringify(body),
+          signal,
         }).then((response) => response.results)
       },
     }

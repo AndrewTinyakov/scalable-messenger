@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import type { Message } from '../../entities/message/model'
+import { subscribePagingFailures } from '../../entities/message/pagingFailures'
 import type { ReadingLocation } from '../../entities/message/readingLocation'
 import { useVisibleReads } from '../../features/conversation/useVisibleReads'
 
@@ -56,13 +57,24 @@ export function useMessageViewport({
   const anchorRef = useRef<{ id: string; top: number } | null>(null)
   const restoredAnchor = useRef<{ id: string; offset: number } | null>(null)
   const atBottomRef = useRef(true)
+  const scrollInputUntil = useRef(0)
+  const lastScrollTop = useRef(0)
   const previousViewRef = useRef<{
     chatId?: string
     jumpRevision: number
     locationRevision: number
   }>({ chatId: undefined, jumpRevision, locationRevision })
   const pendingRestore = useRef<ReadingLocation | null>(null)
-  const autoPageRef = useRef<Partial<Record<'older' | 'newer', { anchor: string; at: number }>>>({})
+  const autoPageRef = useRef<
+    Partial<Record<'older' | 'newer', { anchor: string; at: number; attempts: number }>>
+  >({})
+  const historyKey = messages
+    .map(
+      (message) =>
+        `${message.id}:${message.sequence}:${message.messageVersion ?? '1'}:${message.deletedAt ?? ''}`,
+    )
+    .join('|')
+  const previousHistoryKey = useRef(historyKey)
   const pageFinishedAt = useRef(0)
   const wasPaging = useRef(false)
   useLayoutEffect(() => {
@@ -70,15 +82,29 @@ export function useMessageViewport({
     if (wasPaging.current && !paging) pageFinishedAt.current = Date.now()
     wasPaging.current = paging
   }, [loadingOlder, loadingNewer])
+  const failedUntil = useRef<Partial<Record<'older' | 'newer', number>>>({})
+  const pageTimer = useRef<ReturnType<typeof setTimeout>>()
   const pageRef = useRef<() => void>(() => {})
+  useLayoutEffect(() => {
+    if (previousHistoryKey.current !== historyKey) {
+      failedUntil.current = {}
+      previousHistoryKey.current = historyKey
+    }
+  }, [historyKey])
   const captured = useRef<{ chatId: string; location: ReadingLocation } | null>(null)
   const options = useRef({ chatId, hasNewer, onLocationChange })
   options.current = { chatId, hasNewer, onLocationChange }
+
+  function pinToBottom(scroller: HTMLElement) {
+    scroller.scrollTop = scroller.scrollHeight
+    lastScrollTop.current = scroller.scrollTop
+  }
 
   function captureLocation() {
     const scroller = scrollRef.current
     const current = options.current
     if (!scroller || !current.chatId || pendingRestore.current) return
+    lastScrollTop.current = scroller.scrollTop
     const bounds = scroller.getBoundingClientRect()
     const target = [...scroller.querySelectorAll<HTMLElement>('[data-message-id]')].find((row) => {
       const rect = row.getBoundingClientRect()
@@ -128,12 +154,14 @@ export function useMessageViewport({
     const locationChanged = previous.locationRevision !== locationRevision
     previousViewRef.current = { chatId, jumpRevision, locationRevision }
     if (switched || jumped || locationChanged) {
+      scrollInputUntil.current = 0
       anchorRef.current = null
       restoredAnchor.current = null
       autoPageRef.current = {}
+      failedUntil.current = {}
       pendingRestore.current = readingLocation && !jumped ? readingLocation : null
       if (!pendingRestore.current) {
-        scroller.scrollTop = scroller.scrollHeight
+        pinToBottom(scroller)
         atBottomRef.current = true
         onViewPositionChange(!hasNewer)
         captureLocation()
@@ -143,7 +171,7 @@ export function useMessageViewport({
     const location = pendingRestore.current
     if (location) {
       if (location.atLatest) {
-        scroller.scrollTop = scroller.scrollHeight
+        pinToBottom(scroller)
         atBottomRef.current = true
       } else {
         const rows = [...scroller.querySelectorAll<HTMLElement>('[data-message-id]')]
@@ -169,7 +197,7 @@ export function useMessageViewport({
         (element) => element.dataset.messageId === anchor.id,
       )
     if (anchor && target) scroller.scrollTop += target.getBoundingClientRect().top - anchor.top
-    else if (atBottomRef.current && !hasNewer) scroller.scrollTop = scroller.scrollHeight
+    else if (atBottomRef.current && !hasNewer) pinToBottom(scroller)
     atBottomRef.current = distanceToBottom(scroller) < BOTTOM_THRESHOLD
     onViewPositionChange(atBottomRef.current && !hasNewer)
     captureLocation()
@@ -179,8 +207,13 @@ export function useMessageViewport({
     const scroller = scrollRef.current
     if (!scroller) return
     const intentional = () => {
+      scrollInputUntil.current = Date.now() + 1500
       restoredAnchor.current = null
       pendingRestore.current = null
+      scroller.dispatchEvent(new Event('reading-settled'))
+    }
+    const dragging = (event: PointerEvent) => {
+      if (event.buttons) scrollInputUntil.current = Date.now() + 1500
     }
     const keyboard = (event: KeyboardEvent) => {
       if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key))
@@ -189,6 +222,10 @@ export function useMessageViewport({
     const resize =
       typeof ResizeObserver !== 'undefined'
         ? new ResizeObserver(() => {
+            if (atBottomRef.current && !options.current.hasNewer && !pendingRestore.current) {
+              pinToBottom(scroller)
+              return
+            }
             const anchor = restoredAnchor.current
             if (!anchor) return
             const target = [...scroller.querySelectorAll<HTMLElement>('[data-message-id]')].find(
@@ -207,13 +244,17 @@ export function useMessageViewport({
     if (scroller.firstElementChild) resize?.observe(scroller.firstElementChild)
     scroller.addEventListener('wheel', intentional, { passive: true })
     scroller.addEventListener('touchstart', intentional, { passive: true })
+    scroller.addEventListener('touchmove', intentional, { passive: true })
     scroller.addEventListener('pointerdown', intentional)
+    scroller.addEventListener('pointermove', dragging)
     scroller.addEventListener('keydown', keyboard)
     return () => {
       resize?.disconnect()
       scroller.removeEventListener('wheel', intentional)
       scroller.removeEventListener('touchstart', intentional)
+      scroller.removeEventListener('touchmove', intentional)
       scroller.removeEventListener('pointerdown', intentional)
+      scroller.removeEventListener('pointermove', dragging)
       scroller.removeEventListener('keydown', keyboard)
     }
   }, [chatId])
@@ -259,19 +300,26 @@ export function useMessageViewport({
     anchorRef.current = null
     restoredAnchor.current = null
     atBottomRef.current = true
-    scroller.scrollTop = scroller.scrollHeight
+    pinToBottom(scroller)
   }
 
   function handleScroll() {
     const scroller = scrollRef.current
     if (!scroller || pendingRestore.current) return
-    atBottomRef.current = distanceToBottom(scroller) < BOTTOM_THRESHOLD
+    const atBottom = distanceToBottom(scroller) < BOTTOM_THRESHOLD
+    const userMoved =
+      Date.now() <= scrollInputUntil.current &&
+      (!atBottomRef.current || atBottom || scroller.scrollTop < lastScrollTop.current)
+    if (userMoved) atBottomRef.current = atBottom
+    else if (atBottomRef.current && !hasNewer) pinToBottom(scroller)
+    lastScrollTop.current = scroller.scrollTop
     onViewPositionChange(atBottomRef.current && !hasNewer)
     captureLocation()
     autoPage()
   }
 
   function autoPage() {
+    clearTimeout(pageTimer.current)
     const scroller = scrollRef.current
     if (!scroller || pendingRestore.current || document.visibilityState !== 'visible') return
     if (loadingOlder || loadingNewer) return
@@ -290,18 +338,71 @@ export function useMessageViewport({
       autoPageRef.current.older?.at ?? 0,
       autoPageRef.current.newer?.at ?? 0,
     )
-    if (Date.now() - lastPageAt < 300) return
-    if (previous?.anchor === anchor && Date.now() - previous.at < 1000) return
-    autoPageRef.current[direction] = { anchor, at: Date.now() }
+    const attempts = previous?.anchor === anchor ? previous.attempts : 0
+    const retryAt = Math.max(
+      failedUntil.current[direction] ?? 0,
+      lastPageAt + 300,
+      (previous?.at ?? 0) + (attempts ? Math.min(30000, 1000 * 2 ** (attempts - 1)) : 0),
+    )
+    if (!Number.isFinite(retryAt)) return
+    if (Date.now() < retryAt) {
+      clearTimeout(pageTimer.current)
+      pageTimer.current = setTimeout(() => pageRef.current(), retryAt - Date.now())
+      return
+    }
+    autoPageRef.current[direction] = { anchor, at: Date.now(), attempts: attempts + 1 }
     rememberAnchor(direction)
     if (direction === 'older') onLoadOlder()
     else onLoadNewer()
+    clearTimeout(pageTimer.current)
+    pageTimer.current = setTimeout(() => pageRef.current(), Math.min(30000, 1000 * 2 ** attempts))
   }
+
+  useLayoutEffect(
+    () =>
+      subscribePagingFailures((failure) => {
+        if (failure.chatId !== chatId) return
+        clearTimeout(pageTimer.current)
+        if (failure.direction) failedUntil.current[failure.direction] = failure.until
+        else failedUntil.current = {}
+        if (Number.isFinite(failure.until))
+          pageTimer.current = setTimeout(
+            () => pageRef.current(),
+            Math.max(0, failure.until - Date.now()),
+          )
+      }),
+    [chatId],
+  )
 
   pageRef.current = autoPage
   useLayoutEffect(() => {
-    const timer = window.setInterval(() => pageRef.current(), 250)
-    return () => window.clearInterval(timer)
+    clearTimeout(pageTimer.current)
+    pageRef.current()
+    return () => clearTimeout(pageTimer.current)
+  }, [
+    chatId,
+    messages,
+    pendingState,
+    hasOlder,
+    hasNewer,
+    loadingOlder,
+    loadingNewer,
+    jumpRevision,
+    locationRevision,
+  ])
+
+  useLayoutEffect(() => {
+    const scroller = scrollRef.current
+    if (!scroller) return
+    const evaluate = () => pageRef.current()
+    const resize = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(evaluate) : null
+    resize?.observe(scroller)
+    if (scroller.firstElementChild) resize?.observe(scroller.firstElementChild)
+    document.addEventListener('visibilitychange', evaluate)
+    return () => {
+      resize?.disconnect()
+      document.removeEventListener('visibilitychange', evaluate)
+    }
   }, [chatId])
 
   return { scrollRef, highlight, handleScroll, stickToLatest }

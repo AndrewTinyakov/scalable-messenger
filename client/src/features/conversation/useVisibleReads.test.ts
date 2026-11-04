@@ -34,13 +34,20 @@ it('starts a fresh dwell when a tall row settles without input', async () => {
     await act(async () => vi.advanceTimersByTime(800))
     expect(read).not.toHaveBeenCalled()
     settled = true
+    await act(async () => viewport.dispatchEvent(new dom.window.Event('reading-settled')))
     await act(async () => vi.advanceTimersByTime(300))
     settled = false
+    await act(async () => viewport.dispatchEvent(new dom.window.Event('reading-settled')))
     await act(async () => vi.advanceTimersByTime(800))
     expect(read).not.toHaveBeenCalled()
     settled = true
+    await act(async () => viewport.dispatchEvent(new dom.window.Event('reading-settled')))
     await act(async () => vi.advanceTimersByTime(1000))
     expect(read).toHaveBeenCalledWith('1')
+    const geometry = vi.spyOn(viewport, 'getBoundingClientRect')
+    geometry.mockClear()
+    await act(async () => vi.advanceTimersByTime(10000))
+    expect(geometry).not.toHaveBeenCalled()
     focused = false
     await act(async () => window.dispatchEvent(new dom.window.Event('blur')))
   } finally {

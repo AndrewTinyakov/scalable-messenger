@@ -1,4 +1,5 @@
 import { ChatKind, FrameType } from '../../shared/api/generated/socket-vocabulary'
+import { isWaitingFailure } from '../../shared/api/http'
 import type { RecoveryFrame } from '../../shared/api/socket'
 import { reconnectDelay } from '../../shared/lib/reconnect'
 import { restoreAnchor } from './anchorRestoration'
@@ -11,6 +12,7 @@ import {
 } from './historySnapshot'
 import { HISTORY_PAGE_SIZE, MAX_CATCH_UP_MESSAGES } from './historyWindow'
 import type { Message } from './model'
+import { pagingFailure, resetPagingFailures } from './pagingFailures'
 import { ReadingLocations, type ReadingLocation } from './readingLocation'
 import { RecoveryBatch } from './recoveryBatch'
 import type { RecoveryRuntime } from './recoveryRuntime'
@@ -36,6 +38,30 @@ export class ChatRecovery {
     { promise: Promise<void>; socketGeneration: number; requiredSequence: string }
   >()
   private paging = new Set<string>()
+  private pageFailures = new Map<string, { context: string; attempts: number; until: number }>()
+
+  private pageContext(chatId: string, cursor: string): string {
+    return JSON.stringify([
+      cursor,
+      this.navigationRevision,
+      this.socketGeneration,
+      this.state.snapshotMetadata(chatId),
+    ])
+  }
+
+  private pageAllowed(key: string, context: string): boolean {
+    const failure = this.pageFailures.get(key)
+    return !failure || failure.context !== context || Date.now() >= failure.until
+  }
+
+  private pageFailed(key: string, context: string, cause: unknown): void {
+    const previous = this.pageFailures.get(key)
+    const attempts = previous?.context === context ? previous.attempts + 1 : 1
+    const separator = key.indexOf(':')
+    const direction = key.slice(0, separator) as 'older' | 'newer'
+    const until = pagingFailure(key.slice(separator + 1), direction, cause, attempts)
+    this.pageFailures.set(key, { context, attempts, until })
+  }
   private navigationRevision = 0
   private restoring = new Map<string, number>()
   private restoreWaits = new Map<
@@ -83,6 +109,8 @@ export class ChatRecovery {
     this.cancelRestoreWaits()
     this.navigationRevision += 1
     this.paging.clear()
+    for (const key of this.pageFailures.keys()) resetPagingFailures(key.slice(key.indexOf(':') + 1))
+    this.pageFailures.clear()
     this.disposed = false
     this.cancelRetryExcept(chatId)
     const runtime = this.runtime!
@@ -115,6 +143,7 @@ export class ChatRecovery {
   onSocketOpened(chatId: string | null): void {
     this.disposed = false
     this.socketGeneration += 1
+    for (const key of this.pageFailures.keys()) resetPagingFailures(key.slice(key.indexOf(':') + 1))
     this.flush(false)
     this.subscribedChatId = null
     if (chatId && !chatId.startsWith('draft:') && this.sendSubscription(chatId)) {
@@ -140,6 +169,8 @@ export class ChatRecovery {
     this.flush(false)
     this.catchingUp.clear()
     this.paging.clear()
+    for (const key of this.pageFailures.keys()) resetPagingFailures(key.slice(key.indexOf(':') + 1))
+    this.pageFailures.clear()
     this.historyRequests.cancel()
     this.synchronizing.clear()
     for (const queued of this.synchronizationQueue.values()) queued.resolve()
@@ -345,7 +376,8 @@ export class ChatRecovery {
       if (
         !this.disposed &&
         generation === this.lifecycleGeneration &&
-        revision === this.navigationRevision
+        revision === this.navigationRevision &&
+        !isWaitingFailure(cause)
       )
         this.runtime!.failed(
           cause instanceof Error ? cause.message : 'Could not restore reading position',
@@ -376,6 +408,9 @@ export class ChatRecovery {
       this.paging.has(chatId)
     )
       return
+    const key = `older:${chatId}`
+    const context = this.pageContext(chatId, cursor)
+    if (!this.pageAllowed(key, context)) return
     this.paging.add(chatId)
     try {
       await this.withHistorySnapshot(
@@ -395,6 +430,10 @@ export class ChatRecovery {
           runtime.changed()
         },
       )
+      this.pageFailures.delete(key)
+    } catch (cause) {
+      this.pageFailed(key, context, cause)
+      throw cause
     } finally {
       if (generation === this.lifecycleGeneration && navigation === this.navigationRevision)
         this.paging.delete(chatId)
@@ -408,6 +447,9 @@ export class ChatRecovery {
     const last = this.state.window(chatId).at(-1)
     const cursor = this.state.pageCursor(chatId, 'newer') ?? last?.sequence
     if (!cursor || this.paging.has(chatId)) return
+    const key = `newer:${chatId}`
+    const context = this.pageContext(chatId, cursor)
+    if (!this.pageAllowed(key, context)) return
     this.paging.add(chatId)
     try {
       await this.withHistorySnapshot(
@@ -427,6 +469,10 @@ export class ChatRecovery {
           runtime.changed()
         },
       )
+      this.pageFailures.delete(key)
+    } catch (cause) {
+      this.pageFailed(key, context, cause)
+      throw cause
     } finally {
       if (generation === this.lifecycleGeneration && navigation === this.navigationRevision)
         this.paging.delete(chatId)
@@ -590,7 +636,7 @@ export class ChatRecovery {
       if (this.disposed || generation !== this.lifecycleGeneration) return
       const message = cause instanceof Error ? cause.message : 'Could not load chat history'
       this.catchUpError = { chatId, message }
-      runtime.failed(message)
+      if (!isWaitingFailure(cause)) runtime.failed(message)
       const context = runtime.context(chatId)
       if (
         context.selected &&
@@ -730,6 +776,8 @@ export class ChatRecovery {
   beginNavigation(): number {
     this.cancelRestoreWaits()
     this.paging.clear()
+    for (const key of this.pageFailures.keys()) resetPagingFailures(key.slice(key.indexOf(':') + 1))
+    this.pageFailures.clear()
     return ++this.navigationRevision
   }
   reveal(
@@ -804,6 +852,14 @@ export class ChatRecovery {
   }
 
   observe(chatId: string, snapshot: Partial<SnapshotMetadata>): void {
+    const previous = this.state.snapshotMetadata(chatId)
+    if (
+      (snapshot.mutationRevision !== undefined &&
+        snapshot.mutationRevision !== previous.mutationRevision) ||
+      (snapshot.visibilityRevision !== undefined &&
+        snapshot.visibilityRevision !== previous.visibilityRevision)
+    )
+      resetPagingFailures(chatId)
     this.historyRequests.observe(chatId, snapshot)
     this.state.observeSnapshot(chatId, snapshot)
     const location = this.locations.get(chatId)
@@ -895,7 +951,7 @@ export class ChatRecovery {
       } while (request.again && valid())
     })()
       .catch((cause) => {
-        if (valid())
+        if (valid() && !isWaitingFailure(cause))
           this.runtime!.failed(
             cause instanceof Error ? cause.message : 'Could not refresh conversation',
           )

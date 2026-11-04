@@ -19,7 +19,6 @@ export interface SendRequestAdapters {
   createId(): string
   now(): number
   onChange(sends: PendingSend[]): void
-  pause?(milliseconds: number): Promise<void>
 }
 
 const MAX_REJECTED_SENDS = 100
@@ -107,10 +106,42 @@ export class SendRequests {
   private outbound: string[] = []
   private active?: string
   private timer?: ReturnType<typeof setTimeout>
+  private confirmation?: ReturnType<typeof setTimeout>
+  private confirmationAt = 0
+  private confirmationDeadline = new Map<string, number>()
+  private confirmationAttempts = new Map<string, number>()
+
+  private watch(requestId: string): void {
+    clearTimeout(this.confirmation)
+    if (!this.confirmationDeadline.has(requestId))
+      this.confirmationDeadline.set(requestId, this.adapters.now() + 60000)
+    this.confirmationAt = this.adapters.now() + 10000
+    this.confirmation = setTimeout(() => {
+      this.confirmation = undefined
+      if (this.active !== requestId || !this.adapters.isConnected()) return
+      void this.reconcile().finally(() => {
+        const current = this.sends.find((send) => send.requestId === requestId)
+        if (
+          this.active !== requestId ||
+          !current ||
+          current.status === 'retryable' ||
+          !this.adapters.isConnected()
+        )
+          return
+        if (this.adapters.now() >= (this.confirmationDeadline.get(requestId) ?? Infinity))
+          this.advance(requestId, 'retryable', {
+            reason: 'Confirmation is still pending. Try again to check and resend safely.',
+          })
+        else if (!this.confirmation) this.watch(requestId)
+      })
+    }, 10000)
+  }
+
   private nextSendAt = 0
   private backoff = 0
 
   disconnected(): void {
+    clearTimeout(this.confirmation)
     clearTimeout(this.timer)
     this.timer = undefined
     this.outbound = []
@@ -141,6 +172,7 @@ export class SendRequests {
       return
     }
     this.active = requestId
+    this.watch(requestId)
     this.nextSendAt = this.adapters.now() + 75
     try {
       this.adapters.send(send)
@@ -165,7 +197,10 @@ export class SendRequests {
   }
 
   private release(requestId: string): void {
+    this.confirmationAttempts.delete(requestId)
+    this.confirmationDeadline.delete(requestId)
     if (this.active === requestId) {
+      clearTimeout(this.confirmation)
       this.active = undefined
       this.backoff = 0
     }
@@ -236,6 +271,13 @@ export class SendRequests {
     this.release(requestId)
   }
 
+  unknown(requestId: string): void {
+    if (!this.sends.some((send) => send.requestId === requestId && this.unresolved(send))) return
+    if (this.active && this.active !== requestId) return
+    if (!this.active) this.active = requestId
+    this.watch(requestId)
+  }
+
   retryable(requestId: string, reason: string): void {
     this.advance(requestId, 'retryable', { reason })
     this.release(requestId)
@@ -251,6 +293,10 @@ export class SendRequests {
     const saved: SavedSend[] = []
     try {
       const unresolved = this.sends.filter((send) => this.unresolved(send))
+      if (shouldRetryUnknown && !this.active && unresolved.length && this.adapters.isConnected()) {
+        this.active = unresolved[0].requestId
+        this.watch(this.active)
+      }
       for (let offset = 0; offset < unresolved.length; offset += SEND_STATUS_BATCH_SIZE) {
         const batch = unresolved.slice(offset, offset + SEND_STATUS_BATCH_SIZE)
         const results = await this.adapters.statuses(batch.map((send) => send.requestId))
@@ -271,21 +317,46 @@ export class SendRequests {
             if (outcome) saved.push(outcome)
           } else if (result.status === 'REJECTED') {
             this.rejected(send.requestId, result.reason || undefined)
-          } else if (send.status === 'queued' && !this.active) {
-            this.active = send.requestId
-          } else if (
-            shouldRetryUnknown &&
-            (send.status === 'sending' || send.status === 'retryable')
-          ) {
-            const current = this.sends.find((item) => item.requestId === send.requestId)
-            if (current && (current.status === 'sending' || current.status === 'retryable')) {
-              if (this.adapters.isConnected()) {
-                this.advance(send.requestId, 'sending', { reason: undefined })
-                resends.push(current)
-              } else {
-                retryHandled = false
-              }
+          } else {
+            const latest = this.sends.find((item) => item.requestId === send.requestId)
+            if (!latest || !this.unresolved(latest)) continue
+            if (!this.active && send.status === 'queued' && !shouldRetryUnknown) {
+              this.active = send.requestId
+              this.watch(send.requestId)
             }
+            const overdue =
+              this.active === send.requestId && this.adapters.now() >= this.confirmationAt
+            if (
+              (shouldRetryUnknown || overdue) &&
+              (send.status !== 'retryable' || shouldRetryUnknown) &&
+              this.adapters.isConnected()
+            ) {
+              const attempts = this.confirmationAttempts.get(send.requestId) ?? 0
+              if (overdue && attempts >= 3) {
+                this.advance(send.requestId, 'retryable', {
+                  reason: 'Confirmation is still pending. Try again to check and resend safely.',
+                })
+                clearTimeout(this.confirmation)
+              } else if (!this.active || this.active === send.requestId) {
+                this.confirmationAttempts.set(send.requestId, attempts + 1)
+                this.advance(send.requestId, 'sending', { reason: undefined })
+                if (this.active === send.requestId || send.status === 'queued') {
+                  this.active = send.requestId
+                  this.watch(send.requestId)
+                  this.adapters.send(this.sends.find((item) => item.requestId === send.requestId)!)
+                } else resends.push(send)
+              } else if (this.active !== send.requestId && send.status === 'sending')
+                resends.push(send)
+            } else if (shouldRetryUnknown && send.status === 'retryable' && !this.active) {
+              this.advance(send.requestId, 'sending', { reason: undefined })
+              resends.push(send)
+            } else if (
+              shouldRetryUnknown &&
+              send.status === 'sending' &&
+              this.active !== send.requestId
+            ) {
+              resends.push(send)
+            } else if (shouldRetryUnknown && !this.adapters.isConnected()) retryHandled = false
           }
         }
         for (const send of resends) {
@@ -326,8 +397,16 @@ export class SendRequests {
     }
     const current = this.sends.find((item) => item.requestId === requestId)
     if (!current || current.status !== 'retryable' || !this.adapters.isConnected()) return undefined
+    this.confirmationAttempts.delete(requestId)
+    this.confirmationDeadline.delete(requestId)
+    if (this.active === requestId) {
+      this.active = undefined
+      this.outbound = this.outbound.filter((id) => id !== requestId)
+      this.outbound.unshift(requestId)
+    }
     this.advance(requestId, 'sending', { reason: undefined })
     this.enqueue(requestId)
+    this.drain()
     return undefined
   }
 
@@ -337,6 +416,12 @@ export class SendRequests {
         (send) => send.chatId !== chatId && (!recipientId || send.recipientId !== recipientId),
       ),
     )
+    for (const requestId of this.confirmationDeadline.keys()) {
+      if (!this.sends.some((send) => send.requestId === requestId)) {
+        this.confirmationDeadline.delete(requestId)
+        this.confirmationAttempts.delete(requestId)
+      }
+    }
     if (this.active && !this.sends.some((send) => send.requestId === this.active))
       this.release(this.active)
   }
@@ -360,7 +445,10 @@ export class SendRequests {
       )
     )
       return
-    const next = advanceSend(previous, status, extra)
+    const next =
+      previous.status === 'queued' && (status === 'retryable' || status === 'sending')
+        ? { ...previous, ...extra, status }
+        : advanceSend(previous, status, extra)
     if (next === previous) return
     this.commit(this.sends.map((send) => (send.requestId === requestId ? next : send)))
   }

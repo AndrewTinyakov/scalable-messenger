@@ -104,6 +104,24 @@ describe('send requests', () => {
     expect(fixture.sent.at(-1)?.body).toBe('second')
   })
 
+  it('hands a save found by the confirmation watchdog to the resolver', async () => {
+    vi.useFakeTimers()
+    const fixture = setup()
+    fixture.adapters.now = Date.now
+    const resolved = vi.fn()
+    fixture.requests.resolved = resolved
+    fixture.requests.start(chatId, 'first')
+    fixture.statuses.mockImplementation(async (ids: string[]) =>
+      ids.map((requestId) => ({
+        requestId,
+        result: { status: 'SAVED' as const, chatId, messageId, sequence: '7' },
+      })),
+    )
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(resolved).toHaveBeenCalledOnce()
+    expect(resolved.mock.calls[0][0]).toEqual([expect.objectContaining({ chatId })])
+  })
+
   it('offers Try again after bounded status outages without publishing a later chat', async () => {
     vi.useFakeTimers()
     const fixture = setup()

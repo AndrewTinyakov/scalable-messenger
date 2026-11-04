@@ -432,7 +432,8 @@ export class ChatRecovery {
       )
       this.pageFailures.delete(key)
     } catch (cause) {
-      this.pageFailed(key, context, cause)
+      if (generation === this.lifecycleGeneration && navigation === this.navigationRevision)
+        this.pageFailed(key, context, cause)
       throw cause
     } finally {
       if (generation === this.lifecycleGeneration && navigation === this.navigationRevision)
@@ -471,7 +472,8 @@ export class ChatRecovery {
       )
       this.pageFailures.delete(key)
     } catch (cause) {
-      this.pageFailed(key, context, cause)
+      if (generation === this.lifecycleGeneration && navigation === this.navigationRevision)
+        this.pageFailed(key, context, cause)
       throw cause
     } finally {
       if (generation === this.lifecycleGeneration && navigation === this.navigationRevision)

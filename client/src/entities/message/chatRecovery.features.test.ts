@@ -663,6 +663,30 @@ it.each([
   recovery.dispose()
 })
 
+it('ignores a paging failure that lands after navigation moved on', async () => {
+  let fail: (cause: unknown) => void = () => {}
+  const older = vi
+    .fn()
+    .mockImplementationOnce(() => new Promise((_, reject) => (fail = reject)))
+    .mockResolvedValue({ messages: [], hasMore: false, nextSequence: '0' })
+  const { recovery } = connectedRecovery({
+    latest: async () => ({ messages: page(51) }),
+    after: async () => ({ messages: [], hasMore: false, nextSequence: '100' }),
+    older,
+  })
+  try {
+    await recovery.catchUp('chat', true)
+    const stale = recovery.loadOlder('chat')
+    recovery.beginNavigation()
+    fail(new ApiError(403, 'forbidden'))
+    await expect(stale).rejects.toMatchObject({ status: 403 })
+    await recovery.loadOlder('chat')
+    expect(older).toHaveBeenCalledTimes(2)
+  } finally {
+    recovery.dispose()
+  }
+})
+
 it('backs off transient paging failures without losing the edge', async () => {
   vi.useFakeTimers()
   const older = vi.fn(async () => {

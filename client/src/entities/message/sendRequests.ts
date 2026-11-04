@@ -110,6 +110,7 @@ export class SendRequests {
   private confirmationAt = 0
   private confirmationDeadline = new Map<string, number>()
   private confirmationAttempts = new Map<string, number>()
+  resolved?: (saved: SavedSend[]) => void
 
   private watch(requestId: string): void {
     clearTimeout(this.confirmation)
@@ -119,21 +120,23 @@ export class SendRequests {
     this.confirmation = setTimeout(() => {
       this.confirmation = undefined
       if (this.active !== requestId || !this.adapters.isConnected()) return
-      void this.reconcile().finally(() => {
-        const current = this.sends.find((send) => send.requestId === requestId)
-        if (
-          this.active !== requestId ||
-          !current ||
-          current.status === 'retryable' ||
-          !this.adapters.isConnected()
-        )
-          return
-        if (this.adapters.now() >= (this.confirmationDeadline.get(requestId) ?? Infinity))
-          this.advance(requestId, 'retryable', {
-            reason: 'Confirmation is still pending. Try again to check and resend safely.',
-          })
-        else if (!this.confirmation) this.watch(requestId)
-      })
+      void this.reconcile()
+        .then((saved) => this.resolved?.(saved))
+        .finally(() => {
+          const current = this.sends.find((send) => send.requestId === requestId)
+          if (
+            this.active !== requestId ||
+            !current ||
+            current.status === 'retryable' ||
+            !this.adapters.isConnected()
+          )
+            return
+          if (this.adapters.now() >= (this.confirmationDeadline.get(requestId) ?? Infinity))
+            this.advance(requestId, 'retryable', {
+              reason: 'Confirmation is still pending. Try again to check and resend safely.',
+            })
+          else if (!this.confirmation) this.watch(requestId)
+        })
     }, 10000)
   }
 

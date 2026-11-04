@@ -3,6 +3,8 @@ package com.andrewtinyakov.messenger.shared
 import com.andrewtinyakov.messenger.ApiApplication
 import com.andrewtinyakov.messenger.generated.messaging.command.SendMessageCommandV1
 import com.andrewtinyakov.messenger.shared.id.newId
+import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestInstance
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
@@ -11,6 +13,10 @@ import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import org.testcontainers.containers.PostgreSQLContainer
 import java.time.OffsetDateTime
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 @SpringBootTest(
     classes = [ApiApplication::class],
@@ -18,8 +24,23 @@ import java.time.OffsetDateTime
 )
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 abstract class MessengerIntegrationTest {
+    private lateinit var testExecutor: ExecutorService
+
     @Autowired
     protected lateinit var db: JdbcTemplate
+
+    @BeforeEach
+    fun startConcurrentTasks() {
+        testExecutor = Executors.newVirtualThreadPerTaskExecutor()
+    }
+
+    @AfterEach
+    fun stopConcurrentTasks() {
+        testExecutor.shutdownNow()
+        check(testExecutor.awaitTermination(10, TimeUnit.SECONDS)) { "Concurrent test tasks did not terminate" }
+    }
+
+    protected fun <T> concurrently(task: () -> T): CompletableFuture<T> = CompletableFuture.supplyAsync({ task() }, testExecutor)
 
     companion object {
         private val postgres = PostgreSQLContainer<Nothing>("postgres:17-alpine").apply {

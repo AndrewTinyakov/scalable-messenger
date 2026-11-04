@@ -49,7 +49,7 @@ class ChatServiceTests
             val removingRepository = object : ChatRepository by chatRepository {
                 override fun findMemberDetails(chatId: ChatId, userId: UserId): MemberChatDetails? {
                     val snapshot = chatRepository.findMemberDetails(chatId = chatId, userId = userId)
-                    CompletableFuture.runAsync { chatMembershipService.removeMember(chatId, UserId(owner), UserId(member)) }.join()
+                    concurrently { chatMembershipService.removeMember(chatId, UserId(owner), UserId(member)) }.join()
                     return snapshot
                 }
             }
@@ -196,7 +196,7 @@ class ChatServiceTests
             }
             val removing =
                 ChatMembershipService(repository = pausedRepository, tx = tx, outboxRepository = outboxRepository, mapper = mapper)
-            val removal = CompletableFuture.runAsync { removing.removeMember(ChatId(chat.id), UserId(owner), UserId(member)) }
+            val removal = concurrently { removing.removeMember(ChatId(chat.id), UserId(owner), UserId(member)) }
             try {
                 assertTrue(removed.await(10, TimeUnit.SECONDS))
                 val addingStarted = CountDownLatch(1)
@@ -208,7 +208,7 @@ class ChatServiceTests
                 }
                 val addingService =
                     ChatService(repository = addingRepository, outboxRepository = outboxRepository, mapper = mapper, tx = tx)
-                val adding = CompletableFuture.runAsync {
+                val adding = concurrently {
                     addingService.addMembers(ChatId(chat.id), UserId(owner), AddGroupMembersRequest(listOf(addition)))
                 }
                 assertTrue(addingStarted.await(10, TimeUnit.SECONDS))
@@ -239,7 +239,7 @@ class ChatServiceTests
             }
             val removing = ChatMembershipService(repository = simultaneous, tx = tx, outboxRepository = outboxRepository, mapper = mapper)
             val removals = (1..2).map {
-                CompletableFuture.supplyAsync {
+                concurrently {
                     runCatching { removing.removeMember(ChatId(chat.id), UserId(owner), UserId(member)) }
                 }
             }.map { it.get(10, TimeUnit.SECONDS) }
@@ -276,10 +276,10 @@ class ChatServiceTests
                 }
             }
             val removing = ChatMembershipService(repository = paused, tx = tx, outboxRepository = outboxRepository, mapper = mapper)
-            val removal = CompletableFuture.runAsync { removing.removeMember(ChatId(chat.id), UserId(owner), UserId(member)) }
+            val removal = concurrently { removing.removeMember(ChatId(chat.id), UserId(owner), UserId(member)) }
             try {
                 assertTrue(deleted.await(10, TimeUnit.SECONDS))
-                val send = CompletableFuture.supplyAsync {
+                val send = concurrently {
                     messageSendService.process(command(member, request, "racing removal", chat = chat.id))
                 }
                 val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
@@ -313,7 +313,7 @@ class ChatServiceTests
             val removalStarted = CountDownLatch(1)
             val release = CountDownLatch(1)
             val request = newId()
-            val sending = CompletableFuture.supplyAsync {
+            val sending = concurrently {
                 tx.execute {
                     chatRepository.findByIdForUpdate(chatId = ChatId(chat.id))
                     locked.countDown()
@@ -330,7 +330,7 @@ class ChatServiceTests
             val removing = ChatMembershipService(repository = observing, tx = tx, outboxRepository = outboxRepository, mapper = mapper)
             try {
                 assertTrue(locked.await(10, TimeUnit.SECONDS))
-                val removal = CompletableFuture.runAsync { removing.removeMember(ChatId(chat.id), UserId(owner), UserId(member)) }
+                val removal = concurrently { removing.removeMember(ChatId(chat.id), UserId(owner), UserId(member)) }
                 assertTrue(removalStarted.await(10, TimeUnit.SECONDS))
                 release.countDown()
                 assertEquals(CommandResult.SAVED, sending.get(10, TimeUnit.SECONDS))
@@ -355,7 +355,7 @@ class ChatServiceTests
             val member = user("capacity-lock-session-member")
             tx.executeWithoutResult {
                 assertEquals(setOf(UserId(member)), chatRepository.lockUsers(userIds = listOf(UserId(member))))
-                val inserted = CompletableFuture.supplyAsync {
+                val inserted = concurrently {
                     db.update(
                         "INSERT INTO sessions(token_hash,user_id,device_id,expires_at) VALUES (?,?,'capacity-lock-device',now()+interval '1 hour')",
                         newId().padEnd(64, '0'),
@@ -381,7 +381,7 @@ class ChatServiceTests
             )
             val ready = CountDownLatch(2)
             val attempts = (1..2).map { index ->
-                CompletableFuture.supplyAsync {
+                concurrently {
                     ready.countDown()
                     check(ready.await(10, TimeUnit.SECONDS))
                     runCatching { chatService.createGroup(UserId(owner), CreateGroupChatRequest("Capacity $index", listOf(member))) }

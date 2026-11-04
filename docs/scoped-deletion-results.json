@@ -660,5 +660,19 @@
     "SQL-seeded history omits historical outbox/send-request growth. Warm API requests and repository-equivalent EXPLAIN plans, not cold-cache or captured HTTP SQL traces.",
     "SQL row deletion does not erase WAL, backups, unacknowledged broker commands, browser memory or already-delivered packets.",
     "Physical touch/mobile hardware, OS-level focus, exact-boundary independent browser grouping, forced million-row body eviction and long browser memory behavior remain unverified."
-  ]
+  ],
+  "ciFollowup": {
+    "failedHead": "1cbceae16900e9a0bfff402974e9893ab9f90adb",
+    "cause": "Shared async pool starvation on two CPUs and scheduled cleanup deleting fixed-clock notification fixtures",
+    "localActiveProcessorCount": 2,
+    "apiTests": 208,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "lintPassed": true,
+    "productionCodeChanged": false,
+    "timeoutsOrAssertionsRelaxed": false,
+    "reviewRound": 6,
+    "bothReviewPerspectives": "No findings"
+  }
 }

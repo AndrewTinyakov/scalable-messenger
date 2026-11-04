@@ -193,8 +193,8 @@ class MessageSendBatchServiceTests
             val recipient = user("batch-reversed-recipient")
             val chat = directChat(sender, recipient)
             val commands = (1..8).map { command(sender, newId(), "message $it", chat = chat) }
-            val first = CompletableFuture.runAsync { batches.process(commands) }
-            val second = CompletableFuture.runAsync { batches.process(commands.reversed()) }
+            val first = concurrently { batches.process(commands) }
+            val second = concurrently { batches.process(commands.reversed()) }
 
             CompletableFuture.allOf(first, second).get(15, TimeUnit.SECONDS)
 

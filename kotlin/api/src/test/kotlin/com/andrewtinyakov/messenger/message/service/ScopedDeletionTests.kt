@@ -29,7 +29,6 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.http.HttpStatus
-import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
 class ScopedDeletionTests
@@ -180,7 +179,7 @@ class ScopedDeletionTests
             send(owner, chat, "after cutoff")
             assertEquals(500, purge.runBatch())
             assertEquals(701, db.queryForObject("SELECT count(*) FROM messages WHERE chat_id=? AND sequence<=1201", Int::class.java, chat))
-            val workers = List(2) { CompletableFuture.supplyAsync { purge.runBatch() } }.map { it.get(10, TimeUnit.SECONDS) }
+            val workers = List(2) { concurrently { purge.runBatch() } }.map { it.get(10, TimeUnit.SECONDS) }
             assertTrue(workers.filterNotNull().all { it in 0..500 })
             repeat(4) { purge.runBatch() }
             assertEquals(DeletionState.COMPLETED, deletions.status(ChatId(chat), UserId(owner), input.requestId).state)
@@ -265,7 +264,7 @@ class ScopedDeletionTests
             val first = send(owner, chat, "one")
             val second = send(owner, chat, "two")
             val attempts = listOf(first, second).map { row ->
-                CompletableFuture.supplyAsync { delete(chat, member, DeletionScope.SELF, DeletionTarget.MESSAGES, listOf(row.id)) }
+                concurrently { delete(chat, member, DeletionScope.SELF, DeletionTarget.MESSAGES, listOf(row.id)) }
             }
             attempts.forEach { it.get(10, TimeUnit.SECONDS) }
             assertEquals(
@@ -305,7 +304,7 @@ class ScopedDeletionTests
             } finally {
                 db.execute("ALTER TABLE chats DROP CONSTRAINT \"$constraint\"")
             }
-            assertEquals(500, CompletableFuture.supplyAsync { purge.runBatch() }.get(10, TimeUnit.SECONDS))
+            assertEquals(500, concurrently { purge.runBatch() }.get(10, TimeUnit.SECONDS))
             assertEquals(100, purge.runBatch())
             assertEquals(DeletionState.COMPLETED, deletions.status(ChatId(chat), UserId(owner), operation.operationId).state)
         }
@@ -318,11 +317,11 @@ class ScopedDeletionTests
                 val chat = group(owner, member)
                 val gate = java.util.concurrent.CountDownLatch(1)
                 val command = command(owner, newId(), "racing send", chat = chat)
-                val saved = CompletableFuture.supplyAsync {
+                val saved = concurrently {
                     gate.await()
                     sends.process(command)
                 }
-                val cleared = CompletableFuture.supplyAsync {
+                val cleared = concurrently {
                     gate.await()
                     delete(chat, owner, DeletionScope.EVERYONE, DeletionTarget.HISTORY)
                 }

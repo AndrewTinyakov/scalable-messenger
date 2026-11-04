@@ -28,7 +28,6 @@ import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.http.HttpStatus
 import java.time.OffsetDateTime
-import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
 class MessageFeatureTests
@@ -105,7 +104,7 @@ class MessageFeatureTests
             val chat = group(owner, member)
             val target = send(owner, chat, "original")
             val results = listOf("left", "right").map { body ->
-                CompletableFuture.supplyAsync {
+                concurrently {
                     try {
                         mutations.edit(ChatId(chat), UserId(owner), MessageId(target.id), body, "1")
                         "saved"
@@ -303,7 +302,7 @@ class MessageFeatureTests
                 { mutations.delete(ChatId(chat), UserId(owner), MessageId(target.id), "1") },
             )
             val results = attempts.map { action ->
-                CompletableFuture.supplyAsync {
+                concurrently {
                     try {
                         action()
                         "saved"

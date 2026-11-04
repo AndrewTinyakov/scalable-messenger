@@ -13,7 +13,6 @@ import org.springframework.transaction.support.TransactionTemplate
 import java.sql.SQLException
 import java.time.Instant
 import java.time.OffsetDateTime
-import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
@@ -180,7 +179,7 @@ class OutboxRepositoryTests
             val now = OffsetDateTime.now()
             val locked = CountDownLatch(1)
             val release = CountDownLatch(1)
-            val first = CompletableFuture.supplyAsync {
+            val first = concurrently {
                 tx.execute {
                     val claimed = outboxRepository.claim(now = now, limit = 1, owner = "claim-first", leaseUntil = now.plusSeconds(30))
                     locked.countDown()
@@ -191,7 +190,7 @@ class OutboxRepositoryTests
 
             try {
                 assertTrue(locked.await(10, TimeUnit.SECONDS))
-                val second = CompletableFuture.supplyAsync {
+                val second = concurrently {
                     tx.execute {
                         outboxRepository.claim(now = now, limit = 2, owner = "claim-second", leaseUntil = now.plusSeconds(30))
                     }

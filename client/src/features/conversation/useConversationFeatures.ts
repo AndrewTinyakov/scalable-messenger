@@ -17,6 +17,7 @@ interface Options {
   send(frame: OutgoingSocketFrame): void
   remove(chatId: string): void
   hide?(chatId: string): void
+  refreshChats?(): Promise<unknown>
   fail(message: string): void
 }
 
@@ -321,9 +322,9 @@ export function useConversationFeatures(options: Options) {
   }, [])
   const deletionRequests = useRef(new Map<string, string>())
   const deletion = useCallback(
-    async (target: DeleteTarget, scope: DeleteScope, messages?: Message[]) => {
+    async (target: DeleteTarget, scope: DeleteScope, messages?: Message[], chatId?: string) => {
       const current = optionsRef.current
-      const id = current.chat?.id
+      const id = chatId ?? current.chat?.id
       if (!id || id.startsWith('draft:')) throw new Error('Choose a saved chat')
       const ids = messages ? [...new Set(messages.map((message) => message.id))].sort() : undefined
       if (
@@ -347,8 +348,9 @@ export function useConversationFeatures(options: Options) {
       })
       if (target === 'CHAT' && scope === 'EVERYONE') current.remove(id)
       else {
-        await current.recovery.synchronize(id)
+        if (id === optionsRef.current.chat?.id) await current.recovery.synchronize(id)
         if (target === 'CHAT') current.hide?.(id)
+        else await current.refreshChats?.()
       }
     },
     [],
@@ -373,6 +375,14 @@ export function useConversationFeatures(options: Options) {
       return message
     }, []),
     deleteChat,
+    deleteChatById: useCallback(
+      (id: string, scope: DeleteScope) => deletion('CHAT', scope, undefined, id),
+      [deletion],
+    ),
+    clearChatHistory: useCallback(
+      (id: string, scope: DeleteScope) => deletion('HISTORY', scope, undefined, id),
+      [deletion],
+    ),
     clearHistory,
     deleteMessages,
     presence: options.connected ? presence : {},

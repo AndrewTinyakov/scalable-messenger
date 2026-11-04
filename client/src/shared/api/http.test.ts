@@ -13,6 +13,42 @@ afterEach(() => {
 })
 
 describe('HTTP transport', () => {
+  it('decodes bounded chat summaries with sender usernames and rejects malformed previews', async () => {
+    const id = session.user.id
+    const message = {
+      id,
+      sequence: '7',
+      senderId: id,
+      senderUsername: 'katya',
+      createdAt: '2026-11-04T10:00:00Z',
+      bodyPreview: 'Хорошо',
+      deleted: false,
+    }
+    const chat = {
+      id,
+      kind: 'GROUP',
+      members: [],
+      memberCount: 2,
+      lastSequence: '7',
+      lastMessage: message,
+    }
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json(chat))
+    vi.stubGlobal('fetch', fetch)
+    await expect(authenticated.chat(id)).resolves.toEqual(chat)
+    for (const lastMessage of [
+      { ...message, senderUsername: undefined },
+      { ...message, bodyPreview: 'x'.repeat(161) },
+      { ...message, deleted: true },
+      { ...message, sequence: 7 },
+      { ...message, extra: true },
+    ]) {
+      fetch.mockResolvedValueOnce(Response.json({ ...chat, lastMessage }))
+      await expect(authenticated.chat(id)).rejects.toThrow('Invalid response from server')
+    }
+    fetch.mockResolvedValueOnce(Response.json({ ...chat, lastMessage: null }))
+    await expect(authenticated.chat(id)).resolves.toMatchObject({ lastMessage: null })
+  })
+
   it('accepts certified sparse and empty history while rejecting inconsistent coverage', async () => {
     const id = session.user.id
     const row = {

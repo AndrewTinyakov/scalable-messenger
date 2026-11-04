@@ -24,6 +24,9 @@ data class ChatResponse(
     val lastSequence: String,
     @field:Schema(requiredMode = Schema.RequiredMode.NOT_REQUIRED, nullable = true)
     val ownerId: String? = null,
+    @field:Schema(requiredMode = Schema.RequiredMode.NOT_REQUIRED, nullable = true)
+    @field:JsonInclude(JsonInclude.Include.ALWAYS)
+    val lastMessage: ChatLastMessageResponse? = null,
 )
 
 data class DirectChatResponse(
@@ -72,4 +75,24 @@ fun Chat.toResponse(members: List<UserSummary>): ChatResponse = ChatResponse(
     memberCount = memberCount,
     lastSequence = lastSequence.toString(),
     ownerId = ownerId?.value,
+    lastMessage = lastMessage?.let {
+        ChatLastMessageResponse(it.id, it.sequence.toString(), it.senderId, it.senderUsername, it.createdAt, it.bodyPreview, it.deleted)
+    },
+)
+
+data class ChatLastMessageResponse(
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val id: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val sequence: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val senderId: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val senderUsername: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val createdAt: java.time.OffsetDateTime,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val bodyPreview: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val deleted: Boolean,
 )

@@ -40,6 +40,9 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
   const [jumpRevision, setJumpRevision] = useState(0)
   const [locationRevision, setLocationRevision] = useState(0)
   const [pending, setPending] = useState<PendingSend[]>([])
+  const [nextRetryAt, setNextRetryAt] = useState<number | null>(null)
+  const retryNowRef = useRef<() => void>(() => {})
+  const retryNow = useCallback(() => retryNowRef.current(), [])
   const [connection, setConnection] = useState<ConnectionState>('connecting')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [draftChat, setDraftChat] = useState<Chat | undefined>()
@@ -135,6 +138,7 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     loadMoreChats,
     listChats,
     rememberChat,
+    refreshChatSummary,
     isRemoved,
     successfulRefreshes,
     removeChat,
@@ -190,6 +194,7 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     send: sendConnectedFrame,
     remove: removeConversation,
     hide: hideConversation,
+    refreshChats,
     fail: setError,
   })
   const withSnapshot = async (
@@ -276,10 +281,13 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     focusRequestRef,
     selectedRef,
     setConnection,
+    setNextRetryAt,
+    retryNowRef,
     onSessionRevoked,
     reconcilePending,
     refreshChats,
     listChats,
+    refreshChatSummary,
     catchUp,
     selectResolvedDraft,
     removeChat,
@@ -336,6 +344,10 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
   }, [refreshChats])
 
   return {
+    reconnect: { nextRetryAt },
+    retryNow,
+    deleteChatById: features.deleteChatById,
+    clearChatHistory: features.clearChatHistory,
     features,
     deleteChat: features.deleteChat,
     latestMessages: recovery.latestWindows(),

@@ -209,6 +209,27 @@ export function useChatDirectory({
     },
     [recordLatest],
   )
+  const refreshChatSummary = useCallback(
+    async (chatId: string) => {
+      const generation = removalGenerationRef.current
+      const chat = await sessionApi.chat(chatId)
+      if (
+        !activeRef.current ||
+        generation !== removalGenerationRef.current ||
+        removedChatRef.current.has(chatId)
+      )
+        return
+      const next = chatsRef.current.map((item) =>
+        item.id === chatId
+          ? { ...item, lastMessage: chat.lastMessage, lastSequence: chat.lastSequence }
+          : item,
+      )
+      chatsRef.current = next
+      setChats(next)
+      recordLatest(chatId, chat.lastSequence)
+    },
+    [sessionApi, recordLatest],
+  )
   const isRemoved = useCallback((chatId: string) => removedChatRef.current.has(chatId), [])
   const successfulRefreshes = useCallback(() => refreshSuccessRef.current, [])
   const removeChat = useCallback((chatId: string) => {
@@ -229,6 +250,7 @@ export function useChatDirectory({
     loadMoreChats,
     listChats,
     rememberChat,
+    refreshChatSummary,
     isRemoved,
     successfulRefreshes,
     removeChat,

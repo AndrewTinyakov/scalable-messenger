@@ -25,7 +25,6 @@ import com.andrewtinyakov.messenger.message.model.SendResult
 import com.andrewtinyakov.messenger.message.model.SendResultStatus
 import com.andrewtinyakov.messenger.message.model.asReply
 import com.andrewtinyakov.messenger.message.repository.MessageRepository
-import com.andrewtinyakov.messenger.shared.crypto.sha256
 import com.andrewtinyakov.messenger.shared.id.ChatId
 import com.andrewtinyakov.messenger.shared.id.EventId
 import com.andrewtinyakov.messenger.shared.id.MessageId
@@ -33,14 +32,12 @@ import com.andrewtinyakov.messenger.shared.id.RequestId
 import com.andrewtinyakov.messenger.shared.id.UserId
 import com.andrewtinyakov.messenger.shared.id.newId
 import io.micrometer.core.instrument.MeterRegistry
-import io.micrometer.core.instrument.Timer
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionSynchronization
 import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate
 import tools.jackson.databind.ObjectMapper
 import java.time.Clock
-import java.time.Duration
 import java.time.OffsetDateTime
 
 @Service
@@ -53,30 +50,13 @@ class MessageSendService(
     private val tx: TransactionTemplate,
     private val mapper: ObjectMapper,
     private val clock: Clock,
-    private val metrics: MeterRegistry,
+    metrics: MeterRegistry,
 ) {
-    fun process(command: SendMessageCommandV1): CommandResult {
-        val request = command.toRequest()
-        val fingerprint = fingerprint(request)
-        val invalidBody = when {
-            request.recipientId != null && request.replyToMessageId != null -> SendRejectionReason.INVALID_REPLY_TARGET
-            request.body.isBlank() -> SendRejectionReason.EMPTY_BODY
-            request.body.codePointCount(0, request.body.length) > 4000 -> SendRejectionReason.BODY_TOO_LONG
-            else -> null
-        }
-        val started = System.nanoTime()
-        var locked: Long? = null
-        var callbackFinished: Long? = null
-        var observed = false
+    private val timers = SendTimers(metrics)
 
-        fun completed() {
-            if (observed) return
-            observed = true
-            val finished = System.nanoTime()
-            observe("messenger.send.transaction", finished - started)
-            locked?.let { observe("messenger.send.transaction.hold", finished - it) }
-            callbackFinished?.let { observe("messenger.send.transaction.completion", finished - it) }
-        }
+    fun process(command: SendMessageCommandV1): CommandResult {
+        val request = command.toSendRequest()
+        val window = timers.window()
         var synchronized = false
         try {
             return tx.observedExecute(DatabaseTransaction.SEND_SINGLE) {
@@ -88,247 +68,184 @@ class MessageSendService(
                             else -> SendStage.TRANSACTION_UNKNOWN
                         }
                         SendStageRecorder.record(stage, requestId = request.requestId.value)
-                        completed()
+                        window.completed()
                     }
                 })
                 synchronized = true
                 try {
-                    processInTransaction(request, fingerprint, invalidBody) { locked = System.nanoTime() }
+                    processInTransaction(request, window)
                 } finally {
-                    callbackFinished = System.nanoTime()
+                    window.callbackFinished()
                     SendStageRecorder.record(SendStage.TRANSACTION_CALLBACK_FINISHED, requestId = request.requestId.value)
                 }
             }
         } finally {
-            if (!synchronized) completed()
+            if (!synchronized) window.completed()
         }
     }
 
     fun rejectExhausted(command: SendMessageCommandV1) {
-        val request = command.toRequest()
-        val fingerprint = fingerprint(request)
+        val request = command.toSendRequest()
         tx.observedExecuteWithoutResult(DatabaseTransaction.SEND_REJECT_EXHAUSTED) {
             repository.lockSend(senderId = request.senderId, requestId = request.requestId)
             if (repository.findSendResult(senderId = request.senderId, requestId = request.requestId) == null) {
-                val result = rejected(command = request, fingerprint = fingerprint, reason = SendRejectionReason.PROCESSING_FAILED)
+                val result = rejected(request, SendRejectionReason.PROCESSING_FAILED)
                 repository.insertSendResult(result)
-                enqueueRejection(command = request, reason = result.reason!!)
+                enqueueRejection(request, result.reason!!)
             }
         }
     }
 
     internal fun processBatchInTransaction(commands: List<SendMessageCommandV1>): List<CommandResult> {
         check(TransactionSynchronizationManager.isActualTransactionActive()) { "Send batch requires an active transaction" }
-        val requests = commands.map { it.toRequest() }
-        requests.map { it.senderId to it.requestId }.distinct()
+        val requests = commands.map { it.toSendRequest() }
+        requests.map { it.key }.distinct()
             .sortedWith(compareBy({ it.first.value }, { it.second.value }))
             .forEach { (sender, request) -> repository.lockSend(sender, request) }
         SendStageRecorder.requests(SendStage.REQUEST_LOCKS_ACQUIRED, requests) { it.requestId.value }
         if (requests.any { it.recipientId != null }) return commands.map(::process)
         val chatId = requireNotNull(requests.first().chatId)
         require(requests.all { it.chatId == chatId }) { "Send batch must share one chat" }
-        val started = System.nanoTime()
-        var locked: Long? = null
-        var callbackFinished = started
+        val window = timers.window(requests.size)
         TransactionSynchronizationManager.registerSynchronization(object : TransactionSynchronization {
-            override fun afterCompletion(status: Int) {
-                val finished = System.nanoTime()
-                repeat(requests.size) {
-                    observe("messenger.send.transaction", finished - started)
-                    locked?.let { observe("messenger.send.transaction.hold", finished - it) }
-                    observe("messenger.send.transaction.completion", finished - callbackFinished)
-                }
-            }
+            override fun afterCompletion(status: Int) = window.completed()
         })
         try {
-            val existing = repository.findSendResults(
-                requests.groupBy { it.senderId }.mapValues { (_, sends) ->
-                    sends.map { it.requestId }
-                },
-            )
-                .associateBy { it.senderId to it.requestId }.toMutableMap()
-            SendStageRecorder.requests(SendStage.RESULTS_LOOKED_UP, requests) { it.requestId.value }
-            val lockStarted = System.nanoTime()
-            val chat = try {
-                chatRepository.findByIdForUpdate(chatId)
-            } finally {
-                observe("messenger.send.chat.lock.acquire", System.nanoTime() - lockStarted)
-            }
-            if (chat != null) locked = System.nanoTime()
-            SendStageRecorder.requests(SendStage.CHAT_LOCKED, requests) { it.requestId.value }
-            val members = if (chat ==
-                null
-            ) {
-                emptySet()
-            } else {
-                chatRepository.existingMemberIds(chatId, requests.map { it.senderId }.distinct())
-            }
-            SendStageRecorder.requests(SendStage.MEMBERSHIP_CHECKED, requests) { it.requestId.value }
-            val replyTargets = requests.filter { it.senderId in members && it.replyToMessageId != null }
-                .groupBy { it.senderId }.flatMap { (sender, sends) ->
-                    repository.findMessagesByIds(chatId, sender, sends.mapNotNull { it.replyToMessageId }.distinct())
-                        .filter { it.deletedAt == null }.map { (sender to it.id) to it }
-                }.toMap()
-            val accepted = linkedMapOf<Pair<UserId, RequestId>, PreparedSend>()
-            val results = requests.map { request ->
-                val key = request.senderId to request.requestId
-                val fingerprint = fingerprint(request)
-                val previousFingerprint = existing[key]?.fingerprint ?: accepted[key]?.fingerprint
-                if (previousFingerprint != null) {
-                    if (previousFingerprint == fingerprint) {
-                        CommandResult.DUPLICATE
-                    } else {
-                        enqueueRejection(request, SendRejectionReason.REQUEST_ID_CONFLICT)
-                        CommandResult.CONFLICT
-                    }
-                } else {
-                    val reason = when {
-                        request.body.isBlank() -> {
-                            SendRejectionReason.EMPTY_BODY
-                        }
-
-                        request.body.codePointCount(0, request.body.length) > 4000 -> {
-                            SendRejectionReason.BODY_TOO_LONG
-                        }
-
-                        chat == null -> {
-                            SendRejectionReason.CHAT_NOT_FOUND
-                        }
-
-                        request.senderId !in members -> {
-                            SendRejectionReason.NOT_A_MEMBER
-                        }
-
-                        request.replyToMessageId != null && (request.senderId to request.replyToMessageId) !in replyTargets -> {
-                            SendRejectionReason.INVALID_REPLY_TARGET
-                        }
-
-                        else -> {
-                            null
-                        }
-                    }
-                    if (reason != null) {
-                        existing[key] = reject(request, fingerprint, reason)
-                        CommandResult.REJECTED
-                    } else {
-                        accepted[key] = PreparedSend(request, fingerprint)
-                        CommandResult.SAVED
-                    }
-                }
-            }
-            if (accepted.isNotEmpty()) {
-                val firstSequence =
-                    checkNotNull(chatRepository.allocateSequencesForMembers(chatId, accepted.values.map { it.request.senderId })) {
-                        "Chat membership changed during a locked send batch"
-                    }
-                SendStageRecorder.requests(SendStage.SEQUENCES_ALLOCATED, accepted.values) { it.request.requestId.value }
-                val rooms = if (chat!!.kind ==
-                    ChatKind.GROUP
-                ) {
-                    listOf(RoomAddress.group(chatId))
-                } else {
-                    chatRepository.findMemberIds(chatId).map(RoomAddress::user)
-                }
-                val pending = accepted.values.mapIndexed { index, prepared ->
-                    prepareMessage(
-                        prepared.request,
-                        prepared.fingerprint,
-                        chat,
-                        firstSequence + index,
-                        rooms,
-                        replyTargets[prepared.request.senderId to prepared.request.replyToMessageId]?.asReply(),
-                    )
-                }
-                repository.insertSavedMessages(pending.map { it.saved })
-                SendStageRecorder.requests(SendStage.MESSAGES_RESULTS_WRITTEN, accepted.values) { it.request.requestId.value }
-                outboxRepository.enqueue(pending.flatMap { it.events })
-                SendStageRecorder.requests(SendStage.OUTBOX_WRITTEN, accepted.values) { it.request.requestId.value }
-            }
-            return results
+            return processBatch(chatId, requests, window)
         } finally {
-            callbackFinished = System.nanoTime()
+            window.callbackFinished()
         }
     }
 
-    private fun processInTransaction(
-        command: SendRequest,
-        fingerprint: String,
-        invalidBody: SendRejectionReason?,
-        onLocked: () -> Unit,
-    ): CommandResult {
-        repository.lockSend(senderId = command.senderId, requestId = command.requestId)
-        SendStageRecorder.record(SendStage.REQUEST_LOCKS_ACQUIRED, requestId = command.requestId.value)
-        val existing = repository.findSendResult(senderId = command.senderId, requestId = command.requestId)
-        SendStageRecorder.record(SendStage.RESULTS_LOOKED_UP, requestId = command.requestId.value)
-        if (existing != null) {
-            if (existing.fingerprint != fingerprint) enqueueRejection(command = command, reason = SendRejectionReason.REQUEST_ID_CONFLICT)
-            return if (existing.fingerprint != fingerprint) CommandResult.CONFLICT else CommandResult.DUPLICATE
-        }
-        if (invalidBody != null) {
-            reject(command = command, fingerprint = fingerprint, reason = invalidBody)
-            return CommandResult.REJECTED
-        }
-        val recipientId = command.recipientId
-        val chatId = if (recipientId != null) {
-            if (recipientId == command.senderId) {
-                reject(command = command, fingerprint = fingerprint, reason = SendRejectionReason.INVALID_RECIPIENT)
-                return CommandResult.REJECTED
-            }
-            if (!userRepository.existsById(recipientId)) {
-                reject(command = command, fingerprint = fingerprint, reason = SendRejectionReason.RECIPIENT_NOT_FOUND)
-                return CommandResult.REJECTED
-            }
-            directChatService.createForFirstMessage(senderId = command.senderId, recipientId = recipientId, requestId = command.requestId)
+    private fun processBatch(chatId: ChatId, requests: List<SendRequest>, window: SendTimers.TransactionWindow): List<CommandResult> {
+        val existing = repository.findSendResults(
+            requests.groupBy { it.senderId }.mapValues { (_, sends) -> sends.map { it.requestId } },
+        ).associateBy { it.senderId to it.requestId }.toMutableMap()
+        SendStageRecorder.requests(SendStage.RESULTS_LOOKED_UP, requests) { it.requestId.value }
+        val chat = lockChat(chatId)
+        if (chat != null) window.chatLocked()
+        SendStageRecorder.requests(SendStage.CHAT_LOCKED, requests) { it.requestId.value }
+        val members = if (chat == null) {
+            emptySet()
         } else {
-            command.chatId!!
+            chatRepository.existingMemberIds(chatId, requests.map { it.senderId }.distinct())
         }
-        val lockStarted = System.nanoTime()
-        val chat = try {
-            chatRepository.findByIdForUpdate(chatId = chatId)
-        } finally {
-            observe("messenger.send.chat.lock.acquire", System.nanoTime() - lockStarted)
-        }
-        if (chat != null) onLocked()
-        SendStageRecorder.record(SendStage.CHAT_LOCKED, requestId = command.requestId.value)
-        if (chat == null) {
-            reject(command = command, fingerprint = fingerprint, reason = SendRejectionReason.CHAT_NOT_FOUND)
-            return CommandResult.REJECTED
-        }
-        val reply = command.replyToMessageId?.let { target ->
-            if (!chatRepository.isMember(chatId, command.senderId)) {
-                reject(command, fingerprint, SendRejectionReason.NOT_A_MEMBER)
-                return CommandResult.REJECTED
+        SendStageRecorder.requests(SendStage.MEMBERSHIP_CHECKED, requests) { it.requestId.value }
+        val replyTargets = replyTargets(chatId, requests.filter { it.senderId in members })
+        val accepted = linkedMapOf<Pair<UserId, RequestId>, SendRequest>()
+        val results = requests.map { request ->
+            val previousFingerprint = existing[request.key]?.fingerprint ?: accepted[request.key]?.fingerprint
+            if (previousFingerprint != null) {
+                duplicateOutcome(request, previousFingerprint)
+            } else {
+                val reason = request.bodyRejection ?: when {
+                    chat == null -> SendRejectionReason.CHAT_NOT_FOUND
+                    request.senderId !in members -> SendRejectionReason.NOT_A_MEMBER
+                    request.replyToMessageId != null && (request.senderId to request.replyToMessageId) !in replyTargets ->
+                        SendRejectionReason.INVALID_REPLY_TARGET
+                    else -> null
+                }
+                if (reason != null) {
+                    existing[request.key] = reject(request, reason)
+                    CommandResult.REJECTED
+                } else {
+                    accepted[request.key] = request
+                    CommandResult.SAVED
+                }
             }
-            val parent = repository.findReply(chatId, command.senderId, target)
-            if (parent == null) {
-                reject(command, fingerprint, SendRejectionReason.INVALID_REPLY_TARGET)
-                return CommandResult.REJECTED
-            }
+        }
+        if (accepted.isNotEmpty()) saveAccepted(checkNotNull(chat), accepted.values, replyTargets)
+        return results
+    }
+
+    private fun replyTargets(chatId: ChatId, requests: List<SendRequest>): Map<Pair<UserId, MessageId>, Message> =
+        requests.filter { it.replyToMessageId != null }
+            .groupBy { it.senderId }
+            .flatMap { (sender, sends) ->
+                repository.findMessagesByIds(chatId, sender, sends.mapNotNull { it.replyToMessageId }.distinct())
+                    .filter { it.deletedAt == null }
+                    .map { (sender to it.id) to it }
+            }.toMap()
+
+    private fun saveAccepted(chat: Chat, accepted: Collection<SendRequest>, replyTargets: Map<Pair<UserId, MessageId>, Message>) {
+        val firstSequence = checkNotNull(chatRepository.allocateSequencesForMembers(chat.id, accepted.map { it.senderId })) {
+            "Chat membership changed during a locked send batch"
+        }
+        SendStageRecorder.requests(SendStage.SEQUENCES_ALLOCATED, accepted) { it.requestId.value }
+        val rooms = roomsFor(chat)
+        val pending = accepted.mapIndexed { index, request ->
+            prepareMessage(request, chat, firstSequence + index, rooms, replyTargets[request.senderId to request.replyToMessageId]?.asReply())
+        }
+        repository.insertSavedMessages(pending.map { it.saved })
+        SendStageRecorder.requests(SendStage.MESSAGES_RESULTS_WRITTEN, accepted) { it.requestId.value }
+        outboxRepository.enqueue(pending.flatMap { it.events })
+        SendStageRecorder.requests(SendStage.OUTBOX_WRITTEN, accepted) { it.requestId.value }
+    }
+
+    private fun processInTransaction(request: SendRequest, window: SendTimers.TransactionWindow): CommandResult {
+        repository.lockSend(senderId = request.senderId, requestId = request.requestId)
+        SendStageRecorder.record(SendStage.REQUEST_LOCKS_ACQUIRED, requestId = request.requestId.value)
+        val existing = repository.findSendResult(senderId = request.senderId, requestId = request.requestId)
+        SendStageRecorder.record(SendStage.RESULTS_LOOKED_UP, requestId = request.requestId.value)
+        if (existing != null) return duplicateOutcome(request, existing.fingerprint)
+        val invalid = if (request.recipientId != null && request.replyToMessageId != null) {
+            SendRejectionReason.INVALID_REPLY_TARGET
+        } else {
+            request.bodyRejection
+        }
+        if (invalid != null) return rejectedOutcome(request, invalid)
+        val recipientId = request.recipientId
+        val chatId = if (recipientId != null) {
+            if (recipientId == request.senderId) return rejectedOutcome(request, SendRejectionReason.INVALID_RECIPIENT)
+            if (!userRepository.existsById(recipientId)) return rejectedOutcome(request, SendRejectionReason.RECIPIENT_NOT_FOUND)
+            directChatService.createForFirstMessage(senderId = request.senderId, recipientId = recipientId, requestId = request.requestId)
+        } else {
+            request.chatId!!
+        }
+        val chat = lockChat(chatId)
+        if (chat != null) window.chatLocked()
+        SendStageRecorder.record(SendStage.CHAT_LOCKED, requestId = request.requestId.value)
+        if (chat == null) return rejectedOutcome(request, SendRejectionReason.CHAT_NOT_FOUND)
+        val reply = request.replyToMessageId?.let { target ->
+            if (!chatRepository.isMember(chatId, request.senderId)) return rejectedOutcome(request, SendRejectionReason.NOT_A_MEMBER)
+            val parent = repository.findReply(chatId, request.senderId, target)
+                ?: return rejectedOutcome(request, SendRejectionReason.INVALID_REPLY_TARGET)
             parent.asReply()
         }
-        val sequence = chatRepository.allocateSequenceForMember(chatId = chatId, userId = command.senderId)
-        SendStageRecorder.record(SendStage.MEMBERSHIP_CHECKED, requestId = command.requestId.value)
-        if (sequence == null) {
-            reject(command = command, fingerprint = fingerprint, reason = SendRejectionReason.NOT_A_MEMBER)
-            return CommandResult.REJECTED
-        }
-        SendStageRecorder.record(SendStage.SEQUENCES_ALLOCATED, requestId = command.requestId.value)
-        val rooms = if (chat.kind == ChatKind.GROUP) {
-            listOf(RoomAddress.group(chatId))
-        } else {
-            chatRepository.findMemberIds(chatId).map(RoomAddress::user)
-        }
-        val pending = prepareMessage(command, fingerprint, chat, sequence, rooms, reply)
+        val sequence = chatRepository.allocateSequenceForMember(chatId = chatId, userId = request.senderId)
+        SendStageRecorder.record(SendStage.MEMBERSHIP_CHECKED, requestId = request.requestId.value)
+        if (sequence == null) return rejectedOutcome(request, SendRejectionReason.NOT_A_MEMBER)
+        SendStageRecorder.record(SendStage.SEQUENCES_ALLOCATED, requestId = request.requestId.value)
+        val pending = prepareMessage(request, chat, sequence, roomsFor(chat), reply)
         repository.insertSavedMessage(pending.saved.message, pending.saved.result)
-        SendStageRecorder.record(SendStage.MESSAGES_RESULTS_WRITTEN, requestId = command.requestId.value)
+        SendStageRecorder.record(SendStage.MESSAGES_RESULTS_WRITTEN, requestId = request.requestId.value)
         outboxRepository.enqueue(pending.events)
-        SendStageRecorder.record(SendStage.OUTBOX_WRITTEN, requestId = command.requestId.value)
+        SendStageRecorder.record(SendStage.OUTBOX_WRITTEN, requestId = request.requestId.value)
         return CommandResult.SAVED
+    }
+
+    private fun lockChat(chatId: ChatId): Chat? = timers.timeChatLock { chatRepository.findByIdForUpdate(chatId = chatId) }
+
+    private fun roomsFor(chat: Chat): List<String> =
+        if (chat.kind == ChatKind.GROUP) {
+            listOf(RoomAddress.group(chat.id))
+        } else {
+            chatRepository.findMemberIds(chat.id).map(RoomAddress::user)
+        }
+
+    private fun duplicateOutcome(request: SendRequest, previousFingerprint: String): CommandResult {
+        if (previousFingerprint == request.fingerprint) return CommandResult.DUPLICATE
+        enqueueRejection(request, SendRejectionReason.REQUEST_ID_CONFLICT)
+        return CommandResult.CONFLICT
+    }
+
+    private fun rejectedOutcome(request: SendRequest, reason: SendRejectionReason): CommandResult {
+        reject(request, reason)
+        return CommandResult.REJECTED
     }
 
     private fun prepareMessage(
         command: SendRequest,
-        fingerprint: String,
         chat: Chat,
         sequence: Long,
         rooms: List<String>,
@@ -353,7 +270,7 @@ class MessageSendService(
                 requestId = command.requestId,
                 chatId = chatId,
                 recipientId = command.recipientId,
-                fingerprint = fingerprint,
+                fingerprint = command.fingerprint,
                 status = SendResultStatus.SAVED,
                 messageId = messageId,
                 sequence = sequence,
@@ -383,20 +300,20 @@ class MessageSendService(
         )
     }
 
-    private fun reject(command: SendRequest, fingerprint: String, reason: SendRejectionReason): SendResult {
-        val result = rejected(command = command, fingerprint = fingerprint, reason = reason)
+    private fun reject(command: SendRequest, reason: SendRejectionReason): SendResult {
+        val result = rejected(command, reason)
         repository.insertSendResult(result)
         SendStageRecorder.record(SendStage.MESSAGES_RESULTS_WRITTEN, requestId = command.requestId.value)
         enqueueRejection(command = command, reason = reason)
         return result
     }
 
-    private fun rejected(command: SendRequest, fingerprint: String, reason: SendRejectionReason) = SendResult(
+    private fun rejected(command: SendRequest, reason: SendRejectionReason) = SendResult(
         senderId = command.senderId,
         requestId = command.requestId,
         chatId = command.chatId,
         recipientId = command.recipientId,
-        fingerprint = fingerprint,
+        fingerprint = command.fingerprint,
         status = SendResultStatus.REJECTED,
         messageId = null,
         sequence = null,
@@ -421,51 +338,6 @@ class MessageSendService(
         outboxRepository.enqueue(eventId = EventId(event.eventId), room = event.room, payload = mapper.writeValueAsString(event))
         SendStageRecorder.record(SendStage.OUTBOX_WRITTEN, requestId = event.requestId, eventId = event.eventId)
     }
-
-    private fun fingerprint(command: SendRequest): String {
-        val target = command.chatId?.value ?: "direct:${command.recipientId?.value}"
-        val reply = command.replyToMessageId
-        return if (reply == null) {
-            sha256("$target\u0000${command.senderId.value}\u0000${command.body}")
-        } else {
-            sha256("reply-v1\u0000$target\u0000${command.senderId.value}\u0000${reply.value}\u0000${command.body}")
-        }
-    }
-
-    private fun SendMessageCommandV1.toRequest(): SendRequest {
-        require(version == 1) { "Unsupported command version" }
-        require((chatId == null) != (recipientId == null)) { "Exactly one chat target is required" }
-        return SendRequest(
-            chatId = chatId?.let(::ChatId),
-            recipientId = recipientId?.let(::UserId),
-            requestId = RequestId(requestId),
-            senderId = UserId(senderId),
-            body = body,
-            replyToMessageId = replyToMessageId?.let(::MessageId),
-        )
-    }
-
-    private fun observe(name: String, nanos: Long) {
-        Timer.builder(
-            name,
-        ).publishPercentileHistogram().minimumExpectedValue(
-            Duration.ofMillis(1),
-        ).maximumExpectedValue(Duration.ofMinutes(2)).register(metrics).record(Duration.ofNanos(nanos))
-    }
-
-    private data class SendRequest(
-        val chatId: ChatId?,
-        val recipientId: UserId?,
-        val requestId: RequestId,
-        val senderId: UserId,
-        val body: String,
-        val replyToMessageId: MessageId?,
-    )
-
-    private data class PreparedSend(
-        val request: SendRequest,
-        val fingerprint: String,
-    )
 
     private data class PendingMessage(
         val saved: SavedMessage,

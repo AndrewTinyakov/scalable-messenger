@@ -154,7 +154,7 @@ public class Sessions extends TableImpl<SessionsRecord> {
 
     @Override
     public List<Index> getIndexes() {
-        return Arrays.asList(Indexes.SESSIONS_USER_IDX);
+        return Arrays.asList(Indexes.SESSIONS_EXPIRY_IDX, Indexes.SESSIONS_USER_IDX);
     }
 
     @Override

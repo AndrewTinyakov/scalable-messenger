@@ -12,4 +12,6 @@ interface SessionRepository {
     fun findSession(sessionId: SessionId, now: OffsetDateTime): AuthenticatedSession?
 
     fun deleteSession(sessionId: SessionId): AuthenticatedSession?
+
+    fun deleteExpired(now: OffsetDateTime, limit: Int): Int
 }

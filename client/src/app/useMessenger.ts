@@ -27,9 +27,11 @@ import { useMessengerSends } from './useMessengerSends'
 import { useMessengerSocket } from './useMessengerSocket'
 import { useRecoveryLifecycle } from './useRecoveryLifecycle'
 
+const NO_SIDEBAR_WATCH = (_chatIds: string[]) => {}
+
 export function useMessenger(session: Session, onSessionRevoked: () => void) {
   const location = useChatLocation()
-  const { navigate, allowDefaultSelection } = location
+  const { navigate } = location
   const prefix = `relay.${session.user.id}.${session.deviceId}`
   const recoveryRef = useRef<{ prefix: string; value: ChatRecovery } | null>(null)
   if (recoveryRef.current?.prefix !== prefix)
@@ -121,11 +123,7 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
           )?.id || current
         )
       }
-      return current && chats.some((chat) => chat.id === current)
-        ? current
-        : allowDefaultSelection.current
-          ? chats[0]?.id || null
-          : null
+      return current && chats.some((chat) => chat.id === current) ? current : null
     })
   }, [])
 
@@ -324,7 +322,6 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     session,
     sessionApi,
     location,
-    selectedId,
     selectedRef,
     setSelectedId,
     setDraftChat,
@@ -350,11 +347,7 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     clearChatHistory: features.clearChatHistory,
     features,
     sidebarPresence: {} as Record<string, 'online' | 'offline' | 'unknown'>,
-    watchSidebarPeers: (_chatIds: string[]) => {},
-    reconnect: { nextRetryAt: null as number | null },
-    retryNow: () => {},
-    deleteChatById: async (_chatId: string, _scope: 'SELF' | 'EVERYONE') => {},
-    clearChatHistory: async (_chatId: string, _scope: 'SELF' | 'EVERYONE') => {},
+    watchSidebarPeers: NO_SIDEBAR_WATCH,
     deleteChat: features.deleteChat,
     latestMessages: recovery.latestWindows(),
     detached: Boolean(selectedId && recovery.isDetached(selectedId)),

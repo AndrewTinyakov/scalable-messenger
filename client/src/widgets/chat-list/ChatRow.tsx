@@ -28,7 +28,7 @@ interface Props {
 function preview(chat: Chat, userId: string, loaded: Message | undefined) {
   const last = chat.lastMessage
   const senderId = last?.senderId ?? loaded?.senderId
-  const body = last?.body ?? loaded?.body
+  const body = last?.bodyPreview ?? loaded?.body
   const deleted = last ? last.deleted : Boolean(loaded?.deletedAt)
   const createdAt = last?.createdAt ?? loaded?.createdAt
   if (senderId === undefined)

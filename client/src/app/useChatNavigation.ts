@@ -16,7 +16,6 @@ interface Options {
   session: Session
   sessionApi: ReturnType<typeof api.forSession>
   location: ReturnType<typeof useChatLocation>
-  selectedId: string | null
   selectedRef: MutableRefObject<string | null>
   setSelectedId: Dispatch<SetStateAction<string | null>>
   setDraftChat: Dispatch<SetStateAction<Chat | undefined>>
@@ -31,7 +30,6 @@ export function useChatNavigation({
   session,
   sessionApi,
   location,
-  selectedId,
   selectedRef,
   setSelectedId,
   setDraftChat,
@@ -40,7 +38,7 @@ export function useChatNavigation({
   refreshChats,
   setError,
 }: Options) {
-  const { path, navigate, allowDefaultSelection } = location
+  const { path, navigate } = location
   const [navigationError, setNavigationError] = useState<string | null>(null)
   const [openingConversation, setOpeningConversation] = useState(false)
   const selectChat = useCallback(
@@ -90,12 +88,6 @@ export function useChatNavigation({
     },
     [refreshChats, selectChat, sessionApi, rememberChat],
   )
-
-  useEffect(() => {
-    if (!allowDefaultSelection.current || !selectedId) return
-    const chat = listChats().find((item) => item.id === selectedId)
-    if (chat) navigate(chatPath(chat, session.user.id), true)
-  }, [selectedId, listChats, navigate, session.user.id, allowDefaultSelection])
 
   useEffect(() => {
     const target = parseChatPath(path)

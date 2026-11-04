@@ -808,6 +808,10 @@ describe('messenger request coordination', () => {
     await act(async () => {
       chatRequests[1](Response.json({ chats: [group], nextCursor: null }))
     })
+    expect(messenger.selectedId).toBeNull()
+    await act(async () => {
+      messenger.selectChat(chatId)
+    })
 
     expect(sockets).toHaveLength(1)
     expect(messenger.selectedId).toBe(chatId)
@@ -983,6 +987,7 @@ describe('messenger request coordination', () => {
   })
 
   it('renews the selected group once after coalesced chat-created events', async () => {
+    window.history.replaceState(null, '', `/groups/${chatId}`)
     await renderMessenger()
     await act(async () => {
       sockets[0].open()
@@ -1007,6 +1012,7 @@ describe('messenger request coordination', () => {
 
   it('does not renew a replacement socket when an older socket refresh completes', async () => {
     vi.useFakeTimers()
+    window.history.replaceState(null, '', `/groups/${chatId}`)
     await renderMessenger()
     await act(async () => {
       sockets[0].open()
@@ -1031,6 +1037,7 @@ describe('messenger request coordination', () => {
 
   it('coalesces repeated focus work while the selected group is current', async () => {
     vi.useFakeTimers()
+    window.history.replaceState(null, '', `/groups/${chatId}`)
     await renderMessenger()
     await act(async () => {
       sockets[0].open()
@@ -1070,6 +1077,7 @@ describe('messenger request coordination', () => {
 
   it('retries failed history on focus even while chat metadata is current', async () => {
     vi.useFakeTimers()
+    window.history.replaceState(null, '', `/groups/${chatId}`)
     await renderMessenger()
     await act(async () => {
       sockets[0].open()
@@ -1089,6 +1097,7 @@ describe('messenger request coordination', () => {
 
   it('runs required history recovery after reconnect despite fresh focus data', async () => {
     vi.useFakeTimers()
+    window.history.replaceState(null, '', `/groups/${chatId}`)
     await renderMessenger()
     await act(async () => {
       sockets[0].open()
@@ -1114,6 +1123,7 @@ describe('messenger request coordination', () => {
 
   it('flushes applied progress when the page is hidden', async () => {
     vi.useFakeTimers()
+    window.history.replaceState(null, '', `/groups/${chatId}`)
     await renderMessenger()
     await act(async () => {
       sockets[0].open()

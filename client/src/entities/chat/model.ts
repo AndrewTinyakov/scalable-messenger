@@ -1,20 +1,7 @@
 import type { components } from '../../shared/api/generated/schema'
 import { ChatKind } from '../../shared/api/generated/socket-vocabulary'
 
-export interface ChatLastMessage {
-  id: string
-  sequence: string
-  senderId: string
-  senderUsername?: string | null
-  body: string
-  createdAt: string
-  deleted: boolean
-}
-
-export type Chat = components['schemas']['ChatResponse'] & {
-  unreadCount?: number
-  lastMessage?: ChatLastMessage | null
-}
+export type Chat = components['schemas']['ChatResponse'] & { unreadCount?: number }
 
 export function chatTitle(chat: Chat, myId: string): string {
   if (chat.kind === ChatKind.GROUP) return chat.name || 'Untitled group'

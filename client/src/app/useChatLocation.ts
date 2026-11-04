@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { Chat } from '../entities/chat/model'
 import { ChatKind } from '../shared/api/generated/socket-vocabulary'
 import { isId } from '../shared/lib/validation'
@@ -18,9 +18,7 @@ export function parseChatPath(path: string) {
 
 export function useChatLocation() {
   const [path, setPath] = useState(() => window.location.pathname)
-  const allowDefaultSelection = useRef(path === '/')
   const navigate = useCallback((next: string, replace = false) => {
-    allowDefaultSelection.current = false
     if (window.location.pathname !== next) {
       window.history[replace ? 'replaceState' : 'pushState'](null, '', next)
     }
@@ -28,13 +26,10 @@ export function useChatLocation() {
   }, [])
 
   useEffect(() => {
-    const pop = () => {
-      allowDefaultSelection.current = false
-      setPath(window.location.pathname)
-    }
+    const pop = () => setPath(window.location.pathname)
     window.addEventListener('popstate', pop)
     return () => window.removeEventListener('popstate', pop)
   }, [])
 
-  return { path, navigate, allowDefaultSelection }
+  return { path, navigate }
 }

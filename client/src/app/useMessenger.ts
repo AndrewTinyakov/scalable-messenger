@@ -269,7 +269,12 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     [recovery],
   )
 
-  const { selectResolvedDraft, reconcilePending, sendMessage, retryMessage } = useMessengerSends({
+  const {
+    selectResolvedDraft,
+    reconcilePending,
+    sendMessage: startSend,
+    retryMessage,
+  } = useMessengerSends({
     pending,
     requests,
     catchUp,
@@ -278,6 +283,15 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     setDraftChat,
     setError,
   })
+
+  const sendMessage = useCallback(
+    (chatId: string, body: string, replyToMessageId?: string) => {
+      const accepted = startSend(chatId, body, replyToMessageId)
+      if (accepted && !chatId.startsWith('draft:')) recovery.beginNavigation()
+      return accepted
+    },
+    [startSend, recovery],
+  )
 
   useMessengerSocket({
     onFeatureEvent: features.onEvent,

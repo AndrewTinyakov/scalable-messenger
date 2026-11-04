@@ -336,6 +336,84 @@ afterEach(async () => {
 })
 
 describe('messenger request coordination', () => {
+  it.each(['quote navigation', 'location restore'] as const)(
+    'keeps the latest window when an accepted send supersedes delayed %s',
+    async (navigation) => {
+      historyMessages = Array.from({ length: 100 }, (_, index) => ({
+        id: String(index + 1).padStart(26, '0'),
+        chatId,
+        senderId: recipient.id,
+        sequence: String(index + 1),
+        body: `Message ${index + 1}`,
+        createdAt: '2026-11-04T10:00:00Z',
+      }))
+      window.history.replaceState(null, '', `/groups/${chatId}`)
+      await renderMessenger()
+      await act(async () => sockets[0].open())
+      const latest = messenger.messages[chatId]
+      expect(latest[0].sequence).toBe('51')
+      const fetch = globalThis.fetch
+      let release!: (response: Response) => void
+      const around = new Promise<Response>((resolve) => {
+        release = resolve
+      })
+      const requests: string[] = []
+      vi.stubGlobal('fetch', (input: string, options?: RequestInit) => {
+        requests.push(input)
+        return input.includes('/messages/around') ? around : fetch(input, options)
+      })
+      let jump: Promise<void> | undefined
+      if (navigation === 'quote navigation') {
+        await act(async () => {
+          jump = messenger.features.jumpToMessage(historyMessages[0].id, false)
+        })
+      } else {
+        await act(async () => messenger.closeChat())
+        messenger.rememberLocation(chatId, {
+          messageId: historyMessages[0].id,
+          sequence: '1',
+          offsetPx: -17,
+          atLatest: false,
+        })
+        await act(async () => messenger.selectChat(chatId))
+      }
+      expect(requests.filter((path) => path.includes('/messages/around'))).toHaveLength(1)
+      expect(messenger.detached).toBe(false)
+      expect(messenger.hasNewerMessages).toBe(false)
+      const revision = messenger.locationRevision
+      const windowBeforeSend = messenger.messages[chatId]
+      requests.length = 0
+      await act(async () => {
+        expect(messenger.sendMessage(chatId, 'Stay at latest')).toBe(true)
+      })
+      expect(requests).toEqual([])
+      await act(async () => {
+        release(
+          Response.json({
+            ...snapshotFor(chatId),
+            messages: historyMessages.slice(0, 50),
+            anchorMessageId: historyMessages[0].id,
+            hasOlder: false,
+            hasNewer: true,
+            coverageAfterSequence: '0',
+            coverageThroughSequence: '50',
+          }),
+        )
+        await jump
+      })
+      expect(messenger.messages[chatId]).toEqual(windowBeforeSend)
+      expect(messenger.detached).toBe(false)
+      expect(messenger.hasNewerMessages).toBe(false)
+      expect(messenger.locationRevision).toBe(revision)
+      expect(messenger.features.reveal).toBeNull()
+      expect(messenger.pending).toEqual([
+        expect.objectContaining({ chatId, body: 'Stay at latest', status: 'sending' }),
+      ])
+      expect(messenger.error).toBeNull()
+      expect(readCalls).toEqual([])
+    },
+  )
+
   it('clears the selected badge immediately while a read request waits and resists a stale summary', async () => {
     vi.useFakeTimers()
     fakeUnread = 4
@@ -868,6 +946,9 @@ describe('messenger request coordination', () => {
     })
     expect(messenger.draftChat?.members).toEqual([session.user, recipient])
     expect(messenger.selectedId).toBe(`draft:${recipient.id}`)
+    await act(async () => {
+      expect(messenger.sendMessage(`draft:${recipient.id}`, 'First message')).toBe(true)
+    })
     expect(paths.some((path) => path.includes('/chats/draft'))).toBe(false)
     expect(window.location.pathname).toBe(`/users/${recipient.id}`)
   })

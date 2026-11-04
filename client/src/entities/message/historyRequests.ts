@@ -12,6 +12,7 @@ type Request = {
 
 export class HistoryRequests {
   private readonly pending = new Set<Request>()
+  private capacity?: { promise: Promise<void>; release(): void }
   private readonly revisions = new Map<
     string,
     { mutationRevision: string; visibilityRevision: string }
@@ -72,12 +73,30 @@ export class HistoryRequests {
     )
   }
 
+  waitForCapacity(): Promise<void> | undefined {
+    if (this.pending.size < 16) return undefined
+    if (!this.capacity) {
+      let release!: () => void
+      const promise = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      this.capacity = { promise, release }
+    }
+    return this.capacity.promise
+  }
+
+  private releaseCapacity(): void {
+    if (this.pending.size >= 16) return
+    this.capacity?.release()
+    this.capacity = undefined
+  }
+
   async run<T extends { messages?: Message[] } & Partial<SnapshotMetadata>, R>(
     chatId: string,
     fetch: () => Promise<T>,
     install: (page: T) => R,
   ): Promise<R | undefined> {
-    if (this.pending.size >= 16) throw new Error('Too many pending history requests')
+    if (this.pending.size >= 16) return undefined
     const request: Request = {
       chatId,
       messages: [],
@@ -106,6 +125,7 @@ export class HistoryRequests {
       )
     } finally {
       this.pending.delete(request)
+      this.releaseCapacity()
       request.messages = []
     }
   }
@@ -157,5 +177,6 @@ export class HistoryRequests {
       request.messages = []
       this.pending.delete(request)
     }
+    this.releaseCapacity()
   }
 }

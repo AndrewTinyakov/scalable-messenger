@@ -1,3 +1,12 @@
+@media (min-width: 1300px) {
+  .message-row:has(.message-selection-mark) {
+    padding-right: 0;
+  }
+  .message-selection-mark {
+    right: -38px;
+  }
+}
+
 @media (max-width: 1100px) {
   :root {
     --sidebar-width: 312px;

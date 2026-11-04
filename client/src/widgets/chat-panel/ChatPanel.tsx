@@ -155,7 +155,7 @@ export function ChatPanel({
     }
   }, [reply?.id, edit?.id, features?.revisionKey, features?.resolveTarget])
 
-  const { scrollRef, highlight, rememberAnchor, handleScroll } = useMessageViewport({
+  const { scrollRef, highlight, rememberAnchor, handleScroll, stickToLatest } = useMessageViewport({
     chatId: chat?.id,
     userId: currentUser.id,
     messages,
@@ -176,6 +176,15 @@ export function ChatPanel({
     locationRevision,
     onLocationChange,
   })
+
+  function sendFromComposer(chatId: string, body: string, replyToMessageId?: string) {
+    const sent = onSend(chatId, body, replyToMessageId)
+    if (sent) {
+      stickToLatest()
+      if (detached || hasNewer) onJumpToLatest()
+    }
+    return sent
+  }
 
   const selection = useMessageSelection(scrollRef, messages, chat?.id)
   useEffect(() => {
@@ -402,7 +411,7 @@ export function ChatPanel({
           key={modeKey}
           chatId={chat.id}
           connected={connection === 'connected'}
-          onSend={onSend}
+          onSend={sendFromComposer}
           reply={
             reply
               ? {

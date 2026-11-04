@@ -31,6 +31,14 @@ export function CreateChatDialog({
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !busy) onClose()
+    }
+    window.addEventListener('keydown', escape)
+    return () => window.removeEventListener('keydown', escape)
+  }, [busy, onClose])
+
+  useEffect(() => {
     let active = true
     const timer = window.setTimeout(() => {
       if (!query.trim()) {

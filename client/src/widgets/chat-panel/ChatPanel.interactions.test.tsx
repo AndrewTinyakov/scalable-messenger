@@ -1,5 +1,5 @@
 import { JSDOM } from 'jsdom'
-import { act } from 'react'
+import { act, type ComponentProps } from 'react'
 import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Chat } from '../../entities/chat/model'
@@ -133,7 +133,11 @@ afterEach(async () => {
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
-async function render(messages = rows(10), chat = direct) {
+async function render(
+  messages = rows(10),
+  chat = direct,
+  overrides: Partial<ComponentProps<typeof ChatPanel>> = {},
+) {
   await act(async () =>
     root.render(
       <ChatPanel
@@ -156,6 +160,7 @@ async function render(messages = rows(10), chat = direct) {
         onJumpToLatest={() => {}}
         jumpRevision={0}
         onViewPositionChange={() => {}}
+        {...overrides}
         readingLocation={saved.get(chat.id)}
         locationRevision={revision}
         onLocationChange={(chatId, location) => saved.set(chatId, location)}
@@ -313,6 +318,40 @@ describe('message actions and scoped deletion', () => {
     )
     expect(container.querySelector('.composer-mode')).toBeNull()
     expect(document.querySelector('[role="menu"]')).toBeNull()
+  })
+})
+
+describe('sending while reading history', () => {
+  async function submit(text: string) {
+    const input = container.querySelector('textarea')!
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value')!.set!.call(
+        input,
+        text,
+      )
+      input.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    })
+    await act(async () =>
+      input.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })),
+    )
+  }
+
+  it('returns to the latest messages after a send from an older window', async () => {
+    const jump = vi.fn()
+    await render(rows(4), direct, { hasNewer: true, onJumpToLatest: jump })
+    const viewport = container.querySelector<HTMLElement>('.chat-body')!
+    Object.defineProperty(viewport, 'scrollHeight', { value: 2000, configurable: true })
+    viewport.scrollTop = 100
+    await submit('hello')
+    expect(jump).toHaveBeenCalledOnce()
+    expect(viewport.scrollTop).toBe(2000 - viewport.clientHeight)
+  })
+
+  it('stays where it is when the send is refused', async () => {
+    const jump = vi.fn()
+    await render(rows(4), direct, { hasNewer: true, onJumpToLatest: jump, onSend: () => false })
+    await submit('hello')
+    expect(jump).not.toHaveBeenCalled()
   })
 })
 

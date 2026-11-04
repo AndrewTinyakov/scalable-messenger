@@ -244,6 +244,16 @@ export function useMessageViewport({
     () => !pendingRestore.current,
   )
 
+  function stickToLatest() {
+    const scroller = scrollRef.current
+    if (!scroller) return
+    pendingRestore.current = null
+    anchorRef.current = null
+    restoredAnchor.current = null
+    atBottomRef.current = true
+    scroller.scrollTop = scroller.scrollHeight
+  }
+
   function handleScroll() {
     const scroller = scrollRef.current
     if (!scroller || pendingRestore.current) return
@@ -275,5 +285,5 @@ export function useMessageViewport({
     }
   }
 
-  return { scrollRef, highlight, rememberAnchor, handleScroll }
+  return { scrollRef, highlight, rememberAnchor, handleScroll, stickToLatest }
 }

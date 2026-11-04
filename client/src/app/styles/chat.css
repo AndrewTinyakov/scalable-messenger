@@ -251,7 +251,7 @@
   float: right;
   align-items: center;
   gap: 3px;
-  color: var(--text-3);
+  color: var(--bubble-in-meta);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   line-height: 1;

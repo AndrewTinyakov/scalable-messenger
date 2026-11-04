@@ -247,6 +247,7 @@
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
+.chat-item.selected .chat-item-top time,
 .chat-item.selected .chat-preview {
   color: var(--text-2);
 }

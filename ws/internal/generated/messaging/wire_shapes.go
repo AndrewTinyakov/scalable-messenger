@@ -15,6 +15,7 @@ var FrameShapes = map[FrameType]WireShape{
 	"received_message": {Required: []string{"type", "version", "chatId", "sequence"}, Optional: []string{}},
 	"watch_presence":   {Required: []string{"type", "version", "chatId", "userIds"}, Optional: []string{}},
 	"unwatch_presence": {Required: []string{"type", "version"}, Optional: []string{}},
+	"watch_sidebar":    {Required: []string{"type", "version", "chatIds"}, Optional: []string{}},
 }
 
 var RoomShapes = map[EventType]WireShape{

@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.5.1
 // - protoc             v6.30.2
-// source: chat_authorization.proto
+// source: contracts/grpc/chat_authorization.proto
 
 package authorization
 
@@ -19,6 +19,7 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
+	ChatAuthorization_AuthorizeSidebar_FullMethodName  = "/messenger.authorization.v1.ChatAuthorization/AuthorizeSidebar"
 	ChatAuthorization_ValidateSession_FullMethodName   = "/messenger.authorization.v1.ChatAuthorization/ValidateSession"
 	ChatAuthorization_AuthorizeGroup_FullMethodName    = "/messenger.authorization.v1.ChatAuthorization/AuthorizeGroup"
 	ChatAuthorization_AuthorizeGroups_FullMethodName   = "/messenger.authorization.v1.ChatAuthorization/AuthorizeGroups"
@@ -29,6 +30,7 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ChatAuthorizationClient interface {
+	AuthorizeSidebar(ctx context.Context, in *AuthorizeSidebarRequest, opts ...grpc.CallOption) (*AuthorizeSidebarResponse, error)
 	ValidateSession(ctx context.Context, in *ValidateSessionRequest, opts ...grpc.CallOption) (*ValidateSessionResponse, error)
 	AuthorizeGroup(ctx context.Context, in *AuthorizeGroupRequest, opts ...grpc.CallOption) (*AuthorizeGroupResponse, error)
 	AuthorizeGroups(ctx context.Context, in *AuthorizeGroupsRequest, opts ...grpc.CallOption) (*AuthorizeGroupsResponse, error)
@@ -41,6 +43,16 @@ type chatAuthorizationClient struct {
 
 func NewChatAuthorizationClient(cc grpc.ClientConnInterface) ChatAuthorizationClient {
 	return &chatAuthorizationClient{cc}
+}
+
+func (c *chatAuthorizationClient) AuthorizeSidebar(ctx context.Context, in *AuthorizeSidebarRequest, opts ...grpc.CallOption) (*AuthorizeSidebarResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AuthorizeSidebarResponse)
+	err := c.cc.Invoke(ctx, ChatAuthorization_AuthorizeSidebar_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *chatAuthorizationClient) ValidateSession(ctx context.Context, in *ValidateSessionRequest, opts ...grpc.CallOption) (*ValidateSessionResponse, error) {
@@ -87,6 +99,7 @@ func (c *chatAuthorizationClient) AuthorizePresence(ctx context.Context, in *Aut
 // All implementations must embed UnimplementedChatAuthorizationServer
 // for forward compatibility.
 type ChatAuthorizationServer interface {
+	AuthorizeSidebar(context.Context, *AuthorizeSidebarRequest) (*AuthorizeSidebarResponse, error)
 	ValidateSession(context.Context, *ValidateSessionRequest) (*ValidateSessionResponse, error)
 	AuthorizeGroup(context.Context, *AuthorizeGroupRequest) (*AuthorizeGroupResponse, error)
 	AuthorizeGroups(context.Context, *AuthorizeGroupsRequest) (*AuthorizeGroupsResponse, error)
@@ -101,6 +114,9 @@ type ChatAuthorizationServer interface {
 // pointer dereference when methods are called.
 type UnimplementedChatAuthorizationServer struct{}
 
+func (UnimplementedChatAuthorizationServer) AuthorizeSidebar(context.Context, *AuthorizeSidebarRequest) (*AuthorizeSidebarResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AuthorizeSidebar not implemented")
+}
 func (UnimplementedChatAuthorizationServer) ValidateSession(context.Context, *ValidateSessionRequest) (*ValidateSessionResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ValidateSession not implemented")
 }
@@ -132,6 +148,24 @@ func RegisterChatAuthorizationServer(s grpc.ServiceRegistrar, srv ChatAuthorizat
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&ChatAuthorization_ServiceDesc, srv)
+}
+
+func _ChatAuthorization_AuthorizeSidebar_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AuthorizeSidebarRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatAuthorizationServer).AuthorizeSidebar(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChatAuthorization_AuthorizeSidebar_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatAuthorizationServer).AuthorizeSidebar(ctx, req.(*AuthorizeSidebarRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _ChatAuthorization_ValidateSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -214,6 +248,10 @@ var ChatAuthorization_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*ChatAuthorizationServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
+			MethodName: "AuthorizeSidebar",
+			Handler:    _ChatAuthorization_AuthorizeSidebar_Handler,
+		},
+		{
 			MethodName: "ValidateSession",
 			Handler:    _ChatAuthorization_ValidateSession_Handler,
 		},
@@ -231,5 +269,5 @@ var ChatAuthorization_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "chat_authorization.proto",
+	Metadata: "contracts/grpc/chat_authorization.proto",
 }

@@ -24,6 +24,7 @@ const (
 	FrameApplied         = messaging.FrameApplied
 	FrameDismissed       = messaging.FrameDismissed
 	FrameReceivedMessage = messaging.FrameReceivedMessage
+	FrameWatchSidebar    = messaging.FrameWatchSidebar
 	FrameWatchPresence   = messaging.FrameWatchPresence
 	FrameUnwatchPresence = messaging.FrameUnwatchPresence
 )
@@ -36,6 +37,8 @@ const (
 	EventChatDeleted         = messaging.EventChatDeleted
 	EventReadsChanged        = messaging.EventReadsChanged
 	EventHistoryChanged      = messaging.EventHistoryChanged
+	EventSidebarPresence     = messaging.EventSidebarPresence
+	EventSidebarActivity     = messaging.EventSidebarActivity
 	EventPresence            = messaging.EventPresence
 	EventSendRejected        = messaging.EventSendRejected
 	EventChatCreated         = messaging.EventChatCreated
@@ -57,6 +60,7 @@ const (
 )
 
 type Frame struct {
+	ChatIDs             []string       `json:"chatIds,omitempty"`
 	Type                FrameType      `json:"type"`
 	Version             int            `json:"version"`
 	ChatID              string         `json:"chatId,omitempty"`
@@ -120,6 +124,17 @@ func DecodeFrame(data []byte) (Frame, error) {
 			(f.RecipientID != "" && !ValidULID(f.RecipientID)) ||
 			!ValidULID(f.RequestID) || strings.TrimSpace(f.Body) == "" || len([]rune(f.Body)) > 4000 || f.Kind != "" || f.Sequence != "" || f.Epoch != "" || f.StreamID != "" || f.LastAppliedSequence != "" {
 			return f, errors.New("invalid send")
+		}
+	case FrameWatchSidebar:
+		if f.ChatIDs == nil || len(f.ChatIDs) > 100 {
+			return f, errors.New("invalid sidebar targets")
+		}
+		seen := make(map[string]bool, len(f.ChatIDs))
+		for _, id := range f.ChatIDs {
+			if !ValidULID(id) || seen[id] {
+				return f, errors.New("invalid sidebar target")
+			}
+			seen[id] = true
 		}
 	case FrameWatchPresence, FrameUnwatchPresence:
 	case FrameSubscribe:

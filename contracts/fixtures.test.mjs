@@ -203,3 +203,18 @@ test('bodyless recovery hints and viewer-resolved live replies share strict fixt
   assert.equal(reference(row), true);
   assert.equal(reference({ ...row, body: 'retained text' }), false);
 });
+
+test('sidebar watch and bodyless observations share strict bounded schemas', () => {
+  for (const name of ['watch-sidebar', 'sidebar-activity', 'sidebar-presence']) {
+    const schema = validate(`schemas/socket/frame/${name}-v1.yaml`);
+    const fixture = readJSON(`fixtures/valid/${name}.json`);
+    assert.equal(schema(fixture), true, JSON.stringify(schema.errors));
+    assert.equal(schema({ ...fixture, body: 'forbidden' }), false);
+  }
+  const watch = ajv.getSchema(new URL('schemas/socket/frame/watch-sidebar-v1.yaml', root).href);
+  const fixture = readJSON('fixtures/valid/watch-sidebar.json');
+  assert.equal(watch({ ...fixture, chatIds: [] }), true);
+  assert.equal(watch({ ...fixture, chatIds: null }), false);
+  assert.equal(watch({ ...fixture, chatIds: [fixture.chatIds[0], fixture.chatIds[0]] }), false);
+  assert.equal(watch({ ...fixture, chatIds: Array.from({length:101}, (_, i) => String(i).padStart(26, '0')) }), false);
+});

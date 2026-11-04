@@ -98,8 +98,16 @@ export function decodeChat(value: unknown): Chat {
   )
     invalid()
   if (value.activityAt != null && !isDateTime(value.activityAt)) invalid()
-  if (value.unreadCount !== undefined && (typeof value.unreadCount !== 'number' || !Number.isInteger(value.unreadCount) || value.unreadCount < 0 || value.unreadCount > 256)) invalid()
-  if (value.unreadCountCapped !== undefined && typeof value.unreadCountCapped !== 'boolean') invalid()
+  if (
+    value.unreadCount !== undefined &&
+    (typeof value.unreadCount !== 'number' ||
+      !Number.isInteger(value.unreadCount) ||
+      value.unreadCount < 0 ||
+      value.unreadCount > 256)
+  )
+    invalid()
+  if (value.unreadCountCapped !== undefined && typeof value.unreadCountCapped !== 'boolean')
+    invalid()
   if (value.lastMessage != null) {
     fields(value.lastMessage, [
       'id',

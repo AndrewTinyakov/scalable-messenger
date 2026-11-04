@@ -55,6 +55,7 @@ type Server struct {
 	cleanup          *leaseCleanup
 	draining         bool
 	presence         *presenceCoordinator
+	sidebar          *sidebarCoordinator
 }
 
 type CommandPublisher interface {
@@ -140,6 +141,7 @@ func NewServer(parent context.Context, cfg config.Config, logger *slog.Logger, d
 	s.metrics.SetCapacity(monitoring.CapacityResource("pending_upgrades"), cfg.MaxPendingUpgrades)
 	registry.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{Name: "messenger_ws_oldest_pending_ack_seconds", Help: "Age of the oldest still-pending live acknowledgement on this node."}, s.oldestPendingACK))
 	s.presence = newPresenceCoordinator(s)
+	s.sidebar = newSidebarCoordinator(s)
 	s.startRuntime()
 	s.wg.Add(1)
 	go func() { defer s.wg.Done(); s.rooms.RunChecks(ctx) }()

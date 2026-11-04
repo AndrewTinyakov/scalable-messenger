@@ -328,6 +328,62 @@ afterEach(async () => {
 })
 
 describe('messenger request coordination', () => {
+  it('debounces sidebar targets, expires presence to unknown and restores the watch after reconnect', async () => {
+    vi.useFakeTimers()
+    await renderMessenger()
+    await act(async () => {
+      sockets[0].open()
+      messenger.updateChat({ ...direct, kind: ChatKind.DIRECT })
+      messenger.watchSidebarPeers([direct.id, chatId, chatId])
+      messenger.watchSidebarPeers([chatId, direct.id])
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250)
+    })
+    const watches = () =>
+      sockets[0].sent
+        .map((raw) => JSON.parse(raw))
+        .filter((frame) => frame.type === 'watch_sidebar')
+    expect(watches()).toEqual([
+      { type: 'watch_sidebar', version: 1, chatIds: [chatId, direct.id].sort() },
+    ])
+    expect(sockets[0].sent.some((raw) => JSON.parse(raw).type === 'watch_presence')).toBe(true)
+    await act(async () =>
+      sockets[0].event({
+        type: 'sidebar_presence',
+        version: 1,
+        observedAt: new Date().toISOString(),
+        validForMs: 15000,
+        statuses: [{ userId: recipient.id, state: 'online' }],
+      }),
+    )
+    expect(messenger.sidebarPresence[recipient.id]).toBe('online')
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15000)
+    })
+    expect(messenger.sidebarPresence[recipient.id]).toBe('unknown')
+    await act(async () => {
+      sockets[0].close()
+      await vi.advanceTimersByTimeAsync(1000)
+      sockets[1].open()
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250)
+    })
+    expect(
+      sockets[1].sent
+        .map((raw) => JSON.parse(raw))
+        .filter((frame) => frame.type === 'watch_sidebar'),
+    ).toEqual(watches())
+    await act(async () => {
+      messenger.watchSidebarPeers([])
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250)
+    })
+    expect(messenger.sidebarPresence).toEqual({})
+  })
+
   it('coalesces received live hints into a fresh summary with the group sender username', async () => {
     vi.useFakeTimers()
     await renderMessenger()
@@ -348,15 +404,12 @@ describe('messenger request coordination', () => {
     await act(async () => {
       for (let index = 1; index <= 3; index++)
         sockets[0].event({
-          type: 'reads_changed',
+          type: 'sidebar_activity',
           version: 1,
-          eventId: recipient.id,
-          room: `group:${chatId}`,
-          epoch: 'epoch',
-          streamId: `${index}-0`,
+          sequence: String(index),
           chatId,
         })
-      await vi.advanceTimersByTimeAsync(500)
+      await vi.advanceTimersByTimeAsync(2000)
     })
     expect(messenger.chats.find((chat) => chat.id === chatId)?.lastMessage).toEqual(lastSummary)
     expect(paths.filter((path) => path.endsWith(`/chats/${chatId}`))).toHaveLength(1)

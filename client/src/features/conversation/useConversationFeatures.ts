@@ -45,6 +45,7 @@ export function useConversationFeatures(options: Options) {
   const readTimer = useRef<ReturnType<typeof setTimeout>>()
   const readRunning = useRef(false)
   const readRefreshing = useRef(false)
+  const readRefreshPending = useRef(false)
   const mutationBusy = useRef(new Set<string>())
   const reconcileRef = useRef<MutationRecovery | null>(null)
   if (!reconcileRef.current)
@@ -66,7 +67,12 @@ export function useConversationFeatures(options: Options) {
     const current = optionsRef.current
     const id = current.chat?.id
     const generation = scope.current
-    if (!id || id.startsWith('draft:') || readRefreshing.current) return
+    if (!id || id.startsWith('draft:')) return
+    if (readRefreshing.current) {
+      readRefreshPending.current = true
+      return
+    }
+    readRefreshPending.current = false
     readRefreshing.current = true
     try {
       const result = await current.sessionApi.reads(id)
@@ -80,7 +86,10 @@ export function useConversationFeatures(options: Options) {
       }))
     } catch {
     } finally {
-      if (generation === scope.current) readRefreshing.current = false
+      if (generation === scope.current) {
+        readRefreshing.current = false
+        if (readRefreshPending.current) void refreshReads()
+      }
     }
   }, [])
   const flushRead = useCallback(async () => {
@@ -148,6 +157,7 @@ export function useConversationFeatures(options: Options) {
     readTimer.current = undefined
     readRunning.current = false
     readRefreshing.current = false
+    readRefreshPending.current = false
     setWatchTargets(null)
     presenceAt.current = 0
     clearTimeout(presenceExpiry.current)

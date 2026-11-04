@@ -90,12 +90,16 @@ export function useVisibleReads(
     observer?.observe(viewport)
     rescan.current = scan
     scan()
+    const poll = setInterval(() => {
+      if (document.visibilityState === 'visible') scan()
+    }, 100)
     viewport.addEventListener('scroll', scan, { passive: true })
     window.addEventListener('focus', scan)
     window.addEventListener('blur', scan)
     window.addEventListener('resize', scan)
     document.addEventListener('visibilitychange', scan)
     return () => {
+      clearInterval(poll)
       rescan.current = undefined
       for (const timer of timers.values()) clearTimeout(timer)
       observer?.disconnect()

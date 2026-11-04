@@ -96,6 +96,61 @@ class ReadServiceTests
         )
 
         @Test
+        fun `last read in an already notified bucket gets a durable trailing notification`() {
+            val f = fixture(messages = 3)
+            val clock = MutableClock("2026-11-02T12:00:00Z")
+            val reads = service(clock)
+            reads.advance(f.chat, f.members.first(), AdvanceReadRequest("1"))
+            db.update("DELETE FROM messenger_outbox_events WHERE room=?", "group:${f.chat.value}")
+            clock.set("2026-11-02T12:00:01Z")
+            reads.advance(f.chat, f.members.first(), AdvanceReadRequest("3"))
+            reads.publishPendingNotifications()
+            assertEquals(0, sharedNotifications(f.chat))
+            clock.set("2026-11-02T12:00:02Z")
+            reads.publishPendingNotifications()
+            assertEquals(1, sharedNotifications(f.chat))
+            assertEquals("3", reads.summary(f.chat, f.owner).maxOtherReadSequence)
+            reads.publishPendingNotifications()
+            assertEquals(1, sharedNotifications(f.chat))
+            assertEquals(
+                0,
+                db.queryForObject("SELECT count(*) FROM pending_read_notifications WHERE chat_id=?", Int::class.java, f.chat.value),
+            )
+        }
+
+        @Test
+        fun `committed reader retains notification work when the bucket winner rolls back`() {
+            val f = fixture(messages = 2)
+            val reads = service(MutableClock("2026-11-02T12:00:00Z"))
+            val claimed = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            val winner = concurrently {
+                tx.execute { status ->
+                    reads.advance(f.chat, f.members[0], AdvanceReadRequest("1"))
+                    claimed.countDown()
+                    check(release.await(10, TimeUnit.SECONDS))
+                    status.setRollbackOnly()
+                }
+            }
+            try {
+                assertTrue(claimed.await(10, TimeUnit.SECONDS))
+                assertEquals("2", reads.advance(f.chat, f.members[1], AdvanceReadRequest("2")).throughSequence)
+            } finally {
+                release.countDown()
+                winner.get(10, TimeUnit.SECONDS)
+            }
+            reads.publishPendingNotifications()
+            assertEquals(1, sharedNotifications(f.chat))
+            assertEquals("2", reads.summary(f.chat, f.owner).maxOtherReadSequence)
+        }
+
+        private fun sharedNotifications(chatId: ChatId): Int = db.queryForObject(
+            "SELECT count(*) FROM messenger_outbox_events WHERE room=? AND payload->>'type'='reads_changed'",
+            Int::class.java,
+            "group:${chatId.value}",
+        )!!
+
+        @Test
         fun `every advanced read invalidates its account even when group notifications coalesce`() {
             val f = fixture(messages = 2)
             val reads = service(MutableClock("2026-11-02T12:00:00Z"))

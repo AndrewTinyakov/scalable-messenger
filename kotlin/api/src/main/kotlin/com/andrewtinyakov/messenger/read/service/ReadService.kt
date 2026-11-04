@@ -23,6 +23,7 @@ import com.andrewtinyakov.messenger.shared.web.ApiException
 import com.andrewtinyakov.messenger.shared.web.badRequest
 import com.andrewtinyakov.messenger.shared.web.notFound
 import org.springframework.http.HttpStatus
+import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
 import tools.jackson.databind.ObjectMapper
@@ -60,6 +61,23 @@ class ReadService(
                 )
             }
             ReadProgressResponse(advanced.progress.throughSequence.toString(), advanced.progress.readAt, OffsetDateTime.now(clock))
+        }
+    }
+
+    @Scheduled(
+        fixedDelayString = "\${messenger.read.notification-delay-ms:100}",
+        initialDelayString = "\${messenger.read.notification-initial-delay-ms:100}",
+    )
+    fun publishPendingNotifications() {
+        tx.observedExecute(DatabaseTransaction.READ_ADVANCE) {
+            repository.pendingNotifications(OffsetDateTime.now(clock), 500).forEach { (chatId, rooms) ->
+                outbox.enqueue(
+                    rooms.map { room ->
+                        val event = ReadsChangedEventV1.create(eventId = newId(), room = room, chatId = chatId.value)
+                        OutboxMessage(id = EventId(event.eventId), room = room, payload = mapper.writeValueAsString(event))
+                    },
+                )
+            }
         }
     }
 

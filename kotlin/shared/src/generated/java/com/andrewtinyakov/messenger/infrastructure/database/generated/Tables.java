@@ -15,6 +15,7 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.His
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.MessageChanges;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Messages;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.MessengerOutboxEvents;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.PendingReadNotifications;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.SendRequests;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Sessions;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Users;
@@ -81,6 +82,11 @@ public class Tables {
      * The table <code>public.messenger_outbox_events</code>.
      */
     public static final MessengerOutboxEvents MESSENGER_OUTBOX_EVENTS = MessengerOutboxEvents.MESSENGER_OUTBOX_EVENTS;
+
+    /**
+     * The table <code>public.pending_read_notifications</code>.
+     */
+    public static final PendingReadNotifications PENDING_READ_NOTIFICATIONS = PendingReadNotifications.PENDING_READ_NOTIFICATIONS;
 
     /**
      * The table <code>public.send_requests</code>.

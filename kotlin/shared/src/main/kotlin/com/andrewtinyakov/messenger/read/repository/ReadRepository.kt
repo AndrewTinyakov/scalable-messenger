@@ -31,5 +31,7 @@ interface ReadRepository {
 
     fun notificationRooms(chatId: ChatId, now: OffsetDateTime): List<String>
 
+    fun pendingNotifications(now: OffsetDateTime, limit: Int): Map<ChatId, List<String>>
+
     fun cleanup(now: OffsetDateTime, limit: Int): ReadCleanup?
 }

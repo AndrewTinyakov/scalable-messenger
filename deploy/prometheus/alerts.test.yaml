@@ -4,6 +4,25 @@ rule_files:
 evaluation_interval: 1m
 
 tests:
+  - name: Physical purge delay remains visible independently of acceptance
+    interval: 1m
+    input_series:
+      - series: 'messenger_deletion_purge_oldest_seconds{instance="api-1:8080"}'
+        values: '0 901 961 1021 1081 1141 1201'
+      - series: 'messenger_deletion_purge_oldest_seconds{instance="api-2:8080"}'
+        values: '0 901 961 1021 1081 1141 1201'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: MessengerHistoryPurgeDelayed
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: MessengerHistoryPurgeDelayed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: Message history purge is delayed
+              description: Accepted deletion hides content, but the oldest physical purge has remained unfinished for over fifteen minutes. Inspect purge progress and retry panels.
   - interval: 1m
     input_series:
       - series: 'rabbitmq_detailed_queue_consumers{queue="messenger.send.0"}'

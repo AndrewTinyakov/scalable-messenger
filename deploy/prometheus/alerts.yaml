@@ -1,4 +1,24 @@
 groups:
+  - name: messenger-deletion-cleanup
+    rules:
+      - alert: MessengerHistoryPurgeDelayed
+        expr: max(messenger_deletion_purge_oldest_seconds) > 900
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Message history purge is delayed
+          description: Accepted deletion hides content, but the oldest physical purge has remained unfinished for over fifteen minutes. Inspect purge progress and retry panels.
+
+      - alert: MessengerHistoryPurgeFailing
+        expr: sum(rate(messenger_deletion_purge_retries_total[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Message history purge keeps failing
+          description: Purge batches continue failing. Content remains hidden while durable jobs retry. Inspect database errors and purge backlog age.
+
   - name: messenger-scrape-availability
     rules:
       - record: messenger:minimum_scrape_targets

@@ -19,6 +19,7 @@ interface Props {
   chat: Chat
   userId: string
   selected: boolean
+  live?: boolean
   online: boolean
   loaded?: Message
   onSelect(id: string): void
@@ -50,6 +51,7 @@ export const ChatRow = memo(function ChatRow({
   chat,
   userId,
   selected,
+  live = false,
   online,
   loaded,
   onSelect,
@@ -58,7 +60,7 @@ export const ChatRow = memo(function ChatRow({
   const press = useRef<ReturnType<typeof setTimeout>>()
   const pressed = useRef(false)
   const title = chatTitle(chat, userId)
-  const unread = chat.unreadCount ?? 0
+  const unread = live ? 0 : (chat.unreadCount ?? 0)
   const { sender, text, createdAt } = preview(chat, userId, loaded)
   const release = () => clearTimeout(press.current)
   return (

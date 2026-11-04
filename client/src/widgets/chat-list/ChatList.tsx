@@ -17,6 +17,7 @@ interface Props {
   loading: boolean
   messages: Record<string, Message[]>
   selectedId: string | null
+  liveChatId: string | null
   presence: Record<string, 'online' | 'offline' | 'unknown'>
   onSelect(id: string): void
   onChatMenu: OpenChatMenu
@@ -111,6 +112,7 @@ export function ChatList({
   loading,
   messages,
   selectedId,
+  liveChatId,
   presence,
   onSelect,
   onChatMenu,
@@ -193,6 +195,7 @@ export function ChatList({
               chat={chat}
               userId={user.id}
               selected={selectedId === chat.id}
+              live={liveChatId === chat.id}
               online={peer !== undefined && presence[peer] === 'online'}
               loaded={messages[chat.id]?.at(-1)}
               onSelect={onSelect}

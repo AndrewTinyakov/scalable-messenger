@@ -8,6 +8,7 @@ import { GroupMembersDialog } from '../../features/group-members/GroupMembersDia
 import { ChatKind } from '../../shared/api/generated/socket-vocabulary'
 import { api } from '../../shared/api/http'
 import { isNetworkOnline, subscribeNetwork } from '../../shared/lib/network'
+import { isPageActive, subscribePageActivity } from '../../shared/lib/pageActivity'
 import { ChatList } from '../../widgets/chat-list/ChatList'
 import type { OpenChatMenu } from '../../widgets/chat-list/ChatRow'
 import { ConnectionStatus } from '../../widgets/chat-list/ConnectionStatus'
@@ -22,6 +23,8 @@ interface Props {
 
 export function MessengerPage({ session, onSignOut, onSessionRevoked }: Props) {
   const online = useSyncExternalStore(subscribeNetwork, isNetworkOnline)
+  const pageActive = useSyncExternalStore(subscribePageActivity, isPageActive)
+  const [atLatest, setAtLatest] = useState(true)
   const messenger = useMessenger(session, onSessionRevoked)
   const [creating, setCreating] = useState<'direct' | 'group' | null>(null)
   const [managingMembers, setManagingMembers] = useState(false)
@@ -35,16 +38,17 @@ export function MessengerPage({ session, onSignOut, onSessionRevoked }: Props) {
   const searchUsers = useMemo(() => api.forSession(session).users, [session])
   const selected =
     messenger.chats.find((item) => item.id === messenger.selectedId) || messenger.draftChat
+  const liveChatId = selected && atLatest && pageActive ? selected.id : null
   const unreadChats = useMemo(() => {
     const counts = { all: 0, unread: 0, direct: 0, groups: 0 }
     for (const chat of messenger.chats) {
-      if (!hasUnread(chat)) continue
+      if (!hasUnread(chat) || chat.id === liveChatId) continue
       counts.all += 1
       counts.unread += 1
       counts[chat.kind === ChatKind.GROUP ? 'groups' : 'direct'] += 1
     }
     return counts
-  }, [messenger.chats])
+  }, [messenger.chats, liveChatId])
 
   useEffect(() => {
     setManagingMembers(false)
@@ -80,6 +84,7 @@ export function MessengerPage({ session, onSignOut, onSessionRevoked }: Props) {
           loading={messenger.loading}
           messages={messenger.latestMessages}
           selectedId={messenger.selectedId}
+          liveChatId={liveChatId}
           presence={messenger.sidebarPresence}
           onSelect={messenger.selectChat}
           onChatMenu={openChatMenu}
@@ -116,9 +121,10 @@ export function MessengerPage({ session, onSignOut, onSessionRevoked }: Props) {
           onLoadNewer={() => selected && void messenger.loadNewer(selected.id)}
           onJumpToLatest={() => selected && void messenger.showLatest(selected.id)}
           jumpRevision={messenger.jumpRevision}
-          onViewPositionChange={(atLatest) =>
-            selected && messenger.setAtLatestPosition(selected.id, atLatest)
-          }
+          onViewPositionChange={(latest) => {
+            setAtLatest(latest)
+            if (selected) messenger.setAtLatestPosition(selected.id, latest)
+          }}
         />
         <ConnectionStatus
           connection={messenger.connection}

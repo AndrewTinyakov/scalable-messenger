@@ -32,7 +32,7 @@ let dom: JSDOM
 let root: Root
 let container: HTMLDivElement
 
-async function render(chat: Chat, online = false) {
+async function render(chat: Chat, online = false, live = false) {
   const select = vi.fn()
   const menu = vi.fn()
   await act(async () =>
@@ -41,6 +41,7 @@ async function render(chat: Chat, online = false) {
         chat={chat}
         userId={me.id}
         selected={false}
+        live={live}
         online={online}
         onSelect={select}
         onMenu={menu}
@@ -89,6 +90,13 @@ describe('chat row', () => {
     expect(row.querySelector('.unread-badge')?.textContent).toBe('40+')
     await render({ ...direct, unreadCount: 0 })
     expect(row.querySelector('.unread-badge')).toBeNull()
+  })
+
+  it('hides the badge while the chat is being read live and restores it afterwards', async () => {
+    const { row } = await render({ ...direct, unreadCount: 2 }, false, true)
+    expect(row.querySelector('.unread-badge')).toBeNull()
+    await render({ ...direct, unreadCount: 2 })
+    expect(row.querySelector('.unread-badge')?.textContent).toBe('2')
   })
 
   it('shows the online dot only for an online peer', async () => {

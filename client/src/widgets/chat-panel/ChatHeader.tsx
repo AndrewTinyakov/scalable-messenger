@@ -63,7 +63,13 @@ export function ChatHeader({
       <button className="icon-button mobile-back" onClick={onBack} aria-label="Back to chats">
         <ArrowLeft size={22} />
       </button>
-      <Avatar seed={recipient ?? chat.id} name={title} size={42} group={group} />
+      <Avatar
+        seed={recipient ?? chat.id}
+        name={title}
+        size={42}
+        group={group}
+        online={status.online}
+      />
       <div className="chat-header-info">
         <h2>{title}</h2>
         {status.text && <p className={status.online ? 'online' : ''}>{status.text}</p>}

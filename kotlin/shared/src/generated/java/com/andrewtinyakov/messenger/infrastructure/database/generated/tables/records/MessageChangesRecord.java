@@ -76,6 +76,48 @@ public class MessageChangesRecord extends UpdatableRecordImpl<MessageChangesReco
         return (OffsetDateTime) get(3);
     }
 
+    /**
+     * Setter for <code>public.message_changes.kind</code>.
+     */
+    public void setKind(String value) {
+        set(4, value);
+    }
+
+    /**
+     * Getter for <code>public.message_changes.kind</code>.
+     */
+    public String getKind() {
+        return (String) get(4);
+    }
+
+    /**
+     * Setter for <code>public.message_changes.sequence</code>.
+     */
+    public void setSequence(Long value) {
+        set(5, value);
+    }
+
+    /**
+     * Getter for <code>public.message_changes.sequence</code>.
+     */
+    public Long getSequence() {
+        return (Long) get(5);
+    }
+
+    /**
+     * Setter for <code>public.message_changes.cleared_through_sequence</code>.
+     */
+    public void setClearedThroughSequence(Long value) {
+        set(6, value);
+    }
+
+    /**
+     * Getter for <code>public.message_changes.cleared_through_sequence</code>.
+     */
+    public Long getClearedThroughSequence() {
+        return (Long) get(6);
+    }
+
     // -------------------------------------------------------------------------
     // Primary key information
     // -------------------------------------------------------------------------
@@ -99,13 +141,16 @@ public class MessageChangesRecord extends UpdatableRecordImpl<MessageChangesReco
     /**
      * Create a detached, initialised MessageChangesRecord
      */
-    public MessageChangesRecord(String chatId, Long revision, String messageId, OffsetDateTime changedAt) {
+    public MessageChangesRecord(String chatId, Long revision, String messageId, OffsetDateTime changedAt, String kind, Long sequence, Long clearedThroughSequence) {
         super(MessageChanges.MESSAGE_CHANGES);
 
         setChatId(chatId);
         setRevision(revision);
         setMessageId(messageId);
         setChangedAt(changedAt);
+        setKind(kind);
+        setSequence(sequence);
+        setClearedThroughSequence(clearedThroughSequence);
         resetTouchedOnNotNull();
     }
 }

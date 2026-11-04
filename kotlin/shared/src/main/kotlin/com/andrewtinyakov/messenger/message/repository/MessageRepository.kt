@@ -9,6 +9,10 @@ import com.andrewtinyakov.messenger.shared.id.RequestId
 import com.andrewtinyakov.messenger.shared.id.UserId
 
 interface MessageRepository {
+    fun findMessagesForPublication(messageIds: List<MessageId>): List<Message>
+
+    fun findMessagesInSpan(chatId: ChatId, userId: UserId, after: Long, through: Long, ascending: Boolean, limit: Int): List<Message>
+
     fun findMessagesByIds(chatId: ChatId, userId: UserId, messageIds: List<MessageId>): List<Message>
 
     fun findMessage(chatId: ChatId, userId: UserId, messageId: MessageId): Message?

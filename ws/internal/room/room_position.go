@@ -277,12 +277,15 @@ func (r *Rooms) replay(ctx context.Context, name, epoch, after, through, trigger
 		r.metrics.ReplaySeconds.WithLabelValues(trigger, result).Observe(time.Since(started).Seconds())
 	}()
 	items, replayErr = r.redis.Replay(ctx, name, epoch, after, r.replayLimit)
-	if replayErr != nil || through == "" {
-		return items, replayErr
+	if replayErr != nil {
+		return nil, replayErr
+	}
+	if through == "" {
+		return coalesceHistoryHints(items), nil
 	}
 	for _, item := range items {
 		if item.StreamID == through {
-			return items, nil
+			return coalesceHistoryHints(items), nil
 		}
 	}
 	return nil, redisroom.ErrGap

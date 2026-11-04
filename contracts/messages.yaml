@@ -171,3 +171,11 @@ messages:
     contentType: application/json
     payload:
       $ref: ./schemas/socket/frame/presence-v1.yaml
+  HistoryChangedEventV1:
+    name: HistoryChangedEventV1
+    payload:
+      $ref: ./schemas/message/event/history-changed-v1.yaml
+  SocketHistoryChangedV1:
+    name: SocketHistoryChangedV1
+    payload:
+      $ref: ./schemas/socket/frame/history-changed-v1.yaml

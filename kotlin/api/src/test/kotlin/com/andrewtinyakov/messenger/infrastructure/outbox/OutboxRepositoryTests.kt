@@ -24,6 +24,17 @@ class OutboxRepositoryTests
         private val tx: TransactionTemplate,
     ) : MessengerIntegrationTest() {
         @Test
+        fun `durable outbox rejects message and quote content`() {
+            for (field in listOf("body", "replyBody")) {
+                val id = EventId(newId())
+                assertThrows(DataIntegrityViolationException::class.java) {
+                    outboxRepository.enqueue(listOf(OutboxMessage(id, "user:${newId()}", """{"$field":"retained content"}""")))
+                }
+                assertEquals(0, db.queryForObject("SELECT count(*) FROM messenger_outbox_events WHERE id=?", Int::class.java, id.value))
+            }
+        }
+
+        @Test
         fun `expired group prefixes transfer ownership without changing publication order`() {
             val room = "group:${newId()}"
             val ids = List(3) { EventId(newId()) }

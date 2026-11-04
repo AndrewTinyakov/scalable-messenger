@@ -36,7 +36,7 @@ internal class RoomPublicationScript(
         return redis.execute(
             script,
             listOf("$prefix:stream", "$prefix:epoch", "$prefix:live", "$prefix:history-bytes"),
-            listOf(message.payload, mapper.writeValueAsString(options)),
+            listOf(message.payload, mapper.writeValueAsString(options), message.replayPayload ?: message.payload),
         ).single().doOnNext { check(streamIdPattern.matches(it)) { "Redis returned an invalid stream ID" } }
     }
 }

@@ -62,6 +62,48 @@ public class ChatMembersRecord extends UpdatableRecordImpl<ChatMembersRecord> {
         return (OffsetDateTime) get(2);
     }
 
+    /**
+     * Setter for <code>public.chat_members.cleared_through_sequence</code>.
+     */
+    public void setClearedThroughSequence(Long value) {
+        set(3, value);
+    }
+
+    /**
+     * Getter for <code>public.chat_members.cleared_through_sequence</code>.
+     */
+    public Long getClearedThroughSequence() {
+        return (Long) get(3);
+    }
+
+    /**
+     * Setter for <code>public.chat_members.hidden_through_sequence</code>.
+     */
+    public void setHiddenThroughSequence(Long value) {
+        set(4, value);
+    }
+
+    /**
+     * Getter for <code>public.chat_members.hidden_through_sequence</code>.
+     */
+    public Long getHiddenThroughSequence() {
+        return (Long) get(4);
+    }
+
+    /**
+     * Setter for <code>public.chat_members.visibility_revision</code>.
+     */
+    public void setVisibilityRevision(Long value) {
+        set(5, value);
+    }
+
+    /**
+     * Getter for <code>public.chat_members.visibility_revision</code>.
+     */
+    public Long getVisibilityRevision() {
+        return (Long) get(5);
+    }
+
     // -------------------------------------------------------------------------
     // Primary key information
     // -------------------------------------------------------------------------
@@ -85,12 +127,15 @@ public class ChatMembersRecord extends UpdatableRecordImpl<ChatMembersRecord> {
     /**
      * Create a detached, initialised ChatMembersRecord
      */
-    public ChatMembersRecord(String chatId, String userId, OffsetDateTime joinedAt) {
+    public ChatMembersRecord(String chatId, String userId, OffsetDateTime joinedAt, Long clearedThroughSequence, Long hiddenThroughSequence, Long visibilityRevision) {
         super(ChatMembers.CHAT_MEMBERS);
 
         setChatId(chatId);
         setUserId(userId);
         setJoinedAt(joinedAt);
+        setClearedThroughSequence(clearedThroughSequence);
+        setHiddenThroughSequence(hiddenThroughSequence);
+        setVisibilityRevision(visibilityRevision);
         resetTouchedOnNotNull();
     }
 }

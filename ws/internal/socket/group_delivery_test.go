@@ -18,10 +18,10 @@ import (
 )
 
 func TestGroupDeliveryUsesCurrentGrant(t *testing.T) {
-	for _, eventType := range []protocol.EventType{protocol.EventMessageSaved, protocol.EventMembershipChanged} {
+	for _, eventType := range []protocol.EventType{protocol.EventMessageSaved, protocol.EventMembershipChanged, protocol.EventHistoryChanged} {
 		for _, reason := range []string{"revoked", "unsubscribed", "denied renewal", "expired", "revoked then rejoined", "active"} {
 			t.Run(string(eventType)+"/"+reason, func(t *testing.T) {
-				if reason == "active" && eventType != protocol.EventMembershipChanged {
+				if reason == "active" && eventType == protocol.EventMessageSaved {
 					return
 				}
 				rooms := &raceRooms{}
@@ -109,7 +109,7 @@ func TestGroupDeliveryUsesCurrentGrant(t *testing.T) {
 				if reason == "active" && received != 2 {
 					t.Fatalf("wrote %d notifications, want 2", received)
 				}
-				if eventType == protocol.EventMembershipChanged && !connection.acks.nextDeadline().IsZero() {
+				if eventType != protocol.EventMessageSaved && !connection.acks.nextDeadline().IsZero() {
 					t.Fatal("metadata notification created message ACK state")
 				}
 				connection.Close()

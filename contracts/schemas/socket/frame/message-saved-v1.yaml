@@ -74,8 +74,6 @@ allOf:
   - if:
       anyOf:
         - required:
-            - replyToMessageId
-        - required:
             - replySenderId
         - required:
             - replyBody

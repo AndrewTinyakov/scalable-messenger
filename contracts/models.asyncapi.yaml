@@ -44,3 +44,11 @@ components:
       name: ReadsChangedEventV1
       payload:
         $ref: ./schemas/message/event/reads-changed-v1.yaml
+    HistoryChangedEventV1:
+      name: HistoryChangedEventV1
+      payload:
+        $ref: ./schemas/message/event/history-changed-v1.yaml
+    SavedMessageReferenceV1:
+      name: SavedMessageReferenceV1
+      payload:
+        $ref: ./schemas/message/event/saved-message-reference-v1.yaml

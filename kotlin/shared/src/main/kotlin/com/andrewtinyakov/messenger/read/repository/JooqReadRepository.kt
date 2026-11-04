@@ -11,6 +11,7 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.enums.Chat
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseObservation
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseOperation
 import com.andrewtinyakov.messenger.infrastructure.redis.RoomAddress
+import com.andrewtinyakov.messenger.message.visibility.visibleMessage
 import com.andrewtinyakov.messenger.read.model.MessageReadTarget
 import com.andrewtinyakov.messenger.read.model.MessageReader
 import com.andrewtinyakov.messenger.read.model.ReadAdvance
@@ -116,7 +117,7 @@ class JooqReadRepository(
                 MESSAGES.CHAT_ID.eq(chatId.value),
                 MESSAGES.ID.eq(messageId.value),
                 MESSAGES.SENDER_ID.eq(userId.value),
-                member(chatId, userId),
+                visibleMessage(chatId, userId, MESSAGES.SEQUENCE),
             ).fetchOne { MessageReadTarget(it.value1()!!, it.value2()!!, it.value3() != null) }
         }
 

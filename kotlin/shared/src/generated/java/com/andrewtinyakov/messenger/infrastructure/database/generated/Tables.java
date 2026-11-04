@@ -9,12 +9,16 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Cha
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.ChatReadProgress;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.ChatReadRanges;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Chats;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.DeletionOperations;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.HiddenMessageRanges;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.HistoryPurgeJobs;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.MessageChanges;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Messages;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.MessengerOutboxEvents;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.SendRequests;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Sessions;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Users;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.VisibilityCleanupJobs;
 
 
 /**
@@ -49,6 +53,21 @@ public class Tables {
     public static final Chats CHATS = Chats.CHATS;
 
     /**
+     * The table <code>public.deletion_operations</code>.
+     */
+    public static final DeletionOperations DELETION_OPERATIONS = DeletionOperations.DELETION_OPERATIONS;
+
+    /**
+     * The table <code>public.hidden_message_ranges</code>.
+     */
+    public static final HiddenMessageRanges HIDDEN_MESSAGE_RANGES = HiddenMessageRanges.HIDDEN_MESSAGE_RANGES;
+
+    /**
+     * The table <code>public.history_purge_jobs</code>.
+     */
+    public static final HistoryPurgeJobs HISTORY_PURGE_JOBS = HistoryPurgeJobs.HISTORY_PURGE_JOBS;
+
+    /**
      * The table <code>public.message_changes</code>.
      */
     public static final MessageChanges MESSAGE_CHANGES = MessageChanges.MESSAGE_CHANGES;
@@ -77,4 +96,9 @@ public class Tables {
      * The table <code>public.users</code>.
      */
     public static final Users USERS = Users.USERS;
+
+    /**
+     * The table <code>public.visibility_cleanup_jobs</code>.
+     */
+    public static final VisibilityCleanupJobs VISIBILITY_CLEANUP_JOBS = VisibilityCleanupJobs.VISIBILITY_CLEANUP_JOBS;
 }

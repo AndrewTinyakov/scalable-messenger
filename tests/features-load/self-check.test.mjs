@@ -65,6 +65,26 @@ test('a conflicting saved terminal fails while replayed notifications remain ide
   assert.equal(metrics.counts['correctness.failed'], 1);
 });
 
+test('mutation removals and certified empty history pages recover without inventing notifications', async () => {
+  const metrics = new Metrics();
+  const paths = [];
+  const http = { request: async (_session, path) => {
+    paths.push(path);
+    if (path.includes('/changes?')) return { resetRequired: false, changes: [{ kind: 'REMOVED', messageId: 'removed', message: null, sequence: '3', revision: '1' }], nextRevision: '1', lastRevision: '1' };
+    if (path.includes('afterSeq=0&')) return { messages: [], hasMore: true, nextSequence: '100', coverageAfterSequence: '0', coverageThroughSequence: '100' };
+    assert.match(path, /afterSeq=100&/);
+    return { messages: [{ id: 'survivor', chatId: 'chat', sequence: '200' }], hasMore: false, nextSequence: '200', coverageAfterSequence: '100', coverageThroughSequence: '200' };
+  } };
+  const driver = new Driver({ seed: 1 }, metrics, http);
+  const socket = { index: 0, session: { userId: 'viewer' }, chats: new Map([['chat', { id: 'chat', baseline: '0', mutationBaseline: '0' }]]) };
+  driver.expectedMutations.set('removed', { revision: '1', observed: new Set() });
+  await driver.recover(socket);
+  assert.equal(driver.expectedMutations.get('removed').observed.has(0), true);
+  assert.equal(paths.length, 3);
+  assert.equal(metrics.counts['correctness.failed'] ?? 0, 0);
+  assert.equal(metrics.counts['saved.recoveredNotification'] ?? 0, 0);
+});
+
 test('a failed worker still joins concurrent owned work before rejecting', async () => {
   let joined = false;
   await assert.rejects(bounded([0, 1, 2], 2, async index => {

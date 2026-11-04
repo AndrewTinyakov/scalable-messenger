@@ -189,6 +189,48 @@ public class ChatsRecord extends UpdatableRecordImpl<ChatsRecord> {
         return (Long) get(11);
     }
 
+    /**
+     * Setter for <code>public.chats.cleared_through_sequence</code>.
+     */
+    public void setClearedThroughSequence(Long value) {
+        set(12, value);
+    }
+
+    /**
+     * Getter for <code>public.chats.cleared_through_sequence</code>.
+     */
+    public Long getClearedThroughSequence() {
+        return (Long) get(12);
+    }
+
+    /**
+     * Setter for <code>public.chats.purged_through_sequence</code>.
+     */
+    public void setPurgedThroughSequence(Long value) {
+        set(13, value);
+    }
+
+    /**
+     * Getter for <code>public.chats.purged_through_sequence</code>.
+     */
+    public Long getPurgedThroughSequence() {
+        return (Long) get(13);
+    }
+
+    /**
+     * Setter for <code>public.chats.purged_rows</code>.
+     */
+    public void setPurgedRows(Long value) {
+        set(14, value);
+    }
+
+    /**
+     * Getter for <code>public.chats.purged_rows</code>.
+     */
+    public Long getPurgedRows() {
+        return (Long) get(14);
+    }
+
     // -------------------------------------------------------------------------
     // Primary key information
     // -------------------------------------------------------------------------
@@ -212,7 +254,7 @@ public class ChatsRecord extends UpdatableRecordImpl<ChatsRecord> {
     /**
      * Create a detached, initialised ChatsRecord
      */
-    public ChatsRecord(String id, ChatKind kind, String name, String directPairKey, Long nextSequence, Integer memberCount, OffsetDateTime createdAt, String ownerId, OffsetDateTime deletedAt, String deletedBy, Long mutationRevision, Long mutationFloor) {
+    public ChatsRecord(String id, ChatKind kind, String name, String directPairKey, Long nextSequence, Integer memberCount, OffsetDateTime createdAt, String ownerId, OffsetDateTime deletedAt, String deletedBy, Long mutationRevision, Long mutationFloor, Long clearedThroughSequence, Long purgedThroughSequence, Long purgedRows) {
         super(Chats.CHATS);
 
         setId(id);
@@ -227,6 +269,9 @@ public class ChatsRecord extends UpdatableRecordImpl<ChatsRecord> {
         setDeletedBy(deletedBy);
         setMutationRevision(mutationRevision);
         setMutationFloor(mutationFloor);
+        setClearedThroughSequence(clearedThroughSequence);
+        setPurgedThroughSequence(purgedThroughSequence);
+        setPurgedRows(purgedRows);
         resetTouchedOnNotNull();
     }
 }

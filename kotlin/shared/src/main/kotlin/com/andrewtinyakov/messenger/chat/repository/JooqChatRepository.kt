@@ -45,6 +45,7 @@ class JooqChatRepository(
             .join(CHATS)
             .on(CHATS.ID.eq(CHAT_MEMBERS.CHAT_ID))
             .where(CHAT_MEMBERS.USER_ID.eq(userId.value), CHATS.DELETED_AT.isNull)
+            .and(CHAT_MEMBERS.HIDDEN_THROUGH_SEQUENCE.isNull.or(CHATS.NEXT_SEQUENCE.minus(1L).gt(CHAT_MEMBERS.HIDDEN_THROUGH_SEQUENCE)))
             .and(
                 if (beforeJoinedAt != null && beforeChatId != null) {
                     CHAT_MEMBERS.JOINED_AT.lt(beforeJoinedAt)

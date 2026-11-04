@@ -1,16 +1,20 @@
 package com.andrewtinyakov.messenger.message.service
 
-import com.andrewtinyakov.messenger.chat.service.ChatMembershipService
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseTransaction
 import com.andrewtinyakov.messenger.infrastructure.database.observability.observedExecute
 import com.andrewtinyakov.messenger.message.change.MessageChangeRepository
 import com.andrewtinyakov.messenger.message.model.SendResult
 import com.andrewtinyakov.messenger.message.model.SendResultStatus
 import com.andrewtinyakov.messenger.message.repository.MessageRepository
+import com.andrewtinyakov.messenger.message.visibility.VisibilityRepository
+import com.andrewtinyakov.messenger.message.visibility.VisibilitySnapshot
 import com.andrewtinyakov.messenger.message.web.payload.MessageAroundResponse
+import com.andrewtinyakov.messenger.message.web.payload.MessageChangeKind
 import com.andrewtinyakov.messenger.message.web.payload.MessageChangeResponse
 import com.andrewtinyakov.messenger.message.web.payload.MessageChangesResponse
 import com.andrewtinyakov.messenger.message.web.payload.MessageHistoryResponse
+import com.andrewtinyakov.messenger.message.web.payload.MessageResolveResponse
+import com.andrewtinyakov.messenger.message.web.payload.MessageVisibilityResponse
 import com.andrewtinyakov.messenger.message.web.payload.SendLookupStatus
 import com.andrewtinyakov.messenger.message.web.payload.SendStatusEntry
 import com.andrewtinyakov.messenger.message.web.payload.SendStatusResponse
@@ -33,9 +37,10 @@ import java.time.Duration
 @Service
 class MessageHistoryService(
     private val repository: MessageRepository,
-    private val chatMembershipService: ChatMembershipService,
     private val metrics: MeterRegistry,
     private val changes: MessageChangeRepository,
+    private val visibility: VisibilityRepository,
+    private val pages: VisibleHistory,
     tx: TransactionTemplate,
 ) {
     private val snapshot = TransactionTemplate(requireNotNull(tx.transactionManager)).apply {
@@ -43,156 +48,263 @@ class MessageHistoryService(
         isReadOnly = true
     }
 
-    fun messages(chatId: ChatId, userId: UserId, afterSeq: String?, beforeSeq: String?, limit: Int): MessageHistoryResponse {
-        val started = System.nanoTime()
-        val direction = if (afterSeq != null) "after" else "before"
-        var outcome = "failed"
-        try {
-            val response = snapshot.observedExecute(DatabaseTransaction.MESSAGE_HISTORY) {
-                val revision = changes.cursor(chatId, userId)?.revision ?: notFound()
-                historyPage(chatId, userId, afterSeq, beforeSeq, limit).copy(mutationRevision = revision.toString())
-            }
-            outcome = "success"
-            metrics.counter("messenger.history.messages", "direction", direction).increment(response.messages.size.toDouble())
-            metrics.counter("messenger.history.body.bytes", "direction", direction)
-                .increment(response.messages.sumOf { it.body.toByteArray(Charsets.UTF_8).size }.toDouble())
-            return response
-        } finally {
-            Timer.builder("messenger.history.page").tags("direction", direction, "outcome", outcome)
-                .publishPercentileHistogram().minimumExpectedValue(Duration.ofMillis(1)).maximumExpectedValue(Duration.ofMinutes(2))
-                .register(metrics).record(Duration.ofNanos(System.nanoTime() - started))
-        }
-    }
-
-    fun around(chatId: ChatId, userId: UserId, messageId: MessageId, limit: Int): MessageAroundResponse =
-        observeHistory("around") {
+    fun messages(chatId: ChatId, userId: UserId, afterSeq: String?, beforeSeq: String?, limit: Int): MessageHistoryResponse =
+        measured(if (afterSeq != null) "after" else "before") {
             snapshot.observedExecute(DatabaseTransaction.MESSAGE_HISTORY) {
-                val revision = changes.cursor(chatId, userId)?.revision ?: notFound()
-                if (limit !in 1..100) badRequest(ApiErrorCode.INVALID_LIMIT, "limit must be 1 to 100")
-                val anchor = repository.findMessage(chatId, userId, messageId) ?: notFound()
-                val older = repository.findMessagesBefore(chatId, userId, anchor.sequence, limit)
-                val newer = repository.findMessagesAfter(chatId, userId, anchor.sequence, limit)
-                val newerCount = minOf(newer.size, limit - 1 - minOf(older.size, (limit - 1) / 2))
-                val olderCount = minOf(older.size, limit - 1 - newerCount)
-                val rows = older.take(olderCount).asReversed() + anchor + newer.take(newerCount)
-                metrics.counter("messenger.history.messages", "direction", "around").increment(rows.size.toDouble())
-                MessageAroundResponse(
-                    anchor.id.value,
-                    rows.map { it.toResponse() },
-                    older.size > olderCount,
-                    newer.size > newerCount,
-                    revision.toString(),
-                )
-            }
-        }
-
-    fun changes(chatId: ChatId, userId: UserId, afterRevision: String, limit: Int): MessageChangesResponse =
-        observeHistory("changes") {
-            snapshot.observedExecute(DatabaseTransaction.MESSAGE_HISTORY) {
-                val cursor = changes.cursor(chatId, userId) ?: notFound()
-                if (limit !in 1..100) badRequest(ApiErrorCode.INVALID_LIMIT, "limit must be 1 to 100")
-                val after = parseSequence(afterRevision)
-                    ?: badRequest(ApiErrorCode.INVALID_SEQUENCE, "afterRevision must be a nonnegative decimal integer")
-                if (after < cursor.floor || after > cursor.revision) {
-                    metrics.counter("messenger.message.changes.resets").increment()
-                    return@observedExecute MessageChangesResponse(emptyList(), cursor.revision.toString(), cursor.revision.toString(), true)
+                val state = state(chatId, userId)
+                requireLimit(limit)
+                if (afterSeq != null && beforeSeq != null) badRequest(ApiErrorCode.INVALID_SEQUENCE, "Use either afterSeq or beforeSeq")
+                val cursor = (afterSeq ?: beforeSeq)?.let { sequence(it, beforeSeq != null) }
+                if (afterSeq != null && cursor != null &&
+                    cursor > state.snapshotSequence
+                ) {
+                    badRequest(ApiErrorCode.INVALID_SEQUENCE, "afterSeq exceeds saved history")
                 }
-                val page = changes.changes(chatId, after, cursor.revision, limit)
-                val messages = repository.findMessagesByIds(chatId, userId, page.map { it.messageId }.distinct()).associateBy { it.id }
-                MessageChangesResponse(
-                    changes = page.map { MessageChangeResponse(it.revision.toString(), checkNotNull(messages[it.messageId]).toResponse()) },
-                    lastRevision = cursor.revision.toString(),
-                    nextRevision = (page.lastOrNull()?.revision ?: after).toString(),
-                    resetRequired = false,
+                val page = pages.page(chatId, userId, state, cursor, afterSeq != null, limit)
+                metrics.counter(
+                    "messenger.history.messages",
+                    "direction",
+                    if (afterSeq !=
+                        null
+                    ) {
+                        "after"
+                    } else {
+                        "before"
+                    },
+                ).increment(page.messages.size.toDouble())
+                MessageHistoryResponse(
+                    page.messages.map { it.toResponse() },
+                    page.next.toString(),
+                    page.hasMore,
+                    state.mutationRevision.toString(),
+                    state.snapshotSequence.toString(),
+                    state.visibilityRevision.toString(),
+                    state.clearedThroughSequence.toString(),
+                    state.globalClearedThroughSequence.toString(),
+                    page.after.toString(),
+                    page.through.toString(),
                 )
             }
         }
 
-    private fun <T> observeHistory(direction: String, action: () -> T): T {
-        val started = System.nanoTime()
-        var outcome = "failed"
-        try {
-            val response = action()
-            outcome = "success"
-            return response
-        } finally {
-            Timer.builder("messenger.history.page").tags("direction", direction, "outcome", outcome)
-                .publishPercentileHistogram().minimumExpectedValue(Duration.ofMillis(1)).maximumExpectedValue(Duration.ofMinutes(2))
-                .register(metrics).record(Duration.ofNanos(System.nanoTime() - started))
-        }
-    }
+    fun around(chatId: ChatId, userId: UserId, messageId: MessageId, limit: Int): MessageAroundResponse = around(
+        chatId,
+        userId,
+        messageId,
+        null,
+        limit,
+    )
 
-    private fun historyPage(chatId: ChatId, userId: UserId, afterSeq: String?, beforeSeq: String?, limit: Int): MessageHistoryResponse {
-        if (limit !in 1..100) invalidHistoryRequest(chatId, userId, ApiErrorCode.INVALID_LIMIT, "limit must be 1 to 100")
-        if (afterSeq != null && beforeSeq != null) {
-            invalidHistoryRequest(chatId, userId, ApiErrorCode.INVALID_SEQUENCE, "Use either afterSeq or beforeSeq")
-        }
-        if (afterSeq != null) {
-            val after = parseSequence(afterSeq)
-                ?: invalidHistoryRequest(chatId, userId, ApiErrorCode.INVALID_SEQUENCE, "afterSeq must be a nonnegative decimal integer")
-            val fetched = repository.findMessagesAfter(chatId = chatId, userId = userId, afterSequence = after, limit = limit + 1)
-            if (fetched.isEmpty()) chatMembershipService.requireMember(chatId = chatId, userId = userId)
-            val messages = fetched.take(limit).map { it.toResponse() }
-            return MessageHistoryResponse(
-                messages = messages,
-                nextSequence = messages.lastOrNull()?.sequence ?: afterSeq,
-                hasMore = fetched.size > limit,
+    fun around(
+        chatId: ChatId,
+        userId: UserId,
+        messageId: MessageId?,
+        anchorSequence: String?,
+        limit: Int,
+    ): MessageAroundResponse = measured(
+        "around",
+    ) {
+        snapshot.observedExecute(DatabaseTransaction.MESSAGE_HISTORY) {
+            val state = state(chatId, userId)
+            requireLimit(limit)
+            if (messageId == null &&
+                anchorSequence == null
+            ) {
+                badRequest(ApiErrorCode.INVALID_REQUEST, "Provide a messageId or anchorSequence")
+            }
+            val requested = messageId?.let { repository.findMessage(chatId, userId, it) }
+            if (messageId != null && requested == null && anchorSequence == null) notFound()
+            val anchorAt = requested?.sequence ?: anchorSequence?.let { sequence(it, true) } ?: state.snapshotSequence
+            val beforeAnchor = pages.page(chatId, userId, state, minOf(anchorAt, state.snapshotSequence) + 1, false, 1)
+            val afterAnchor = pages.page(chatId, userId, state, minOf(maxOf(anchorAt - 1, 0), state.snapshotSequence), true, 1)
+            val anchor =
+                requested
+                    ?: listOfNotNull(beforeAnchor.messages.lastOrNull(), afterAnchor.messages.firstOrNull()).minByOrNull {
+                        kotlin.math.abs(it.sequence - anchorAt)
+                    }
+            if (anchor ==
+                null
+            ) {
+                return@observedExecute MessageAroundResponse(
+                    null,
+                    emptyList(),
+                    beforeAnchor.hasMore,
+                    afterAnchor.hasMore,
+                    state.mutationRevision.toString(),
+                    state.snapshotSequence.toString(),
+                    state.visibilityRevision.toString(),
+                    state.clearedThroughSequence.toString(),
+                    state.globalClearedThroughSequence.toString(),
+                    beforeAnchor.after.toString(),
+                    afterAnchor.through.toString(),
+                )
+            }
+            val older = pages.page(chatId, userId, state, anchor.sequence, false, limit)
+            val newer = pages.page(chatId, userId, state, anchor.sequence, true, limit)
+            val newerCount = minOf(newer.messages.size, limit - 1 - minOf(older.messages.size, (limit - 1) / 2))
+            val olderCount = minOf(older.messages.size, limit - 1 - newerCount)
+            val rows = older.messages.takeLast(olderCount) + anchor + newer.messages.take(newerCount)
+            val after = if (olderCount == older.messages.size) older.after else rows.first().sequence - 1
+            val through = if (newerCount == newer.messages.size) newer.through else rows.last().sequence
+            MessageAroundResponse(
+                anchor.id.value,
+                rows.map { it.toResponse() },
+                older.hasMore || older.messages.size > olderCount,
+                newer.hasMore || newer.messages.size > newerCount,
+                state.mutationRevision.toString(),
+                state.snapshotSequence.toString(),
+                state.visibilityRevision.toString(),
+                state.clearedThroughSequence.toString(),
+                state.globalClearedThroughSequence.toString(),
+                after.toString(),
+                through.toString(),
             )
         }
-        val before = beforeSeq?.let {
-            parseSequence(it)?.takeIf { sequence -> sequence > 0 }
-                ?: invalidHistoryRequest(chatId, userId, ApiErrorCode.INVALID_SEQUENCE, "beforeSeq must be a positive decimal integer")
+    }
+
+    fun resolve(chatId: ChatId, userId: UserId, ids: List<MessageId>): MessageResolveResponse = snapshot.observedExecute(
+        DatabaseTransaction.MESSAGE_HISTORY,
+    ) {
+        val state = state(chatId, userId)
+        if (ids.size !in 1..100 ||
+            ids.distinct().size != ids.size
+        ) {
+            badRequest(ApiErrorCode.INVALID_REQUEST, "Provide 1 to 100 distinct message IDs")
         }
-        val fetched = repository.findMessagesBefore(chatId = chatId, userId = userId, beforeSequence = before, limit = limit + 1)
-        if (fetched.isEmpty()) chatMembershipService.requireMember(chatId = chatId, userId = userId)
-        val messages = fetched.take(limit).asReversed().map { it.toResponse() }
-        return MessageHistoryResponse(
-            messages = messages,
-            nextSequence = messages.firstOrNull()?.sequence ?: beforeSeq ?: "0",
-            hasMore = fetched.size > limit,
+        MessageResolveResponse(
+            repository.findMessagesByIds(chatId, userId, ids).map { it.toResponse() },
+            state.snapshotSequence.toString(),
+            state.mutationRevision.toString(),
+            state.visibilityRevision.toString(),
+            state.clearedThroughSequence.toString(),
+            state.globalClearedThroughSequence.toString(),
         )
     }
 
-    private fun invalidHistoryRequest(chatId: ChatId, userId: UserId, code: ApiErrorCode, message: String): Nothing {
-        chatMembershipService.requireMember(chatId = chatId, userId = userId)
-        badRequest(code, message)
+    fun visibility(chatId: ChatId, userId: UserId): MessageVisibilityResponse = state(chatId, userId).let {
+        MessageVisibilityResponse(
+            it.snapshotSequence.toString(),
+            it.mutationRevision.toString(),
+            it.visibilityRevision.toString(),
+            it.clearedThroughSequence.toString(),
+            it.globalClearedThroughSequence.toString(),
+            it.hidden,
+        )
     }
 
-    fun status(userId: UserId, requestId: RequestId): SendStatusResponse {
-        val result =
-            repository.findSendResult(senderId = userId, requestId = requestId)
-                ?: return SendStatusResponse(status = SendLookupStatus.UNKNOWN)
-        return result.toStatusResponse()
+    fun changes(chatId: ChatId, userId: UserId, afterRevision: String, limit: Int): MessageChangesResponse = measured("changes") {
+        snapshot.observedExecute(DatabaseTransaction.MESSAGE_HISTORY) {
+            val state = state(chatId, userId)
+            val cursor = changes.cursor(chatId, userId) ?: notFound()
+            requireLimit(limit)
+            val after = sequence(afterRevision)
+            if (after < cursor.floor || after > cursor.revision) {
+                metrics.counter("messenger.message.changes.resets").increment()
+                return@observedExecute MessageChangesResponse(
+                    emptyList(),
+                    cursor.revision.toString(),
+                    cursor.revision.toString(),
+                    true,
+                    state.snapshotSequence.toString(),
+                    state.visibilityRevision.toString(),
+                    state.clearedThroughSequence.toString(),
+                    state.globalClearedThroughSequence.toString(),
+                )
+            }
+            val page = changes.changes(chatId, after, cursor.revision, limit)
+            val current = repository.findMessagesByIds(chatId, userId, page.mapNotNull { it.messageId }.distinct()).associateBy { it.id }
+            MessageChangesResponse(
+                page.map { change ->
+                    val message = current[change.messageId]
+                    val kind = if (change.kind == "UPSERT" &&
+                        message == null
+                    ) {
+                        MessageChangeKind.REMOVED
+                    } else {
+                        MessageChangeKind.valueOf(change.kind)
+                    }
+                    MessageChangeResponse(
+                        change.revision.toString(),
+                        kind,
+                        if (kind ==
+                            MessageChangeKind.UPSERT
+                        ) {
+                            message?.toResponse()
+                        } else {
+                            null
+                        },
+                        change.messageId?.value,
+                        change.sequence?.toString(),
+                        change.clearedThroughSequence?.toString(),
+                    )
+                },
+                cursor.revision.toString(),
+                (page.lastOrNull()?.revision ?: after).toString(),
+                false,
+                state.snapshotSequence.toString(),
+                state.visibilityRevision.toString(),
+                state.clearedThroughSequence.toString(),
+                state.globalClearedThroughSequence.toString(),
+            )
+        }
     }
 
-    private fun parseSequence(value: String): Long? =
+    private fun state(chatId: ChatId, userId: UserId): VisibilitySnapshot = visibility.snapshot(chatId, userId) ?: notFound()
+
+    private fun requireLimit(limit: Int) {
+        if (limit !in 1..100) badRequest(ApiErrorCode.INVALID_LIMIT, "limit must be 1 to 100")
+    }
+
+    private fun sequence(value: String, positive: Boolean = false): Long =
         value.takeIf { Regex("0|[1-9][0-9]{0,18}").matches(it) }?.toLongOrNull()
+            ?.takeIf { !positive || it > 0 } ?: badRequest(ApiErrorCode.INVALID_SEQUENCE, "Invalid decimal sequence")
+
+    private fun <T> measured(direction: String, action: () -> T): T {
+        val started = System.nanoTime()
+        var outcome = "failed"
+        try {
+            val result = action()
+            outcome = "success"
+            return result
+        } finally {
+            Timer.builder("messenger.history.page").tags("direction", direction, "outcome", outcome).publishPercentileHistogram()
+                .minimumExpectedValue(
+                    Duration.ofMillis(1),
+                ).maximumExpectedValue(Duration.ofMinutes(2)).register(metrics).record(Duration.ofNanos(System.nanoTime() - started))
+        }
+    }
+
+    fun status(userId: UserId, requestId: RequestId): SendStatusResponse =
+        repository.findSendResult(userId, requestId)?.toStatusResponse() ?: SendStatusResponse(SendLookupStatus.UNKNOWN)
 
     fun statuses(userId: UserId, requestIds: List<RequestId>): SendStatusesResponse {
-        if (requestIds.size !in 1..100 || requestIds.size != requestIds.toSet().size) {
+        if (requestIds.size !in 1..100 ||
+            requestIds.size != requestIds.toSet().size
+        ) {
             badRequest(ApiErrorCode.INVALID_ID, "Provide 1 to 100 distinct request IDs")
         }
-        val found = repository.findSendResults(senderId = userId, requestIds = requestIds).associateBy { it.requestId }
+        val found = repository.findSendResults(userId, requestIds).associateBy { it.requestId }
         return SendStatusesResponse(
-            results = requestIds.map { requestId ->
+            requestIds.map {
                 SendStatusEntry(
-                    requestId = requestId.value,
-                    result =
-                        found[requestId]?.toStatusResponse() ?: SendStatusResponse(status = SendLookupStatus.UNKNOWN),
+                    it.value,
+                    found[it]?.toStatusResponse() ?: SendStatusResponse(SendLookupStatus.UNKNOWN),
                 )
             },
         )
     }
 
-    private fun SendResult.toStatusResponse(): SendStatusResponse =
-        SendStatusResponse(
-            status = when (status) {
-                SendResultStatus.SAVED -> SendLookupStatus.SAVED
-                SendResultStatus.REJECTED -> SendLookupStatus.REJECTED
-            },
-            chatId = chatId?.value,
-            messageId = messageId?.value,
-            sequence = sequence?.toString(),
-            reason = reason,
-        )
+    private fun SendResult.toStatusResponse(): SendStatusResponse = SendStatusResponse(
+        if (status ==
+            SendResultStatus.SAVED
+        ) {
+            SendLookupStatus.SAVED
+        } else {
+            SendLookupStatus.REJECTED
+        },
+        chatId?.value,
+        messageId?.value,
+        sequence?.toString(),
+        reason,
+    )
 }

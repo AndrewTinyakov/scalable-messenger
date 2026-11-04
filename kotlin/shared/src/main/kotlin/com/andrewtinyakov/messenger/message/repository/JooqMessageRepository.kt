@@ -3,7 +3,6 @@ package com.andrewtinyakov.messenger.message.repository
 import com.andrewtinyakov.messenger.generated.messaging.event.SendRejectionReason
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Routines
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHATS
-import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHAT_MEMBERS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSAGES
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.SEND_REQUESTS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.MessagesRecord
@@ -15,6 +14,7 @@ import com.andrewtinyakov.messenger.message.model.SavedMessage
 import com.andrewtinyakov.messenger.message.model.SendResult
 import com.andrewtinyakov.messenger.message.model.SendResultStatus
 import com.andrewtinyakov.messenger.message.model.asReply
+import com.andrewtinyakov.messenger.message.visibility.visibleMessage
 import com.andrewtinyakov.messenger.shared.id.ChatId
 import com.andrewtinyakov.messenger.shared.id.MessageId
 import com.andrewtinyakov.messenger.shared.id.RequestId
@@ -29,6 +29,46 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.enums.Send
 class JooqMessageRepository(
     private val db: DSLContext,
 ) : MessageRepository {
+    override fun findMessagesForPublication(
+        messageIds: List<MessageId>,
+    ): List<Message> = DatabaseObservation.query(DatabaseOperation.MESSAGE_PUBLICATION_HYDRATE) {
+        require(messageIds.size <= 100)
+        if (messageIds.isEmpty()) return@query emptyList()
+        return@query db.select(MESSAGES.asterisk()).from(MESSAGES).join(CHATS).on(CHATS.ID.eq(MESSAGES.CHAT_ID))
+            .where(
+                MESSAGES.ID.`in`(
+                    messageIds.map {
+                        it.value
+                    },
+                ),
+                CHATS.DELETED_AT.isNull,
+                MESSAGES.SEQUENCE.gt(CHATS.CLEARED_THROUGH_SEQUENCE),
+            )
+            .fetchInto(MESSAGES).map { it.toModel() }
+    }
+
+    override fun findMessagesInSpan(
+        chatId: ChatId,
+        userId: UserId,
+        after: Long,
+        through: Long,
+        ascending: Boolean,
+        limit: Int,
+    ): List<Message> = DatabaseObservation.query(
+        DatabaseOperation.MESSAGE_VISIBLE_SPAN,
+    ) {
+        db.selectFrom(
+            MESSAGES,
+        ).where(
+            MESSAGES.CHAT_ID.eq(chatId.value),
+            MESSAGES.SEQUENCE.gt(after),
+            MESSAGES.SEQUENCE.le(through),
+            visibleMessage(chatId, userId, MESSAGES.SEQUENCE),
+        )
+            .orderBy(if (ascending) MESSAGES.SEQUENCE.asc() else MESSAGES.SEQUENCE.desc()).limit(limit)
+            .fetch().let { hydrate(it, userId) }
+    }
+
     override fun lockSend(senderId: UserId, requestId: RequestId) = DatabaseObservation.query(DatabaseOperation.MESSAGE_LOCK_SEND) {
         Routines.acquireTransactionLock(db.configuration(), "send:${senderId.value}:${requestId.value}")
     }
@@ -153,11 +193,11 @@ class JooqMessageRepository(
             .where(
                 MESSAGES.CHAT_ID.eq(chatId.value),
                 MESSAGES.SEQUENCE.gt(afterSequence),
-                currentMembership(chatId = chatId, userId = userId),
+                visibleToMember(chatId = chatId, userId = userId),
             )
             .orderBy(MESSAGES.SEQUENCE)
             .limit(limit)
-            .fetch().let(::hydrate)
+            .fetch().let { hydrate(it, userId) }
     }
 
     override fun findMessagesBefore(
@@ -169,45 +209,47 @@ class JooqMessageRepository(
         DatabaseOperation.MESSAGE_FIND_MESSAGES_BEFORE,
     ) {
         db.selectFrom(MESSAGES)
-            .where(MESSAGES.CHAT_ID.eq(chatId.value), currentMembership(chatId = chatId, userId = userId))
+            .where(MESSAGES.CHAT_ID.eq(chatId.value), visibleToMember(chatId = chatId, userId = userId))
             .and(beforeSequence?.let { MESSAGES.SEQUENCE.lt(it) } ?: DSL.trueCondition())
             .orderBy(MESSAGES.SEQUENCE.desc())
             .limit(limit)
-            .fetch().let(::hydrate)
+            .fetch().let { hydrate(it, userId) }
     }
 
-    private fun currentMembership(chatId: ChatId, userId: UserId) = DSL.exists(
-        DSL.selectOne().from(CHAT_MEMBERS)
-            .join(CHATS).on(CHATS.ID.eq(CHAT_MEMBERS.CHAT_ID))
-            .where(CHAT_MEMBERS.CHAT_ID.eq(chatId.value), CHAT_MEMBERS.USER_ID.eq(userId.value), CHATS.DELETED_AT.isNull),
-    )
+    private fun visibleToMember(chatId: ChatId, userId: UserId) = visibleMessage(chatId, userId, MESSAGES.SEQUENCE)
 
     override fun findMessagesByIds(chatId: ChatId, userId: UserId, messageIds: List<MessageId>): List<Message> =
         DatabaseObservation.query(DatabaseOperation.MESSAGE_FIND_MESSAGE) {
             require(messageIds.size <= 100)
             if (messageIds.isEmpty()) return@query emptyList()
             db.selectFrom(MESSAGES)
-                .where(MESSAGES.CHAT_ID.eq(chatId.value), MESSAGES.ID.`in`(messageIds.map { it.value }), currentMembership(chatId, userId))
-                .fetch().let(::hydrate)
+                .where(MESSAGES.CHAT_ID.eq(chatId.value), MESSAGES.ID.`in`(messageIds.map { it.value }), visibleToMember(chatId, userId))
+                .fetch().let { hydrate(it, userId) }
         }
 
     override fun findMessage(chatId: ChatId, userId: UserId, messageId: MessageId): Message? =
         DatabaseObservation.query(DatabaseOperation.MESSAGE_FIND_MESSAGE) {
             db.selectFrom(MESSAGES)
-                .where(MESSAGES.CHAT_ID.eq(chatId.value), MESSAGES.ID.eq(messageId.value), currentMembership(chatId, userId))
-                .fetch().let(::hydrate).singleOrNull()
+                .where(MESSAGES.CHAT_ID.eq(chatId.value), MESSAGES.ID.eq(messageId.value), visibleToMember(chatId, userId))
+                .fetch().let { hydrate(it, userId) }.singleOrNull()
         }
 
     override fun findReply(chatId: ChatId, userId: UserId, messageId: MessageId): Message? =
         findMessage(chatId, userId, messageId)?.takeIf { it.deletedAt == null }
 
-    private fun hydrate(rows: List<MessagesRecord>): List<Message> {
+    private fun hydrate(rows: List<MessagesRecord>, userId: UserId): List<Message> {
         val targets = rows.filter { it.deletedAt == null }.mapNotNull { it.replyToMessageId }.distinct()
         val replies = if (targets.isEmpty()) {
             emptyMap()
         } else {
             db.selectFrom(MESSAGES)
-                .where(MESSAGES.ID.`in`(targets)).fetch().associateBy { it.id }
+                .where(
+                    MESSAGES.ID.`in`(targets),
+                    MESSAGES.CHAT_ID.eq(rows.first().chatId),
+                    visibleMessage(ChatId(rows.first().chatId!!), userId, MESSAGES.SEQUENCE),
+                ).fetch().associateBy {
+                    it.id
+                }
         }
         return rows.map { row ->
             val parent = if (row.deletedAt == null) replies[row.replyToMessageId] else null
@@ -226,6 +268,7 @@ class JooqMessageRepository(
             messageVersion = messageVersion!!,
             editedAt = editedAt,
             deletedAt = deletedAt,
+            replyToMessageId = replyToMessageId?.let(::MessageId),
         )
 
     private fun SendRequestsRecord.toSendResult(): SendResult =

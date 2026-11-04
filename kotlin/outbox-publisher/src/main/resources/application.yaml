@@ -3,6 +3,8 @@ server:
 spring:
   application:
     name: messenger-outbox-publisher
+  jackson:
+    default-property-inclusion: non_null
   security:
     user:
       name: ${METRICS_USERNAME:metrics}

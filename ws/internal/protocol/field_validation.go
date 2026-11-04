@@ -57,7 +57,8 @@ func validateEventFields(event Event, fields messagecodec.Fields) error {
 			replyFields++
 		}
 	}
-	if replyFields != 0 && replyFields != 5 {
+	identityOnly := event.Type == EventMessageSaved && replyFields == 1 && fields.Has("replyToMessageId") && ValidULID(event.ReplyToMessageID)
+	if replyFields != 0 && replyFields != 5 && !identityOnly {
 		return errors.New("incomplete reply metadata")
 	}
 	if replyFields == 5 && !ValidULID(event.ReplyToMessageID) {

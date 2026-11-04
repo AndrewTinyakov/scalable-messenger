@@ -24,7 +24,7 @@ func newFeatureMetrics(registry *prometheus.Registry) *FeatureMetrics {
 
 func (m *FeatureMetrics) ObserveFeatureDelivery(event protocol.Event, now time.Time) {
 	switch event.Type {
-	case protocol.EventMessageChanged, protocol.EventChatDeleted, protocol.EventReadsChanged, protocol.EventPresence:
+	case protocol.EventMessageChanged, protocol.EventChatDeleted, protocol.EventReadsChanged, protocol.EventHistoryChanged, protocol.EventPresence:
 		m.deliveries.WithLabelValues(string(event.Type)).Inc()
 	default:
 		return

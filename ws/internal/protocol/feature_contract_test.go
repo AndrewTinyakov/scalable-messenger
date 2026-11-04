@@ -337,7 +337,7 @@ func featureAssertJSONEqual(t *testing.T, actual, expected []byte) {
 }
 
 func TestFeatureSharedDurableFixturesRoundTripWithoutLosingTombstonesOrReplyFlags(t *testing.T) {
-	for _, name := range []string{"message-saved-reply", "message-changed", "message-deleted", "message-saved-deleted-reply", "chat-deleted", "reads-changed"} {
+	for _, name := range []string{"message-saved-reply", "message-changed", "message-deleted", "message-saved-deleted-reply", "chat-deleted", "reads-changed", "history-changed", "message-saved-reply-identity"} {
 		t.Run(name, func(t *testing.T) {
 			payload, err := os.ReadFile("../../../contracts/fixtures/valid/" + name + ".json")
 			if err != nil {
@@ -395,4 +395,29 @@ func TestFeatureSharedReplyCommandMatchesGeneratedWire(t *testing.T) {
 		t.Fatal(err)
 	}
 	featureAssertJSONEqual(t, wire, payload)
+}
+
+func TestHistoryHintsRejectContentAndInvalidRevisions(t *testing.T) {
+	payload, err := os.ReadFile("../../../contracts/fixtures/valid/history-changed.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []any{nil, 1, "-1", "01", "9223372036854775808"} {
+		fields := map[string]any{}
+		if err := json.Unmarshal(payload, &fields); err != nil {
+			t.Fatal(err)
+		}
+		fields["visibilityRevision"] = value
+		if _, err := DecodeEvent(featureJSON(t, fields)); err == nil {
+			t.Fatalf("accepted invalid revision %v", value)
+		}
+	}
+	fields := map[string]any{}
+	if err := json.Unmarshal(payload, &fields); err != nil {
+		t.Fatal(err)
+	}
+	fields["body"] = "removed text"
+	if _, err := DecodeEvent(featureJSON(t, fields)); err == nil {
+		t.Fatal("accepted body in history hint")
+	}
 }

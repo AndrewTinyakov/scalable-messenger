@@ -18,10 +18,13 @@ class RoomEventPublisher(
     properties: RedisRoomProperties,
     private val publisherProperties: PublisherProperties,
     mapper: ObjectMapper,
+    private val hydration: PublicationHydration? = null,
 ) : OutboxEventPublisher,
     AutoCloseable {
     private val scheduler = Schedulers.newBoundedElastic(publisherProperties.concurrency, 500, "room-publication")
     private val publication = RoomPublicationScript(redis, mapper, properties)
+
+    override fun prepare(messages: List<OutboxMessage>): List<OutboxMessage> = hydration?.prepare(messages) ?: messages
 
     override fun publish(message: OutboxMessage) {
         SendStageRecorder.record(SendStage.REDIS_PUBLISH_STARTED, eventId = message.id.value)

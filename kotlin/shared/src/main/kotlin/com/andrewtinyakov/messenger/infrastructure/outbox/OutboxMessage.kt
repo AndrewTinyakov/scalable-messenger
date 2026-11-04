@@ -9,4 +9,5 @@ data class OutboxMessage(
     val payload: String,
     val groupPublicationOrder: Long? = null,
     val createdAt: OffsetDateTime? = null,
+    val replayPayload: String? = null,
 )

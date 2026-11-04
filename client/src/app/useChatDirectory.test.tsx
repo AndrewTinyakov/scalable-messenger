@@ -8,10 +8,12 @@ import { useChatDirectory } from './useChatDirectory'
 
 function deferred<T>() {
   let resolve!: (value: T) => void
-  const promise = new Promise<T>((done) => {
+  let reject!: (reason: Error) => void
+  const promise = new Promise<T>((done, fail) => {
     resolve = done
+    reject = fail
   })
-  return { promise, resolve }
+  return { promise, resolve, reject }
 }
 const older: Chat = {
   id: 'chat',
@@ -114,6 +116,46 @@ it.each(['directory', 'summary'] as const)(
       await firstRequest
     })
     expect(directory.chats[0]).toEqual(newer)
+  },
+)
+it.each([
+  ['directory', 'before'],
+  ['directory', 'after'],
+  ['summary', 'before'],
+  ['summary', 'after'],
+] as const)(
+  'applies the successful %s when the later request fails %s it completes',
+  async (first, failureTiming) => {
+    const other = { ...older, id: 'other', activityAt: '2026-01-15T00:00:00Z' }
+    await act(async () => directory.rememberChat(other))
+    const page = deferred<{ chats: Chat[]; nextCursor: null }>()
+    const summary = deferred<Chat>()
+    chats.mockReturnValueOnce(page.promise)
+    chat.mockReturnValueOnce(summary.promise)
+    const failure = new Error('Connection lost')
+    let successful!: Promise<unknown>
+    let failed!: Promise<unknown>
+    await act(async () => {
+      successful =
+        first === 'directory' ? directory.refreshChats() : directory.refreshChatSummary('chat')
+      failed =
+        first === 'directory'
+          ? directory.refreshChatSummary('chat').catch((cause: unknown) => cause)
+          : directory.refreshChats()
+    })
+    const fail = async () => {
+      if (first === 'directory') summary.reject(failure)
+      else page.reject(failure)
+      await failed
+    }
+    if (failureTiming === 'before') await act(fail)
+    await act(async () => {
+      if (first === 'directory') page.resolve({ chats: [newer, other], nextCursor: null })
+      else summary.resolve(newer)
+      await successful
+    })
+    if (failureTiming === 'after') await act(fail)
+    expect(directory.chats).toEqual([newer, other])
   },
 )
 it('does not restore an unread badge after a read on another device at the same sequence', async () => {

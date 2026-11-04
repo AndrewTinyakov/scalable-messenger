@@ -52,7 +52,7 @@ export function useChatDirectory({
         (BigInt(read.through) >= BigInt(chat.lastSequence) ||
           (read.pending && selectedIdRef.current === chat.id))
         ? { ...chat, unreadCount: 0, unreadCountCapped: false }
-        : chat
+        : { unreadCount: 0, unreadCountCapped: false, ...chat }
     },
     [selectedIdRef],
   )

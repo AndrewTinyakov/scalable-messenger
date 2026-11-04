@@ -97,7 +97,7 @@ class JooqChatRepository(
     )
 
     private fun summary(userId: UserId): org.jooq.Field<Summary> {
-        val candidates = DSL.name("summary_candidates").`as`(
+        val candidates = DSL.name("summary_candidates").asMaterialized(
             DSL.select(MESSAGES.ID, MESSAGES.SEQUENCE, MESSAGES.SENDER_ID, MESSAGES.CREATED_AT, MESSAGES.BODY, MESSAGES.DELETED_AT)
                 .from(MESSAGES).where(MESSAGES.CHAT_ID.eq(CHATS.ID))
                 .orderBy(MESSAGES.SEQUENCE.desc()).limit(256),
@@ -621,6 +621,7 @@ class JooqChatRepository(
     ) {
         require(userIds.size in 1..16) { "Sequence allocation must contain one to sixteen senders" }
         val distinctUsers = userIds.distinct()
+        val activityNow = DSL.field("clock_timestamp()", OffsetDateTime::class.java)
         return db.update(CHATS)
             .set(
                 CHATS.NEXT_SEQUENCE,
@@ -628,7 +629,7 @@ class JooqChatRepository(
             )
             .set(
                 CHATS.LAST_ACTIVITY_AT,
-                DSL.greatest(DSL.coalesce(CHATS.LAST_ACTIVITY_AT, DSL.currentOffsetDateTime()), DSL.currentOffsetDateTime()),
+                DSL.greatest(DSL.coalesce(CHATS.LAST_ACTIVITY_AT, activityNow), activityNow),
             )
             .where(CHATS.ID.eq(chatId.value), CHATS.DELETED_AT.isNull)
             .and(

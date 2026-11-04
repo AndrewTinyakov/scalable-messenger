@@ -42,6 +42,48 @@ class ChatServiceTests
         private val messageHistoryService: MessageHistoryService,
     ) : MessengerIntegrationTest() {
         @Test
+        fun `activity uses acceptance time rather than an earlier transaction start`() {
+            val owner = user("activity-clock-owner")
+            val peer = user("activity-clock-peer")
+            val chat = chatService.createGroup(UserId(owner), CreateGroupChatRequest("Clock", listOf(peer)))
+            tx.executeWithoutResult {
+                val began = db.queryForObject("SELECT transaction_timestamp()", java.time.OffsetDateTime::class.java)!!
+                db.execute("SELECT pg_sleep(0.03)")
+                chatRepository.allocateSequenceForMember(ChatId(chat.id), UserId(owner))
+                val activity = db.queryForObject(
+                    "SELECT last_activity_at FROM chats WHERE id=?",
+                    java.time.OffsetDateTime::class.java,
+                    chat.id,
+                )!!
+                assertTrue(activity.isAfter(began))
+            }
+        }
+
+        @Test
+        fun `a fully hidden candidate window does not scan backwards to an older visible message`() {
+            val owner = user("window-owner")
+            val peer = user("window-peer")
+            val chat = chatService.createGroup(UserId(owner), CreateGroupChatRequest("Hidden window", listOf(peer)))
+            db.update(
+                "INSERT INTO messages(id,chat_id,sequence,sender_id,body,created_at) SELECT left(?,20)||lpad(i::text,6,'0'),?,i,?,'body',now() FROM generate_series(1,300) i",
+                chat.id,
+                chat.id,
+                peer,
+            )
+            db.update("UPDATE chats SET next_sequence=301 WHERE id=?", chat.id)
+            db.update(
+                "INSERT INTO hidden_message_ranges(chat_id,user_id,after_sequence,through_sequence) VALUES (?,?,1,300)",
+                chat.id,
+                owner,
+            )
+            val result = chatService.get(ChatId(chat.id), UserId(owner))
+            assertEquals(null, result.lastMessage)
+            assertEquals(0, result.unreadCount)
+            assertEquals(true, result.unreadCountCapped)
+            assertEquals(1, db.queryForObject("SELECT count(*) FROM messages WHERE chat_id=? AND sequence=1", Int::class.java, chat.id))
+        }
+
+        @Test
         fun `chat pages order by activity with deterministic ties and sends update activity transactionally`() {
             val owner = user("activity-owner")
             val peer = user("activity-peer")

@@ -160,7 +160,7 @@ class ChatService(
                     members = members,
                 ),
             )
-            chat.toResponse(members = repository.findMembers(chatId = chat.id))
+            get(chat.id, userId)
         }
     }
 

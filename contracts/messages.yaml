@@ -191,3 +191,7 @@ messages:
     name: SocketSidebarActivityV1
     payload:
       $ref: ./schemas/socket/frame/sidebar-activity-v1.yaml
+  SidebarActivityEventV1:
+    name: SidebarActivityEventV1
+    payload:
+      $ref: ./schemas/message/event/sidebar-activity-v1.yaml

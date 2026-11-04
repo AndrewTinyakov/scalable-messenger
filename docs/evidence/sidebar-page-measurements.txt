@@ -1,0 +1,14 @@
+PostgreSQL 17, isolated compose database, 2 CPU quota, 768 MiB limit.
+Dataset: +-------------------+------------+----------+
+|large_chat_messages|viewer_chats|exclusions|
++-------------------+------------+----------+
+|            1088660|        5201|    110000|
++-------------------+------------+----------+
+
+Warmup: 5 pages. Samples: 60 each, serial, warm cache. Page size: 100 plus one lookahead.
+Repository page plus direct member preview wall clock:
+p50=22.163333 ms p95=33.891208 ms
+PostgreSQL main page execution via EXPLAIN ANALYZE:
+p50=38.958 ms p95=43.656 ms
+Includes real jOOQ SQL and conversion in repository wall clock.
+Excludes HTTP, authentication, browser and network fanout.

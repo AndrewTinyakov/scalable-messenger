@@ -7,6 +7,7 @@ import (
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
 	authorization "messenger/ws/internal/generated/grpc"
 )
 

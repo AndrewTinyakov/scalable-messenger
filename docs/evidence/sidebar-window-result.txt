@@ -1,0 +1,4 @@
+Window unreadCount=86, capped=true
+Seed-derived exact unread=32992
+Last message sequence=1100000
+Sender username=evidence-user-2

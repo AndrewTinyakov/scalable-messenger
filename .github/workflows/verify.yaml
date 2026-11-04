@@ -13,6 +13,13 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7.4-alpine
+        ports: ["6379:6379"]
+        options: --health-cmd "redis-cli ping" --health-interval 1s --health-retries 30
+    env:
+      REDIS_TEST_URL: redis://localhost:6379
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -49,6 +56,8 @@ jobs:
           git diff --exit-code -- kotlin/shared/src/generated/asyncapi/kotlin ws/internal/generated/messaging client/src/shared/api/generated/socket-vocabulary.ts
       - name: Compile and lint Kotlin
         run: ./kotlin/gradlew -p kotlin :api:classes :command-processor:classes :outbox-publisher:classes ktlintCheck --no-daemon
+      - name: Run Kotlin transaction and publication tests
+        run: ./kotlin/gradlew -p kotlin :api:test :outbox-publisher:test --no-daemon
       - name: Compile and lint Go
         run: |
           go -C ws build -o /dev/null ./...
@@ -58,7 +67,7 @@ jobs:
           npm run format:go:check
       - name: Run Go unit tests
         run: |
-          go -C ws test -short -timeout=60s ./...
+          go -C ws test -race -timeout=120s ./...
           go -C tests/load/ws test -short -timeout=60s ./...
       - name: Build and lint the client
         run: |

@@ -1,5 +1,6 @@
 package com.andrewtinyakov.messenger.infrastructure.redis
 
+import com.andrewtinyakov.messenger.generated.messaging.event.SidebarActivityEventV1
 import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxMessage
 import org.springframework.core.io.ClassPathResource
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate
@@ -42,14 +43,7 @@ internal class RoomPublicationScript(
             val event = mapper.readTree(message.payload)
             if (message.room.startsWith("group:") && event.path("type").asText() == "message_saved") {
                 val chatId = event.path("chatId").asText()
-                val hint = mapper.writeValueAsString(
-                    mapOf(
-                        "type" to "sidebar_activity",
-                        "version" to 1,
-                        "chatId" to chatId,
-                        "sequence" to event.path("sequence").asText(),
-                    ),
-                )
+                val hint = mapper.writeValueAsString(SidebarActivityEventV1.create(chatId, event.path("sequence").asText()))
                 redis.execute(activityScript, listOf("messenger:{activity:$chatId}:live"), listOf(hint)).single().thenReturn(streamId)
             } else {
                 Mono.just(streamId)

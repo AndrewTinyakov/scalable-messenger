@@ -2,8 +2,10 @@ package protocol
 
 import (
 	"errors"
-	"messenger/ws/internal/messagecodec"
 	"time"
+
+	"messenger/ws/internal/generated/messaging"
+	"messenger/ws/internal/messagecodec"
 )
 
 func DecodeSidebarEvent(data []byte) (Event, error) {
@@ -16,7 +18,8 @@ func DecodeSidebarEvent(data []byte) (Event, error) {
 	}
 	switch event.Type {
 	case EventSidebarActivity:
-		if !fields.Match([]string{"type", "version", "chatId", "sequence"}, nil) || !ValidULID(event.ChatID) || !validSequence(event.Sequence) || event.Sequence == "0" {
+		shape := messaging.RoomShapes[EventSidebarActivity]
+		if !fields.Match(shape.Required, shape.Optional) || !ValidULID(event.ChatID) || !validSequence(event.Sequence) || event.Sequence == "0" {
 			return event, errors.New("invalid sidebar activity")
 		}
 	case EventSidebarPresence:

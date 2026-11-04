@@ -24,14 +24,26 @@ data class ChatResponse(
     val lastSequence: String,
     @field:Schema(requiredMode = Schema.RequiredMode.NOT_REQUIRED, nullable = true)
     val ownerId: String? = null,
-    @field:Schema(requiredMode = Schema.RequiredMode.NOT_REQUIRED, nullable = true)
+    @field:Schema(
+        requiredMode = Schema.RequiredMode.NOT_REQUIRED,
+        nullable = true,
+        description = "Latest visible message in the newest 256 rows; null can leave older visible history",
+    )
     @field:JsonInclude(JsonInclude.Include.ALWAYS)
     val lastMessage: ChatLastMessageResponse? = null,
-    @field:Schema(requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+    @field:Schema(
+        requiredMode = Schema.RequiredMode.NOT_REQUIRED,
+        minimum = "0",
+        maximum = "256",
+        description = "Visible other-author unread messages in the newest 256 candidates; lower bound when capped",
+    )
     val unreadCount: Int = 0,
     @field:Schema(requiredMode = Schema.RequiredMode.NOT_REQUIRED, nullable = true)
     val activityAt: java.time.OffsetDateTime? = null,
-    @field:Schema(requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+    @field:Schema(
+        requiredMode = Schema.RequiredMode.NOT_REQUIRED,
+        description = "True for 256 raw unread candidates; real count may be higher even when unreadCount is zero",
+    )
     val unreadCountCapped: Boolean = false,
 )
 

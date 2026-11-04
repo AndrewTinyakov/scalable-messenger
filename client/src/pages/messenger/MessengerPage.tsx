@@ -14,6 +14,7 @@ import type { OpenChatMenu } from '../../widgets/chat-list/ChatRow'
 import { ConnectionStatus } from '../../widgets/chat-list/ConnectionStatus'
 import { FolderRail, type ChatFolder } from '../../widgets/chat-list/FolderRail'
 import { ChatPanel } from '../../widgets/chat-panel/ChatPanel'
+import { liveChatId, type ChatViewport } from './liveChat'
 
 interface Props {
   session: Session
@@ -24,7 +25,7 @@ interface Props {
 export function MessengerPage({ session, onSignOut, onSessionRevoked }: Props) {
   const online = useSyncExternalStore(subscribeNetwork, isNetworkOnline)
   const pageActive = useSyncExternalStore(subscribePageActivity, isPageActive)
-  const [atLatest, setAtLatest] = useState(true)
+  const [viewport, setViewport] = useState<ChatViewport | null>(null)
   const messenger = useMessenger(session, onSessionRevoked)
   const [creating, setCreating] = useState<'direct' | 'group' | null>(null)
   const [managingMembers, setManagingMembers] = useState(false)
@@ -38,17 +39,23 @@ export function MessengerPage({ session, onSignOut, onSessionRevoked }: Props) {
   const searchUsers = useMemo(() => api.forSession(session).users, [session])
   const selected =
     messenger.chats.find((item) => item.id === messenger.selectedId) || messenger.draftChat
-  const liveChatId = selected && atLatest && pageActive ? selected.id : null
+  const liveId = liveChatId({
+    selectedId: selected?.id,
+    viewport,
+    hasNewer: messenger.hasNewerMessages,
+    loadedMessages: selected ? (messenger.messages[selected.id]?.length ?? 0) : 0,
+    pageActive,
+  })
   const unreadChats = useMemo(() => {
     const counts = { all: 0, unread: 0, direct: 0, groups: 0 }
     for (const chat of messenger.chats) {
-      if (!hasUnread(chat) || chat.id === liveChatId) continue
+      if (!hasUnread(chat) || chat.id === liveId) continue
       counts.all += 1
       counts.unread += 1
       counts[chat.kind === ChatKind.GROUP ? 'groups' : 'direct'] += 1
     }
     return counts
-  }, [messenger.chats, liveChatId])
+  }, [messenger.chats, liveId])
 
   useEffect(() => {
     setManagingMembers(false)
@@ -84,7 +91,7 @@ export function MessengerPage({ session, onSignOut, onSessionRevoked }: Props) {
           loading={messenger.loading}
           messages={messenger.latestMessages}
           selectedId={messenger.selectedId}
-          liveChatId={liveChatId}
+          liveChatId={liveId}
           presence={messenger.sidebarPresence}
           onSelect={messenger.selectChat}
           onChatMenu={openChatMenu}
@@ -121,9 +128,15 @@ export function MessengerPage({ session, onSignOut, onSessionRevoked }: Props) {
           onLoadNewer={() => selected && void messenger.loadNewer(selected.id)}
           onJumpToLatest={() => selected && void messenger.showLatest(selected.id)}
           jumpRevision={messenger.jumpRevision}
-          onViewPositionChange={(latest) => {
-            setAtLatest(latest)
-            if (selected) messenger.setAtLatestPosition(selected.id, latest)
+          onViewPositionChange={(atLatest) => {
+            if (!selected) return
+            const chatId = selected.id
+            setViewport((current) =>
+              current?.chatId === chatId && current.atLatest === atLatest
+                ? current
+                : { chatId, atLatest },
+            )
+            messenger.setAtLatestPosition(chatId, atLatest)
           }}
         />
         <ConnectionStatus

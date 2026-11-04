@@ -5,6 +5,7 @@ import com.andrewtinyakov.messenger.infrastructure.database.observability.Databa
 import com.andrewtinyakov.messenger.infrastructure.database.observability.observedExecute
 import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxMessage
 import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxRepository
+import com.andrewtinyakov.messenger.infrastructure.redis.RoomAddress
 import com.andrewtinyakov.messenger.read.repository.ReadRepository
 import com.andrewtinyakov.messenger.read.web.payload.AdvanceReadRequest
 import com.andrewtinyakov.messenger.read.web.payload.MessageReaderResponse
@@ -49,7 +50,7 @@ class ReadService(
             if (advanced.advanced) {
                 metrics.count("ranges", "inserted", advanced.rangesWritten)
                 metrics.count("batches", "ranges")
-                val rooms = repository.notificationRooms(chatId, advanced.progress.readAt!!)
+                val rooms = (repository.notificationRooms(chatId, advanced.progress.readAt!!) + RoomAddress.user(userId)).distinct()
                 metrics.count("notifications", if (rooms.isEmpty()) "coalesced" else "emitted")
                 outbox.enqueue(
                     rooms.map { room ->

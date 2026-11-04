@@ -51,6 +51,9 @@ let historyMessages: Message[]
 let groupMemberCount: number
 let groupMembers: Session['user'][]
 let renderPanel: boolean
+let fakeUnread: number
+let holdReadRequests: boolean
+let readRequests: ((value: Response) => void)[]
 let readCalls: string[]
 let visibilityRevision: string
 let clearedThrough: string
@@ -156,6 +159,9 @@ beforeEach(() => {
   groupMemberCount = group.memberCount
   groupMembers = [session.user]
   renderPanel = false
+  fakeUnread = 0
+  holdReadRequests = false
+  readRequests = []
   readCalls = []
   visibilityRevision = '0'
   clearedThrough = '0'
@@ -216,6 +222,7 @@ beforeEach(() => {
       if (options?.method === 'POST') {
         const { throughSequence } = JSON.parse(String(options.body)) as { throughSequence: string }
         readCalls.push(throughSequence)
+        if (holdReadRequests) return new Promise<Response>((resolve) => readRequests.push(resolve))
         return Response.json({
           throughSequence,
           readAt: new Date().toISOString(),
@@ -286,6 +293,7 @@ beforeEach(() => {
       return Response.json({
         ...group,
         lastMessage: lastSummary,
+        unreadCount: fakeUnread,
         memberCount: groupMemberCount,
         members: groupMembers,
       })
@@ -304,6 +312,7 @@ beforeEach(() => {
           : [
               {
                 ...group,
+                unreadCount: fakeUnread,
                 memberCount: groupMemberCount,
                 lastSequence: snapshotFor(chatId).snapshotSequence,
               },
@@ -328,6 +337,69 @@ afterEach(async () => {
 })
 
 describe('messenger request coordination', () => {
+  it('clears the selected badge immediately while a read request waits and resists a stale summary', async () => {
+    vi.useFakeTimers()
+    fakeUnread = 4
+    await renderMessenger()
+    await act(async () => sockets[0].open())
+    expect(messenger.chats.find((chat) => chat.id === chatId)?.unreadCount).toBe(4)
+    holdReadRequests = true
+    await act(async () => messenger.features.readThrough('1'))
+    expect(readRequests).toHaveLength(1)
+    expect(messenger.chats.find((chat) => chat.id === chatId)?.unreadCount).toBe(0)
+    await act(async () => {
+      sockets[0].event({
+        type: 'reads_changed',
+        version: 1,
+        eventId: recipient.id,
+        room: `user:${userId}`,
+        epoch: 'epoch',
+        streamId: '1-0',
+        chatId,
+      })
+      await vi.advanceTimersByTimeAsync(500)
+    })
+    expect(messenger.chats.find((chat) => chat.id === chatId)?.unreadCount).toBe(0)
+    fakeUnread = 0
+    holdReadRequests = false
+    await act(async () =>
+      readRequests[0](
+        Response.json({
+          throughSequence: '1',
+          readAt: new Date().toISOString(),
+          serverTime: new Date().toISOString(),
+        }),
+      ),
+    )
+    expect(messenger.chats.find((chat) => chat.id === chatId)?.unreadCount).toBe(0)
+  })
+
+  it('clears an unopened group badge on another device read hint through the account room', async () => {
+    vi.useFakeTimers()
+    fakeUnread = 9
+    await renderMessenger()
+    await act(async () => {
+      sockets[0].open()
+      messenger.closeChat()
+    })
+    fakeUnread = 0
+    paths = []
+    await act(async () => {
+      sockets[0].event({
+        type: 'reads_changed',
+        version: 1,
+        eventId: recipient.id,
+        room: `user:${userId}`,
+        epoch: 'epoch',
+        streamId: '1-0',
+        chatId,
+      })
+      await vi.advanceTimersByTimeAsync(500)
+    })
+    expect(messenger.chats.find((chat) => chat.id === chatId)?.unreadCount).toBe(0)
+    expect(paths.some((path) => path.endsWith('/messages'))).toBe(false)
+  })
+
   it('debounces sidebar targets, expires presence to unknown and restores the watch after reconnect', async () => {
     vi.useFakeTimers()
     await renderMessenger()

@@ -18,6 +18,9 @@ interface Options {
   remove(chatId: string): void
   hide?(chatId: string): void
   refreshChats?(): Promise<unknown>
+  onReadPending?(chatId: string, through: string): void
+  onReadCommitted?(chatId: string, through: string): void
+  onReadFailed?(chatId: string): void
   fail(message: string): void
 }
 
@@ -101,6 +104,7 @@ export function useConversationFeatures(options: Options) {
         const through = readPending.current
         readNextAt.current = Date.now() + 1000
         const result = await current.sessionApi.advanceRead(id, through)
+        current.onReadCommitted?.(id, result.throughSequence)
         if (generation !== scope.current) return
         if (BigInt(readPending.current) <= BigInt(result.throughSequence)) readPending.current = '0'
         setSummary((previous) => ({
@@ -112,12 +116,15 @@ export function useConversationFeatures(options: Options) {
         }))
       }
     } catch {
+      current.onReadFailed?.(id)
     } finally {
       if (generation === scope.current) readRunning.current = false
     }
   }, [])
   const readThrough = useCallback(
     (through: string) => {
+      const id = optionsRef.current.chat?.id
+      if (id && !id.startsWith('draft:')) optionsRef.current.onReadPending?.(id, through)
       if (BigInt(through) > BigInt(readPending.current)) readPending.current = through
       void flushRead()
     },

@@ -141,6 +141,8 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     listChats,
     rememberChat,
     refreshChatSummary,
+    markRead,
+    settleRead,
     isRemoved,
     successfulRefreshes,
     removeChat,
@@ -204,6 +206,9 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     remove: removeConversation,
     hide: hideConversation,
     refreshChats,
+    onReadPending: markRead,
+    onReadCommitted: settleRead,
+    onReadFailed: settleRead,
     fail: setError,
   })
   const withSnapshot = async (

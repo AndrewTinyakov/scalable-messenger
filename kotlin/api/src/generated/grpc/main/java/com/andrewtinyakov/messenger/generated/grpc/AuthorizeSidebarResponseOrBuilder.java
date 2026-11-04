@@ -12,7 +12,7 @@ public interface AuthorizeSidebarResponseOrBuilder extends
   /**
    * <code>repeated .messenger.authorization.v1.SidebarChat chats = 1;</code>
    */
-  java.util.List<com.andrewtinyakov.messenger.generated.grpc.SidebarChat> 
+  java.util.List<com.andrewtinyakov.messenger.generated.grpc.SidebarChat>
       getChatsList();
   /**
    * <code>repeated .messenger.authorization.v1.SidebarChat chats = 1;</code>
@@ -25,7 +25,7 @@ public interface AuthorizeSidebarResponseOrBuilder extends
   /**
    * <code>repeated .messenger.authorization.v1.SidebarChat chats = 1;</code>
    */
-  java.util.List<? extends com.andrewtinyakov.messenger.generated.grpc.SidebarChatOrBuilder> 
+  java.util.List<? extends com.andrewtinyakov.messenger.generated.grpc.SidebarChatOrBuilder>
       getChatsOrBuilderList();
   /**
    * <code>repeated .messenger.authorization.v1.SidebarChat chats = 1;</code>

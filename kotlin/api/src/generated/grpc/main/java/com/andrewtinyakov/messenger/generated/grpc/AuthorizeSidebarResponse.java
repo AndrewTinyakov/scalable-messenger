@@ -57,7 +57,7 @@ private static final long serialVersionUID = 0L;
    * <code>repeated .messenger.authorization.v1.SidebarChat chats = 1;</code>
    */
   @java.lang.Override
-  public java.util.List<? extends com.andrewtinyakov.messenger.generated.grpc.SidebarChatOrBuilder> 
+  public java.util.List<? extends com.andrewtinyakov.messenger.generated.grpc.SidebarChatOrBuilder>
       getChatsOrBuilderList() {
     return chats_;
   }
@@ -362,7 +362,7 @@ private static final long serialVersionUID = 0L;
             chatsBuilder_ = null;
             chats_ = other.chats_;
             bitField0_ = (bitField0_ & ~0x00000001);
-            chatsBuilder_ = 
+            chatsBuilder_ =
               com.google.protobuf.GeneratedMessage.alwaysUseFieldBuilders ?
                  internalGetChatsFieldBuilder() : null;
           } else {
@@ -621,7 +621,7 @@ private static final long serialVersionUID = 0L;
     /**
      * <code>repeated .messenger.authorization.v1.SidebarChat chats = 1;</code>
      */
-    public java.util.List<? extends com.andrewtinyakov.messenger.generated.grpc.SidebarChatOrBuilder> 
+    public java.util.List<? extends com.andrewtinyakov.messenger.generated.grpc.SidebarChatOrBuilder>
          getChatsOrBuilderList() {
       if (chatsBuilder_ != null) {
         return chatsBuilder_.getMessageOrBuilderList();
@@ -647,12 +647,12 @@ private static final long serialVersionUID = 0L;
     /**
      * <code>repeated .messenger.authorization.v1.SidebarChat chats = 1;</code>
      */
-    public java.util.List<com.andrewtinyakov.messenger.generated.grpc.SidebarChat.Builder> 
+    public java.util.List<com.andrewtinyakov.messenger.generated.grpc.SidebarChat.Builder>
          getChatsBuilderList() {
       return internalGetChatsFieldBuilder().getBuilderList();
     }
     private com.google.protobuf.RepeatedFieldBuilder<
-        com.andrewtinyakov.messenger.generated.grpc.SidebarChat, com.andrewtinyakov.messenger.generated.grpc.SidebarChat.Builder, com.andrewtinyakov.messenger.generated.grpc.SidebarChatOrBuilder> 
+        com.andrewtinyakov.messenger.generated.grpc.SidebarChat, com.andrewtinyakov.messenger.generated.grpc.SidebarChat.Builder, com.andrewtinyakov.messenger.generated.grpc.SidebarChatOrBuilder>
         internalGetChatsFieldBuilder() {
       if (chatsBuilder_ == null) {
         chatsBuilder_ = new com.google.protobuf.RepeatedFieldBuilder<

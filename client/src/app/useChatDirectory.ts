@@ -44,6 +44,18 @@ export function useChatDirectory({
   } | null>(null)
   const refreshSuccessRef = useRef(0)
   const activeRef = useRef(true)
+  const optimisticReads = useRef(new Map<string, { through: string; pending: boolean }>())
+  const applyOptimisticRead = useCallback(
+    (chat: Chat): Chat => {
+      const read = optimisticReads.current.get(chat.id)
+      return read &&
+        (BigInt(read.through) >= BigInt(chat.lastSequence) ||
+          (read.pending && selectedIdRef.current === chat.id))
+        ? { ...chat, unreadCount: 0, unreadCountCapped: false }
+        : chat
+    },
+    [selectedIdRef],
+  )
 
   useEffect(() => {
     activeRef.current = true
@@ -100,11 +112,13 @@ export function useChatDirectory({
         }
         if (!activeRef.current || refreshGeneration !== refreshGenerationRef.current)
           return chatsRef.current
-        const fresh = list.filter(
-          (chat) =>
-            !removedChatRef.current.has(chat.id) ||
-            removalGeneration === removalGenerationRef.current,
-        )
+        const fresh = list
+          .map(applyOptimisticRead)
+          .filter(
+            (chat) =>
+              !removedChatRef.current.has(chat.id) ||
+              removalGeneration === removalGenerationRef.current,
+          )
         for (const chat of fresh) removedChatRef.current.delete(chat.id)
         const merged = full
           ? fresh
@@ -135,7 +149,7 @@ export function useChatDirectory({
           setLoading(false)
       }
     },
-    [onRefreshed, recordLatest, selectedIdRef, sessionApi, setError],
+    [onRefreshed, recordLatest, selectedIdRef, sessionApi, setError, applyOptimisticRead],
   )
 
   const refreshChats = useCallback(
@@ -171,7 +185,7 @@ export function useChatDirectory({
       const known = new Set(chatsRef.current.map((chat) => chat.id))
       const merged = [
         ...chatsRef.current,
-        ...page.chats.filter((chat) => !known.has(chat.id)),
+        ...page.chats.filter((chat) => !known.has(chat.id)).map(applyOptimisticRead),
       ].sort(compareActivity)
       chatsRef.current = merged
       setChats(merged)
@@ -182,7 +196,7 @@ export function useChatDirectory({
     } finally {
       setLoadingMoreChats(false)
     }
-  }, [loadingMoreChats, nextChatCursor, recordLatest, sessionApi, setError])
+  }, [loadingMoreChats, nextChatCursor, recordLatest, sessionApi, setError, applyOptimisticRead])
 
   useEffect(() => {
     const chat = chats.find((item) => item.id === selectedId)
@@ -213,17 +227,20 @@ export function useChatDirectory({
   const listChats = useCallback(() => chatsRef.current, [])
   const rememberChat = useCallback(
     (chat: Chat) => {
-      const next = [chat, ...chatsRef.current.filter((item) => item.id !== chat.id)]
+      const next = [
+        applyOptimisticRead(chat),
+        ...chatsRef.current.filter((item) => item.id !== chat.id),
+      ]
       chatsRef.current = next
       setChats(next)
       recordLatest(chat.id, chat.lastSequence)
     },
-    [recordLatest],
+    [recordLatest, applyOptimisticRead],
   )
   const refreshChatSummary = useCallback(
     async (chatId: string) => {
       const generation = removalGenerationRef.current
-      const chat = await sessionApi.chat(chatId)
+      const chat = applyOptimisticRead(await sessionApi.chat(chatId))
       if (
         !activeRef.current ||
         generation !== removalGenerationRef.current ||
@@ -247,7 +264,36 @@ export function useChatDirectory({
       setChats(next)
       recordLatest(chatId, chat.lastSequence)
     },
-    [sessionApi, recordLatest],
+    [sessionApi, recordLatest, applyOptimisticRead],
+  )
+  const markRead = useCallback(
+    (chatId: string, through: string) => {
+      const previous = optimisticReads.current.get(chatId)
+      optimisticReads.current.delete(chatId)
+      optimisticReads.current.set(chatId, {
+        through:
+          previous && BigInt(previous.through) > BigInt(through) ? previous.through : through,
+        pending: true,
+      })
+      if (optimisticReads.current.size > 1000)
+        optimisticReads.current.delete(optimisticReads.current.keys().next().value!)
+      const next = chatsRef.current.map((chat) =>
+        chat.id === chatId ? applyOptimisticRead(chat) : chat,
+      )
+      chatsRef.current = next
+      setChats(next)
+    },
+    [applyOptimisticRead],
+  )
+  const settleRead = useCallback(
+    (chatId: string, through?: string) => {
+      const read = optimisticReads.current.get(chatId)
+      if (read && through !== undefined && BigInt(through) >= BigInt(read.through))
+        optimisticReads.current.set(chatId, { through, pending: false })
+      else if (through === undefined) optimisticReads.current.delete(chatId)
+      void refreshChatSummary(chatId).catch(() => {})
+    },
+    [refreshChatSummary],
   )
   const isRemoved = useCallback((chatId: string) => removedChatRef.current.has(chatId), [])
   const successfulRefreshes = useCallback(() => refreshSuccessRef.current, [])
@@ -270,6 +316,8 @@ export function useChatDirectory({
     listChats,
     rememberChat,
     refreshChatSummary,
+    markRead,
+    settleRead,
     isRemoved,
     successfulRefreshes,
     removeChat,

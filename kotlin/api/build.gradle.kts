@@ -47,9 +47,14 @@ protobuf {
     protoc { artifact = "com.google.protobuf:protoc:4.30.2" }
     plugins { create("grpc") { artifact = "io.grpc:protoc-gen-grpc-java:1.83.1" } }
     generateProtoTasks {
-        all().forEach {
-            it.outputBaseDirProperty.set(layout.projectDirectory.dir("src/generated/grpc/${it.sourceSet.name}"))
-            it.plugins { maybeCreate("grpc") }
+        all().forEach { protoTask ->
+            protoTask.outputBaseDirProperty.set(layout.projectDirectory.dir("src/generated/grpc/${protoTask.sourceSet.name}"))
+            protoTask.plugins { maybeCreate("grpc") }
+            protoTask.doLast {
+                fileTree(protoTask.outputBaseDirProperty.get().asFile).matching { include("**/*.java") }.forEach { generated ->
+                    generated.writeText(generated.readLines().joinToString("\n") { it.trimEnd() } + "\n")
+                }
+            }
         }
     }
 }

@@ -1,0 +1,13 @@
+{
+  "seed": 1103,
+  "activeSenderFraction": 0.2,
+  "payloads": [
+    {"bytes": 256, "weight": 80},
+    {"bytes": 1000, "weight": 18},
+    {"bytes": 4000, "weight": 2}
+  ],
+  "groups": [
+    {"count": 20, "members": 10, "messagesPerSecond": 0.5},
+    {"count": 2, "members": 100, "messagesPerSecond": 5}
+  ]
+}

@@ -3,21 +3,37 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=24.11"
+    "node": ">=24.15"
   },
   "scripts": {
+    "format": "npm run format:go && npm run format:kotlin && npm run format:client",
+    "format:check": "npm run format:go:check && npm run format:kotlin:check && npm run format:client:check",
+    "format:go": "(cd ws && find . -type d \\( -name generated -o -name vendor \\) -prune -o -type f -name \"*.go\" -exec go tool goimports -w -local messenger/ws,messenger/tests/load/ws {} +) && (cd tests/load/ws && find . -type d \\( -name generated -o -name vendor \\) -prune -o -type f -name \"*.go\" -exec go tool goimports -w -local messenger/ws,messenger/tests/load/ws {} +)",
+    "format:go:check": "bash -o pipefail -c '(cd ws && find . -type d \\( -name generated -o -name vendor \\) -prune -o -type f -name \"*.go\" -exec go tool goimports -l -local messenger/ws,messenger/tests/load/ws {} + | diff -u /dev/null -) && (cd tests/load/ws && find . -type d \\( -name generated -o -name vendor \\) -prune -o -type f -name \"*.go\" -exec go tool goimports -l -local messenger/ws,messenger/tests/load/ws {} + | diff -u /dev/null -)'",
+    "format:kotlin": "./kotlin/gradlew -p kotlin ktlintFormat",
+    "format:kotlin:check": "./kotlin/gradlew -p kotlin ktlintCheck",
+    "format:client": "npm --prefix client run format",
+    "format:client:check": "npm --prefix client run format:check",
     "generate:openapi": "./kotlin/gradlew -p kotlin :api:generateOpenApiDocs && npm --prefix client run generate:api",
-    "validate:asyncapi": "asyncapi validate contracts/asyncapi.yaml && asyncapi validate contracts/models.asyncapi.yaml",
+    "validate:asyncapi": "node contracts/generate-models.mjs validate",
     "generate:asyncapi:kotlin": "node contracts/generate-models.mjs kotlin",
     "generate:asyncapi:go": "node contracts/generate-models.mjs go",
     "test:contracts": "node --test contracts/fixtures.test.mjs",
     "typecheck:client": "npm --prefix client run typecheck",
-    "monitoring:check": "node scripts/check-monitoring.mjs",
-    "monitoring:dashboards": "python3 scripts/generate-monitoring-dashboards.py",
+    "audit:dependencies": "npm audit --audit-level=high && npm --prefix contracts audit --audit-level=high && npm --prefix client audit --audit-level=high && go -C ws run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./... && npm run audit:kotlin",
+    "audit:kotlin": "./kotlin/gradlew -p kotlin osvSbom",
+    "monitoring:check": "node tests/monitoring/check.mjs",
     "test:system": "node --test --test-concurrency=1 tests/system/*.test.mjs",
-    "test:resilience": "MESSENGER_RESILIENCE=1 node --test --test-concurrency=1 tests/system/*.test.mjs"
+    "test:resilience": "MESSENGER_RESILIENCE=1 node --test --test-concurrency=1 tests/system/*.test.mjs tests/resilience/*.test.mjs",
+    "test:load": "go -C tests/load/ws test -race ./...",
+    "load:ws": "go -C tests/load/ws run ."
   },
   "devDependencies": {
-    "@asyncapi/cli": "6.1.0"
+    "@asyncapi/modelina": "5.10.1",
+    "@asyncapi/parser": "3.6.3"
+  },
+  "overrides": {
+    "jsonpath-plus": "10.4.0",
+    "ajv@<7": "6.15.0"
   }
 }

@@ -276,7 +276,7 @@
   color: var(--text-3) !important;
   font-style: italic;
 }
-.message-bubble.rejected {
+.message-row .message-bubble.rejected {
   background: var(--bubble-failed);
 }
 .message-row.mine.run-end .message-bubble.rejected::after {

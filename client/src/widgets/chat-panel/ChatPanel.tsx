@@ -159,7 +159,7 @@ export function ChatPanel({
     chatId: chat?.id,
     userId: currentUser.id,
     messages,
-    pendingCount: pending.length,
+    pendingState: pending.map((send) => send.status).join(),
     throughSequence: features?.summary.throughSequence,
     onRead: features?.readThrough,
     reveal: features?.reveal,

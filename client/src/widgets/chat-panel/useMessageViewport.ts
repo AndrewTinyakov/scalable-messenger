@@ -7,7 +7,7 @@ interface Options {
   chatId?: string
   userId: string
   messages: Message[]
-  pendingCount: number
+  pendingState: string
   throughSequence?: string
   onRead?: (sequence: string) => void
   reveal?: { messageId: string; revision: number; focus: boolean } | null
@@ -34,7 +34,7 @@ export function useMessageViewport({
   chatId,
   userId,
   messages,
-  pendingCount,
+  pendingState,
   throughSequence,
   onRead,
   reveal,
@@ -165,7 +165,7 @@ export function useMessageViewport({
     atBottomRef.current = distanceToBottom(scroller) < BOTTOM_THRESHOLD
     onViewPositionChange(atBottomRef.current && !hasNewer)
     captureLocation()
-  }, [chatId, messages, pendingCount, hasNewer, jumpRevision, locationRevision])
+  }, [chatId, messages, pendingState, hasNewer, jumpRevision, locationRevision])
 
   useLayoutEffect(() => {
     const scroller = scrollRef.current

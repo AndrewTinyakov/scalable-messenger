@@ -20,7 +20,7 @@ function Viewport({
     chatId: 'chat',
     userId: 'me',
     messages: [message('1')],
-    pendingCount: 0,
+    pendingState: '',
     jumpRevision: 0,
     hasOlder: false,
     hasNewer,

@@ -2,6 +2,7 @@ import { JSDOM } from 'jsdom'
 import { act, useEffect } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Chat } from '../entities/chat/model'
 import type { Message } from '../entities/message/model'
 import type { Session } from '../entities/session/model'
 import { ChatKind, FrameType } from '../shared/api/generated/socket-vocabulary'
@@ -53,7 +54,10 @@ let renderPanel: boolean
 let readCalls: string[]
 let visibilityRevision: string
 let clearedThrough: string
+let lastSummary: Chat['lastMessage']
 let hidden: boolean
+let deletionCalls: { chatId: string; requestId: string; scope: string; target: string }[]
+let failDeletion: boolean
 
 function snapshotFor(id: string) {
   return {
@@ -155,6 +159,9 @@ beforeEach(() => {
   visibilityRevision = '0'
   clearedThrough = '0'
   hidden = false
+  lastSummary = null
+  deletionCalls = []
+  failDeletion = false
   vi.stubGlobal(
     'WebSocket',
     class extends TestSocket {
@@ -169,6 +176,21 @@ beforeEach(() => {
     paths.push(path)
     const requestedChat = path.split('/chats/')[1]?.split('/')[0] ?? chatId
     const metadata = snapshotFor(requestedChat)
+    if (path.endsWith('/deletions')) {
+      const body = JSON.parse(String(options?.body))
+      deletionCalls.push({ chatId: requestedChat, ...body })
+      if (failDeletion) return Response.json({ message: 'Unavailable' }, { status: 503 })
+      return Response.json({
+        operationId: body.requestId,
+        scope: body.scope,
+        target: body.target,
+        clearedThroughSequence: '0',
+        mutationRevision: '0',
+        visibilityRevision: '1',
+        state: 'COMPLETED',
+        deletedRows: '0',
+      })
+    }
     if (path.endsWith('/visibility')) return Response.json({ ...metadata, hidden })
     if (path.endsWith('/changes'))
       return Response.json({
@@ -260,7 +282,12 @@ beforeEach(() => {
       })
     }
     if (path.endsWith(`/chats/${chatId}`))
-      return Response.json({ ...group, memberCount: groupMemberCount, members: groupMembers })
+      return Response.json({
+        ...group,
+        lastMessage: lastSummary,
+        memberCount: groupMemberCount,
+        members: groupMembers,
+      })
     if (path.endsWith('/chats')) {
       if (failChatRequest) {
         failChatRequest = false
@@ -300,6 +327,78 @@ afterEach(async () => {
 })
 
 describe('messenger request coordination', () => {
+  it('coalesces received live hints into a fresh summary with the group sender username', async () => {
+    vi.useFakeTimers()
+    await renderMessenger()
+    await act(async () => {
+      sockets[0].open()
+      messenger.closeChat()
+    })
+    lastSummary = {
+      id: recipient.id,
+      sequence: '7',
+      senderId: recipient.id,
+      senderUsername: 'katya',
+      createdAt: '2026-11-04T10:00:00Z',
+      bodyPreview: 'Хорошо',
+      deleted: false,
+    }
+    paths = []
+    await act(async () => {
+      for (let index = 1; index <= 3; index++)
+        sockets[0].event({
+          type: 'reads_changed',
+          version: 1,
+          eventId: recipient.id,
+          room: `group:${chatId}`,
+          epoch: 'epoch',
+          streamId: `${index}-0`,
+          chatId,
+        })
+      await vi.advanceTimersByTimeAsync(500)
+    })
+    expect(messenger.chats.find((chat) => chat.id === chatId)?.lastMessage).toEqual(lastSummary)
+    expect(paths.filter((path) => path.endsWith(`/chats/${chatId}`))).toHaveLength(1)
+    expect(messenger.selectedId).toBeNull()
+  })
+
+  it('deletes a never-opened chat without changing selection or loading its history', async () => {
+    await renderMessenger()
+    const selected = messenger.selectedId
+    paths = []
+    await act(async () => {
+      await messenger.deleteChatById(direct.id, 'SELF')
+    })
+    expect(deletionCalls).toEqual([
+      { chatId: direct.id, requestId: expect.any(String), scope: 'SELF', target: 'CHAT' },
+    ])
+    expect(messenger.selectedId).toBe(selected)
+    expect(paths.some((path) => path.includes(`/chats/${direct.id}/messages`))).toBe(false)
+  })
+
+  it('retains an arbitrary-chat deletion request ID after failure and uses a fresh one after success', async () => {
+    await renderMessenger()
+    failDeletion = true
+    await act(async () => {
+      await expect(messenger.clearChatHistory(direct.id, 'EVERYONE')).rejects.toThrow('Unavailable')
+    })
+    failDeletion = false
+    await act(async () => {
+      await messenger.clearChatHistory(direct.id, 'EVERYONE')
+    })
+    expect(deletionCalls[0]).toEqual(deletionCalls[1])
+    expect(deletionCalls[1]).toMatchObject({
+      chatId: direct.id,
+      scope: 'EVERYONE',
+      target: 'HISTORY',
+    })
+    await act(async () => {
+      await messenger.clearChatHistory(direct.id, 'EVERYONE')
+    })
+    expect(deletionCalls[2].requestId).not.toBe(deletionCalls[1].requestId)
+    expect(paths.some((path) => path.includes(`/chats/${direct.id}/messages`))).toBe(false)
+  })
+
   it('pauses directory and pending-send polling for the whole offline interval', async () => {
     vi.useFakeTimers()
     let online = true

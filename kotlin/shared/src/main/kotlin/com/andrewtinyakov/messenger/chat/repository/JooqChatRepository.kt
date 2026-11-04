@@ -3,9 +3,12 @@ package com.andrewtinyakov.messenger.chat.repository
 import com.andrewtinyakov.messenger.auth.model.UserSummary
 import com.andrewtinyakov.messenger.chat.model.Chat
 import com.andrewtinyakov.messenger.chat.model.ChatKind
+import com.andrewtinyakov.messenger.chat.model.ChatLastMessage
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Routines
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHATS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHAT_MEMBERS
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.HIDDEN_MESSAGE_RANGES
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSAGES
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSENGER_OUTBOX_EVENTS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.USERS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.ChatsRecord
@@ -32,7 +35,9 @@ class JooqChatRepository(
         beforeChatId: ChatId?,
         limit: Int,
     ): List<MemberChat> = DatabaseObservation.query(DatabaseOperation.CHAT_FIND_BY_MEMBER) {
+        val lastMessage = lastMessage(userId)
         db.select(
+            lastMessage,
             CHATS.ID,
             CHATS.KIND,
             CHATS.NAME,
@@ -72,10 +77,46 @@ class JooqChatRepository(
                         ownerId = row.get(CHATS.OWNER_ID)
                             ?.let(::UserId),
                         memberCount = row.get(CHATS.MEMBER_COUNT)!!,
+                        lastMessage = row.get(lastMessage),
                     ),
                     joinedAt = row.get(CHAT_MEMBERS.JOINED_AT)!!,
                 )
             }
+    }
+
+    private fun lastMessage(userId: UserId) = DSL.multiset(
+        DSL.select(
+            MESSAGES.ID,
+            MESSAGES.SEQUENCE,
+            MESSAGES.SENDER_ID,
+            USERS.USERNAME,
+            MESSAGES.CREATED_AT,
+            DSL.left(MESSAGES.BODY, 160),
+        ).from(MESSAGES)
+            .join(USERS).on(USERS.ID.eq(MESSAGES.SENDER_ID))
+            .join(CHAT_MEMBERS).on(CHAT_MEMBERS.CHAT_ID.eq(MESSAGES.CHAT_ID), CHAT_MEMBERS.USER_ID.eq(userId.value))
+            .where(
+                MESSAGES.CHAT_ID.eq(CHATS.ID),
+                MESSAGES.DELETED_AT.isNull,
+                MESSAGES.SEQUENCE.gt(CHATS.CLEARED_THROUGH_SEQUENCE),
+                MESSAGES.SEQUENCE.gt(CHAT_MEMBERS.CLEARED_THROUGH_SEQUENCE),
+                CHAT_MEMBERS.HIDDEN_THROUGH_SEQUENCE.isNull.or(CHATS.NEXT_SEQUENCE.minus(1L).gt(CHAT_MEMBERS.HIDDEN_THROUGH_SEQUENCE)),
+                MESSAGES.SEQUENCE.gt(
+                    DSL.coalesce(
+                        DSL.select(HIDDEN_MESSAGE_RANGES.THROUGH_SEQUENCE).from(HIDDEN_MESSAGE_RANGES)
+                            .where(
+                                HIDDEN_MESSAGE_RANGES.CHAT_ID.eq(CHATS.ID),
+                                HIDDEN_MESSAGE_RANGES.USER_ID.eq(userId.value),
+                                HIDDEN_MESSAGE_RANGES.AFTER_SEQUENCE.lt(MESSAGES.SEQUENCE),
+                            ).orderBy(HIDDEN_MESSAGE_RANGES.AFTER_SEQUENCE.desc()).limit(1).asField<Long>(),
+                        DSL.inline(0L),
+                    ),
+                ),
+            ).orderBy(MESSAGES.SEQUENCE.desc()).limit(1),
+    ).convertFrom { rows ->
+        rows.firstOrNull()?.let {
+            ChatLastMessage(it.value1()!!, it.value2()!!, it.value3()!!, it.value4()!!, it.value5()!!, it.value6()!!, false)
+        }
     }
 
     override fun findMembersByChatIds(chatIds: List<ChatId>): Map<ChatId, List<UserSummary>> = DatabaseObservation.query(
@@ -378,9 +419,11 @@ class JooqChatRepository(
                     )
                 }
             }
+        val lastMessage = lastMessage(userId)
         return db.select(
             CHATS.asterisk(),
             members,
+            lastMessage,
         )
             .from(CHATS)
             .where(CHATS.ID.eq(chatId.value), CHATS.DELETED_AT.isNull)
@@ -397,7 +440,7 @@ class JooqChatRepository(
             .fetchOne { row ->
                 MemberChatDetails(
                     chat = row.into(CHATS)
-                        .toModel(),
+                        .toModel().copy(lastMessage = row.get(lastMessage)),
                     members = row.get(members),
                 )
             }

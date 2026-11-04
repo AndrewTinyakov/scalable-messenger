@@ -1973,6 +1973,32 @@ components:
       required:
       - memberIds
       - name
+    ChatLastMessageResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        sequence:
+          type: string
+        senderId:
+          type: string
+        senderUsername:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        bodyPreview:
+          type: string
+        deleted:
+          type: boolean
+      required:
+      - bodyPreview
+      - createdAt
+      - deleted
+      - id
+      - senderId
+      - senderUsername
+      - sequence
     ChatResponse:
       type: object
       properties:
@@ -2000,6 +2026,10 @@ components:
           type:
           - string
           - "null"
+        lastMessage:
+          oneOf:
+          - $ref: "#/components/schemas/ChatLastMessageResponse"
+          - type: "null"
       required:
       - id
       - kind

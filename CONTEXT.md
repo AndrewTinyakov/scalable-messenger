@@ -31,4 +31,6 @@
 - **Chat deletion** with everyone scope closes the chat identity for all members and schedules permanent history purge. A later direct conversation uses a new chat. Self scope hides the existing chat for one account.
 - **Recovery hint** contains durable identifiers and cursors without message or quote text. Redis retains hints; full live message frames are ephemeral.
 
+- **Last message summary** is the viewer's latest visible message identity, sequence, sender ID and current username, creation time, and body preview of at most 160 Unicode characters. Empty visible history has no summary. Globally removed messages do not leave summary tombstones. Summary reads do not advance human reads or device recovery.
+
 State the actual guarantee instead of calling a message "delivered". Request IDs identify retries, message IDs identify saved messages, and event IDs identify publications.

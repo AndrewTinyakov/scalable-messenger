@@ -10,6 +10,7 @@ data class Chat(
     val lastSequence: Long,
     val ownerId: UserId?,
     val memberCount: Int,
+    val lastMessage: ChatLastMessage? = null,
 ) {
     init {
         require(lastSequence >= 0) { "Chat sequence must be nonnegative" }
@@ -29,3 +30,13 @@ data class Chat(
         }
     }
 }
+
+data class ChatLastMessage(
+    val id: String,
+    val sequence: Long,
+    val senderId: String,
+    val senderUsername: String,
+    val createdAt: java.time.OffsetDateTime,
+    val bodyPreview: String,
+    val deleted: Boolean,
+)

@@ -80,7 +80,11 @@ export function decodeUsers(value: unknown): User[] {
 }
 
 export function decodeChat(value: unknown): Chat {
-  fields(value, ['id', 'kind', 'members', 'memberCount', 'lastSequence'], ['name', 'ownerId'])
+  fields(
+    value,
+    ['id', 'kind', 'members', 'memberCount', 'lastSequence'],
+    ['name', 'ownerId', 'lastMessage'],
+  )
   if (
     !isId(value.id) ||
     (value.kind !== ChatKind.DIRECT && value.kind !== ChatKind.GROUP) ||
@@ -93,6 +97,34 @@ export function decodeChat(value: unknown): Chat {
     !isSequence(value.lastSequence)
   )
     invalid()
+  if (value.lastMessage != null) {
+    fields(value.lastMessage, [
+      'id',
+      'sequence',
+      'senderId',
+      'senderUsername',
+      'createdAt',
+      'bodyPreview',
+      'deleted',
+    ])
+    const message = value.lastMessage
+    if (
+      !isId(message.id) ||
+      !isSequence(message.sequence) ||
+      message.sequence === '0' ||
+      !isId(message.senderId) ||
+      typeof message.senderUsername !== 'string' ||
+      !message.senderUsername ||
+      message.senderUsername.length > 40 ||
+      !isDateTime(message.createdAt) ||
+      typeof message.bodyPreview !== 'string' ||
+      [...message.bodyPreview].length > 160 ||
+      typeof message.deleted !== 'boolean' ||
+      (message.deleted && message.bodyPreview !== '') ||
+      (!message.deleted && message.bodyPreview === '')
+    )
+      invalid()
+  }
   value.members.forEach(decodeUser)
   return value as Chat
 }

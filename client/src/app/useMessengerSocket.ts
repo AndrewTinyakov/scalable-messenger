@@ -20,11 +20,14 @@ interface MessengerSocketOptions {
   focusFreshAtRef: MutableRefObject<number>
   focusRequestRef: MutableRefObject<Promise<void> | null>
   selectedRef: MutableRefObject<string | null>
+  setNextRetryAt: Dispatch<SetStateAction<number | null>>
+  retryNowRef: MutableRefObject<() => void>
   setConnection: Dispatch<SetStateAction<ConnectionState>>
   onSessionRevoked(): void
   reconcilePending(retryUnknown?: boolean): Promise<void>
   refreshChats(full?: boolean, invalidated?: boolean): Promise<Chat[]>
   listChats(): Chat[]
+  refreshChatSummary(chatId: string): Promise<void>
   catchUp(chatId: string, fromStart?: boolean): Promise<void>
   selectResolvedDraft(saved: SavedSend): boolean
   removeChat(chatId: string): Chat[]
@@ -69,10 +72,13 @@ export function useMessengerSocket({
   focusRequestRef,
   selectedRef,
   setConnection,
+  setNextRetryAt,
+  retryNowRef,
   onSessionRevoked,
   reconcilePending,
   refreshChats,
   listChats,
+  refreshChatSummary,
   catchUp,
   selectResolvedDraft,
   removeChat,
@@ -87,10 +93,37 @@ export function useMessengerSocket({
 
   useEffect(() => {
     let disposed = false
+    const summaryChats = new Set<string>()
+    let summaryTimer: ReturnType<typeof setTimeout> | undefined
+    let summaryRunning = false
+    const refreshSummaries = async () => {
+      summaryTimer = undefined
+      if (disposed || summaryRunning) return
+      summaryRunning = true
+      const batch = [...summaryChats].slice(0, 10)
+      for (const id of batch) summaryChats.delete(id)
+      await Promise.all(
+        batch.map(async (id) => {
+          try {
+            if (!disposed) await refreshChatSummary(id)
+          } catch {}
+        }),
+      )
+      summaryRunning = false
+      if (!disposed && summaryChats.size)
+        summaryTimer = setTimeout(() => void refreshSummaries(), 500)
+    }
+    const invalidateSummary = (id: string) => {
+      if (summaryChats.size >= 100 && !summaryChats.has(id)) return
+      summaryChats.add(id)
+      if (summaryTimer === undefined && !summaryRunning)
+        summaryTimer = setTimeout(() => void refreshSummaries(), 500)
+    }
     const close = connectSocket({
       url: websocketUrl(),
       ticket: () => sessionApi.wsTicket(),
       onState: setConnection,
+      onRetryScheduled: setNextRetryAt,
       onSessionRevoked,
       onOpen: (socket) => {
         socketGenerationRef.current += 1
@@ -100,6 +133,13 @@ export function useMessengerSocket({
         void reconcilePending(true)
       },
       onEvent: (frame, socket) => {
+        if (
+          frame.type === EventType.MESSAGE_SAVED ||
+          frame.type === 'message_changed' ||
+          frame.type === 'history_changed' ||
+          frame.type === 'reads_changed'
+        )
+          invalidateSummary(frame.chatId)
         if (frame.type === 'history_changed') void refreshChats(false, true)
         if (frame.type === 'message_changed') requests.revised(frame.messageId)
         if (onFeatureEvent(frame)) return
@@ -221,12 +261,18 @@ export function useMessengerSocket({
         groupRetryRef.current = undefined
       },
     })
+    retryNowRef.current = close.retryNow
     return () => {
+      retryNowRef.current = () => {}
       disposed = true
+      clearTimeout(summaryTimer)
+      summaryChats.clear()
       close()
     }
   }, [
     onFeatureEvent,
+    setNextRetryAt,
+    retryNowRef,
     catchUp,
     onSessionRevoked,
     recovery,
@@ -237,6 +283,7 @@ export function useMessengerSocket({
     sessionApi,
     userId,
     listChats,
+    refreshChatSummary,
     removeChat,
     leaveHistory,
     closeChat,

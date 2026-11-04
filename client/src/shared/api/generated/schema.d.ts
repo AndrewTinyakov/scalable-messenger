@@ -495,6 +495,16 @@ export interface components {
             name: string;
             memberIds: string[];
         };
+        ChatLastMessageResponse: {
+            id: string;
+            sequence: string;
+            senderId: string;
+            senderUsername: string;
+            /** Format: date-time */
+            createdAt: string;
+            bodyPreview: string;
+            deleted: boolean;
+        };
         ChatResponse: {
             id: string;
             /** @enum {string} */
@@ -505,6 +515,7 @@ export interface components {
             memberCount: number;
             lastSequence: string;
             ownerId?: string | null;
+            lastMessage?: components["schemas"]["ChatLastMessageResponse"] | null;
         };
         UserResponse: {
             id: string;

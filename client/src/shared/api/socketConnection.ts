@@ -8,6 +8,7 @@ export type ConnectionState = 'connecting' | 'connected' | 'offline'
 export interface SocketConnectionOptions {
   url: string
   ticket(): Promise<{ token: string; expiresAt: number }>
+  onRetryScheduled?(nextRetryAt: number | null): void
   onState(state: ConnectionState): void
   onOpen(socket: WebSocket): void
   onEvent(event: SocketEvent, socket: WebSocket): void
@@ -15,7 +16,9 @@ export interface SocketConnectionOptions {
   onSessionRevoked(): void
 }
 
-export function connectSocket(options: SocketConnectionOptions): () => void {
+export type SocketConnection = (() => void) & { retryNow(): void }
+
+export function connectSocket(options: SocketConnectionOptions): SocketConnection {
   let disposed = false
   let socket: WebSocket | null = null
   let ticket: { token: string; expiresAt: number } | null = null
@@ -32,6 +35,7 @@ export function connectSocket(options: SocketConnectionOptions): () => void {
     clearTimeout(handshakeTimer)
     clearTimeout(stableTimer)
     reconnectTimer = undefined
+    options.onRetryScheduled?.(null)
   }
 
   function revokeSession(): void {
@@ -42,10 +46,13 @@ export function connectSocket(options: SocketConnectionOptions): () => void {
   function retry(): void {
     if (disposed || revoked || !isNetworkOnline() || reconnectTimer !== undefined) return
     options.onState('offline')
+    const delay = reconnectDelay(++attempts)
+    options.onRetryScheduled?.(Date.now() + delay)
     reconnectTimer = setTimeout(() => {
       reconnectTimer = undefined
+      options.onRetryScheduled?.(null)
       void connect()
-    }, reconnectDelay(++attempts))
+    }, delay)
   }
 
   async function connect(): Promise<void> {
@@ -121,7 +128,7 @@ export function connectSocket(options: SocketConnectionOptions): () => void {
   })
   if (isNetworkOnline()) void connect()
   else options.onState('offline')
-  return () => {
+  const close = () => {
     if (disposed) return
     disposed = true
     unsubscribe()
@@ -130,4 +137,13 @@ export function connectSocket(options: SocketConnectionOptions): () => void {
     socket = null
     options.onClose()
   }
+  return Object.assign(close, {
+    retryNow() {
+      if (disposed || revoked || socket || connecting || !isNetworkOnline()) return
+      clearTimeout(reconnectTimer)
+      reconnectTimer = undefined
+      options.onRetryScheduled?.(null)
+      void connect()
+    },
+  })
 }

@@ -32,11 +32,74 @@ function fixture(
 }
 
 afterEach(() => {
+  vi.restoreAllMocks()
   vi.useRealTimers()
   vi.unstubAllGlobals()
 })
 
 describe('socket connection lifecycle', () => {
+  it('publishes the retry deadline and cancels the scheduled wait for retryNow', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    const test = fixture()
+    test.options.onRetryScheduled = vi.fn()
+    const close = test.start()
+    await Promise.resolve()
+    test.sockets[0].onclose?.({ code: 1006 })
+    expect(test.options.onRetryScheduled).toHaveBeenLastCalledWith(Date.now() + 500)
+    close.retryNow()
+    await Promise.resolve()
+    expect(test.options.onRetryScheduled).toHaveBeenLastCalledWith(null)
+    expect(test.sockets).toHaveLength(2)
+    await vi.advanceTimersByTimeAsync(500)
+    expect(test.sockets).toHaveLength(2)
+    test.sockets[1].onclose?.({ code: 1006 })
+    expect(test.options.onRetryScheduled).toHaveBeenLastCalledWith(Date.now() + 1000)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(test.options.onRetryScheduled).toHaveBeenLastCalledWith(null)
+    expect(test.sockets).toHaveLength(3)
+    close()
+    expect(test.options.onRetryScheduled).toHaveBeenLastCalledWith(null)
+    close.retryNow()
+    expect(test.sockets).toHaveLength(3)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('ignores manual retries while connecting, connected, offline, or revoked', async () => {
+    vi.useFakeTimers()
+    let online = true
+    const network = Object.assign(new EventTarget(), {
+      navigator: {
+        get onLine() {
+          return online
+        },
+      },
+    })
+    vi.stubGlobal('window', network)
+    const test = fixture()
+    const close = test.start()
+    close.retryNow()
+    expect(test.ticket).toHaveBeenCalledOnce()
+    await Promise.resolve()
+    test.sockets[0].onopen?.()
+    close.retryNow()
+    expect(test.sockets).toHaveLength(1)
+    online = false
+    network.dispatchEvent(new Event('offline'))
+    close.retryNow()
+    expect(vi.getTimerCount()).toBe(0)
+    online = true
+    network.dispatchEvent(new Event('online'))
+    close.retryNow()
+    await Promise.resolve()
+    expect(test.sockets).toHaveLength(2)
+    test.sockets[1].onclose?.({ code: 4003 })
+    close.retryNow()
+    await vi.advanceTimersByTimeAsync(60000)
+    expect(test.sockets).toHaveLength(2)
+    close()
+  })
+
   it('does not reopen a revoked session when the network changes', async () => {
     vi.useFakeTimers()
     let online = true

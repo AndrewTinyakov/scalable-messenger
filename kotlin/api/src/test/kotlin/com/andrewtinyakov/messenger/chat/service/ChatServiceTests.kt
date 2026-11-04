@@ -42,6 +42,38 @@ class ChatServiceTests
         private val messageHistoryService: MessageHistoryService,
     ) : MessengerIntegrationTest() {
         @Test
+        fun `chat summaries include sender names and obey viewer visibility across sequence gaps`() {
+            val owner = user("summary-owner")
+            val member = user("summary-member")
+            val chat = chatService.createGroup(UserId(owner), CreateGroupChatRequest("Summary", listOf(member)))
+            assertEquals(null, chat.lastMessage)
+            messageSendService.process(command(member, newId(), "Earlier", chat = chat.id))
+            messageSendService.process(command(owner, newId(), "x".repeat(180), chat = chat.id))
+            val listed = chatService.list(UserId(owner), null, 100).chats.single { it.id == chat.id }
+            assertEquals(emptyList<Any>(), listed.members)
+            assertEquals("summary-owner", listed.lastMessage!!.senderUsername)
+            assertEquals("2", listed.lastMessage.sequence)
+            assertEquals("x".repeat(160), listed.lastMessage.bodyPreview)
+            assertEquals(false, listed.lastMessage.deleted)
+            assertEquals(listed.lastMessage, chatService.get(ChatId(chat.id), UserId(owner)).lastMessage)
+            db.update("INSERT INTO hidden_message_ranges(chat_id,user_id,after_sequence,through_sequence) VALUES (?,?,1,2)", chat.id, owner)
+            assertEquals("1", chatService.get(ChatId(chat.id), UserId(owner)).lastMessage!!.sequence)
+            assertEquals("2", chatService.get(ChatId(chat.id), UserId(member)).lastMessage!!.sequence)
+            db.update("DELETE FROM messages WHERE chat_id=? AND sequence=1", chat.id)
+            assertEquals(null, chatService.get(ChatId(chat.id), UserId(owner)).lastMessage)
+            db.update("UPDATE chat_members SET cleared_through_sequence=2 WHERE chat_id=? AND user_id=?", chat.id, member)
+            assertEquals(null, chatService.get(ChatId(chat.id), UserId(member)).lastMessage)
+            db.update("UPDATE chat_members SET hidden_through_sequence=2 WHERE chat_id=? AND user_id=?", chat.id, owner)
+            assertEquals(null, chatService.get(ChatId(chat.id), UserId(owner)).lastMessage)
+            messageSendService.process(command(member, newId(), "Visible again", chat = chat.id))
+            assertEquals("3", chatService.get(ChatId(chat.id), UserId(owner)).lastMessage!!.sequence)
+            db.update("UPDATE chats SET cleared_through_sequence=3 WHERE id=?", chat.id)
+            assertEquals(null, chatService.get(ChatId(chat.id), UserId(owner)).lastMessage)
+            chatMembershipService.removeMember(ChatId(chat.id), UserId(owner), UserId(member))
+            assertThrows(ApiException::class.java) { chatService.get(ChatId(chat.id), UserId(member)) }
+        }
+
+        @Test
         fun `chat reads retain one authorized snapshot during member removal`() {
             val owner = user("snapshot-chat-owner")
             val member = user("snapshot-chat-member")

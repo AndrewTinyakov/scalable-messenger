@@ -48,6 +48,7 @@ type Subscription = {
 
 export type PresenceStatus = { userId: string; state: 'online' | 'offline' | 'unknown' }
 export type OutgoingSocketFrame =
+  | { type: 'watch_sidebar'; version: 1; chatIds: string[] }
   | { type: 'watch_presence'; version: 1; chatId: string; userIds: string[] }
   | { type: 'unwatch_presence'; version: 1 }
   | SendFrame
@@ -69,6 +70,8 @@ type LiveEvent = { eventId: string; room: string; epoch: string; streamId: strin
 
 type MessageFields = Omit<Message, 'id'> & { messageId: string }
 export type SocketEvent = { version: 1 } & (
+  | { type: 'sidebar_activity'; chatId: string; sequence: string }
+  | { type: 'sidebar_presence'; observedAt: string; validForMs: number; statuses: PresenceStatus[] }
   | ({
       type: 'history_changed'
       chatId: string
@@ -136,6 +139,8 @@ const messageFields = [
   'replyVersion',
 ]
 const eventFields = {
+  sidebar_activity: ['chatId', 'sequence'],
+  sidebar_presence: ['observedAt', 'validForMs', 'statuses'],
   history_changed: [...liveFields, 'chatId', 'sequence', 'mutationRevision', 'visibilityRevision'],
   message_changed: [...liveFields, ...messageFields, 'mutationRevision'],
   chat_deleted: [...liveFields, 'chatId'],
@@ -214,9 +219,13 @@ export function decodeSocketEvent(data: unknown): SocketEvent | null {
         isSequence(frame.mutationRevision) &&
         isSequence(frame.visibilityRevision)
       break
+    case 'sidebar_activity':
+      valid = isId(frame.chatId) && isSequence(frame.sequence) && frame.sequence !== '0'
+      break
+    case 'sidebar_presence':
     case 'presence':
       valid =
-        isId(frame.chatId) &&
+        (frame.type === 'sidebar_presence' || isId(frame.chatId)) &&
         isDateTime(frame.observedAt) &&
         typeof frame.validForMs === 'number' &&
         Number.isSafeInteger(frame.validForMs) &&

@@ -34,7 +34,11 @@ describe('HTTP transport', () => {
     }
     const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json(chat))
     vi.stubGlobal('fetch', fetch)
-    await expect(authenticated.chat(id)).resolves.toEqual(chat)
+    await expect(authenticated.chat(id)).resolves.toEqual({
+      unreadCount: 0,
+      unreadCountCapped: false,
+      ...chat,
+    })
     for (const lastMessage of [
       { ...message, senderUsername: undefined },
       { ...message, bodyPreview: 'x'.repeat(161) },
@@ -415,7 +419,11 @@ describe('HTTP transport', () => {
         vi.fn(async () => Response.json(chat)),
       )
       if (kind === 'DIRECT' || kind === 'GROUP') {
-        await expect(authenticated.chat(id)).resolves.toEqual(chat)
+        await expect(authenticated.chat(id)).resolves.toEqual({
+          unreadCount: 0,
+          unreadCountCapped: false,
+          ...chat,
+        })
       } else {
         await expect(authenticated.chat(id)).rejects.toThrow('Invalid response from server')
       }

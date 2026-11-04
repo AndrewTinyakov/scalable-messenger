@@ -31,6 +31,10 @@
 - **Chat deletion** with everyone scope closes the chat identity for all members and schedules permanent history purge. A later direct conversation uses a new chat. Self scope hides the existing chat for one account.
 - **Recovery hint** contains durable identifiers and cursors without message or quote text. Redis retains hints; full live message frames are ephemeral.
 
-- **Last message summary** is the viewer's latest visible message identity, sequence, sender ID and current username, creation time, and body preview of at most 160 Unicode characters. Empty visible history has no summary. Globally removed messages do not leave summary tombstones. Summary reads do not advance human reads or device recovery.
+- **Last message summary** is the latest viewer-visible message among a chat's newest 256 stored candidates, with its identity, sequence, sender ID and current username, creation time, and a preview of at most 160 Unicode characters. A null summary means no candidate in that window is visible; older visible history can still exist. Summary reads do not advance human reads or device recovery.
+- **Window unread count** counts visible messages by other authors above the account's read-through in the newest 256 stored candidates. A saturated window makes the count a lower bound, including when that bound is zero; it does not measure a sequence difference.
+- **Chat activity** is the time of the most recent accepted send in a chat. Empty chats use the viewer's membership join time when ordered in the directory.
+- **Sidebar watch** is a bounded selection of visible chat rows whose direct peers' presence and group activity are observed separately from the selected conversation.
+- **Sidebar activity hint** is a bodyless indication that a watched group has accepted a message. It requests an authoritative summary refresh and proves neither application nor human reading.
 
 State the actual guarantee instead of calling a message "delivered". Request IDs identify retries, message IDs identify saved messages, and event IDs identify publications.

@@ -1,0 +1,43 @@
+$schema: http://json-schema.org/draft-07/schema#
+title: SocketSidebarPresenceV1
+x-messenger-direction: server
+type: object
+additionalProperties: false
+required:
+  - type
+  - version
+  - observedAt
+  - validForMs
+  - statuses
+properties:
+  type:
+    const: sidebar_presence
+  version:
+    type: integer
+    const: 1
+  observedAt:
+    type: string
+    format: date-time
+  validForMs:
+    type: integer
+    minimum: 1
+    maximum: 30000
+  statuses:
+    type: array
+    maxItems: 100
+    items:
+      type: object
+      additionalProperties: false
+      required:
+        - userId
+        - state
+      properties:
+        userId:
+          type: string
+          pattern: ^[0-7][0-9A-HJKMNP-TV-Z]{25}$
+        state:
+          type: string
+          enum:
+            - online
+            - offline
+            - unknown

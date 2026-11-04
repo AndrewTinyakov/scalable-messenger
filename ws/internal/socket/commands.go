@@ -22,6 +22,8 @@ func (c *Connection) handle(f protocol.Frame) error {
 
 func (c *Connection) handleContext(base context.Context, f protocol.Frame) error {
 	switch f.Type {
+	case protocol.FrameWatchSidebar:
+		return c.watchSidebar(base, f.ChatIDs)
 	case protocol.FrameSubscribe:
 		return c.subscriptions.subscribeContext(base, []protocol.Subscription{{ChatID: f.ChatID, Kind: f.Kind, Epoch: f.Epoch, StreamID: f.StreamID}}, singleSubscription)
 	case protocol.FrameSubscribeMany:

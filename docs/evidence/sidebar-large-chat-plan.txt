@@ -1,0 +1,94 @@
+Nested Loop Semi Join  (cost=0.69..2890.07 rows=1 width=347) (actual time=2.325..2.328 rows=1 loops=1)
+  Buffers: shared hit=2240
+  ->  Index Scan using chats_pkey on chats  (cost=0.28..8.30 rows=1 width=275) (actual time=0.009..0.010 rows=1 loops=1)
+        Index Cond: ((id)::text = '00000000000000000010000000'::text)
+        Filter: (deleted_at IS NULL)
+        Buffers: shared hit=3
+  ->  Index Only Scan using chat_members_pkey on chat_members  (cost=0.41..29.92 rows=2550 width=27) (actual time=0.010..0.010 rows=1 loops=1)
+        Index Cond: ((chat_id = '00000000000000000010000000'::text) AND (user_id = '00000000000000000000000001'::text))
+        Heap Fetches: 0
+        Buffers: shared hit=4
+  SubPlan 1
+    ->  Index Scan using chat_members_pkey on chat_members chat_members_1  (cost=0.41..8.43 rows=1 width=8) (never executed)
+          Index Cond: (((chat_id)::text = (chats.id)::text) AND ((user_id)::text = '00000000000000000000000001'::text))
+  SubPlan 2
+    ->  Aggregate  (cost=37.76..37.77 rows=1 width=32) (actual time=0.099..0.099 rows=1 loops=1)
+          Buffers: shared hit=154
+          ->  Limit  (cost=0.70..37.69 rows=4 width=72) (actual time=0.015..0.065 rows=50 loops=1)
+                Buffers: shared hit=154
+                ->  Nested Loop  (cost=0.70..37.69 rows=4 width=72) (actual time=0.015..0.063 rows=50 loops=1)
+                      Buffers: shared hit=154
+                      ->  Index Only Scan using chat_members_pkey on chat_members chat_members_2  (cost=0.41..4.48 rows=4 width=27) (actual time=0.011..0.012 rows=50 loops=1)
+                            Index Cond: (chat_id = (chats.id)::text)
+                            Heap Fetches: 0
+                            Buffers: shared hit=4
+                      ->  Index Scan using users_pkey on users  (cost=0.29..8.30 rows=1 width=45) (actual time=0.001..0.001 rows=1 loops=50)
+                            Index Cond: ((id)::text = (chat_members_2.user_id)::text)
+                            Buffers: shared hit=150
+  SubPlan 10
+    ->  Aggregate  (cost=2805.61..2805.62 rows=1 width=32) (actual time=2.204..2.205 rows=1 loops=1)
+          Buffers: shared hit=2079
+          ->  Aggregate  (cost=2805.59..2805.60 rows=1 width=41) (actual time=2.201..2.202 rows=1 loops=1)
+                Buffers: shared hit=2079
+                CTE summary_candidates
+                  ->  Limit  (cost=0.43..466.83 rows=256 width=235) (actual time=0.011..0.050 rows=256 loops=1)
+                        Buffers: shared hit=18
+                        ->  Index Scan Backward using messages_conversation_sequence_unique on messages  (cost=0.43..995.17 rows=546 width=235) (actual time=0.011..0.040 rows=256 loops=1)
+                              Index Cond: ((chat_id)::text = (chats.id)::text)
+                              Buffers: shared hit=18
+                InitPlan 6
+                  ->  Seq Scan on chat_read_progress  (cost=0.00..1.01 rows=1 width=8) (actual time=0.003..0.003 rows=1 loops=1)
+                        Filter: (((chat_id)::text = (chats.id)::text) AND ((user_id)::text = '00000000000000000000000001'::text))
+                        Buffers: shared hit=1
+                InitPlan 7
+                  ->  Seq Scan on chat_read_progress chat_read_progress_1  (cost=0.00..1.01 rows=1 width=8) (actual time=0.002..0.002 rows=1 loops=1)
+                        Filter: (((chat_id)::text = (chats.id)::text) AND ((user_id)::text = '00000000000000000000000001'::text))
+                        Buffers: shared hit=1
+                InitPlan 9
+                  ->  Aggregate  (cost=25.25..25.26 rows=1 width=32) (actual time=0.116..0.117 rows=1 loops=1)
+                        Buffers: shared hit=11
+                        ->  Limit  (cost=0.70..25.24 rows=1 width=206) (actual time=0.108..0.109 rows=1 loops=1)
+                              Buffers: shared hit=11
+                              ->  Nested Loop  (cost=0.70..221.59 rows=9 width=206) (actual time=0.108..0.108 rows=1 loops=1)
+                                    Buffers: shared hit=11
+                                    ->  Nested Loop  (cost=0.41..157.13 rows=9 width=672) (actual time=0.102..0.102 rows=1 loops=1)
+                                          Join Filter: (summary_candidates.sequence > chat_members_4.cleared_through_sequence)
+                                          Buffers: shared hit=8
+                                          ->  CTE Scan on summary_candidates  (cost=0.00..148.27 rows=28 width=672) (actual time=0.011..0.011 rows=1 loops=1)
+                                                Filter: ((deleted_at IS NULL) AND (sequence > chats.cleared_through_sequence) AND (sequence > COALESCE((SubPlan 8), '0'::bigint)))
+                                                Buffers: shared hit=4
+                                                SubPlan 8
+                                                  ->  Limit  (cost=0.42..0.55 rows=1 width=16) (actual time=0.010..0.010 rows=1 loops=1)
+                                                        Buffers: shared hit=4
+                                                        ->  Index Scan Backward using hidden_message_ranges_pkey on hidden_message_ranges hidden_message_ranges_1  (cost=0.42..5012.17 rows=36667 width=16) (actual time=0.010..0.010 rows=1 loops=1)
+                                                              Index Cond: (((chat_id)::text = (chats.id)::text) AND ((user_id)::text = '00000000000000000000000001'::text) AND (after_sequence < summary_candidates.sequence))
+                                                              Buffers: shared hit=4
+                                          ->  Materialize  (cost=0.41..8.44 rows=1 width=8) (actual time=0.090..0.090 rows=1 loops=1)
+                                                Buffers: shared hit=4
+                                                ->  Index Scan using chat_members_pkey on chat_members chat_members_4  (cost=0.41..8.44 rows=1 width=8) (actual time=0.089..0.089 rows=1 loops=1)
+                                                      Index Cond: (((chat_id)::text = (chats.id)::text) AND ((user_id)::text = '00000000000000000000000001'::text))
+                                                      Filter: ((hidden_through_sequence IS NULL) OR ((chats.next_sequence - 1) > hidden_through_sequence))
+                                                      Buffers: shared hit=4
+                                    ->  Index Scan using users_pkey on users users_1  (cost=0.29..7.16 rows=1 width=45) (actual time=0.004..0.004 rows=1 loops=1)
+                                          Index Cond: ((id)::text = (summary_candidates.sender_id)::text)
+                                          Buffers: shared hit=3
+                ->  CTE Scan on summary_candidates summary_candidates_1  (cost=0.00..5.12 rows=256 width=86) (actual time=0.012..0.095 rows=256 loops=1)
+                      Buffers: shared hit=18
+                SubPlan 4
+                  ->  Result  (cost=0.41..8.44 rows=1 width=0) (actual time=0.002..0.002 rows=1 loops=256)
+                        One-Time Filter: (summary_candidates_1.sequence > chats.cleared_through_sequence)
+                        Buffers: shared hit=1024
+                        ->  Index Scan using chat_members_pkey on chat_members chat_members_3  (cost=0.41..8.44 rows=1 width=0) (actual time=0.002..0.002 rows=1 loops=256)
+                              Index Cond: (((chat_id)::text = (chats.id)::text) AND ((user_id)::text = '00000000000000000000000001'::text))
+                              Filter: ((summary_candidates_1.sequence > cleared_through_sequence) AND ((hidden_through_sequence IS NULL) OR ((chats.next_sequence - 1) > hidden_through_sequence)))
+                              Buffers: shared hit=1024
+                SubPlan 5
+                  ->  Limit  (cost=0.42..0.55 rows=1 width=16) (actual time=0.006..0.006 rows=1 loops=256)
+                        Buffers: shared hit=1024
+                        ->  Index Scan Backward using hidden_message_ranges_pkey on hidden_message_ranges  (cost=0.42..5012.17 rows=36667 width=16) (actual time=0.006..0.006 rows=1 loops=256)
+                              Index Cond: (((chat_id)::text = (chats.id)::text) AND ((user_id)::text = '00000000000000000000000001'::text) AND (after_sequence < summary_candidates_1.sequence))
+                              Buffers: shared hit=1024
+Planning:
+  Buffers: shared hit=17
+Planning Time: 0.474 ms
+Execution Time: 2.416 ms

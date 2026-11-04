@@ -2027,9 +2027,27 @@ components:
           - string
           - "null"
         lastMessage:
+          description: Latest visible message in the newest 256 rows; null can leave
+            older visible history
           oneOf:
           - $ref: "#/components/schemas/ChatLastMessageResponse"
           - type: "null"
+        unreadCount:
+          type: integer
+          format: int32
+          description: Visible other-author unread messages in the newest 256 candidates;
+            lower bound when capped
+          maximum: 256
+          minimum: 0
+        activityAt:
+          type:
+          - string
+          - "null"
+          format: date-time
+        unreadCountCapped:
+          type: boolean
+          description: True for 256 raw unread candidates; real count may be higher
+            even when unreadCount is zero
       required:
       - id
       - kind

@@ -96,6 +96,27 @@ class ReadServiceTests
         )
 
         @Test
+        fun `every advanced read invalidates its account even when group notifications coalesce`() {
+            val f = fixture(messages = 2)
+            val reads = service(MutableClock("2026-11-02T12:00:00Z"))
+            assertEquals(2, chatService.get(f.chat, f.members[0]).unreadCount)
+            reads.advance(f.chat, f.members[0], AdvanceReadRequest("2"))
+            reads.advance(f.chat, f.members[1], AdvanceReadRequest("2"))
+            assertEquals(0, chatService.get(f.chat, f.members[0]).unreadCount)
+            for (member in f.members.take(2)) {
+                assertEquals(
+                    1,
+                    db.queryForObject(
+                        "SELECT count(*) FROM messenger_outbox_events WHERE room=? AND payload->>'type'='reads_changed' AND payload->>'chatId'=?",
+                        Int::class.java,
+                        "user:${member.value}",
+                        f.chat.value,
+                    ),
+                )
+            }
+        }
+
+        @Test
         fun `first accepted prefix timestamps survive repeats backwards progress and another device`() {
             val f = fixture()
             val clock = MutableClock("2026-11-02T12:00:00Z")
@@ -164,7 +185,7 @@ class ReadServiceTests
             assertEquals(
                 1,
                 db.queryForObject(
-                    "SELECT count(*) FROM messenger_outbox_events WHERE payload->>'type'='reads_changed' AND payload->>'chatId'=?",
+                    "SELECT count(*) FROM messenger_outbox_events WHERE payload->>'type'='reads_changed' AND payload->>'chatId'=? AND room LIKE 'group:%'",
                     Int::class.java,
                     f.chat.value,
                 ),
@@ -200,7 +221,7 @@ class ReadServiceTests
                 assertEquals(
                     0,
                     db.queryForObject(
-                        "SELECT count(*) FROM messenger_outbox_events WHERE payload->>'type'='reads_changed' AND payload->>'chatId'=?",
+                        "SELECT count(*) FROM messenger_outbox_events WHERE payload->>'type'='reads_changed' AND payload->>'chatId'=? AND room LIKE 'group:%'",
                         Int::class.java,
                         f.chat.value,
                     ),
@@ -214,7 +235,7 @@ class ReadServiceTests
             assertEquals(
                 1,
                 db.queryForObject(
-                    "SELECT count(*) FROM messenger_outbox_events WHERE payload->>'type'='reads_changed' AND payload->>'chatId'=?",
+                    "SELECT count(*) FROM messenger_outbox_events WHERE payload->>'type'='reads_changed' AND payload->>'chatId'=? AND room LIKE 'group:%'",
                     Int::class.java,
                     f.chat.value,
                 ),

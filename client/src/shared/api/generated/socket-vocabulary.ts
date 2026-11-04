@@ -8,6 +8,7 @@ export const FrameType = {
   UNSUBSCRIBE: "unsubscribe",
   UNWATCH_PRESENCE: "unwatch_presence",
   WATCH_PRESENCE: "watch_presence",
+  WATCH_SIDEBAR: "watch_sidebar",
 } as const
 
 export type FrameType = (typeof FrameType)[keyof typeof FrameType]
@@ -27,6 +28,8 @@ export const EventType = {
   RECOVERY_FAILED: "recovery_failed",
   SEND_REJECTED: "send_rejected",
   SESSION_REVOKED: "session_revoked",
+  SIDEBAR_ACTIVITY: "sidebar_activity",
+  SIDEBAR_PRESENCE: "sidebar_presence",
   SUBSCRIBED: "subscribed",
   SUBSCRIPTION_EXPIRED: "subscription_expired",
 } as const

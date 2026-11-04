@@ -43,12 +43,12 @@ type PresenceStatus struct {
 
 func (event Event) MarshalJSON() ([]byte, error) {
 	type wireEvent Event
-	if event.Type != EventMessageChanged && event.Type != EventPresence && event.ReplyToMessageID == "" {
+	if event.Type != EventMessageChanged && event.Type != EventPresence && event.Type != EventSidebarPresence && event.ReplyToMessageID == "" {
 		return json.Marshal(wireEvent(event))
 	}
 	var body, replyBody *string
 	var statuses *[]PresenceStatus
-	if event.Type == EventPresence {
+	if event.Type == EventPresence || event.Type == EventSidebarPresence {
 		value := event.Statuses
 		if value == nil {
 			value = []PresenceStatus{}

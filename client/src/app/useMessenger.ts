@@ -26,6 +26,7 @@ import { useMessengerFocus } from './useMessengerFocus'
 import { useMessengerSends } from './useMessengerSends'
 import { useMessengerSocket } from './useMessengerSocket'
 import { useRecoveryLifecycle } from './useRecoveryLifecycle'
+import { useSidebarWatch } from './useSidebarWatch'
 
 const NO_SIDEBAR_WATCH = (_chatIds: string[]) => {}
 
@@ -42,6 +43,7 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
   const [jumpRevision, setJumpRevision] = useState(0)
   const [locationRevision, setLocationRevision] = useState(0)
   const [pending, setPending] = useState<PendingSend[]>([])
+  const [connectionGeneration, setConnectionGeneration] = useState(0)
   const [nextRetryAt, setNextRetryAt] = useState<number | null>(null)
   const retryNowRef = useRef<() => void>(() => {})
   const retryNow = useCallback(() => retryNowRef.current(), [])
@@ -137,6 +139,8 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     listChats,
     rememberChat,
     refreshChatSummary,
+    markRead,
+    settleRead,
     isRemoved,
     successfulRefreshes,
     removeChat,
@@ -182,6 +186,13 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     },
     [removeChat, leaveHistory, closeChat],
   )
+  const sidebar = useSidebarWatch({
+    connectionGeneration,
+    connected: connection === 'connected',
+    userId: session.user.id,
+    listChats,
+    send: sendConnectedFrame,
+  })
   const features = useConversationFeatures({
     chat:
       chats.find((chat) => chat.id === selectedId) ??
@@ -193,6 +204,9 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     remove: removeConversation,
     hide: hideConversation,
     refreshChats,
+    onReadPending: markRead,
+    onReadCommitted: settleRead,
+    onReadFailed: settleRead,
     fail: setError,
   })
   const withSnapshot = async (
@@ -269,6 +283,7 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
 
   useMessengerSocket({
     onFeatureEvent: features.onEvent,
+    onSidebarEvent: sidebar.onEvent,
     sessionApi,
     userId: session.user.id,
     recovery,
@@ -280,6 +295,7 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     selectedRef,
     setConnection,
     setNextRetryAt,
+    setConnectionGeneration,
     retryNowRef,
     onSessionRevoked,
     reconcilePending,
@@ -341,6 +357,8 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
   }, [refreshChats])
 
   return {
+    sidebarPresence: sidebar.sidebarPresence,
+    watchSidebarPeers: sidebar.watchSidebarPeers,
     reconnect: { nextRetryAt },
     retryNow,
     deleteChatById: features.deleteChatById,

@@ -54,6 +54,10 @@ func (s *Server) startRuntime() {
 		}
 		s.wg.Add(1)
 		go func() { defer s.wg.Done(); s.renewLeases() }()
+		if s.sidebar != nil {
+			s.wg.Add(1)
+			go func() { defer s.wg.Done(); s.sidebar.run() }()
+		}
 		if s.presence != nil {
 			s.wg.Add(1)
 			go func() { defer s.wg.Done(); s.presence.run() }()

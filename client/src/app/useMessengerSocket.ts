@@ -11,6 +11,7 @@ import { reconnectDelay } from '../shared/lib/reconnect'
 
 interface MessengerSocketOptions {
   onFeatureEvent(event: SocketEvent): boolean
+  onSidebarEvent(event: SocketEvent): boolean
   sessionApi: ReturnType<typeof api.forSession>
   userId: string
   recovery: ChatRecovery
@@ -20,6 +21,7 @@ interface MessengerSocketOptions {
   focusFreshAtRef: MutableRefObject<number>
   focusRequestRef: MutableRefObject<Promise<void> | null>
   selectedRef: MutableRefObject<string | null>
+  setConnectionGeneration: Dispatch<SetStateAction<number>>
   setNextRetryAt: Dispatch<SetStateAction<number | null>>
   retryNowRef: MutableRefObject<() => void>
   setConnection: Dispatch<SetStateAction<ConnectionState>>
@@ -62,6 +64,7 @@ function socketErrorMessage(code?: string): string {
 
 export function useMessengerSocket({
   onFeatureEvent,
+  onSidebarEvent,
   sessionApi,
   userId,
   recovery,
@@ -73,6 +76,7 @@ export function useMessengerSocket({
   selectedRef,
   setConnection,
   setNextRetryAt,
+  setConnectionGeneration,
   retryNowRef,
   onSessionRevoked,
   reconcilePending,
@@ -111,13 +115,16 @@ export function useMessengerSocket({
       )
       summaryRunning = false
       if (!disposed && summaryChats.size)
-        summaryTimer = setTimeout(() => void refreshSummaries(), 500)
+        summaryTimer = setTimeout(() => void refreshSummaries(), 500 + Math.random() * 1500)
     }
-    const invalidateSummary = (id: string) => {
+    const invalidateSummary = (id: string, jitter = false) => {
       if (summaryChats.size >= 100 && !summaryChats.has(id)) return
       summaryChats.add(id)
       if (summaryTimer === undefined && !summaryRunning)
-        summaryTimer = setTimeout(() => void refreshSummaries(), 500)
+        summaryTimer = setTimeout(
+          () => void refreshSummaries(),
+          500 + (jitter ? Math.random() * 1500 : 0),
+        )
     }
     const close = connectSocket({
       url: websocketUrl(),
@@ -126,6 +133,7 @@ export function useMessengerSocket({
       onRetryScheduled: setNextRetryAt,
       onSessionRevoked,
       onOpen: (socket) => {
+        setConnectionGeneration((value) => value + 1)
         socketGenerationRef.current += 1
         focusFreshAtRef.current = 0
         socketRef.current = socket
@@ -137,12 +145,13 @@ export function useMessengerSocket({
           frame.type === EventType.MESSAGE_SAVED ||
           frame.type === 'message_changed' ||
           frame.type === 'history_changed' ||
-          frame.type === 'reads_changed'
+          frame.type === 'reads_changed' ||
+          frame.type === 'sidebar_activity'
         )
-          invalidateSummary(frame.chatId)
+          invalidateSummary(frame.chatId, frame.type === 'sidebar_activity')
         if (frame.type === 'history_changed') void refreshChats(false, true)
         if (frame.type === 'message_changed') requests.revised(frame.messageId)
-        if (onFeatureEvent(frame)) return
+        if (onSidebarEvent(frame) || onFeatureEvent(frame)) return
         if (frame.type === EventType.SUBSCRIBED && frame.chatId === selectedRef.current) {
           window.clearTimeout(groupRetryRef.current)
           groupRetryRef.current = undefined
@@ -271,7 +280,9 @@ export function useMessengerSocket({
     }
   }, [
     onFeatureEvent,
+    onSidebarEvent,
     setNextRetryAt,
+    setConnectionGeneration,
     retryNowRef,
     catchUp,
     onSessionRevoked,

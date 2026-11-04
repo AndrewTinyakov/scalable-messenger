@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { RecoveryHistory } from './chatRecovery'
+import { ChatRecovery, type RecoveryHistory } from './chatRecovery'
 import { baselineStorage, connectedRecovery, message } from './chatRecovery.fixtures'
 import type { Message } from './model'
 
@@ -7,6 +7,70 @@ describe('ChatRecovery history', () => {
   afterEach(() => {
     vi.useRealTimers()
   })
+
+  it.each([false, true])(
+    'offers newer history after live arrivals while scrolled up, summary first: %s',
+    async (summaryFirst) => {
+      const recovery = new ChatRecovery('history-reader', baselineStorage('1'))
+      let readingHistory = false
+      const snapshot = (end: string) => ({
+        snapshotSequence: end,
+        coverageAfterSequence: '0',
+        coverageThroughSequence: end,
+        mutationRevision: '0',
+        visibilityRevision: '0',
+        clearedThroughSequence: '0',
+        globalClearedThroughSequence: '0',
+      })
+      recovery.configure({
+        history: {
+          latest: async () => ({ ...snapshot('1'), messages: [message('1')], hasMore: false }),
+          after: async () => ({
+            ...snapshot('4'),
+            coverageAfterSequence: '1',
+            messages: ['2', '3', '4'].map(message),
+            hasMore: false,
+            nextSequence: '4',
+          }),
+          older: async () => ({ messages: [] }),
+        },
+        context: () => ({
+          selected: true,
+          readingHistory,
+          removed: false,
+          connected: true,
+          room: 'group:chat',
+          kind: 'GROUP',
+        }),
+        changed: () => {},
+        sendFrame: () => {},
+        jumped: () => {},
+        failed: () => {},
+        recovered: () => {},
+      })
+      await recovery.showLatest('chat')
+      expect(recovery.availability('chat').hasNewerMessages).toBe(false)
+      readingHistory = true
+      if (summaryFirst) {
+        recovery.recordLatest('chat', '4')
+        expect(recovery.availability('chat').hasNewerMessages).toBe(true)
+        expect(recovery.baseline('chat')).toBe('1')
+      }
+      for (const sequence of ['2', '3', '4'])
+        await recovery.onLive(message(sequence), 'group:chat', () => true)
+      expect(recovery.visibleWindows().chat.map((row) => row.sequence)).toEqual(['1'])
+      expect(recovery.availability('chat').hasNewerMessages).toBe(true)
+      await recovery.loadNewer('chat')
+      expect(recovery.visibleWindows().chat.map((row) => row.sequence)).toEqual([
+        '1',
+        '2',
+        '3',
+        '4',
+      ])
+      expect(recovery.availability('chat').hasNewerMessages).toBe(false)
+      recovery.dispose()
+    },
+  )
 
   it('lets concurrent recovery callers wait for the shared history result', async () => {
     let releaseHistory!: (value: {

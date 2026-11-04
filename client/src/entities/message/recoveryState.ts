@@ -223,7 +223,13 @@ export class RecoveryState {
 
   availability(chatId: string): { hasOlderMessages?: boolean; hasNewerMessages?: boolean } {
     const bounds = this.visibility.bounds(chatId)
-    return { hasOlderMessages: bounds?.hasOlder, hasNewerMessages: bounds?.hasNewer }
+    return {
+      hasOlderMessages: bounds.hasOlder,
+      hasNewerMessages:
+        bounds.newer !== undefined && BigInt(this.latestSequence(chatId)) > BigInt(bounds.newer)
+          ? true
+          : bounds.hasNewer,
+    }
   }
 
   verifiedSnapshot(

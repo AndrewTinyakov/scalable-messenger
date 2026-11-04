@@ -193,7 +193,7 @@ func (p *sidebarCoordinator) deliver(c *Connection, watch *sidebarWatch, event p
 	}
 	frame, err := protocol.NewEventFrame(event)
 	if err == nil {
-		c.enqueueWithGrants(frame, nil, nil, watch)
+		c.enqueueFrame(frame, frameGrants{sidebar: watch})
 	}
 }
 func (p *sidebarCoordinator) runFeed(ctx context.Context, id string, feed *sidebarFeed) {

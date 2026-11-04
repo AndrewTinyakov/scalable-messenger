@@ -87,7 +87,7 @@ func (p *presenceCoordinator) sweep() {
 		}
 		frame, err := protocol.NewEventFrame(delivery.event)
 		if err == nil {
-			delivery.connection.enqueueFrame(frame, nil, delivery.watch)
+			delivery.connection.enqueueFrame(frame, frameGrants{presence: delivery.watch})
 		}
 	}
 }

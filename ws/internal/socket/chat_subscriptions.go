@@ -232,7 +232,7 @@ func (grant *groupGrant) Enqueue(event protocol.Event) bool {
 }
 
 func (grant *groupGrant) EnqueueFrame(frame *protocol.EventFrame) bool {
-	return grant.connection.enqueueFrame(frame, grant)
+	return grant.connection.enqueueFrame(frame, frameGrants{group: grant})
 }
 
 func (grant *groupGrant) Close() {

@@ -1,8 +1,11 @@
 .git
 .idea
-research
-video.txt
 **/node_modules
 **/dist
 **/build
 **/.gradle
+
+.env
+.env.*
+
+.local/

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { message } from './chatRecovery.fixtures'
 import { HistoryRequests } from './historyRequests'
 import type { Message } from './model'
@@ -191,7 +191,7 @@ describe('pending history requests', () => {
   })
 
   it.each([undefined, 'chat'])(
-    'discards cancelled requests and frees their capacity for %s',
+    'silently bounds a 60-request burst and frees cancelled capacity for %s',
     async (chatId) => {
       const requests = new HistoryRequests()
       const delayed = delayedPage()
@@ -205,15 +205,18 @@ describe('pending history requests', () => {
           },
         ),
       )
-      await expect(
-        requests.run(
-          'chat',
-          async () => ({ messages: [] }),
-          () => {},
-        ),
-      ).rejects.toThrow('Too many pending history requests')
+      const excessFetch = vi.fn(async () => ({ messages: [] }))
+      const excess = await Promise.all(
+        Array.from({ length: 44 }, () => requests.run('chat', excessFetch, () => {})),
+      )
+      expect(excess).toEqual(Array(44).fill(undefined))
+      expect(excessFetch).not.toHaveBeenCalled()
       requests.patch('chat', [{ ...message('1'), messageVersion: '3' }])
+      const capacity = requests.waitForCapacity()
+      expect(capacity).toBeInstanceOf(Promise)
       requests.cancel(chatId)
+      await capacity
+      expect(requests.waitForCapacity()).toBeUndefined()
       expect(
         await requests.run(
           'chat',

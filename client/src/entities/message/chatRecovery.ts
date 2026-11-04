@@ -433,7 +433,12 @@ export class ChatRecovery {
     }
   }
 
-  catchUp(chatId: string, fromStart = false, requiredSequence = '0'): Promise<void> {
+  catchUp(
+    chatId: string,
+    fromStart = false,
+    requiredSequence = '0',
+    allowLiveArrival = false,
+  ): Promise<void> {
     if (this.disposed || chatId.startsWith('draft:')) return Promise.resolve()
     const current = this.catchingUp.get(chatId)
     if (current) {
@@ -443,7 +448,7 @@ export class ChatRecovery {
       const generation = this.lifecycleGeneration
       return current.promise.then(() => {
         if (!this.disposed && generation === this.lifecycleGeneration)
-          return this.catchUp(chatId, fromStart, requiredSequence)
+          return this.catchUp(chatId, fromStart, requiredSequence, allowLiveArrival)
       })
     }
     const request = {
@@ -456,6 +461,7 @@ export class ChatRecovery {
       chatId,
       fromStart,
       () => request.requiredSequence,
+      allowLiveArrival,
     ).finally(() => {
       if (this.catchingUp.get(chatId) === request) this.catchingUp.delete(chatId)
     })
@@ -466,11 +472,33 @@ export class ChatRecovery {
     chatId: string,
     fromStart: boolean,
     requiredSequence: () => string,
+    allowLiveArrival: boolean,
   ): Promise<void> {
     const runtime = this.runtime!
     const generation = this.lifecycleGeneration
     const socketGeneration = this.socketGeneration
     if (this.disposed) return
+    const capacity = this.historyRequests.waitForCapacity()
+    if (capacity) {
+      await capacity
+      if (this.disposed || generation !== this.lifecycleGeneration) return
+    }
+    const context = runtime.context(chatId)
+    if (
+      allowLiveArrival &&
+      this.state.window(chatId).length &&
+      BigInt(this.state.window(chatId)[0].sequence) <= BigInt(this.baseline(chatId)) &&
+      !fromStart &&
+      requiredSequence() !== '0' &&
+      context.selected &&
+      context.connected &&
+      !context.readingHistory &&
+      !this.state.isDetached(chatId)
+    ) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 1250))
+      if (this.disposed || generation !== this.lifecycleGeneration) return
+      if (BigInt(this.baseline(chatId)) >= BigInt(requiredSequence())) return
+    }
     const beforeCatchUp = this.baseline(chatId)
     let observedLatest = '0'
     const loadLatest = async (moveViewport = false, initialize = false) => {
@@ -612,7 +640,9 @@ export class ChatRecovery {
       if (runtime.context(chatId).removed || !canAcknowledge()) return null
       return this.state.acknowledgeLive(chatId, message.sequence, room, epoch, streamId)
     }
-    return decision.catchUp ? this.catchUp(chatId).then(acknowledge) : acknowledge()
+    return decision.catchUp
+      ? this.catchUp(chatId, false, message.sequence, true).then(acknowledge)
+      : acknowledge()
   }
 
   async onLive(
@@ -829,14 +859,16 @@ export class ChatRecovery {
         const changed =
           BigInt(visibility.mutationRevision) > BigInt(previous?.mutationRevision ?? '0') ||
           BigInt(visibility.visibilityRevision) > BigInt(previous?.visibilityRevision ?? '0')
-        this.observe(chatId, visibility)
+        const { snapshotSequence, ...metadata } = visibility
+        this.observe(chatId, metadata)
+        this.recordLatest(chatId, snapshotSequence)
         if (visibility.hidden) {
           this.runtime!.hidden?.(chatId)
           return
         }
         if (!changed) {
           if (BigInt(visibility.snapshotSequence) > BigInt(this.baseline(chatId)))
-            await this.catchUp(chatId, false, visibility.snapshotSequence)
+            await this.catchUp(chatId, false, visibility.snapshotSequence, true)
           continue
         }
         const ids = this.state.retainedIds(chatId)
@@ -881,7 +913,7 @@ export class ChatRecovery {
   }
 
   availability(chatId: string): { hasOlderMessages?: boolean; hasNewerMessages?: boolean } {
-    return this.state.availability(chatId)
+    return this.state.availability(chatId, this.runtime?.context(chatId).readingHistory ?? true)
   }
 
   mutationRevision(chatId: string): string {
@@ -926,12 +958,18 @@ export class ChatRecovery {
   ): boolean {
     this.historyRequests.observe(chatId, this.state.snapshotMetadata(chatId))
     if (!this.historyRequests.accepts(chatId, snapshot)) return false
-    this.observe(chatId, snapshot)
+    const previous = this.state.snapshotMetadata(chatId)
+    const changed =
+      BigInt(snapshot.mutationRevision ?? '0') > BigInt(previous.mutationRevision ?? '0') ||
+      BigInt(snapshot.visibilityRevision ?? '0') > BigInt(previous.visibilityRevision ?? '0')
+    const { snapshotSequence, ...metadata } = snapshot
+    this.observe(chatId, changes.length || changed ? snapshot : metadata)
+    if (snapshotSequence) this.recordLatest(chatId, snapshotSequence)
     const ids = changes.flatMap((change) =>
       change.messageId ? [change.messageId] : change.message ? [change.message.id] : [],
     )
     const messages = changes.flatMap((change) => (change.message ? [change.message] : []))
-    this.state.resolve(chatId, ids, { ...snapshot, messages })
+    if (ids.length) this.state.resolve(chatId, ids, { ...snapshot, messages })
     if (messages.length) this.patchAccepted(chatId, messages)
     this.runtime!.changed()
     return true

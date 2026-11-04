@@ -72,6 +72,167 @@ describe('ChatRecovery history', () => {
     },
   )
 
+  it('keeps a live window attached through 80 own sends followed by 300 peer arrivals', async () => {
+    const after = vi.fn(async () => ({ messages: [], hasMore: false, nextSequence: '1' }))
+    const older = vi.fn(async () => ({ messages: [] }))
+    const { recovery } = connectedRecovery({
+      latest: async () => ({
+        messages: [message('1')],
+        hasMore: false,
+        snapshotSequence: '1',
+        coverageAfterSequence: '0',
+        coverageThroughSequence: '1',
+        mutationRevision: '0',
+        visibilityRevision: '0',
+        clearedThroughSequence: '0',
+        globalClearedThroughSequence: '0',
+      }),
+      after,
+      older,
+    })
+    await recovery.showLatest('chat')
+    for (let n = 2; n <= 381; n++) {
+      recovery.recordLatest('chat', String(n))
+      expect(recovery.availability('chat').hasNewerMessages).toBe(false)
+      await recovery.onLive(
+        { ...message(String(n)), senderId: n <= 81 ? 'me' : 'peer' },
+        'group:chat',
+        () => true,
+      )
+      expect(recovery.availability('chat').hasNewerMessages).toBe(false)
+    }
+    expect(recovery.visibleWindows().chat.map((row) => row.sequence)).toEqual(
+      Array.from({ length: 200 }, (_, i) => String(i + 182)),
+    )
+    expect(recovery.availability('chat').hasOlderMessages).toBe(true)
+    expect(after).not.toHaveBeenCalled()
+    expect(older).not.toHaveBeenCalled()
+    recovery.dispose()
+  })
+
+  it('lets a live arrival satisfy a slightly newer visibility snapshot before fetching history', async () => {
+    const metadata = {
+      snapshotSequence: '1',
+      mutationRevision: '0',
+      visibilityRevision: '0',
+      clearedThroughSequence: '0',
+      globalClearedThroughSequence: '0',
+    }
+    const after = vi.fn(async () => ({
+      messages: [message('2')],
+      hasMore: false,
+      nextSequence: '2',
+    }))
+    const { recovery } = connectedRecovery({
+      latest: async () => ({
+        ...metadata,
+        messages: [message('1')],
+        hasMore: false,
+        coverageAfterSequence: '0',
+        coverageThroughSequence: '1',
+      }),
+      older: async () => ({ messages: [] }),
+      after,
+      visibility: async () => ({ ...metadata, snapshotSequence: '2', hidden: false }),
+      resolve: async () => ({ ...metadata, messages: [] }),
+    })
+    await recovery.showLatest('chat')
+    const syncing = recovery.synchronize('chat')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    recovery.applyChanges('chat', [], { ...metadata, snapshotSequence: '2' })
+    await recovery.onLive(message('2'), 'group:chat', () => true)
+    await syncing
+    expect(after).not.toHaveBeenCalled()
+    expect(recovery.visibleWindows().chat.at(-1)?.sequence).toBe('2')
+    recovery.dispose()
+  })
+
+  it('coalesces a saturated 60-frame live burst and recovers its final message after capacity returns', async () => {
+    const metadata = {
+      snapshotSequence: '1',
+      mutationRevision: '0',
+      visibilityRevision: '0',
+      clearedThroughSequence: '0',
+      globalClearedThroughSequence: '0',
+    }
+    const releases: (() => void)[] = []
+    const resolve = vi.fn(
+      (_chatId: string, ids: string[]) =>
+        new Promise<{ messages: Message[] } & typeof metadata>((release) => {
+          releases.push(() =>
+            release({
+              ...metadata,
+              snapshotSequence: '61',
+              messages: ids.map((id) => message(id.replace('message-', ''))),
+            }),
+          )
+        }),
+    )
+    const after = vi.fn(async () => ({
+      ...metadata,
+      snapshotSequence: '61',
+      messages: Array.from({ length: 60 }, (_, i) => message(String(i + 2))),
+      coverageAfterSequence: '1',
+      coverageThroughSequence: '61',
+      nextSequence: '61',
+      hasMore: false,
+    }))
+    const { recovery } = connectedRecovery({
+      latest: async () => ({
+        ...metadata,
+        messages: [message('1')],
+        coverageAfterSequence: '0',
+        coverageThroughSequence: '1',
+        hasMore: false,
+      }),
+      older: async () => ({ messages: [] }),
+      after,
+      resolve,
+    })
+    await recovery.showLatest('chat')
+    recovery.observe('chat', { snapshotSequence: '61' })
+    const arrivals = Array.from({ length: 60 }, (_, i) =>
+      recovery.onLive(message(String(i + 2)), 'group:chat', () => true),
+    )
+    expect(resolve).toHaveBeenCalledTimes(16)
+    expect(after).not.toHaveBeenCalled()
+    releases.forEach((release) => release())
+    await Promise.all(arrivals)
+    expect(after).toHaveBeenCalledTimes(1)
+    expect(recovery.baseline('chat')).toBe('61')
+    expect(recovery.visibleWindows().chat.map((row) => row.sequence)).toEqual(
+      Array.from({ length: 61 }, (_, i) => String(i + 1)),
+    )
+    recovery.dispose()
+  })
+
+  it('orders a bounded out-of-order live burst without paging or detaching the latest window', async () => {
+    vi.useFakeTimers()
+    const after = vi.fn(async () => ({ messages: [], hasMore: false, nextSequence: '1' }))
+    const { recovery } = connectedRecovery({
+      latest: async () => ({ messages: [message('1')], hasMore: false }),
+      older: async () => ({ messages: [] }),
+      after,
+    })
+    await recovery.showLatest('chat')
+    const arrivals = ['5', '2', '4', '3'].map((sequence) =>
+      recovery.onLive(message(sequence), 'group:chat', () => true),
+    )
+    expect(recovery.baseline('chat')).toBe('5')
+    expect(recovery.visibleWindows().chat.map((row) => row.sequence)).toEqual([
+      '1',
+      '2',
+      '3',
+      '4',
+      '5',
+    ])
+    await vi.advanceTimersByTimeAsync(1250)
+    await Promise.all(arrivals)
+    expect(after).not.toHaveBeenCalled()
+    expect(recovery.availability('chat').hasNewerMessages).toBe(false)
+    recovery.dispose()
+  })
+
   it('lets concurrent recovery callers wait for the shared history result', async () => {
     let releaseHistory!: (value: {
       messages: Message[]

@@ -62,7 +62,8 @@ export function useMessageViewport({
     locationRevision: number
   }>({ chatId: undefined, jumpRevision, locationRevision })
   const pendingRestore = useRef<ReadingLocation | null>(null)
-  const autoPageRef = useRef<{ older?: string; newer?: string }>({})
+  const autoPageRef = useRef<Partial<Record<'older' | 'newer', { anchor: string; at: number }>>>({})
+  const pageRef = useRef<() => void>(() => {})
   const captured = useRef<{ chatId: string; location: ReadingLocation } | null>(null)
   const options = useRef({ chatId, hasNewer, onLocationChange })
   options.current = { chatId, hasNewer, onLocationChange }
@@ -260,30 +261,35 @@ export function useMessageViewport({
     atBottomRef.current = distanceToBottom(scroller) < BOTTOM_THRESHOLD
     onViewPositionChange(atBottomRef.current && !hasNewer)
     captureLocation()
-    const first = messages[0]?.sequence
-    const last = messages.at(-1)?.sequence
-    if (
-      scroller.scrollTop < 120 &&
-      hasOlder &&
-      !loadingOlder &&
-      first &&
-      autoPageRef.current.older !== first
-    ) {
-      autoPageRef.current.older = first
-      rememberAnchor('older')
-      onLoadOlder()
-    } else if (
-      distanceToBottom(scroller) < 120 &&
-      hasNewer &&
-      !loadingNewer &&
-      last &&
-      autoPageRef.current.newer !== last
-    ) {
-      autoPageRef.current.newer = last
-      rememberAnchor('newer')
-      onLoadNewer()
-    }
+    autoPage()
   }
+
+  function autoPage() {
+    const scroller = scrollRef.current
+    if (!scroller || pendingRestore.current || document.visibilityState !== 'visible') return
+    if (loadingOlder || loadingNewer) return
+    const direction =
+      hasNewer && distanceToBottom(scroller) < 120
+        ? 'newer'
+        : hasOlder && scroller.scrollTop < 120
+          ? 'older'
+          : null
+    if (!direction) return
+    const anchor =
+      (direction === 'older' ? messages[0]?.sequence : messages.at(-1)?.sequence) ?? '0'
+    const previous = autoPageRef.current[direction]
+    if (previous?.anchor === anchor && Date.now() - previous.at < 1000) return
+    autoPageRef.current[direction] = { anchor, at: Date.now() }
+    rememberAnchor(direction)
+    if (direction === 'older') onLoadOlder()
+    else onLoadNewer()
+  }
+
+  pageRef.current = autoPage
+  useLayoutEffect(() => {
+    const timer = window.setInterval(() => pageRef.current(), 250)
+    return () => window.clearInterval(timer)
+  }, [chatId])
 
   return { scrollRef, highlight, rememberAnchor, handleScroll, stickToLatest }
 }

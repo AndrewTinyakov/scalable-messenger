@@ -10,8 +10,8 @@ const targets = {
   kotlin: {
     generator: 'kotlin',
     packageName: 'com.andrewtinyakov.messenger.generated.messaging',
-    clean: 'api/src/generated/asyncapi/kotlin',
-    output: 'api/src/generated/asyncapi/kotlin/com/andrewtinyakov/messenger/generated/messaging',
+    clean: 'kotlin/shared/src/generated/asyncapi/kotlin',
+    output: 'kotlin/shared/src/generated/asyncapi/kotlin/com/andrewtinyakov/messenger/generated/messaging',
   },
   go: {
     generator: 'golang',

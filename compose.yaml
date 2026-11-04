@@ -9,7 +9,7 @@ x-api: &api
   image: messenger-api:local
   build:
     context: .
-    dockerfile: api/Dockerfile
+    dockerfile: kotlin/api/Dockerfile
   environment:
     <<: *database-environment
     METRICS_USERNAME: metrics

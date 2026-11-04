@@ -38,11 +38,11 @@ jobs:
           npm run test:contracts
           npm run generate:asyncapi:kotlin
           npm run generate:asyncapi:go
-          git add --intent-to-add api/src/generated/asyncapi/kotlin ws/internal/generated/messaging
-          git diff --exit-code -- api/src/generated/asyncapi/kotlin ws/internal/generated/messaging
+          git add --intent-to-add kotlin/shared/src/generated/asyncapi/kotlin ws/internal/generated/messaging
+          git diff --exit-code -- kotlin/shared/src/generated/asyncapi/kotlin ws/internal/generated/messaging
       - name: Test API, WebSocket server, and client
         run: |
-          ./api/gradlew -p api test ktlintCheck --no-daemon
+          ./kotlin/gradlew -p kotlin test ktlintCheck --no-daemon
           go -C ws vet ./...
           go -C ws test -race -count=1 ./...
           npm --prefix client run typecheck
@@ -64,9 +64,9 @@ jobs:
       - name: Check generated HTTP and SQL models
         run: |
           npm run generate:openapi
-          ./api/gradlew -p api jooqCodegen --no-daemon
-          git add --intent-to-add contracts/openapi.yaml client/src/shared/api/generated api/src/generated/java
-          git diff --exit-code -- contracts/openapi.yaml client/src/shared/api/generated api/src/generated/java
+          ./kotlin/gradlew -p kotlin :shared:jooqCodegen --no-daemon
+          git add --intent-to-add contracts/openapi.yaml client/src/shared/api/generated kotlin/shared/src/generated/java
+          git diff --exit-code -- contracts/openapi.yaml client/src/shared/api/generated kotlin/shared/src/generated/java
       - name: Run cross-process tests
         run: npm run test:resilience
       - name: Show logs on failure

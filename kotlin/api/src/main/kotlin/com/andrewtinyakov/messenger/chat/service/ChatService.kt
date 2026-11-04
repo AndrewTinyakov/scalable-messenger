@@ -30,9 +30,7 @@ import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
 import tools.jackson.databind.ObjectMapper
-import java.nio.charset.StandardCharsets
 import java.time.OffsetDateTime
-import java.util.Base64
 
 @Service
 class ChatService(
@@ -47,11 +45,11 @@ class ChatService(
         limit: Int,
     ): ChatPageResponse {
         requirePageLimit(limit)
-        val position = cursor?.let(::decodeCursor)
+        val position = cursor?.let(ChatCursor::decode)
         val fetched = repository.findByMember(
             userId = userId,
-            beforeActivityAt = position?.first,
-            beforeChatId = position?.second,
+            beforeActivityAt = position?.activityAt,
+            beforeChatId = position?.chatId,
             limit = limit + 1,
         )
         val page = fetched.take(limit)
@@ -66,16 +64,7 @@ class ChatService(
             chats.filter { it.kind == ChatKind.DIRECT }
                 .map { it.id },
         )
-        val nextCursor = page.lastOrNull()
-            ?.takeIf {
-                fetched.size > limit
-            }
-            ?.let {
-                encodeCursor(
-                    activityAt = it.activityAt,
-                    chatId = it.chat.id,
-                )
-            }
+        val nextCursor = page.last().takeIf { fetched.size > limit }?.let { ChatCursor(it.activityAt, it.chat.id).encode() }
         return ChatPageResponse(
             chats = page.map {
                 it.chat.toResponse(members = members[it.chat.id].orEmpty())
@@ -84,56 +73,17 @@ class ChatService(
         )
     }
 
-    private fun encodeCursor(
-        activityAt: OffsetDateTime,
-        chatId: ChatId,
-    ): String =
-        Base64.getUrlEncoder()
-            .withoutPadding()
-            .encodeToString("$activityAt|${chatId.value}".toByteArray(StandardCharsets.UTF_8))
-
-    private fun decodeCursor(value: String): Pair<OffsetDateTime, ChatId> {
-        if (value.length > 256) {
-            badRequest(
-                ApiErrorCode.INVALID_SEQUENCE,
-                "Invalid chat cursor",
-            )
-        }
-        return runCatching {
-            val parts = String(
-                Base64.getUrlDecoder()
-                    .decode(value),
-                StandardCharsets.UTF_8,
-            ).split('|')
-            require(parts.size == 2)
-            val activityAt = OffsetDateTime.parse(parts[0])
-            requireId(parts[1])
-            activityAt to ChatId(parts[1])
-        }.getOrElse {
-            badRequest(
-                ApiErrorCode.INVALID_SEQUENCE,
-                "Invalid chat cursor",
-            )
-        }
-    }
-
     fun createGroup(
         userId: UserId,
         input: CreateGroupChatRequest,
     ): ChatResponse {
         val name = input.name.trim()
         if (name.length !in 1..80) {
-            badRequest(
-                ApiErrorCode.INVALID_NAME,
-                "Group name must be 1 to 80 characters",
-            )
+            badRequest(ApiErrorCode.INVALID_NAME, "Group name must be 1 to 80 characters")
         }
         val members = (input.memberIds.map { UserId.parse(it) } + userId).distinct()
         if (members.size !in 2..1000) {
-            badRequest(
-                ApiErrorCode.INVALID_MEMBERS,
-                "Initial group needs 2 to 1000 members",
-            )
+            badRequest(ApiErrorCode.INVALID_MEMBERS, "Initial group needs 2 to 1000 members")
         }
         return tx.observedExecute(DatabaseTransaction.CHAT_CREATE_GROUP) {
             requireUsersAndLock(members)
@@ -181,9 +131,7 @@ class ChatService(
         tx.observedExecuteWithoutResult(DatabaseTransaction.CHAT_ADD_MEMBERS) {
             val chat = repository.findByIdForUpdate(chatId = chatId)
                 ?.takeIf { it.kind == ChatKind.GROUP } ?: notFound()
-            if (chat.ownerId !=
-                actorId
-            ) {
+            if (chat.ownerId != actorId) {
                 throw ApiException(
                     HttpStatus.FORBIDDEN,
                     ApiErrorCode.FORBIDDEN,
@@ -197,10 +145,7 @@ class ChatService(
             )
             val additions = requested.filterNot(existing::contains)
             if (chat.memberCount + additions.size > 100_000) {
-                badRequest(
-                    ApiErrorCode.INVALID_MEMBERS,
-                    "Group cannot exceed 100000 members",
-                )
+                badRequest(ApiErrorCode.INVALID_MEMBERS, "Group cannot exceed 100000 members")
             }
             if (additions.isNotEmpty()) {
                 requireGroupCapacity(additions)
@@ -239,10 +184,7 @@ class ChatService(
 
     private fun requireGroupCapacity(userIds: List<UserId>) {
         if (repository.groupCountsByUser(userIds = userIds).values.any { it >= 200 }) {
-            badRequest(
-                ApiErrorCode.INVALID_MEMBERS,
-                "A member cannot join more than 200 groups",
-            )
+            badRequest(ApiErrorCode.INVALID_MEMBERS, "A member cannot join more than 200 groups")
         }
     }
 

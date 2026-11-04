@@ -102,9 +102,7 @@ class DeletionService(
                 repository.saveOperation(chatId, actorId, input, fingerprint, chat, chat.revision, chat.visibility, 0)
                 return@observedExecute repository.operation(chatId, actorId, input.requestId)!!.response
             }
-            val targets = if (input.target ==
-                DeletionTarget.MESSAGES
-            ) {
+            val targets = if (input.target == DeletionTarget.MESSAGES) {
                 repository.targets(chatId, actorId, ids.map(::MessageId), input.scope)
             } else {
                 emptyList()
@@ -122,9 +120,7 @@ class DeletionService(
             when (input.scope) {
                 DeletionScope.SELF -> {
                     visibility =
-                        if (input.target ==
-                            DeletionTarget.MESSAGES
-                        ) {
+                        if (input.target == DeletionTarget.MESSAGES) {
                             repository.hideMessages(chatId, actorId, targets)
                         } else {
                             repository.clearPersonal(
@@ -138,9 +134,7 @@ class DeletionService(
 
                 DeletionScope.EVERYONE -> {
                     revision =
-                        if (input.target ==
-                            DeletionTarget.MESSAGES
-                        ) {
+                        if (input.target == DeletionTarget.MESSAGES) {
                             repository.removeMessages(chatId, targets)
                         } else {
                             repository.clearGlobal(
@@ -160,9 +154,7 @@ class DeletionService(
                 chat,
                 revision,
                 visibility,
-                if (input.scope ==
-                    DeletionScope.EVERYONE
-                ) {
+                if (input.scope == DeletionScope.EVERYONE) {
                     targets.size
                 } else {
                     0
@@ -180,9 +172,7 @@ class DeletionService(
                     chatId = chatId.value,
                     sequence = chat.high.toString(),
                     mutationRevision = revision.toString(),
-                    visibilityRevision = if (input.scope ==
-                        DeletionScope.SELF
-                    ) {
+                    visibilityRevision = if (input.scope == DeletionScope.SELF) {
                         visibility.toString()
                     } else {
                         "0"

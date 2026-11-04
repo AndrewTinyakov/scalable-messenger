@@ -51,9 +51,7 @@ class MessageMutationService(
     fun delete(chatId: ChatId, userId: UserId, messageId: MessageId, expectedVersion: String): MessageResponse {
         requireVersion(expectedVersion)
         val previous = messages.findMessage(chatId, userId, messageId) ?: notFound()
-        if (previous.messageVersion.toString() !=
-            expectedVersion
-        ) {
+        if (previous.messageVersion.toString() != expectedVersion) {
             throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.INVALID_REQUEST, "Message version changed")
         }
         deletions.delete(

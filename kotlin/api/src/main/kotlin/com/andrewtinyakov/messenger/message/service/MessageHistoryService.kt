@@ -66,9 +66,7 @@ class MessageHistoryService(
                 metrics.counter(
                     "messenger.history.messages",
                     "direction",
-                    if (afterSeq !=
-                        null
-                    ) {
+                    if (afterSeq != null) {
                         "after"
                     } else {
                         "before"
@@ -124,9 +122,7 @@ class MessageHistoryService(
                     ?: listOfNotNull(beforeAnchor.messages.lastOrNull(), afterAnchor.messages.firstOrNull()).minByOrNull {
                         kotlin.math.abs(it.sequence - anchorAt)
                     }
-            if (anchor ==
-                null
-            ) {
+            if (anchor == null) {
                 return@observedExecute MessageAroundResponse(
                     null,
                     emptyList(),
@@ -228,9 +224,7 @@ class MessageHistoryService(
                     MessageChangeResponse(
                         change.revision.toString(),
                         kind,
-                        if (kind ==
-                            MessageChangeKind.UPSERT
-                        ) {
+                        if (kind == MessageChangeKind.UPSERT) {
                             message?.toResponse()
                         } else {
                             null
@@ -292,9 +286,7 @@ class MessageHistoryService(
     }
 
     private fun SendResult.toStatusResponse(): SendStatusResponse = SendStatusResponse(
-        if (status ==
-            SendResultStatus.SAVED
-        ) {
+        if (status == SendResultStatus.SAVED) {
             SendLookupStatus.SAVED
         } else {
             SendLookupStatus.REJECTED

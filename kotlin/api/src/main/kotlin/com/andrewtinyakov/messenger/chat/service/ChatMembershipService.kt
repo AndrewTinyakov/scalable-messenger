@@ -18,6 +18,7 @@ import com.andrewtinyakov.messenger.shared.id.newId
 import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
 import com.andrewtinyakov.messenger.shared.web.ApiException
 import com.andrewtinyakov.messenger.shared.web.badRequest
+import com.andrewtinyakov.messenger.shared.web.requirePageLimit
 import com.andrewtinyakov.messenger.shared.web.notFound
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -32,7 +33,7 @@ class ChatMembershipService(
     private val mapper: ObjectMapper,
 ) {
     fun listMembers(chatId: ChatId, viewerId: UserId, afterUserId: UserId?, limit: Int): GroupMemberPageResponse {
-        if (limit !in 1..100) badRequest(ApiErrorCode.INVALID_LIMIT, "limit must be 1 to 100")
+        requirePageLimit(limit)
         val fetched = repository.findGroupMemberPage(chatId, viewerId, afterUserId, limit + 1) ?: notFound()
         val page = fetched.take(limit)
         return GroupMemberPageResponse(

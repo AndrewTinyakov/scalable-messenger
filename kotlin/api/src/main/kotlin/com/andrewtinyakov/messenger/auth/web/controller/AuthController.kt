@@ -4,7 +4,6 @@ import com.andrewtinyakov.messenger.auth.model.AuthenticatedSession
 import com.andrewtinyakov.messenger.auth.repository.UserRepository
 import com.andrewtinyakov.messenger.auth.service.AuthenticationService
 import com.andrewtinyakov.messenger.auth.service.WsTicketService
-import com.andrewtinyakov.messenger.auth.web.AUTHENTICATED_SESSION_ATTRIBUTE
 import com.andrewtinyakov.messenger.auth.web.SessionCookie
 import com.andrewtinyakov.messenger.auth.web.expectedSessionIdentity
 import com.andrewtinyakov.messenger.auth.web.payload.AuthRequest
@@ -18,7 +17,6 @@ import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
-import org.springframework.web.bind.annotation.RequestAttribute
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.ResponseStatus
@@ -55,7 +53,7 @@ class AuthController(
 
     @GetMapping("/session")
     fun session(
-        @RequestAttribute(AUTHENTICATED_SESSION_ATTRIBUTE) session: AuthenticatedSession,
+        session: AuthenticatedSession,
     ): SessionResponse {
         val user = requireNotNull(userRepository.findSummary(userId = session.userId))
         return SessionResponse(userId = user.id.value, username = user.username, deviceId = session.deviceId.value)
@@ -73,6 +71,6 @@ class AuthController(
 
     @PostMapping("/ws-ticket")
     fun wsTicket(
-        @RequestAttribute(AUTHENTICATED_SESSION_ATTRIBUTE) session: AuthenticatedSession,
+        session: AuthenticatedSession,
     ): WsTicketResponse = wsTicketService.issue(session)
 }

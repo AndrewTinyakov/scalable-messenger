@@ -1,7 +1,6 @@
 package com.andrewtinyakov.messenger.chat.web.controller
 
 import com.andrewtinyakov.messenger.auth.model.AuthenticatedSession
-import com.andrewtinyakov.messenger.auth.web.AUTHENTICATED_SESSION_ATTRIBUTE
 import com.andrewtinyakov.messenger.chat.service.ChatDeletionService
 import com.andrewtinyakov.messenger.chat.service.ChatMembershipService
 import com.andrewtinyakov.messenger.chat.service.ChatService
@@ -14,14 +13,12 @@ import com.andrewtinyakov.messenger.chat.web.payload.DirectChatResponse
 import com.andrewtinyakov.messenger.chat.web.payload.GroupMemberPageResponse
 import com.andrewtinyakov.messenger.shared.id.ChatId
 import com.andrewtinyakov.messenger.shared.id.UserId
-import com.andrewtinyakov.messenger.shared.id.requireId
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
-import org.springframework.web.bind.annotation.RequestAttribute
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
@@ -39,15 +36,15 @@ class ChatController(
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     fun delete(
-        @RequestAttribute(AUTHENTICATED_SESSION_ATTRIBUTE) session: AuthenticatedSession,
+        session: AuthenticatedSession,
         @PathVariable id: String,
     ) {
-        chatDeletionService.delete(ChatId(requireId(id)), session.userId)
+        chatDeletionService.delete(ChatId.parse(id), session.userId)
     }
 
     @GetMapping
     fun list(
-        @RequestAttribute(AUTHENTICATED_SESSION_ATTRIBUTE) session: AuthenticatedSession,
+        session: AuthenticatedSession,
         @RequestParam(required = false) cursor: String?,
         @RequestParam(defaultValue = "50") limit: Int,
     ): ChatPageResponse =
@@ -55,55 +52,55 @@ class ChatController(
 
     @GetMapping("/direct/{userId}")
     fun direct(
-        @RequestAttribute(AUTHENTICATED_SESSION_ATTRIBUTE) session: AuthenticatedSession,
+        session: AuthenticatedSession,
         @PathVariable userId: String,
-    ): DirectChatResponse = directChatLookupService.get(userId = session.userId, recipientId = UserId(requireId(userId)))
+    ): DirectChatResponse = directChatLookupService.get(userId = session.userId, recipientId = UserId.parse(userId))
 
     @GetMapping("/{id}")
     fun get(
-        @RequestAttribute(AUTHENTICATED_SESSION_ATTRIBUTE) session: AuthenticatedSession,
+        session: AuthenticatedSession,
         @PathVariable id: String,
-    ): ChatResponse = chatService.get(chatId = ChatId(requireId(id)), userId = session.userId)
+    ): ChatResponse = chatService.get(chatId = ChatId.parse(id), userId = session.userId)
 
     @PostMapping("/groups")
     @ResponseStatus(HttpStatus.CREATED)
     fun group(
-        @RequestAttribute(AUTHENTICATED_SESSION_ATTRIBUTE) session: AuthenticatedSession,
+        session: AuthenticatedSession,
         @Valid @RequestBody input: CreateGroupChatRequest,
     ): ChatResponse =
         chatService.createGroup(userId = session.userId, input = input)
 
     @GetMapping("/{id}/members")
     fun members(
-        @RequestAttribute(AUTHENTICATED_SESSION_ATTRIBUTE) session: AuthenticatedSession,
+        session: AuthenticatedSession,
         @PathVariable id: String,
         @RequestParam(required = false) afterUserId: String?,
         @RequestParam(defaultValue = "50") limit: Int,
     ): GroupMemberPageResponse =
         chatMembershipService.listMembers(
-            chatId = ChatId(requireId(id)),
+            chatId = ChatId.parse(id),
             viewerId = session.userId,
-            afterUserId = afterUserId?.let { UserId(requireId(it)) },
+            afterUserId = afterUserId?.let { UserId.parse(it) },
             limit = limit,
         )
 
     @PostMapping("/{id}/members")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     fun addMembers(
-        @RequestAttribute(AUTHENTICATED_SESSION_ATTRIBUTE) session: AuthenticatedSession,
+        session: AuthenticatedSession,
         @PathVariable id: String,
         @Valid @RequestBody input: AddGroupMembersRequest,
     ) {
-        chatService.addMembers(chatId = ChatId(requireId(id)), actorId = session.userId, input = input)
+        chatService.addMembers(chatId = ChatId.parse(id), actorId = session.userId, input = input)
     }
 
     @DeleteMapping("/{id}/members/{userId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     fun removeMember(
-        @RequestAttribute(AUTHENTICATED_SESSION_ATTRIBUTE) session: AuthenticatedSession,
+        session: AuthenticatedSession,
         @PathVariable id: String,
         @PathVariable userId: String,
     ) {
-        chatMembershipService.removeMember(chatId = ChatId(requireId(id)), actorId = session.userId, memberId = UserId(requireId(userId)))
+        chatMembershipService.removeMember(chatId = ChatId.parse(id), actorId = session.userId, memberId = UserId.parse(userId))
     }
 }

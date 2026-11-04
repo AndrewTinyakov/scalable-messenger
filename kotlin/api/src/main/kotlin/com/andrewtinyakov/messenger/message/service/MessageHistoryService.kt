@@ -26,6 +26,8 @@ import com.andrewtinyakov.messenger.shared.id.RequestId
 import com.andrewtinyakov.messenger.shared.id.UserId
 import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
 import com.andrewtinyakov.messenger.shared.web.badRequest
+import com.andrewtinyakov.messenger.shared.web.parseSequence
+import com.andrewtinyakov.messenger.shared.web.requirePageLimit
 import com.andrewtinyakov.messenger.shared.web.notFound
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.Timer
@@ -52,7 +54,7 @@ class MessageHistoryService(
         measured(if (afterSeq != null) "after" else "before") {
             snapshot.observedExecute(DatabaseTransaction.MESSAGE_HISTORY) {
                 val state = state(chatId, userId)
-                requireLimit(limit)
+                requirePageLimit(limit)
                 if (afterSeq != null && beforeSeq != null) badRequest(ApiErrorCode.INVALID_SEQUENCE, "Use either afterSeq or beforeSeq")
                 val cursor = (afterSeq ?: beforeSeq)?.let { sequence(it, beforeSeq != null) }
                 if (afterSeq != null && cursor != null &&
@@ -106,7 +108,7 @@ class MessageHistoryService(
     ) {
         snapshot.observedExecute(DatabaseTransaction.MESSAGE_HISTORY) {
             val state = state(chatId, userId)
-            requireLimit(limit)
+            requirePageLimit(limit)
             if (messageId == null &&
                 anchorSequence == null
             ) {
@@ -196,7 +198,7 @@ class MessageHistoryService(
         snapshot.observedExecute(DatabaseTransaction.MESSAGE_HISTORY) {
             val state = state(chatId, userId)
             val cursor = changes.cursor(chatId, userId) ?: notFound()
-            requireLimit(limit)
+            requirePageLimit(limit)
             val after = sequence(afterRevision)
             if (after < cursor.floor || after > cursor.revision) {
                 metrics.counter("messenger.message.changes.resets").increment()
@@ -251,13 +253,8 @@ class MessageHistoryService(
 
     private fun state(chatId: ChatId, userId: UserId): VisibilitySnapshot = visibility.snapshot(chatId, userId) ?: notFound()
 
-    private fun requireLimit(limit: Int) {
-        if (limit !in 1..100) badRequest(ApiErrorCode.INVALID_LIMIT, "limit must be 1 to 100")
-    }
-
     private fun sequence(value: String, positive: Boolean = false): Long =
-        value.takeIf { Regex("0|[1-9][0-9]{0,18}").matches(it) }?.toLongOrNull()
-            ?.takeIf { !positive || it > 0 } ?: badRequest(ApiErrorCode.INVALID_SEQUENCE, "Invalid decimal sequence")
+        parseSequence(value)?.takeIf { !positive || it > 0 } ?: badRequest(ApiErrorCode.INVALID_SEQUENCE, "Invalid decimal sequence")
 
     private fun <T> measured(direction: String, action: () -> T): T {
         val started = System.nanoTime()

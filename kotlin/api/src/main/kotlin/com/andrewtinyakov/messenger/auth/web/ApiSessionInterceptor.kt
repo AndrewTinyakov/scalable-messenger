@@ -7,6 +7,7 @@ import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
 import org.springframework.context.annotation.Configuration
 import org.springframework.stereotype.Component
+import org.springframework.web.method.support.HandlerMethodArgumentResolver
 import org.springframework.web.servlet.HandlerInterceptor
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer
@@ -31,7 +32,12 @@ class ApiSessionInterceptor(
 @Configuration(proxyBeanMethods = false)
 class ApiSessionConfiguration(
     private val interceptor: ApiSessionInterceptor,
+    private val sessionArgument: AuthenticatedSessionArgumentResolver,
 ) : WebMvcConfigurer {
+    override fun addArgumentResolvers(resolvers: MutableList<HandlerMethodArgumentResolver>) {
+        resolvers.add(sessionArgument)
+    }
+
     override fun addInterceptors(registry: InterceptorRegistry) {
         registry.addInterceptor(interceptor)
             .addPathPatterns("/**")

@@ -17,12 +17,20 @@ fun requireId(value: String): String {
 
 fun isValidId(value: String): Boolean = ulidPattern.matches(value)
 
+fun isValidSessionId(value: String): Boolean = sessionIdPattern.matches(value)
+
+fun isValidSessionToken(value: String): Boolean = sessionTokenPattern.matches(value)
+
 @JvmInline
 value class UserId(
     val value: String,
 ) {
     init {
         require(isValidId(value)) { "Invalid user ID" }
+    }
+
+    companion object {
+        fun parse(value: String) = UserId(requireId(value))
     }
 }
 
@@ -32,6 +40,10 @@ value class ChatId(
 ) {
     init {
         require(isValidId(value)) { "Invalid chat ID" }
+    }
+
+    companion object {
+        fun parse(value: String) = ChatId(requireId(value))
     }
 }
 
@@ -51,6 +63,10 @@ value class MessageId(
     init {
         require(isValidId(value)) { "Invalid message ID" }
     }
+
+    companion object {
+        fun parse(value: String) = MessageId(requireId(value))
+    }
 }
 
 @JvmInline
@@ -67,7 +83,7 @@ value class SessionId(
     val value: String,
 ) {
     init {
-        require(sessionIdPattern.matches(value)) { "Invalid session ID" }
+        require(isValidSessionId(value)) { "Invalid session ID" }
     }
 }
 
@@ -85,6 +101,6 @@ value class SessionToken(
     val value: String,
 ) {
     init {
-        require(sessionTokenPattern.matches(value)) { "Invalid session token" }
+        require(isValidSessionToken(value)) { "Invalid session token" }
     }
 }

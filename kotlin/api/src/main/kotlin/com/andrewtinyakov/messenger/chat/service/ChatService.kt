@@ -24,6 +24,7 @@ import com.andrewtinyakov.messenger.shared.id.requireId
 import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
 import com.andrewtinyakov.messenger.shared.web.ApiException
 import com.andrewtinyakov.messenger.shared.web.badRequest
+import com.andrewtinyakov.messenger.shared.web.requirePageLimit
 import com.andrewtinyakov.messenger.shared.web.notFound
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -45,12 +46,7 @@ class ChatService(
         cursor: String?,
         limit: Int,
     ): ChatPageResponse {
-        if (limit !in 1..100) {
-            badRequest(
-                ApiErrorCode.INVALID_LIMIT,
-                "limit must be 1 to 100",
-            )
-        }
+        requirePageLimit(limit)
         val position = cursor?.let(::decodeCursor)
         val fetched = repository.findByMember(
             userId = userId,
@@ -132,7 +128,7 @@ class ChatService(
                 "Group name must be 1 to 80 characters",
             )
         }
-        val members = (input.memberIds.map { UserId(requireId(it)) } + userId).distinct()
+        val members = (input.memberIds.map { UserId.parse(it) } + userId).distinct()
         if (members.size !in 2..1000) {
             badRequest(
                 ApiErrorCode.INVALID_MEMBERS,
@@ -180,7 +176,7 @@ class ChatService(
         actorId: UserId,
         input: AddGroupMembersRequest,
     ) {
-        val requested = input.memberIds.map { UserId(requireId(it)) }
+        val requested = input.memberIds.map { UserId.parse(it) }
             .distinct()
         tx.observedExecuteWithoutResult(DatabaseTransaction.CHAT_ADD_MEMBERS) {
             val chat = repository.findByIdForUpdate(chatId = chatId)

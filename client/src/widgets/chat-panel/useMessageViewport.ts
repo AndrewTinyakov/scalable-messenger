@@ -24,6 +24,12 @@ interface Options {
   locationRevision?: number
   onLocationChange?: (chatId: string, location: ReadingLocation) => void
 }
+const BOTTOM_THRESHOLD = 48
+
+function distanceToBottom(scroller: HTMLElement): number {
+  return scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight
+}
+
 export function useMessageViewport({
   chatId,
   userId,
@@ -121,7 +127,7 @@ export function useMessageViewport({
       if (!pendingRestore.current) {
         scroller.scrollTop = scroller.scrollHeight
         atBottomRef.current = true
-        onViewPositionChange(true)
+        onViewPositionChange(!hasNewer)
         captureLocation()
         return
       }
@@ -156,6 +162,8 @@ export function useMessageViewport({
       )
     if (anchor && target) scroller.scrollTop += target.getBoundingClientRect().top - anchor.top
     else if (atBottomRef.current && !hasNewer) scroller.scrollTop = scroller.scrollHeight
+    atBottomRef.current = distanceToBottom(scroller) < BOTTOM_THRESHOLD
+    onViewPositionChange(atBottomRef.current && !hasNewer)
     captureLocation()
   }, [chatId, messages, pendingCount, hasNewer, jumpRevision, locationRevision])
 
@@ -239,8 +247,7 @@ export function useMessageViewport({
   function handleScroll() {
     const scroller = scrollRef.current
     if (!scroller || pendingRestore.current) return
-    const distanceToBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight
-    atBottomRef.current = distanceToBottom < 48
+    atBottomRef.current = distanceToBottom(scroller) < BOTTOM_THRESHOLD
     onViewPositionChange(atBottomRef.current && !hasNewer)
     captureLocation()
     const first = messages[0]?.sequence
@@ -256,7 +263,7 @@ export function useMessageViewport({
       rememberAnchor('older')
       onLoadOlder()
     } else if (
-      distanceToBottom < 120 &&
+      distanceToBottom(scroller) < 120 &&
       hasNewer &&
       !loadingNewer &&
       last &&

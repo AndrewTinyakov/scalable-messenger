@@ -136,7 +136,7 @@
   background: var(--bg-raised);
 }
 .dialog-group-name input:focus {
-  border-color: #454545;
+  border-color: var(--line-focus);
   outline: none;
 }
 .dialog-search {
@@ -152,7 +152,7 @@
   color: var(--text-3);
 }
 .dialog-search:focus-within {
-  border-color: #454545;
+  border-color: var(--line-focus);
 }
 .dialog-search input {
   min-width: 0;

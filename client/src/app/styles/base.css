@@ -17,7 +17,6 @@
   --bg-sidebar: #0a0a0a;
   --bg-panel: #000;
   --bg-raised: #111;
-  --bg-input: #161616;
   --bg-hover: #141414;
   --bg-active: #1f1f1f;
   --bg-menu: #111;
@@ -27,6 +26,7 @@
   --bubble-out-meta: #9a9a9a;
   --line: #1f1f1f;
   --line-strong: #2e2e2e;
+  --line-focus: #454545;
   --text: #ededed;
   --text-2: #a1a1a1;
   --text-3: #7a7a7a;
@@ -36,6 +36,7 @@
   --online: #3fb950;
   --danger: #ff6166;
   --danger-soft: rgb(255 97 102 / 12%);
+  --bubble-failed: #4a1f22;
   --shadow-pop: 0 8px 28px rgb(0 0 0 / 60%);
   --radius-s: 8px;
   --radius-m: 10px;

@@ -84,7 +84,7 @@
     background 120ms;
 }
 .field input:hover {
-  border-color: #454545;
+  border-color: var(--line-focus);
 }
 .field input:focus {
   border-color: var(--text-2);

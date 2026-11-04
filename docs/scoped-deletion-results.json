@@ -674,5 +674,41 @@
     "timeoutsOrAssertionsRelaxed": false,
     "reviewRound": 6,
     "bothReviewPerspectives": "No findings"
+  },
+  "ciReadinessFollowup": {
+    "failedRun": 41869866699,
+    "cause": "Resilience harness assumed started containers were ready; publisher restoration raced Redis recovery",
+    "processorStartupSecondsObserved": 36.304,
+    "messageWaitSecondsUnchanged": 30,
+    "localAffectedTests": 9,
+    "failures": 0,
+    "skipped": 0,
+    "localDurationSeconds": 112.919,
+    "productionCodeChanged": false,
+    "bothReviewPerspectives": "No findings"
+  },
+  "automaticCi": {
+    "compile": [
+      "Kotlin application classes",
+      "Go modules",
+      "TypeScript/client production build"
+    ],
+    "lint": [
+      "Kotlin ktlint",
+      "Go vet and formatting",
+      "client formatting"
+    ],
+    "fastChecks": [
+      "Go short unit tests",
+      "client unit tests",
+      "AsyncAPI contract validation/fixtures and model generation"
+    ],
+    "localOnly": [
+      "Kotlin Testcontainers tests",
+      "dependency audits",
+      "race detector",
+      "infrastructure/system/resilience/load",
+      "live HTTP/SQL/gRPC generation checks"
+    ]
   }
 }

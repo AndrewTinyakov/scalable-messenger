@@ -209,7 +209,7 @@ go -C ws test -race ./internal/room ./internal/protocol ./internal/socket
 go -C tests/load/ws test -race ./...
 ```
 
-The system suite checks replica discovery and drain/reconnect behavior. CI also runs an observed public fanout smoke against the Compose stack.
+The system suite checks replica discovery and drain/reconnect behavior. Run the observed public fanout smoke against the local Compose stack. Automatic CI compiles, lints and runs fast unit/contract checks without starting infrastructure.
 
 Before raising node limits, measure long idle runs at the intended socket count, then the intended group size and event rate. Repeat with paused readers and a lost gateway. Increase the generator fleet if its CPU or source ports are limiting the result. Record the first limiting resource and keep admission headroom below it.
 

@@ -1,8 +1,12 @@
 package com.andrewtinyakov.messenger.message.change
 
+import com.andrewtinyakov.messenger.chat.deletion.DeletionRequest
+import com.andrewtinyakov.messenger.chat.deletion.DeletionScope
+import com.andrewtinyakov.messenger.chat.deletion.DeletionService
+import com.andrewtinyakov.messenger.chat.deletion.DeletionTarget
 import com.andrewtinyakov.messenger.chat.model.ChatKind
 import com.andrewtinyakov.messenger.chat.repository.ChatRepository
-import com.andrewtinyakov.messenger.generated.messaging.event.MessageChangedEventV1
+import com.andrewtinyakov.messenger.generated.messaging.event.HistoryChangedEventV1
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseTransaction
 import com.andrewtinyakov.messenger.infrastructure.database.observability.observedExecute
 import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxMessage
@@ -30,6 +34,7 @@ import java.time.OffsetDateTime
 
 @Service
 class MessageMutationService(
+    private val deletions: DeletionService,
     private val messages: MessageRepository,
     private val chats: ChatRepository,
     private val changes: MessageChangeRepository,
@@ -42,17 +47,40 @@ class MessageMutationService(
     fun edit(chatId: ChatId, userId: UserId, messageId: MessageId, body: String, expectedVersion: String): MessageResponse =
         mutate(chatId, userId, messageId, body, expectedVersion)
 
-    fun delete(chatId: ChatId, userId: UserId, messageId: MessageId, expectedVersion: String): MessageResponse =
-        mutate(chatId, userId, messageId, null, expectedVersion)
+    fun delete(chatId: ChatId, userId: UserId, messageId: MessageId, expectedVersion: String): MessageResponse {
+        if (!Regex("[1-9][0-9]{0,18}").matches(expectedVersion) ||
+            expectedVersion.toLongOrNull() == null
+        ) {
+            badRequest(ApiErrorCode.INVALID_REQUEST, "expectedVersion must be a positive decimal integer")
+        }
+        val previous = messages.findMessage(chatId, userId, messageId) ?: notFound()
+        if (previous.messageVersion.toString() !=
+            expectedVersion
+        ) {
+            throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.INVALID_REQUEST, "Message version changed")
+        }
+        deletions.delete(
+            chatId,
+            userId,
+            DeletionRequest(newId(), DeletionScope.EVERYONE, DeletionTarget.MESSAGES, listOf(messageId.value)),
+            mapOf(messageId to previous.messageVersion),
+        )
+        return previous.copy(
+            body = "",
+            deletedAt = OffsetDateTime.now(clock),
+            messageVersion = previous.messageVersion + 1,
+            reply = null,
+            replyToMessageId = null,
+        ).toResponse()
+    }
 
     private fun mutate(
         chatId: ChatId,
         userId: UserId,
         messageId: MessageId,
-        body: String?,
+        body: String,
         expectedVersion: String,
     ): MessageResponse {
-        val kind = if (body == null) "delete" else "edit"
         var outcome = "failed"
         try {
             val response = tx.observedExecute(DatabaseTransaction.MESSAGE_MUTATE) {
@@ -64,15 +92,14 @@ class MessageMutationService(
                 }
                 val version = expectedVersion.takeIf { Regex("[1-9][0-9]{0,18}").matches(it) }?.toLongOrNull()
                     ?: badRequest(ApiErrorCode.INVALID_REQUEST, "expectedVersion must be a positive decimal integer")
-                if (body == null && message.deletedAt != null) return@observedExecute message.toResponse()
                 if (message.deletedAt != null || version != message.messageVersion) {
                     outcome = "conflict"
                     throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.INVALID_REQUEST, "Message version changed")
                 }
-                if (body != null && (body.isBlank() || body.codePointCount(0, body.length) !in 1..4000)) {
+                if (body.isBlank() || body.codePointCount(0, body.length) !in 1..4000) {
                     badRequest(ApiErrorCode.INVALID_REQUEST, "body must contain 1 to 4000 characters and cannot be blank")
                 }
-                val revision = changes.mutate(chatId, messageId, body ?: "", body == null, OffsetDateTime.now(clock))
+                val revision = changes.mutate(chatId, messageId, body, OffsetDateTime.now(clock))
                 val updated = checkNotNull(messages.findMessage(chatId, userId, messageId))
                 val rooms = if (chat.kind == ChatKind.GROUP) {
                     listOf(RoomAddress.group(chatId))
@@ -81,24 +108,13 @@ class MessageMutationService(
                 }
                 outbox.enqueue(
                     rooms.map { room ->
-                        val event = MessageChangedEventV1.create(
+                        val event = HistoryChangedEventV1.create(
                             eventId = newId(),
                             room = room,
                             chatId = chatId.value,
-                            messageId = messageId.value,
-                            sequence = updated.sequence.toString(),
-                            senderId = updated.senderId.value,
-                            body = updated.body,
-                            createdAt = updated.createdAt,
-                            messageVersion = updated.messageVersion.toString(),
+                            sequence = chat.lastSequence.toString(),
                             mutationRevision = revision.toString(),
-                            editedAt = updated.editedAt,
-                            deletedAt = updated.deletedAt,
-                            replyToMessageId = updated.reply?.messageId?.value,
-                            replySenderId = updated.reply?.senderId?.value,
-                            replyBody = updated.reply?.body,
-                            replyDeleted = updated.reply?.deleted,
-                            replyVersion = updated.reply?.version?.toString(),
+                            visibilityRevision = "0",
                         )
                         OutboxMessage(EventId(event.eventId), event.room, mapper.writeValueAsString(event))
                     },
@@ -108,7 +124,7 @@ class MessageMutationService(
             outcome = "success"
             return response
         } finally {
-            metrics.counter("messenger.message.mutations", "kind", kind, "outcome", outcome).increment()
+            metrics.counter("messenger.message.mutations", "kind", "edit", "outcome", outcome).increment()
         }
     }
 }

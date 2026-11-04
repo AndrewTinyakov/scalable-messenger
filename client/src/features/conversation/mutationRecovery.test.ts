@@ -3,6 +3,26 @@ import { message } from '../../entities/message/chatRecovery.fixtures'
 import { MutationRecovery } from './mutationRecovery'
 
 describe('durable mutation recovery', () => {
+  it('keeps its cursor after ten rejected pages and retries from that cursor later', async () => {
+    const changes = vi.fn(async (_chat: string, _after: string) => ({
+      changes: [{ revision: '8', message: message('1') }],
+      lastRevision: '8',
+      nextRevision: '8',
+      resetRequired: false,
+    }))
+    const apply = vi.fn().mockReturnValue(false)
+    const reset = vi.fn()
+    const recovery = new MutationRecovery({ changes, apply, reset, patch: vi.fn() })
+    recovery.select('chat')
+    recovery.snapshot('chat', '7')
+    await recovery.refresh()
+    expect(changes).toHaveBeenCalledTimes(10)
+    expect(reset).not.toHaveBeenCalled()
+    apply.mockReturnValue(true)
+    await recovery.refresh()
+    expect(changes.mock.calls[10]).toEqual(['chat', '7'])
+    expect(changes).toHaveBeenCalledTimes(11)
+  })
   it('recovers an edit and later delete by mutation revision even when their message sequence is old', async () => {
     const patch = vi.fn()
     const changes = vi

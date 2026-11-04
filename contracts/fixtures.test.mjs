@@ -183,3 +183,23 @@ test('presence snapshots are bounded, private to a chat and separate from durabl
   assert.equal(watchPresence({ ...frame, body: '' }), false);
   assert.equal(chatDeleted({ ...readJSON('fixtures/valid/chat-deleted.json'), observedAt: '' }), false);
 });
+
+
+test('bodyless recovery hints and viewer-resolved live replies share strict fixtures', () => {
+  const hint = validate('schemas/message/event/history-changed-v1.yaml');
+  const socketHint = validate('schemas/socket/frame/history-changed-v1.yaml');
+  const fixture = readJSON('fixtures/valid/history-changed.json');
+  assert.equal(hint(fixture), true, JSON.stringify(hint.errors));
+  assert.equal(socketHint({ ...fixture, epoch: 'epoch', streamId: '1-0' }), true);
+  assert.equal(hint({ ...fixture, body: 'removed text' }), false);
+  assert.equal(hint({ ...fixture, visibilityRevision: 1 }), false);
+  const reply = readJSON('fixtures/valid/message-saved-reply-identity.json');
+  assert.equal(saved(reply), true, JSON.stringify(saved.errors));
+  assert.equal(socketSaved({ ...reply, epoch: 'epoch', streamId: '1-0' }), true);
+  assert.equal(saved({ ...reply, replyBody: 'unverified preview' }), false);
+  const reference = validate('schemas/message/event/saved-message-reference-v1.yaml');
+  const { type, version, eventId, room, chatId, requestId, messageId, sequence } = reply;
+  const row = { type, version, eventId, room, chatId, requestId, messageId, sequence };
+  assert.equal(reference(row), true);
+  assert.equal(reference({ ...row, body: 'retained text' }), false);
+});

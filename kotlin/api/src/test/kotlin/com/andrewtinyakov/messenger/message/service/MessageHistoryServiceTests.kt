@@ -120,10 +120,7 @@ class MessageHistoryServiceTests
             assertThrows(ApiException::class.java) { messageHistoryService.messages(chatId, userId, null, "0", 10) }
             assertEquals("0", messageHistoryService.messages(chatId, userId, "0", null, 10).nextSequence)
             assertEquals("1", messageHistoryService.messages(chatId, userId, null, "1", 10).nextSequence)
-            assertEquals(
-                "9223372036854775807",
-                messageHistoryService.messages(chatId, userId, "9223372036854775807", null, 10).nextSequence,
-            )
+            assertThrows(ApiException::class.java) { messageHistoryService.messages(chatId, userId, "9223372036854775807", null, 10) }
         }
 
         @Test

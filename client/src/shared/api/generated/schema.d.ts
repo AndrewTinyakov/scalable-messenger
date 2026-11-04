@@ -36,6 +36,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/chats/{id}/messages/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["resolve"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/chats/{id}/members": {
         parameters: {
             query?: never;
@@ -46,6 +62,22 @@ export interface paths {
         get: operations["members"];
         put?: never;
         post: operations["addMembers"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/chats/{id}/deletions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["delete"];
         delete?: never;
         options?: never;
         head?: never;
@@ -142,7 +174,7 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        delete: operations["delete"];
+        delete: operations["delete_1"];
         options?: never;
         head?: never;
         patch: operations["edit"];
@@ -222,7 +254,23 @@ export interface paths {
         get: operations["get_1"];
         put?: never;
         post?: never;
-        delete: operations["delete_1"];
+        delete: operations["delete_2"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/chats/{id}/visibility": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["visibility"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -284,6 +332,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["around"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/chats/{id}/deletions/{operationId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["status_1"];
         put?: never;
         post?: never;
         delete?: never;
@@ -373,8 +437,59 @@ export interface components {
             /** Format: date-time */
             serverTime: string;
         };
+        MessageResolveRequest: {
+            messageIds: string[];
+        };
+        MessageResolveResponse: {
+            messages: components["schemas"]["MessageResponse"][];
+            snapshotSequence: string;
+            mutationRevision: string;
+            visibilityRevision: string;
+            clearedThroughSequence: string;
+            globalClearedThroughSequence: string;
+        };
+        MessageResponse: {
+            id: string;
+            chatId: string;
+            sequence: string;
+            senderId: string;
+            body: string;
+            /** Format: date-time */
+            createdAt: string;
+            messageVersion: string;
+            /** Format: date-time */
+            editedAt: string | null;
+            /** Format: date-time */
+            deletedAt: string | null;
+            replyToMessageId: string | null;
+            replySenderId: string | null;
+            replyBody: string | null;
+            replyDeleted: boolean | null;
+            replyVersion: string | null;
+        };
         AddGroupMembersRequest: {
             memberIds: string[];
+        };
+        DeletionRequest: {
+            requestId: string;
+            /** @enum {string} */
+            scope: "SELF" | "EVERYONE";
+            /** @enum {string} */
+            target: "MESSAGES" | "HISTORY" | "CHAT";
+            messageIds?: string[] | null;
+        };
+        DeletionResponse: {
+            operationId: string;
+            /** @enum {string} */
+            scope: "SELF" | "EVERYONE";
+            /** @enum {string} */
+            target: "MESSAGES" | "HISTORY" | "CHAT";
+            clearedThroughSequence: string;
+            mutationRevision: string;
+            visibilityRevision: string;
+            /** @enum {string} */
+            state: "ACCEPTED" | "COMPLETED";
+            deletedRows: string;
         };
         CreateGroupChatRequest: {
             name: string;
@@ -413,28 +528,17 @@ export interface components {
             body: string;
             expectedVersion: string;
         };
-        MessageResponse: {
-            id: string;
-            chatId: string;
-            sequence: string;
-            senderId: string;
-            body: string;
-            /** Format: date-time */
-            createdAt: string;
-            messageVersion: string;
-            /** Format: date-time */
-            editedAt: string | null;
-            /** Format: date-time */
-            deletedAt: string | null;
-            replyToMessageId: string | null;
-            replySenderId: string | null;
-            replyBody: string | null;
-            replyDeleted: boolean | null;
-            replyVersion: string | null;
-        };
         ChatPageResponse: {
             chats: components["schemas"]["ChatResponse"][];
             nextCursor?: string | null;
+        };
+        MessageVisibilityResponse: {
+            snapshotSequence: string;
+            mutationRevision: string;
+            visibilityRevision: string;
+            clearedThroughSequence: string;
+            globalClearedThroughSequence: string;
+            hidden: boolean;
         };
         ReadSummaryResponse: {
             throughSequence: string;
@@ -447,6 +551,12 @@ export interface components {
             nextSequence: string;
             hasMore: boolean;
             mutationRevision: string;
+            snapshotSequence: string;
+            visibilityRevision: string;
+            clearedThroughSequence: string;
+            globalClearedThroughSequence: string;
+            coverageAfterSequence: string;
+            coverageThroughSequence: string;
         };
         MessageReaderResponse: {
             userId: string;
@@ -465,20 +575,35 @@ export interface components {
         };
         MessageChangeResponse: {
             revision: string;
-            message: components["schemas"]["MessageResponse"];
+            /** @enum {string} */
+            kind: "UPSERT" | "REMOVED" | "CLEARED";
+            message: components["schemas"]["MessageResponse"] | null;
+            messageId: string | null;
+            sequence: string | null;
+            clearedThroughSequence: string | null;
         };
         MessageChangesResponse: {
             changes: components["schemas"]["MessageChangeResponse"][];
             lastRevision: string;
             nextRevision: string;
             resetRequired: boolean;
+            snapshotSequence: string;
+            visibilityRevision: string;
+            clearedThroughSequence: string;
+            globalClearedThroughSequence: string;
         };
         MessageAroundResponse: {
-            anchorMessageId: string;
+            anchorMessageId: string | null;
             messages: components["schemas"]["MessageResponse"][];
             hasOlder: boolean;
             hasNewer: boolean;
             mutationRevision: string;
+            snapshotSequence: string;
+            visibilityRevision: string;
+            clearedThroughSequence: string;
+            globalClearedThroughSequence: string;
+            coverageAfterSequence: string;
+            coverageThroughSequence: string;
         };
         GroupMemberPageResponse: {
             members: components["schemas"]["UserResponse"][];
@@ -699,6 +824,72 @@ export interface operations {
             };
         };
     };
+    resolve: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-Messenger-CSRF": "1";
+                "X-Messenger-User"?: string;
+                "X-Messenger-Device"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MessageResolveRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["MessageResolveResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
     members: {
         parameters: {
             query?: {
@@ -788,6 +979,72 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    delete: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-Messenger-CSRF": "1";
+                "X-Messenger-User"?: string;
+                "X-Messenger-Device"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeletionRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["DeletionResponse"];
+                };
             };
             /** @description Invalid request */
             400: {
@@ -1115,7 +1372,7 @@ export interface operations {
             };
         };
     };
-    delete: {
+    delete_1: {
         parameters: {
             query: {
                 expectedVersion: string;
@@ -1553,7 +1810,7 @@ export interface operations {
             };
         };
     };
-    delete_1: {
+    delete_2: {
         parameters: {
             query?: never;
             header: {
@@ -1574,6 +1831,67 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    visibility: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Messenger-User"?: string;
+                "X-Messenger-Device"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["MessageVisibilityResponse"];
+                };
             };
             /** @description Invalid request */
             400: {
@@ -1809,8 +2127,9 @@ export interface operations {
     };
     around: {
         parameters: {
-            query: {
-                messageId: string;
+            query?: {
+                messageId?: string;
+                anchorSequence?: string;
                 limit?: number;
             };
             header?: {
@@ -1831,6 +2150,68 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["MessageAroundResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    status_1: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Messenger-User"?: string;
+                "X-Messenger-Device"?: string;
+            };
+            path: {
+                id: string;
+                operationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["DeletionResponse"];
                 };
             };
             /** @description Invalid request */

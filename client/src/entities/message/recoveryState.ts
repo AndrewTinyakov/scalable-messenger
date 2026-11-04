@@ -1,6 +1,8 @@
 import { FrameType } from '../../shared/api/generated/socket-vocabulary'
 import { groupRoom, type RecoveryFrame } from '../../shared/api/socket'
 import { isRecord, isSequence, isStreamId } from '../../shared/lib/validation'
+import { hasCoverage, type HistorySnapshot, type SnapshotMetadata } from './historySnapshot'
+import { HistoryVisibility } from './historyVisibility'
 import {
   advanceAppliedSequence,
   appendLiveWindow,
@@ -67,6 +69,191 @@ export class RecoveryState {
   private latest: CursorMap = {}
   private deferredGaps = new Set<string>()
   private historyBuffered: MessageMap = {}
+  private readonly visibility = new HistoryVisibility((chatId) => this.evictWindow(chatId))
+
+  private evictWindow(chatId: string): void {
+    const { [chatId]: _window, ...windows } = this.windows
+    this.windows = windows
+    delete this.pinned[chatId]
+    delete this.historyBuffered[chatId]
+    this.detachedWindows.delete(chatId)
+  }
+
+  private cutoff(chatId: string): bigint {
+    return this.visibility.cutoff(chatId)
+  }
+
+  eligible(message: Pick<Message, 'chatId' | 'sequence'>): boolean {
+    return BigInt(message.sequence) > this.cutoff(message.chatId)
+  }
+
+  requiresResolution(message: Message): boolean {
+    if (BigInt(message.sequence) <= BigInt(this.baseline(message.chatId))) return false
+    if (this.visibility.snapshot(message.chatId).snapshotSequence === undefined) return true
+    return (
+      BigInt(message.sequence) > BigInt(this.baseline(message.chatId)) &&
+      BigInt(message.sequence) <=
+        BigInt(this.visibility.snapshot(message.chatId).snapshotSequence ?? '0') &&
+      (!this.retains(message.chatId, message.id) ||
+        this.visibility.isUnverified(message.chatId, message.id))
+    )
+  }
+
+  hydrateReply(message: Message): Message | undefined {
+    if (!message.replyToMessageId) return message
+    if (this.visibility.isUnverified(message.chatId, message.replyToMessageId)) return undefined
+    if (message.replySenderId != null) return message
+    const target = [this.window(message.chatId), this.pinned[message.chatId] ?? []]
+      .flat()
+      .find((row) => row.id === message.replyToMessageId)
+    if (!target || !this.eligible(target)) return undefined
+    return {
+      ...message,
+      replySenderId: target.senderId,
+      replyBody: target.deletedAt ? '' : [...target.body].slice(0, 160).join(''),
+      replyDeleted: Boolean(target.deletedAt),
+      replyVersion: target.messageVersion ?? '1',
+    }
+  }
+
+  retainedIds(chatId: string): string[] {
+    return [
+      ...new Set(
+        [
+          this.window(chatId),
+          this.pinned[chatId] ?? [],
+          this.historyBuffered[chatId] ?? [],
+        ].flatMap((items) =>
+          items.flatMap((message) =>
+            message.replyToMessageId ? [message.id, message.replyToMessageId] : [message.id],
+          ),
+        ),
+      ),
+    ].slice(0, 500)
+  }
+
+  private filterWindows(
+    chatId: string,
+    keep: (message: Message) => boolean,
+    absent = new Set<string>(),
+  ): void {
+    const filter = (items: Message[]) =>
+      items.filter(keep).map((message) =>
+        message.replyToMessageId && absent.has(message.replyToMessageId)
+          ? {
+              ...message,
+              replySenderId: null,
+              replyBody: null,
+              replyDeleted: null,
+              replyVersion: null,
+            }
+          : message,
+      )
+    this.windows = { ...this.windows, [chatId]: filter(this.window(chatId)) }
+    if (this.pinned[chatId]) this.pinned[chatId] = filter(this.pinned[chatId])
+    if (this.historyBuffered[chatId])
+      this.historyBuffered[chatId] = filter(this.historyBuffered[chatId])
+  }
+
+  observeSnapshot(chatId: string, snapshot: Partial<SnapshotMetadata>): void {
+    const previousCutoff = this.cutoff(chatId)
+    const ids = this.retainedIds(chatId)
+    if (this.visibility.observe(chatId, snapshot, ids))
+      this.filterWindows(chatId, () => true, new Set(ids))
+    if (this.cutoff(chatId) > previousCutoff) {
+      const absent = new Set(
+        [this.window(chatId), this.pinned[chatId] ?? [], this.historyBuffered[chatId] ?? []]
+          .flat()
+          .filter((message) => !this.eligible(message))
+          .map((message) => message.id),
+      )
+      this.filterWindows(chatId, (message) => this.eligible(message), absent)
+    }
+    if (snapshot.snapshotSequence) this.recordLatest(chatId, snapshot.snapshotSequence)
+  }
+
+  reconcileSnapshot(chatId: string, page: HistorySnapshot): void {
+    this.observeSnapshot(chatId, page)
+    if (!hasCoverage(page)) return
+    const ids = new Set(page.messages.map((message) => message.id))
+    const inside = (message: Message) =>
+      BigInt(message.sequence) > BigInt(page.coverageAfterSequence) &&
+      BigInt(message.sequence) <= BigInt(page.coverageThroughSequence)
+    const absent = new Set(
+      [this.window(chatId), this.pinned[chatId] ?? [], this.historyBuffered[chatId] ?? []]
+        .flat()
+        .filter((message) => inside(message) && !ids.has(message.id))
+        .map((message) => message.id),
+    )
+    this.filterWindows(chatId, (message) => !inside(message) || ids.has(message.id), absent)
+  }
+
+  resolve(chatId: string, ids: string[], page: HistorySnapshot): void {
+    this.observeSnapshot(chatId, page)
+    const returned = new Set(page.messages.map((message) => message.id))
+    const requested = new Set(ids)
+    const absent = new Set(ids.filter((id) => !returned.has(id)))
+    this.visibility.resolved(chatId, ids)
+    this.filterWindows(
+      chatId,
+      (message) => !requested.has(message.id) || returned.has(message.id),
+      absent,
+    )
+    const replace = (items: Message[]) =>
+      items.map((message) => page.messages.find((next) => next.id === message.id) ?? message)
+    this.windows = { ...this.windows, [chatId]: replace(this.window(chatId)) }
+    if (this.pinned[chatId]) this.pinned[chatId] = replace(this.pinned[chatId])
+    if (this.historyBuffered[chatId])
+      this.historyBuffered[chatId] = replace(this.historyBuffered[chatId])
+  }
+
+  certify(chatId: string, page: HistorySnapshot): void {
+    if (!hasCoverage(page) || BigInt(page.coverageAfterSequence) > BigInt(this.baseline(chatId)))
+      return
+    if (BigInt(page.coverageThroughSequence) <= BigInt(this.baseline(chatId))) return
+    this.resolved = { ...this.resolved, [chatId]: page.coverageThroughSequence }
+    this.batch.persist(`${this.prefix}.resolved-cursor.v2`, this.resolved)
+    if (BigInt(this.baseline(chatId)) >= BigInt(this.latestSequence(chatId)))
+      this.deferredGaps.delete(chatId)
+  }
+
+  pageCursor(chatId: string, direction: 'older' | 'newer'): string | undefined {
+    return this.visibility.bounds(chatId)[direction]
+  }
+
+  availability(chatId: string): { hasOlderMessages?: boolean; hasNewerMessages?: boolean } {
+    const bounds = this.visibility.bounds(chatId)
+    return { hasOlderMessages: bounds?.hasOlder, hasNewerMessages: bounds?.hasNewer }
+  }
+
+  verifiedSnapshot(
+    chatId: string,
+  ): { mutationRevision: string; visibilityRevision: string } | undefined {
+    return this.visibility.verified(chatId)
+  }
+
+  snapshotMetadata(chatId: string): Partial<SnapshotMetadata> {
+    return { ...this.visibility.snapshot(chatId) }
+  }
+
+  verifySnapshot(
+    chatId: string,
+    snapshot: { mutationRevision: string; visibilityRevision: string },
+  ): void {
+    this.visibility.verify(chatId, snapshot)
+  }
+
+  mutationRevision(chatId: string): string {
+    return this.visibility.snapshot(chatId).mutationRevision ?? '0'
+  }
+
+  revisionKey(chatId: string): string {
+    return `${this.mutationRevision(chatId)}:${this.visibility.snapshot(chatId).visibilityRevision ?? '0'}`
+  }
+
+  snapshotSequence(chatId: string): string {
+    return this.visibility.snapshot(chatId).snapshotSequence ?? '0'
+  }
 
   constructor(
     private readonly prefix: string,
@@ -109,7 +296,12 @@ export class RecoveryState {
     return { ...this.windows, ...this.pinned }
   }
 
-  installAround(chatId: string, incoming: Message[]): void {
+  installAround(
+    chatId: string,
+    incoming: Message[],
+    page?: HistorySnapshot & { hasOlder?: boolean; hasNewer?: boolean },
+  ): void {
+    if (page) this.reconcileSnapshot(chatId, page)
     const known = mergeMessages(this.window(chatId), this.pinned[chatId] ?? [])
     this.windows = {
       ...this.windows,
@@ -118,12 +310,20 @@ export class RecoveryState {
           incoming,
           known.filter((message) => incoming.some((item) => item.id === message.id)),
         ),
+        Boolean(page && hasCoverage(page)),
       ),
     }
     this.detachedWindows.add(chatId)
+    this.visibility.setBounds(chatId, {
+      older: incoming[0]?.sequence ?? page?.coverageAfterSequence,
+      newer: incoming.at(-1)?.sequence ?? page?.coverageThroughSequence,
+      hasOlder: page?.hasOlder,
+      hasNewer: page?.hasNewer,
+    })
   }
 
   patch(chatId: string, incoming: Message[]): void {
+    this.observeSnapshot(chatId, {})
     const patch = (items: Message[]) => {
       const ids = new Set(items.map((message) => message.id))
       const merged = mergeMessages(items, incoming)
@@ -143,6 +343,10 @@ export class RecoveryState {
     return true
   }
 
+  settleLatest(chatId: string): void {
+    this.detachedWindows.delete(chatId)
+  }
+
   private boundWindows(): void {
     const inactive = Object.entries(this.windows)
       .filter(([id]) => id !== this.selectedChatId)
@@ -157,6 +361,7 @@ export class RecoveryState {
 
   compactWindows(selectedId: string | null): void {
     this.selectedChatId = selectedId
+    this.visibility.select(selectedId)
     this.pinned = Object.fromEntries(
       Object.entries(this.pinned).filter(([id]) => id === selectedId),
     )
@@ -201,18 +406,23 @@ export class RecoveryState {
     readingHistory: boolean,
   ): boolean {
     if (!incoming.length) return false
+    this.observeSnapshot(chatId, {})
     const incomingIds = new Set(incoming.map((message) => message.id))
     incoming = mergeMessages(
       mergeMessages(this.window(chatId), this.pinned[chatId] ?? []),
       incoming,
-    ).filter((message) => incomingIds.has(message.id))
-    if (selected) this.selectedChatId = chatId
+    ).filter((message) => incomingIds.has(message.id) && this.eligible(message))
+    if (!incoming.length) return false
+    if (selected) {
+      this.selectedChatId = chatId
+      this.visibility.select(chatId)
+    }
     const browsingOlder = selected && (this.isDetached(chatId) || readingHistory)
     let visible = this.window(chatId)
     const incorporated: Message[] = []
     for (const message of incoming) {
       const next = selected
-        ? appendLiveWindow(visible, message, browsingOlder)
+        ? appendLiveWindow(visible, message, browsingOlder, this.baseline(chatId))
         : !visible.length || BigInt(message.sequence) >= BigInt(visible.at(-1)!.sequence)
           ? mergeMessages(visible, [message]).slice(-1)
           : visible
@@ -220,7 +430,8 @@ export class RecoveryState {
       visible = next
     }
     let pinned = this.pinned[chatId] ?? (selected ? this.window(chatId).slice(-50) : [])
-    for (const message of incoming) pinned = appendLiveWindow(pinned, message, false).slice(-50)
+    for (const message of incoming)
+      pinned = appendLiveWindow(pinned, message, false, this.baseline(chatId)).slice(-50)
     if (selected && pinned.length) this.pinned[chatId] = pinned
     if (browsingOlder) this.apply(chatId, pinned, true)
     const highest = incoming.reduce(
@@ -231,6 +442,15 @@ export class RecoveryState {
     this.windows = { ...this.windows, [chatId]: visible }
     this.boundWindows()
     this.apply(chatId, incorporated, true)
+    if (!browsingOlder) {
+      const bounds = this.visibility.bounds(chatId)
+      if (bounds)
+        this.visibility.setBounds(chatId, {
+          ...bounds,
+          newer: visible.at(-1)?.sequence,
+          hasNewer: false,
+        })
+    }
     return latestChanged
   }
 
@@ -241,6 +461,7 @@ export class RecoveryState {
     initialize: boolean,
     room: string,
     selected = true,
+    snapshot?: HistorySnapshot,
   ): {
     latest?: string
     messages: Message[]
@@ -248,21 +469,24 @@ export class RecoveryState {
     latestChanged: boolean
     dismissal: RecoveryFrame | null
   } {
+    if (snapshot) this.reconcileSnapshot(chatId, snapshot)
     const retained = mergeMessages(this.window(chatId), this.pinned[chatId] ?? [])
     const visible = replaceWindow(
       mergeMessages(
         incoming,
         retained.filter((message) => incoming.some((item) => item.id === message.id)),
       ),
+      Boolean(snapshot && hasCoverage(snapshot)),
     )
     const previousPin = this.pinned[chatId] ?? []
     const mergedPin = mergeMessages(visible, previousPin)
     if (selected)
-      this.pinned[chatId] = isContiguous(mergedPin)
-        ? mergedPin.slice(-50)
-        : BigInt(previousPin.at(-1)?.sequence ?? '0') > BigInt(visible.at(-1)?.sequence ?? '0')
-          ? previousPin
-          : visible.slice(-50)
+      this.pinned[chatId] =
+        (snapshot && hasCoverage(snapshot)) || isContiguous(mergedPin)
+          ? mergedPin.slice(-50)
+          : BigInt(previousPin.at(-1)?.sequence ?? '0') > BigInt(visible.at(-1)?.sequence ?? '0')
+            ? previousPin
+            : visible.slice(-50)
     const current = this.window(chatId)
     const fetchedLatest = incoming.at(-1)?.sequence
     const currentLatest = current.at(-1)?.sequence
@@ -279,10 +503,27 @@ export class RecoveryState {
     const latestChanged = latest ? this.recordLatest(chatId, latest) : false
     let dismissal: RecoveryFrame | null = null
     if (initialize && !this.hasBaseline(chatId) && shown.length) {
-      const boundary = historyBoundaryBefore(shown)
+      const boundary = snapshot?.coverageAfterSequence ?? historyBoundaryBefore(shown)
       if (BigInt(boundary) > 0n) dismissal = this.dismiss(chatId, boundary, room)
     }
     if (replaced || initialize) this.apply(chatId, shown)
+    if (snapshot) {
+      if (
+        initialize &&
+        !shown.length &&
+        snapshot.coverageAfterSequence &&
+        !this.hasBaseline(chatId)
+      )
+        dismissal = this.dismiss(chatId, snapshot.coverageAfterSequence, room)
+      this.certify(chatId, snapshot)
+      if (replaced || this.visibility.bounds(chatId).older === undefined)
+        this.visibility.setBounds(chatId, {
+          older: snapshot.nextSequence ?? shown[0]?.sequence,
+          newer: snapshot.coverageThroughSequence ?? shown.at(-1)?.sequence,
+          hasOlder: snapshot.hasMore,
+          hasNewer: false,
+        })
+    }
     if (latest && BigInt(latest) > BigInt(this.baseline(chatId))) this.deferGap(chatId)
     return { latest: shown.at(-1)?.sequence, messages: shown, replaced, latestChanged, dismissal }
   }
@@ -292,13 +533,44 @@ export class RecoveryState {
     incoming: Message[],
     direction: 'older' | 'newer',
     hasMore = false,
+    snapshot?: HistorySnapshot,
   ): boolean {
+    if (snapshot) this.reconcileSnapshot(chatId, snapshot)
     const current = this.window(chatId)
-    const visible = pageWindow(current, incoming, direction)
+    const visible = pageWindow(
+      current,
+      incoming,
+      direction,
+      Boolean(snapshot && hasCoverage(snapshot)),
+    )
     if (direction === 'older' && visible.at(-1)?.sequence !== current.at(-1)?.sequence)
       this.detachedWindows.add(chatId)
     this.windows = { ...this.windows, [chatId]: visible }
     this.apply(chatId, visible)
+    if (snapshot) {
+      this.certify(chatId, snapshot)
+      const bounds = this.visibility.bounds(chatId)
+      this.visibility.setBounds(
+        chatId,
+        direction === 'older'
+          ? {
+              ...bounds,
+              older: snapshot.nextSequence ?? visible[0]?.sequence,
+              hasOlder: snapshot.hasMore,
+              ...(visible.at(-1)?.id !== current.at(-1)?.id
+                ? { newer: visible.at(-1)?.sequence, hasNewer: true }
+                : {}),
+            }
+          : {
+              ...bounds,
+              newer: snapshot.nextSequence ?? visible.at(-1)?.sequence,
+              hasNewer: snapshot.hasMore,
+              ...(visible[0]?.id !== current[0]?.id
+                ? { older: visible[0]?.sequence, hasOlder: true }
+                : {}),
+            },
+      )
+    }
     if (direction === 'older') return false
     const end = incoming.at(-1)?.sequence
     const latestChanged = end
@@ -410,12 +682,36 @@ export class RecoveryState {
     this.roomCursors = rooms
     this.deferredGaps.delete(chatId)
     delete this.historyBuffered[chatId]
+    this.visibility.forget(chatId)
     this.batch.persist(`${this.prefix}.resolved-cursor.v2`, resolved)
     this.batch.persist(`${this.prefix}.dismissed-through.v2`, dismissed)
     this.batch.persist(`${this.prefix}.room-cursor.v2`, rooms)
   }
 
-  incorporateHistory(chatId: string, incoming: Message[], selected: boolean): void {
+  incorporateHistory(
+    chatId: string,
+    incoming: Message[],
+    selected: boolean,
+    snapshot?: HistorySnapshot,
+  ): void {
+    if (snapshot && hasCoverage(snapshot)) {
+      this.reconcileSnapshot(chatId, snapshot)
+      this.windows = {
+        ...this.windows,
+        [chatId]: selected
+          ? pageWindow(this.window(chatId), incoming, 'newer', true)
+          : mergeMessages(this.window(chatId), incoming).slice(-1),
+      }
+      this.certify(chatId, snapshot)
+      if (selected && incoming.length)
+        this.pinned[chatId] = mergeMessages(this.pinned[chatId] ?? [], incoming).slice(-50)
+      this.visibility.setBounds(chatId, {
+        ...this.visibility.bounds(chatId),
+        newer: snapshot.nextSequence,
+        hasNewer: snapshot.hasMore,
+      })
+      return
+    }
     if (!incoming.length) return
     const buffered = mergeMessages(this.historyBuffered[chatId] || [], incoming)
     const merged = mergeMessages(this.window(chatId), buffered)

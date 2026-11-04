@@ -56,6 +56,18 @@ data class MessageHistoryResponse(
     val hasMore: Boolean,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val mutationRevision: String = "0",
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val snapshotSequence: String = "0",
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val visibilityRevision: String = "0",
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val clearedThroughSequence: String = "0",
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val globalClearedThroughSequence: String = "0",
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val coverageAfterSequence: String = "0",
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val coverageThroughSequence: String = "0",
 )
 
 enum class SendLookupStatus {
@@ -101,7 +113,7 @@ fun Message.toResponse(): MessageResponse = MessageResponse(
     messageVersion = messageVersion.toString(),
     editedAt = editedAt,
     deletedAt = deletedAt,
-    replyToMessageId = reply?.messageId?.value,
+    replyToMessageId = replyToMessageId?.value,
     replySenderId = reply?.senderId?.value,
     replyBody = reply?.body,
     replyDeleted = reply?.deleted,
@@ -118,8 +130,9 @@ data class EditMessageRequest(
 )
 
 data class MessageAroundResponse(
-    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
-    val anchorMessageId: String,
+    @field:JsonInclude(JsonInclude.Include.ALWAYS)
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED, nullable = true)
+    val anchorMessageId: String?,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val messages: List<MessageResponse>,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
@@ -128,13 +141,39 @@ data class MessageAroundResponse(
     val hasNewer: Boolean,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val mutationRevision: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val snapshotSequence: String = "0",
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val visibilityRevision: String = "0",
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val clearedThroughSequence: String = "0",
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val globalClearedThroughSequence: String = "0",
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val coverageAfterSequence: String = "0",
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val coverageThroughSequence: String = "0",
 )
+
+enum class MessageChangeKind { UPSERT, REMOVED, CLEARED }
 
 data class MessageChangeResponse(
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val revision: String,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
-    val message: MessageResponse,
+    val kind: MessageChangeKind,
+    @field:JsonInclude(JsonInclude.Include.ALWAYS)
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED, nullable = true)
+    val message: MessageResponse? = null,
+    @field:JsonInclude(JsonInclude.Include.ALWAYS)
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED, nullable = true)
+    val messageId: String? = null,
+    @field:JsonInclude(JsonInclude.Include.ALWAYS)
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED, nullable = true)
+    val sequence: String? = null,
+    @field:JsonInclude(JsonInclude.Include.ALWAYS)
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED, nullable = true)
+    val clearedThroughSequence: String? = null,
 )
 
 data class MessageChangesResponse(
@@ -146,4 +185,48 @@ data class MessageChangesResponse(
     val nextRevision: String,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val resetRequired: Boolean,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val snapshotSequence: String = "0",
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val visibilityRevision: String = "0",
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val clearedThroughSequence: String = "0",
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val globalClearedThroughSequence: String = "0",
+)
+
+data class MessageResolveRequest(
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    @field:JsonDeserialize(contentUsing = StrictStringDeserializer::class)
+    val messageIds: List<String>,
+)
+
+data class MessageResolveResponse(
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val messages: List<MessageResponse>,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val snapshotSequence: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val mutationRevision: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val visibilityRevision: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val clearedThroughSequence: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val globalClearedThroughSequence: String,
+)
+
+data class MessageVisibilityResponse(
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val snapshotSequence: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val mutationRevision: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val visibilityRevision: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val clearedThroughSequence: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val globalClearedThroughSequence: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val hidden: Boolean,
 )

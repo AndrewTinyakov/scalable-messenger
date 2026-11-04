@@ -28,6 +28,15 @@ body,
 }
 body {
   min-height: 100vh;
+  -webkit-user-select: none;
+  user-select: none;
+}
+input,
+textarea,
+[contenteditable='true'],
+[contenteditable=''] {
+  -webkit-user-select: text;
+  user-select: text;
 }
 button,
 input,

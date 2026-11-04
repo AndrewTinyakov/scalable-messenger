@@ -183,6 +183,71 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/ApiProblem"
+  /v1/chats/{id}/messages/resolve:
+    post:
+      tags:
+      - message-controller
+      operationId: resolve
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: X-Messenger-CSRF
+        in: header
+        required: true
+        schema:
+          type: string
+          enum:
+          - "1"
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MessageResolveRequest"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/MessageResolveResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "401":
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
   /v1/chats/{id}/members:
     get:
       tags:
@@ -283,6 +348,71 @@ paths:
       responses:
         "204":
           description: No Content
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "401":
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+  /v1/chats/{id}/deletions:
+    post:
+      tags:
+      - deletion-controller
+      operationId: delete
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: X-Messenger-CSRF
+        in: header
+        required: true
+        schema:
+          type: string
+          enum:
+          - "1"
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeletionRequest"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/DeletionResponse"
         "403":
           description: Forbidden
           content:
@@ -566,7 +696,7 @@ paths:
     delete:
       tags:
       - message-controller
-      operationId: delete
+      operationId: delete_1
       parameters:
       - name: id
         in: path
@@ -973,7 +1103,7 @@ paths:
     delete:
       tags:
       - chat-controller
-      operationId: delete_1
+      operationId: delete_2
       parameters:
       - name: id
         in: path
@@ -1008,6 +1138,58 @@ paths:
                 $ref: "#/components/schemas/ApiProblem"
         "401":
           description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+  /v1/chats/{id}/visibility:
+    get:
+      tags:
+      - deletion-controller
+      operationId: visibility
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/MessageVisibilityResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "403":
+          description: Forbidden
           content:
             application/problem+json:
               schema:
@@ -1239,7 +1421,12 @@ paths:
           type: string
       - name: messageId
         in: query
-        required: true
+        required: false
+        schema:
+          type: string
+      - name: anchorSequence
+        in: query
+        required: false
         schema:
           type: string
       - name: limit
@@ -1266,6 +1453,63 @@ paths:
             '*/*':
               schema:
                 $ref: "#/components/schemas/MessageAroundResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+  /v1/chats/{id}/deletions/{operationId}:
+    get:
+      tags:
+      - deletion-controller
+      operationId: status_1
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: operationId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/DeletionResponse"
         "401":
           description: Unauthorized
           content:
@@ -1542,6 +1786,102 @@ components:
       - readAt
       - serverTime
       - throughSequence
+    MessageResolveRequest:
+      type: object
+      properties:
+        messageIds:
+          type: array
+          items:
+            type: string
+      required:
+      - messageIds
+    MessageResolveResponse:
+      type: object
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/MessageResponse"
+        snapshotSequence:
+          type: string
+        mutationRevision:
+          type: string
+        visibilityRevision:
+          type: string
+        clearedThroughSequence:
+          type: string
+        globalClearedThroughSequence:
+          type: string
+      required:
+      - clearedThroughSequence
+      - globalClearedThroughSequence
+      - messages
+      - mutationRevision
+      - snapshotSequence
+      - visibilityRevision
+    MessageResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        chatId:
+          type: string
+        sequence:
+          type: string
+        senderId:
+          type: string
+        body:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        messageVersion:
+          type: string
+        editedAt:
+          type:
+          - string
+          - "null"
+          format: date-time
+        deletedAt:
+          type:
+          - string
+          - "null"
+          format: date-time
+        replyToMessageId:
+          type:
+          - string
+          - "null"
+        replySenderId:
+          type:
+          - string
+          - "null"
+        replyBody:
+          type:
+          - string
+          - "null"
+        replyDeleted:
+          type:
+          - boolean
+          - "null"
+        replyVersion:
+          type:
+          - string
+          - "null"
+      required:
+      - body
+      - chatId
+      - createdAt
+      - deletedAt
+      - editedAt
+      - id
+      - messageVersion
+      - replyBody
+      - replyDeleted
+      - replySenderId
+      - replyToMessageId
+      - replyVersion
+      - senderId
+      - sequence
     AddGroupMembersRequest:
       type: object
       properties:
@@ -1553,6 +1893,70 @@ components:
           minItems: 1
       required:
       - memberIds
+    DeletionRequest:
+      type: object
+      properties:
+        requestId:
+          type: string
+        scope:
+          type: string
+          enum:
+          - SELF
+          - EVERYONE
+        target:
+          type: string
+          enum:
+          - MESSAGES
+          - HISTORY
+          - CHAT
+        messageIds:
+          type:
+          - array
+          - "null"
+          items:
+            type: string
+      required:
+      - requestId
+      - scope
+      - target
+    DeletionResponse:
+      type: object
+      properties:
+        operationId:
+          type: string
+        scope:
+          type: string
+          enum:
+          - SELF
+          - EVERYONE
+        target:
+          type: string
+          enum:
+          - MESSAGES
+          - HISTORY
+          - CHAT
+        clearedThroughSequence:
+          type: string
+        mutationRevision:
+          type: string
+        visibilityRevision:
+          type: string
+        state:
+          type: string
+          enum:
+          - ACCEPTED
+          - COMPLETED
+        deletedRows:
+          type: string
+      required:
+      - clearedThroughSequence
+      - deletedRows
+      - mutationRevision
+      - operationId
+      - scope
+      - state
+      - target
+      - visibilityRevision
     CreateGroupChatRequest:
       type: object
       properties:
@@ -1661,69 +2065,6 @@ components:
       required:
       - body
       - expectedVersion
-    MessageResponse:
-      type: object
-      properties:
-        id:
-          type: string
-        chatId:
-          type: string
-        sequence:
-          type: string
-        senderId:
-          type: string
-        body:
-          type: string
-        createdAt:
-          type: string
-          format: date-time
-        messageVersion:
-          type: string
-        editedAt:
-          type:
-          - string
-          - "null"
-          format: date-time
-        deletedAt:
-          type:
-          - string
-          - "null"
-          format: date-time
-        replyToMessageId:
-          type:
-          - string
-          - "null"
-        replySenderId:
-          type:
-          - string
-          - "null"
-        replyBody:
-          type:
-          - string
-          - "null"
-        replyDeleted:
-          type:
-          - boolean
-          - "null"
-        replyVersion:
-          type:
-          - string
-          - "null"
-      required:
-      - body
-      - chatId
-      - createdAt
-      - deletedAt
-      - editedAt
-      - id
-      - messageVersion
-      - replyBody
-      - replyDeleted
-      - replySenderId
-      - replyToMessageId
-      - replyVersion
-      - senderId
-      - sequence
     ChatPageResponse:
       type: object
       properties:
@@ -1737,6 +2078,28 @@ components:
           - "null"
       required:
       - chats
+    MessageVisibilityResponse:
+      type: object
+      properties:
+        snapshotSequence:
+          type: string
+        mutationRevision:
+          type: string
+        visibilityRevision:
+          type: string
+        clearedThroughSequence:
+          type: string
+        globalClearedThroughSequence:
+          type: string
+        hidden:
+          type: boolean
+      required:
+      - clearedThroughSequence
+      - globalClearedThroughSequence
+      - hidden
+      - mutationRevision
+      - snapshotSequence
+      - visibilityRevision
     ReadSummaryResponse:
       type: object
       properties:
@@ -1764,11 +2127,29 @@ components:
           type: boolean
         mutationRevision:
           type: string
+        snapshotSequence:
+          type: string
+        visibilityRevision:
+          type: string
+        clearedThroughSequence:
+          type: string
+        globalClearedThroughSequence:
+          type: string
+        coverageAfterSequence:
+          type: string
+        coverageThroughSequence:
+          type: string
       required:
+      - clearedThroughSequence
+      - coverageAfterSequence
+      - coverageThroughSequence
+      - globalClearedThroughSequence
       - hasMore
       - messages
       - mutationRevision
       - nextSequence
+      - snapshotSequence
+      - visibilityRevision
     MessageReaderResponse:
       type: object
       properties:
@@ -1813,11 +2194,35 @@ components:
       properties:
         revision:
           type: string
+        kind:
+          type: string
+          enum:
+          - UPSERT
+          - REMOVED
+          - CLEARED
         message:
-          $ref: "#/components/schemas/MessageResponse"
+          oneOf:
+          - $ref: "#/components/schemas/MessageResponse"
+          - type: "null"
+        messageId:
+          type:
+          - string
+          - "null"
+        sequence:
+          type:
+          - string
+          - "null"
+        clearedThroughSequence:
+          type:
+          - string
+          - "null"
       required:
+      - clearedThroughSequence
+      - kind
       - message
+      - messageId
       - revision
+      - sequence
     MessageChangesResponse:
       type: object
       properties:
@@ -1831,16 +2236,30 @@ components:
           type: string
         resetRequired:
           type: boolean
+        snapshotSequence:
+          type: string
+        visibilityRevision:
+          type: string
+        clearedThroughSequence:
+          type: string
+        globalClearedThroughSequence:
+          type: string
       required:
       - changes
+      - clearedThroughSequence
+      - globalClearedThroughSequence
       - lastRevision
       - nextRevision
       - resetRequired
+      - snapshotSequence
+      - visibilityRevision
     MessageAroundResponse:
       type: object
       properties:
         anchorMessageId:
-          type: string
+          type:
+          - string
+          - "null"
         messages:
           type: array
           items:
@@ -1851,12 +2270,30 @@ components:
           type: boolean
         mutationRevision:
           type: string
+        snapshotSequence:
+          type: string
+        visibilityRevision:
+          type: string
+        clearedThroughSequence:
+          type: string
+        globalClearedThroughSequence:
+          type: string
+        coverageAfterSequence:
+          type: string
+        coverageThroughSequence:
+          type: string
       required:
       - anchorMessageId
+      - clearedThroughSequence
+      - coverageAfterSequence
+      - coverageThroughSequence
+      - globalClearedThroughSequence
       - hasNewer
       - hasOlder
       - messages
       - mutationRevision
+      - snapshotSequence
+      - visibilityRevision
     GroupMemberPageResponse:
       type: object
       properties:

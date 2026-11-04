@@ -89,7 +89,8 @@ class MessageFeatureHttpTests
             val page = mapper.readTree(changes.body())
             assertEquals("2", page.path("lastRevision").stringValue())
             assertEquals("1", page.path("nextRevision").stringValue())
-            assertEquals("", page.path("changes").first().path("message").path("body").stringValue())
+            assertEquals("REMOVED", page.path("changes").first().path("kind").stringValue())
+            assertTrue(page.path("changes").first().path("message").isNull)
             assertEquals(204, request("/$chat", owner.second, "DELETE").statusCode())
             assertEquals(404, request("/$chat/messages", member.second).statusCode())
             assertEquals(404, request("/$chat/messages/changes?afterRevision=0", member.second).statusCode())
@@ -108,6 +109,55 @@ class MessageFeatureHttpTests
             assertEquals(400, request("/$chat/messages/$id?expectedVersion=01", owner.second, "DELETE").statusCode())
             assertEquals(400, request("/$chat/messages/around?messageId=$id&limit=101", owner.second).statusCode())
             assertEquals(400, request("/$chat/messages/changes?afterRevision=01", owner.second).statusCode())
+        }
+
+        @Test
+        fun `HTTP scoped deletion resolves account visibility and returns durable operation status`() {
+            val owner = account()
+            val member = account()
+            val chat = chats.createGroup(UserId(owner.first), CreateGroupChatRequest("HTTP scoped deletion", listOf(member.first))).id
+            sends.process(command(owner.first, newId(), "private hide", chat = chat))
+            val target = db.queryForObject("SELECT id FROM messages WHERE chat_id=?", String::class.java, chat)!!
+            val requestId = newId()
+            val accepted =
+                request(
+                    "/$chat/deletions",
+                    member.second,
+                    "POST",
+                    """{"requestId":"$requestId","scope":"SELF","target":"MESSAGES","messageIds":["$target"]}""",
+                )
+            assertEquals(200, accepted.statusCode(), accepted.body())
+            val operation = mapper.readTree(accepted.body())
+            assertEquals(requestId, operation.path("operationId").stringValue())
+            assertEquals("COMPLETED", operation.path("state").stringValue())
+            assertEquals("1", operation.path("visibilityRevision").stringValue())
+            val resolved = request("/$chat/messages/resolve", member.second, "POST", """{"messageIds":["$target"]}""")
+            assertEquals(200, resolved.statusCode(), resolved.body())
+            assertEquals(0, mapper.readTree(resolved.body()).path("messages").size())
+            val visibility = mapper.readTree(request("/$chat/visibility", member.second).body())
+            assertEquals("1", visibility.path("snapshotSequence").stringValue())
+            assertEquals("1", visibility.path("visibilityRevision").stringValue())
+            assertEquals(200, request("/$chat/deletions/$requestId", member.second).statusCode())
+            assertEquals(404, request("/$chat/deletions/$requestId", owner.second).statusCode())
+            assertEquals(
+                409,
+                request(
+                    "/$chat/deletions",
+                    member.second,
+                    "POST",
+                    """{"requestId":"$requestId","scope":"SELF","target":"CHAT"}""",
+                ).statusCode(),
+            )
+            assertEquals(
+                400,
+                request(
+                    "/$chat/deletions",
+                    member.second,
+                    "POST",
+                    """{"requestId":"${newId()}","scope":"SELF","target":"MESSAGES","messageIds":[12345678901234567890123456]}""",
+                ).statusCode(),
+            )
+            assertEquals(401, request("/$chat/visibility", null).statusCode())
         }
 
         private fun account(): Pair<String, String> {

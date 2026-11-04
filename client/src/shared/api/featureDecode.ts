@@ -1,7 +1,8 @@
-import type { Message } from '../../entities/message/model'
+import type { MessageChange } from '../../entities/message/historySnapshot'
 import { isDateTime, isId, isRecord, isSequence } from '../lib/validation'
-import { decodeMessage } from './decode'
+import { decodeHistory, decodeMessage } from './decode'
 import type { components } from './generated/schema'
+import { decodeSnapshot, snapshotFields } from './snapshotDecode'
 
 function record(value: unknown, keys: string[]): Record<string, unknown> {
   if (
@@ -15,40 +16,52 @@ function record(value: unknown, keys: string[]): Record<string, unknown> {
 function check(condition: boolean): asserts condition {
   if (!condition) throw new Error('Invalid response from server')
 }
-export function decodeAround(
-  value: unknown,
-  chatId: string,
-): components['schemas']['MessageAroundResponse'] {
+export type AroundPage = Required<components['schemas']['MessageAroundResponse']>
+export function decodeAround(value: unknown, chatId: string): AroundPage {
   const page = record(value, [
     'anchorMessageId',
     'messages',
     'hasOlder',
     'hasNewer',
-    'mutationRevision',
+    'coverageAfterSequence',
+    'coverageThroughSequence',
+    ...snapshotFields,
   ])
   check(
-    isId(page.anchorMessageId) &&
-      Array.isArray(page.messages) &&
-      page.messages.length <= 50 &&
+    (page.anchorMessageId === null || isId(page.anchorMessageId)) &&
       typeof page.hasOlder === 'boolean' &&
-      typeof page.hasNewer === 'boolean' &&
-      isSequence(page.mutationRevision),
+      typeof page.hasNewer === 'boolean',
   )
-  const messages = page.messages.map((message) => decodeMessage(message, chatId))
-  check(messages.some((message) => message.id === page.anchorMessageId))
-  return {
-    anchorMessageId: page.anchorMessageId as string,
-    messages,
-    hasOlder: page.hasOlder as boolean,
-    hasNewer: page.hasNewer as boolean,
-    mutationRevision: page.mutationRevision as string,
-  }
+  const history = decodeHistory(
+    Object.fromEntries([
+      ...['messages', 'coverageAfterSequence', 'coverageThroughSequence', ...snapshotFields].map(
+        (field) => [field, page[field]],
+      ),
+      ['nextSequence', page.coverageThroughSequence],
+      ['hasMore', false],
+    ]),
+    chatId,
+  )
+  check(
+    page.anchorMessageId === null
+      ? history.messages.length === 0
+      : history.messages.some((message) => message.id === page.anchorMessageId),
+  )
+  return { ...page, messages: history.messages } as unknown as AroundPage
 }
-export function decodeChanges(
-  value: unknown,
-  chatId: string,
-): components['schemas']['MessageChangesResponse'] {
-  const page = record(value, ['changes', 'lastRevision', 'nextRevision', 'resetRequired'])
+
+export type ChangesPage = Omit<
+  Required<components['schemas']['MessageChangesResponse']>,
+  'changes'
+> & { changes: Required<components['schemas']['MessageChangeResponse']>[] }
+export function decodeChanges(value: unknown, chatId: string): ChangesPage {
+  const page = record(value, [
+    'changes',
+    'lastRevision',
+    'nextRevision',
+    'resetRequired',
+    ...snapshotFields.filter((field) => field !== 'mutationRevision'),
+  ])
   check(
     Array.isArray(page.changes) &&
       page.changes.length <= 100 &&
@@ -56,16 +69,112 @@ export function decodeChanges(
       isSequence(page.nextRevision) &&
       typeof page.resetRequired === 'boolean',
   )
-  return {
-    changes: page.changes.map((entry) => {
-      const change = record(entry, ['revision', 'message'])
-      check(isSequence(change.revision))
-      return { revision: change.revision as string, message: decodeMessage(change.message, chatId) }
-    }),
-    lastRevision: page.lastRevision as string,
-    nextRevision: page.nextRevision as string,
-    resetRequired: page.resetRequired as boolean,
-  }
+  decodeSnapshot({ ...page, mutationRevision: page.lastRevision })
+  check(BigInt(page.nextRevision as string) <= BigInt(page.lastRevision as string))
+  const changes = (page.changes as unknown[]).map((entry) => {
+    const change = record(entry, [
+      'revision',
+      'kind',
+      'message',
+      'messageId',
+      'sequence',
+      'clearedThroughSequence',
+    ])
+    check(
+      isSequence(change.revision) &&
+        change.revision !== '0' &&
+        BigInt(change.revision as string) <= BigInt(page.lastRevision as string),
+    )
+    check(change.messageId === null || isId(change.messageId))
+    check(change.sequence === null || (isSequence(change.sequence) && change.sequence !== '0'))
+    check(change.clearedThroughSequence === null || isSequence(change.clearedThroughSequence))
+    if (change.kind === 'UPSERT') {
+      const message = decodeMessage(change.message, chatId)
+      check(
+        change.messageId === message.id &&
+          change.sequence === message.sequence &&
+          change.clearedThroughSequence === null,
+      )
+      return { ...change, message } as unknown as MessageChange
+    }
+    check(change.message === null)
+    if (change.kind === 'REMOVED')
+      check(
+        isId(change.messageId) &&
+          isSequence(change.sequence) &&
+          change.clearedThroughSequence === null,
+      )
+    else
+      check(
+        change.kind === 'CLEARED' &&
+          change.messageId === null &&
+          change.sequence === null &&
+          isSequence(change.clearedThroughSequence),
+      )
+    return change as unknown as MessageChange
+  })
+  check(
+    changes.every(
+      (change, index) =>
+        index === 0 || BigInt(change.revision) > BigInt(changes[index - 1].revision),
+    ),
+  )
+  return { ...page, changes } as unknown as ChangesPage
+}
+
+export function decodeVisibility(
+  value: unknown,
+): Required<components['schemas']['MessageVisibilityResponse']> {
+  const page = record(value, [...snapshotFields, 'hidden'])
+  check(typeof page.hidden === 'boolean')
+  return { ...decodeSnapshot(page), hidden: page.hidden as boolean }
+}
+
+export function decodeResolved(
+  value: unknown,
+  chatId: string,
+): Required<components['schemas']['MessageResolveResponse']> {
+  const page = record(value, ['messages', ...snapshotFields])
+  const snapshot = decodeSnapshot(page)
+  check(Array.isArray(page.messages) && page.messages.length <= 100)
+  const messages = (page.messages as unknown[]).map((message) => decodeMessage(message, chatId))
+  check(new Set(messages.map((message) => message.id)).size === messages.length)
+  check(
+    messages.every(
+      (message) =>
+        BigInt(message.sequence) <= BigInt(snapshot.snapshotSequence) &&
+        BigInt(message.sequence) > BigInt(snapshot.clearedThroughSequence) &&
+        BigInt(message.sequence) > BigInt(snapshot.globalClearedThroughSequence),
+    ),
+  )
+  return { ...snapshot, messages }
+}
+
+export function decodeDeletion(
+  value: unknown,
+): Required<components['schemas']['DeletionResponse']> {
+  const result = record(value, [
+    'operationId',
+    'scope',
+    'target',
+    'clearedThroughSequence',
+    'mutationRevision',
+    'visibilityRevision',
+    'state',
+    'deletedRows',
+  ])
+  check(
+    isId(result.operationId) &&
+      ['SELF', 'EVERYONE'].includes(String(result.scope)) &&
+      ['MESSAGES', 'HISTORY', 'CHAT'].includes(String(result.target)) &&
+      ['ACCEPTED', 'COMPLETED'].includes(String(result.state)),
+  )
+  check(
+    ['clearedThroughSequence', 'mutationRevision', 'visibilityRevision', 'deletedRows'].every(
+      (field) => isSequence(result[field]),
+    ),
+  )
+  return result as unknown as Required<components['schemas']['DeletionResponse']>
 }
 export function decodeReads(value: unknown): components['schemas']['ReadSummaryResponse'] {
   const summary = record(value, ['throughSequence', 'maxOtherReadSequence', 'serverTime'])
@@ -114,4 +223,3 @@ export function decodeReaders(value: unknown): ReaderPage {
   }
   return page as unknown as ReaderPage
 }
-export type MessageChange = { revision: string; message: Message }

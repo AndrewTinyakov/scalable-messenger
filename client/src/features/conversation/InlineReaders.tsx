@@ -1,14 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Message } from '../../entities/message/model'
 import type { ReaderPage } from '../../shared/api/featureDecode'
-import { Dialog } from '../../shared/ui/Dialog'
 
 interface Props {
   message: Message
   load(chatId: string, messageId: string, afterUserId?: string): Promise<ReaderPage>
-  onClose(): void
 }
-export function ReaderDialog({ message, load, onClose }: Props) {
+export function InlineReaders({ message, load }: Props) {
   const [readers, setReaders] = useState<ReaderPage['readers']>([])
   const [cursor, setCursor] = useState<string | null>(null)
   const [available, setAvailable] = useState(true)
@@ -63,12 +61,10 @@ export function ReaderDialog({ message, load, onClose }: Props) {
     }
   }, [message.id, message.deletedAt])
   return (
-    <Dialog title="Read details" onClose={onClose}>
-      <p className="dialog-description">
-        Read-through records the first time a reader advanced past this message.
-      </p>
+    <section className="inline-readers" aria-label="Read times">
+      <h3>Read times</h3>
       {message.deletedAt ? (
-        <p className="receipt-empty">Read details are unavailable for deleted messages.</p>
+        <p className="receipt-empty">Read times are unavailable for deleted messages.</p>
       ) : !available ? (
         <p className="receipt-empty">
           Timestamps are available for messages created within the last seven days.
@@ -118,6 +114,6 @@ export function ReaderDialog({ message, load, onClose }: Props) {
           </button>
         </div>
       )}
-    </Dialog>
+    </section>
   )
 }

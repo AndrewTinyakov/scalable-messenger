@@ -3,6 +3,7 @@ import type { Chat } from '../entities/chat/model'
 import { ChatRecovery } from '../entities/message/chatRecovery'
 import { HISTORY_PAGE_SIZE, historyAvailability } from '../entities/message/historyWindow'
 import type { Message, PendingSend } from '../entities/message/model'
+import type { ReadingLocation } from '../entities/message/readingLocation'
 import type { SendRequests } from '../entities/message/sendRequests'
 import type { Session } from '../entities/session/model'
 import { useConversationFeatures } from '../features/conversation/useConversationFeatures'
@@ -15,6 +16,7 @@ import {
   type OutgoingSocketFrame,
 } from '../shared/api/socket'
 import type { ConnectionState } from '../shared/api/socketConnection'
+import { isNetworkOnline } from '../shared/lib/network'
 import { createMessengerSendRequests } from './messengerSendRequests'
 import { useChatDirectory } from './useChatDirectory'
 import { useChatHistory } from './useChatHistory'
@@ -36,11 +38,15 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
   const [messages, setMessages] = useState<Record<string, Message[]>>({})
   const [latestSequences, setLatestSequences] = useState<Record<string, string>>({})
   const [jumpRevision, setJumpRevision] = useState(0)
+  const [locationRevision, setLocationRevision] = useState(0)
   const [pending, setPending] = useState<PendingSend[]>([])
   const [connection, setConnection] = useState<ConnectionState>('connecting')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [draftChat, setDraftChat] = useState<Chat | undefined>()
-  const [error, setError] = useState<string | null>(null)
+  const [error, setErrorState] = useState<string | null>(null)
+  const setError = useCallback((message: string | null) => {
+    if (!message || isNetworkOnline()) setErrorState(message)
+  }, [])
   const socketRef = useRef<WebSocket | null>(null)
   const sessionApi = useMemo(() => api.forSession(session), [session.user.id, session.deviceId])
   const requestsRef = useRef<{ prefix: string; value: SendRequests } | null>(null)
@@ -166,6 +172,14 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     },
     [removeChat, requests, recovery, leaveHistory, closeChat, listChats, session.user.id],
   )
+  const hideConversation = useCallback(
+    (chatId: string) => {
+      removeChat(chatId)
+      leaveHistory(chatId)
+      if (selectedRef.current === chatId) closeChat()
+    },
+    [removeChat, leaveHistory, closeChat],
+  )
   const features = useConversationFeatures({
     chat:
       chats.find((chat) => chat.id === selectedId) ??
@@ -175,6 +189,7 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     sessionApi,
     send: sendConnectedFrame,
     remove: removeConversation,
+    hide: hideConversation,
     fail: setError,
   })
   const withSnapshot = async (
@@ -193,6 +208,10 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
         withSnapshot(chatId, sessionApi.messages(chatId, sequence, HISTORY_PAGE_SIZE)),
       older: (chatId, sequence) =>
         withSnapshot(chatId, sessionApi.olderMessages(chatId, sequence, HISTORY_PAGE_SIZE)),
+      around: (chatId, messageId, sequence) =>
+        sessionApi.aroundMessage(chatId, messageId, sequence),
+      visibility: sessionApi.visibility,
+      resolve: sessionApi.resolveMessages,
     },
     context: (chatId) => ({
       selected: selectedRef.current === chatId,
@@ -203,6 +222,14 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
       kind: listChats().find((chat) => chat.id === chatId)?.kind,
     }),
     changed: () => {
+      for (const send of requests.list())
+        if (
+          send.status === 'saved' &&
+          send.messageId &&
+          send.sequence &&
+          !recovery.acceptsSaved(send.chatId, send.messageId, send.sequence)
+        )
+          requests.revised(send.messageId)
       setMessages(recovery.visibleWindows())
       setLatestSequences(recovery.latestSequences())
     },
@@ -213,7 +240,11 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
       focusFreshAtRef.current = 0
       setError(message)
     },
-    recovered: (message) => setError((current) => (current === message ? null : current)),
+    recovered: (message) => setErrorState((current) => (current === message ? null : current)),
+    hidden: hideConversation,
+    locationRestored: (chatId) => {
+      if (selectedRef.current === chatId) setLocationRevision((value) => value + 1)
+    },
   })
 
   useRecoveryLifecycle({ recovery, selectedId, selectedRef, activeRef, focusRequestRef })
@@ -299,7 +330,7 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
 
   useEffect(() => {
     const timer = window.setInterval(() => {
-      void refreshChats(true, true)
+      if (isNetworkOnline()) void refreshChats(true, true)
     }, 30000)
     return () => window.clearInterval(timer)
   }, [refreshChats])
@@ -322,10 +353,21 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     loadingOlder: loadingOlder === selectedId,
     loadingNewer: loadingNewer === selectedId,
     jumpRevision,
+    location: selectedId ? recovery.readingLocation(selectedId) : undefined,
+    locationRevision,
+    rememberLocation: useCallback(
+      (chatId: string, location: ReadingLocation) => recovery.rememberLocation(chatId, location),
+      [recovery],
+    ),
     ...historyAvailability(
       selectedId ? (messages[selectedId] ?? []) : [],
       selectedId ? (latestSequences[selectedId] ?? '0') : '0',
       selectedId ? recovery.baseline(selectedId) : '0',
+    ),
+    ...Object.fromEntries(
+      Object.entries(selectedId ? recovery.availability(selectedId) : {}).filter(
+        ([, value]) => value !== undefined,
+      ),
     ),
     selectChat,
     closeChat,

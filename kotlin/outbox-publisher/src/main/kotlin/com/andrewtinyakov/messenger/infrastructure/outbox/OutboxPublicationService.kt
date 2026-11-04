@@ -87,10 +87,13 @@ class OutboxPublicationService(
             }
         }
         metrics.counter("messenger.outbox.claimed").increment(rooms.sumOf { it.size }.toDouble())
+        val prepared = observePhase("hydrate") {
+            publisher.prepare(rooms.flatten()).associateBy { it.id }
+        }
         val published = Executors.newVirtualThreadPerTaskExecutor().use { executor ->
             val tasks = rooms.map { roomRows ->
                 executor.submit(
-                    Callable { publishClaimedRoom(roomRows, deadline) },
+                    Callable { publishClaimedRoom(roomRows.map { checkNotNull(prepared[it.id]) }, deadline) },
                 )
             }
             tasks.map { it.get() }

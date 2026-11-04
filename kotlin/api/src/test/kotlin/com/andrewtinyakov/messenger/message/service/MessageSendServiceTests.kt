@@ -151,8 +151,8 @@ class MessageSendServiceTests
         fun `opposite first sends share one direct chat`() {
             val left = user("direct-left")
             val right = user("direct-right")
-            val first = CompletableFuture.runAsync { service.process(command(left, newId(), "from left", recipient = right)) }
-            val second = CompletableFuture.runAsync { service.process(command(right, newId(), "from right", recipient = left)) }
+            val first = concurrently { service.process(command(left, newId(), "from left", recipient = right)) }
+            val second = concurrently { service.process(command(right, newId(), "from right", recipient = left)) }
             CompletableFuture.allOf(first, second).join()
 
             val pair = listOf(left, right).sorted().joinToString(":")

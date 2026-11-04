@@ -16,6 +16,7 @@ export const EventType = {
   CHAT_CREATED: "chat_created",
   CHAT_DELETED: "chat_deleted",
   ERROR: "error",
+  HISTORY_CHANGED: "history_changed",
   MEMBER_REMOVED: "member_removed",
   MEMBERSHIP_CHANGED: "membership_changed",
   MESSAGE_CHANGED: "message_changed",

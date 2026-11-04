@@ -9,6 +9,7 @@ const (
 	EventChatCreated         EventType = "chat_created"
 	EventChatDeleted         EventType = "chat_deleted"
 	EventError               EventType = "error"
+	EventHistoryChanged      EventType = "history_changed"
 	EventMemberRemoved       EventType = "member_removed"
 	EventMembershipChanged   EventType = "membership_changed"
 	EventMessageChanged      EventType = "message_changed"

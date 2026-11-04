@@ -41,7 +41,7 @@ subprojects {
     extra["jackson-bom.version"] = "3.1.7"
     extra["jackson-2-bom.version"] = "2.21.7"
     extra["tomcat.version"] = "11.0.25"
-    extra["rabbit-amqp-client.version"] = "5.34.0"
+    extra["rabbit-amqp-client.version"] = "5.37.0"
 
     tasks.named<CyclonedxDirectTask>("cyclonedxDirectBom") {
         includeConfigs = listOf("runtimeClasspath")

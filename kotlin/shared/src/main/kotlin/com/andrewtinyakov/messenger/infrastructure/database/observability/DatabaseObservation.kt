@@ -22,6 +22,9 @@ enum class DatabaseTransaction(
     MESSAGE_HISTORY("message.history"),
     READ_ADVANCE("read.advance"),
     READ_CLEANUP("read.cleanup"),
+    DELETION_ACCEPT("deletion.accept"),
+    DELETION_PURGE("deletion.purge"),
+    DELETION_VISIBILITY_CLEANUP("deletion.visibility_cleanup"),
     OTHER("other"),
 }
 

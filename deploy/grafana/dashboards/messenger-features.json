@@ -758,8 +758,8 @@
     },
     {
       "id": 16,
-      "title": "Edit and delete outcomes",
-      "description": "Author-only versioned mutations preserve original creation sequence. Conflicts and permission failures are visible separately from committed operations.",
+      "title": "Edit outcomes",
+      "description": "Author-only edits with expected-version checks. Scoped deletion has separate acceptance and purge panels.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
@@ -806,8 +806,8 @@
     },
     {
       "id": 17,
-      "title": "Global chat deletion outcomes",
-      "description": "Either direct participant or a group creator may delete for everyone. Deleted-chat history and new writes are rejected.",
+      "title": "Global chat deletion acceptance outcomes",
+      "description": "Accepted or failed everyone-scope chat deletion requests across API replicas. Acceptance closes the identity; physical purge completes separately.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
@@ -845,7 +845,7 @@
       },
       "targets": [
         {
-          "expr": "sum by(outcome)(rate(messenger_chat_deletions_total[$__rate_interval]))",
+          "expr": "sum by (outcome) (rate(messenger_deletion_acceptance_seconds_count{scope=\"everyone\",target=\"chat\"}[5m]))",
           "legendFormat": "{{outcome}}",
           "refId": "A",
           "instant": false
@@ -854,8 +854,8 @@
     },
     {
       "id": 18,
-      "title": "Mutation to socket p95 and p99",
-      "description": "From accepted edit/deletion time to successful WebSocket write, including transaction, outbox, Redis and queueing. This is distinct from immutable message age.",
+      "title": "Outbox publication age p95 and p99",
+      "description": "Time from durable event creation to publication attempt, including outbox backlog. Message bodies are hydrated only for ephemeral live publication.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
@@ -893,13 +893,13 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95,sum by(le)(rate(messenger_ws_mutation_lag_seconds_bucket[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(messenger_outbox_publication_age_seconds_bucket[5m])))",
           "legendFormat": "p95",
           "refId": "A",
           "instant": false
         },
         {
-          "expr": "histogram_quantile(0.99,sum by(le)(rate(messenger_ws_mutation_lag_seconds_bucket[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(messenger_outbox_publication_age_seconds_bucket[5m])))",
           "legendFormat": "p99",
           "refId": "B",
           "instant": false
@@ -1213,6 +1213,348 @@
         {
           "expr": "sum(rate(messenger_ws_sql_fallback_total[$__rate_interval]))",
           "legendFormat": "SQL recovery fallbacks",
+          "refId": "B",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 26,
+      "title": "Scoped deletion, physical purge and sparse recovery",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 60,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 27,
+      "title": "Deletion acceptance",
+      "description": "Accepted operations by scope and target. Acceptance denies content immediately; large history purges complete separately.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 61,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (scope,target) (rate(messenger_deletion_accepted_total[5m]))",
+          "legendFormat": "{{scope}} {{target}}",
+          "refId": "A",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 28,
+      "title": "Pending purge age and backlog",
+      "description": "Each API replica samples the same shared backlog. Maximum avoids double counting. Count is capped at10000; the cap signal identifies larger backlogs.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 61,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "oldest seconds"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "max(messenger_deletion_purge_pending)",
+          "legendFormat": "pending jobs, capped10000",
+          "refId": "A",
+          "instant": false
+        },
+        {
+          "expr": "max(messenger_deletion_purge_oldest_seconds)",
+          "legendFormat": "oldest seconds",
+          "refId": "B",
+          "instant": false
+        },
+        {
+          "expr": "max(messenger_deletion_purge_pending_sample_capped)",
+          "legendFormat": "sample capped",
+          "refId": "C",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 29,
+      "title": "Physical purge progress and retries",
+      "description": "Actual deleted message rows, separately from accepted prefix size. Sustained retry activity or increasing oldest age requires investigation.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 61,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(messenger_deletion_purged_rows_total[5m]))",
+          "legendFormat": "removed rows/s",
+          "refId": "A",
+          "instant": false
+        },
+        {
+          "expr": "sum(rate(messenger_deletion_purge_retries_total[5m]))",
+          "legendFormat": "failed batches/s",
+          "refId": "B",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 30,
+      "title": "Purge batch latency",
+      "description": "Duration of bounded purge transactions, with idle polls separated from useful work.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 69,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum by (le,outcome) (rate(messenger_deletion_purge_batch_seconds_bucket[5m])))",
+          "legendFormat": "p99 {{outcome}}",
+          "refId": "A",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 31,
+      "title": "Visibility scan budgets",
+      "description": "Requests stopped after the configured interval-span budget. These return continuation and may return no visible messages. They are not end-of-history.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 69,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (direction) (rate(messenger_history_span_budget_exhausted_total[5m]))",
+          "legendFormat": "{{direction}} budget exhausted/s",
+          "refId": "A",
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 32,
+      "title": "Publication hydration sharing",
+      "description": "Current SQL rows hydrated per bounded publication batch, shared across direct recipient rooms and normal group fanout.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 69,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(messenger_outbox_hydration_batch_sum[5m])) / clamp_min(sum(rate(messenger_outbox_hydration_batch_count[5m])), 0.001)",
+          "legendFormat": "references per SQL batch",
+          "refId": "A",
+          "instant": false
+        },
+        {
+          "expr": "sum by (result) (rate(messenger_outbox_hydration_total[5m]))",
+          "legendFormat": "{{result}} events/s",
           "refId": "B",
           "instant": false
         }

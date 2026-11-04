@@ -1,4 +1,4 @@
-import { ArrowLeft, MoreHorizontal, Trash2, UsersRound } from 'lucide-react'
+import { ArrowLeft, Eraser, MoreHorizontal, Trash2, UsersRound } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { chatInitials, chatTitle, type Chat } from '../../entities/chat/model'
 import type { User } from '../../entities/session/model'
@@ -14,6 +14,7 @@ interface Props {
   onBack(): void
   onMembers?: () => void
   onDelete?: () => void
+  onClear?: () => void
 }
 export function ChatHeader({
   chat,
@@ -23,6 +24,7 @@ export function ChatHeader({
   onBack,
   onMembers,
   onDelete,
+  onClear,
 }: Props) {
   const [chatMenu, setChatMenu] = useState(false)
   const actionsRef = useRef<HTMLButtonElement>(null)
@@ -68,33 +70,44 @@ export function ChatHeader({
           <UsersRound size={17} /> <span>Members</span>
         </button>
       )}
-      {onDelete &&
-        !chat.id.startsWith('draft:') &&
-        (chat.kind === ChatKind.DIRECT || chat.ownerId === currentUser.id) && (
-          <div
-            className="chat-overflow"
-            onKeyDown={(event) => {
-              if (event.key === 'Escape') {
-                event.stopPropagation()
-                setChatMenu(false)
-                actionsRef.current?.focus()
-              }
-            }}
-            onBlur={(event) => {
-              if (!event.currentTarget.contains(event.relatedTarget)) setChatMenu(false)
-            }}
+      {(onDelete || onClear) && !chat.id.startsWith('draft:') && (
+        <div
+          className="chat-overflow"
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              event.stopPropagation()
+              setChatMenu(false)
+              actionsRef.current?.focus()
+            }
+          }}
+          onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget)) setChatMenu(false)
+          }}
+        >
+          <button
+            className="icon-button"
+            ref={actionsRef}
+            aria-label="Chat actions"
+            aria-expanded={chatMenu}
+            onClick={() => setChatMenu(!chatMenu)}
           >
-            <button
-              className="icon-button"
-              ref={actionsRef}
-              aria-label="Chat actions"
-              aria-expanded={chatMenu}
-              onClick={() => setChatMenu(!chatMenu)}
-            >
-              <MoreHorizontal size={20} />
-            </button>
-            {chatMenu && (
-              <div className="message-action-menu">
+            <MoreHorizontal size={20} />
+          </button>
+          {chatMenu && (
+            <div className="message-action-menu">
+              {onClear && (
+                <button
+                  onClick={() => {
+                    setChatMenu(false)
+                    actionsRef.current?.focus()
+                    onClear()
+                  }}
+                >
+                  <Eraser size={14} />
+                  Clear history
+                </button>
+              )}
+              {onDelete && (
                 <button
                   className="danger-text"
                   onClick={() => {
@@ -104,12 +117,13 @@ export function ChatHeader({
                   }}
                 >
                   <Trash2 size={14} />
-                  Delete chat for everyone
+                  Delete chat
                 </button>
-              </div>
-            )}
-          </div>
-        )}
+              )}
+            </div>
+          )}
+        </div>
+      )}
       <span className={`connection-pill ${connection}`}>
         <span />
         {connection === 'connected'

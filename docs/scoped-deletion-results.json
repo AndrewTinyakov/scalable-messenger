@@ -1,0 +1,714 @@
+{
+  "format": "messenger-scoped-deletion-verification-v1",
+  "date": "2026-11-04",
+  "baseCommit": "9577923373edd42c9f1ce88ba8f788bcb0837550",
+  "reviewedCodeSnapshot": "6bd5df16dac294b3fc646e692a3220cd66f95cf49e570e510e838040e76761cb",
+  "environment": {
+    "host": {
+      "platform": "darwin",
+      "arch": "arm64",
+      "cpu": "Apple M3 Pro",
+      "logicalCpus": 11,
+      "memoryBytes": 38654705664,
+      "node": "v24.21.0"
+    },
+    "dockerVcpus": 11,
+    "dockerMemoryBytes": 16818765824,
+    "replicasPerRole": {
+      "api": 2,
+      "gateway": 2,
+      "commandProcessor": 2,
+      "outboxPublisher": 2
+    },
+    "jvmHeapMiB": 192,
+    "jvmContainerLimitMiB": 768,
+    "cpuQuota": "none; shared host",
+    "runtimePatches": [
+      "Go1.26.10",
+      "x/net0.60.0",
+      "Rabbit5.37.0",
+      "Guava33.7.2-jre"
+    ],
+    "node": "v24.21.0"
+  },
+  "checks": {
+    "kotlin": {
+      "tests": 260,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0
+    },
+    "client": {
+      "tests": 206,
+      "failures": 0
+    },
+    "systemResilience": {
+      "tests": 15,
+      "failures": 0
+    },
+    "scopedDriver": {
+      "tests": 5,
+      "failures": 0
+    },
+    "monitoring": {
+      "targets": 27,
+      "dashboards": 5
+    },
+    "headless": "Independent broad R2, affected R3 cases and final deployed smoke passed. Owned browsers/sockets closed."
+  },
+  "deletion": {
+    "fixtureProvisioning": "Controlled SQL inserts with128-byte bodies, not send/write throughput; no cache flush. Public HTTP/WS deletion and ordinary later sends.",
+    "repeatsPerHistoryOperation": 20,
+    "histories": [
+      {
+        "rows": 10000,
+        "fixtureProvisionMs": 484.79612499999985,
+        "hiddenMiddleFraction": 0.9,
+        "sparseIntervals": 100,
+        "sparsePages": 13,
+        "shortSparsePages": 12,
+        "purge": {
+          "acceptedMs": 6.949708000000101,
+          "initially": "ACCEPTED",
+          "completionMs": 2471.5187499999993,
+          "retirementWaitMs": 203.5965410000008,
+          "deletedRows": "10000",
+          "observedRowsPerSecond": 4046.095138869573,
+          "pollIntervalMs": 100
+        },
+        "afterStorage": {
+          "messageRows": "1",
+          "changeRows": "1",
+          "hiddenRanges": "0",
+          "purgeJobs": "0",
+          "outboxBodies": "0",
+          "remainingOriginalBodies": "0"
+        },
+        "timings": {
+          "latest.initial": {
+            "count": 1,
+            "meanMs": 5.863583999999719,
+            "p50UpperMs": 5.863583999999719,
+            "p95UpperMs": 5.863583999999719,
+            "p99UpperMs": 5.863583999999719,
+            "maxMs": 5.863583999999719
+          },
+          "latest": {
+            "count": 20,
+            "meanMs": 4.602650099999982,
+            "p50UpperMs": 6.884917000000314,
+            "p95UpperMs": 6.884917000000314,
+            "p99UpperMs": 6.884917000000314,
+            "maxMs": 6.884917000000314
+          },
+          "older.middle": {
+            "count": 20,
+            "meanMs": 5.818672949999973,
+            "p50UpperMs": 8.192,
+            "p95UpperMs": 8.192,
+            "p99UpperMs": 23.108334000000468,
+            "maxMs": 23.108334000000468
+          },
+          "after.middle": {
+            "count": 20,
+            "meanMs": 4.482912549999947,
+            "p50UpperMs": 5.909375000000182,
+            "p95UpperMs": 5.909375000000182,
+            "p99UpperMs": 5.909375000000182,
+            "maxMs": 5.909375000000182
+          },
+          "around.hidden": {
+            "count": 20,
+            "meanMs": 7.029997949999915,
+            "p50UpperMs": 8.192,
+            "p95UpperMs": 14.54791699999987,
+            "p99UpperMs": 14.54791699999987,
+            "maxMs": 14.54791699999987
+          },
+          "alternating": {
+            "count": 13,
+            "meanMs": 6.973416692307603,
+            "p50UpperMs": 8.192,
+            "p95UpperMs": 9.34295899999961,
+            "p99UpperMs": 9.34295899999961,
+            "maxMs": 9.34295899999961
+          }
+        },
+        "repositoryEquivalentPlans": {
+          "containing": {
+            "executionMs": 0.061,
+            "messageAccess": []
+          },
+          "next": {
+            "executionMs": 0.094,
+            "messageAccess": []
+          },
+          "messageSpan": {
+            "executionMs": 0.503,
+            "messageAccess": [
+              {
+                "Node Type": "Index Scan",
+                "Index Name": "messages_conversation_sequence_unique",
+                "Actual Rows": 51,
+                "Actual Loops": 1,
+                "Rows Removed by Filter": 0
+              }
+            ]
+          }
+        }
+      },
+      {
+        "rows": 100000,
+        "fixtureProvisionMs": 2368.1526670000003,
+        "hiddenMiddleFraction": 0.9,
+        "sparseIntervals": 100,
+        "sparsePages": 13,
+        "shortSparsePages": 12,
+        "purge": {
+          "acceptedMs": 10.383082999998805,
+          "initially": "ACCEPTED",
+          "completionMs": 25102.613874999995,
+          "retirementWaitMs": 855.026417000001,
+          "deletedRows": "100000",
+          "observedRowsPerSecond": 3983.6488940138315,
+          "pollIntervalMs": 100
+        },
+        "afterStorage": {
+          "messageRows": "1",
+          "changeRows": "1",
+          "hiddenRanges": "0",
+          "purgeJobs": "0",
+          "outboxBodies": "0",
+          "remainingOriginalBodies": "0"
+        },
+        "timings": {
+          "latest.initial": {
+            "count": 1,
+            "meanMs": 9.011333999998897,
+            "p50UpperMs": 9.011333999998897,
+            "p95UpperMs": 9.011333999998897,
+            "p99UpperMs": 9.011333999998897,
+            "maxMs": 9.011333999998897
+          },
+          "latest": {
+            "count": 20,
+            "meanMs": 4.604718800000046,
+            "p50UpperMs": 7.242125000000669,
+            "p95UpperMs": 7.242125000000669,
+            "p99UpperMs": 7.242125000000669,
+            "maxMs": 7.242125000000669
+          },
+          "older.middle": {
+            "count": 20,
+            "meanMs": 9.299212500000067,
+            "p50UpperMs": 8.192,
+            "p95UpperMs": 16.384,
+            "p99UpperMs": 17.641042000001107,
+            "maxMs": 17.641042000001107
+          },
+          "after.middle": {
+            "count": 20,
+            "meanMs": 4.594368599999962,
+            "p50UpperMs": 4.096,
+            "p95UpperMs": 8.575833000000785,
+            "p99UpperMs": 8.575833000000785,
+            "maxMs": 8.575833000000785
+          },
+          "around.hidden": {
+            "count": 20,
+            "meanMs": 5.391916650000349,
+            "p50UpperMs": 7.179959000000963,
+            "p95UpperMs": 7.179959000000963,
+            "p99UpperMs": 7.179959000000963,
+            "maxMs": 7.179959000000963
+          },
+          "alternating": {
+            "count": 13,
+            "meanMs": 7.336375000000212,
+            "p50UpperMs": 8.192,
+            "p95UpperMs": 13.710583000000042,
+            "p99UpperMs": 13.710583000000042,
+            "maxMs": 13.710583000000042
+          }
+        },
+        "repositoryEquivalentPlans": {
+          "containing": {
+            "executionMs": 0.078,
+            "messageAccess": []
+          },
+          "next": {
+            "executionMs": 0.084,
+            "messageAccess": []
+          },
+          "messageSpan": {
+            "executionMs": 0.584,
+            "messageAccess": [
+              {
+                "Node Type": "Index Scan",
+                "Index Name": "messages_conversation_sequence_unique",
+                "Actual Rows": 51,
+                "Actual Loops": 1,
+                "Rows Removed by Filter": 0
+              }
+            ]
+          }
+        }
+      },
+      {
+        "rows": 1000000,
+        "fixtureProvisionMs": 25198.151958000002,
+        "hiddenMiddleFraction": 0.9,
+        "sparseIntervals": 100,
+        "sparsePages": 13,
+        "shortSparsePages": 12,
+        "purge": {
+          "acceptedMs": 19.78887499999837,
+          "initially": "ACCEPTED",
+          "completionMs": 257565.55291700002,
+          "retirementWaitMs": 494.4451659999904,
+          "deletedRows": "1000000",
+          "observedRowsPerSecond": 3882.506758666784,
+          "pollIntervalMs": 100
+        },
+        "afterStorage": {
+          "messageRows": "1",
+          "changeRows": "1",
+          "hiddenRanges": "0",
+          "purgeJobs": "0",
+          "outboxBodies": "0",
+          "remainingOriginalBodies": "0"
+        },
+        "timings": {
+          "latest.initial": {
+            "count": 1,
+            "meanMs": 10.71425000000454,
+            "p50UpperMs": 10.71425000000454,
+            "p95UpperMs": 10.71425000000454,
+            "p99UpperMs": 10.71425000000454,
+            "maxMs": 10.71425000000454
+          },
+          "latest": {
+            "count": 20,
+            "meanMs": 4.2901854500021726,
+            "p50UpperMs": 4.096,
+            "p95UpperMs": 8.192,
+            "p99UpperMs": 9.254000000000815,
+            "maxMs": 9.254000000000815
+          },
+          "older.middle": {
+            "count": 20,
+            "meanMs": 5.383708400000614,
+            "p50UpperMs": 8.192,
+            "p95UpperMs": 12.688584000003175,
+            "p99UpperMs": 12.688584000003175,
+            "maxMs": 12.688584000003175
+          },
+          "after.middle": {
+            "count": 20,
+            "meanMs": 4.978522899997915,
+            "p50UpperMs": 8.192,
+            "p95UpperMs": 8.192,
+            "p99UpperMs": 8.718041000000085,
+            "maxMs": 8.718041000000085
+          },
+          "around.hidden": {
+            "count": 20,
+            "meanMs": 6.220360350001283,
+            "p50UpperMs": 8.192,
+            "p95UpperMs": 8.192,
+            "p99UpperMs": 9.270291000008001,
+            "maxMs": 9.270291000008001
+          },
+          "alternating": {
+            "count": 13,
+            "meanMs": 5.545410384615445,
+            "p50UpperMs": 8.192,
+            "p95UpperMs": 9.337125000005472,
+            "p99UpperMs": 9.337125000005472,
+            "maxMs": 9.337125000005472
+          }
+        },
+        "repositoryEquivalentPlans": {
+          "containing": {
+            "executionMs": 0.033,
+            "messageAccess": []
+          },
+          "next": {
+            "executionMs": 0.03,
+            "messageAccess": []
+          },
+          "messageSpan": {
+            "executionMs": 0.51,
+            "messageAccess": [
+              {
+                "Node Type": "Index Scan",
+                "Index Name": "messages_conversation_sequence_unique",
+                "Actual Rows": 51,
+                "Actual Loops": 1,
+                "Rows Removed by Filter": 0
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "batch100": {
+      "selfAcceptanceMs": 31.267166999999972,
+      "selfStoredRanges": 1,
+      "selfPhysicalRowsRemoved": 0,
+      "everyoneAcceptanceMs": 28.021999999999935,
+      "everyonePhysicalRowsRemoved": 100
+    },
+    "liveTraffic": {
+      "sends": 585,
+      "reconnects": 1,
+      "offeredModel": "One sequential send every 500 ms plus one offline send. Backpressure reduces offered rate.",
+      "missingNotifications": 0
+    },
+    "allRecordedSavedLatency": {
+      "count": 595,
+      "p50Ms": 24.9742499999993,
+      "p95Ms": 47.24345899999025,
+      "p99Ms": 74.0055410000059,
+      "maxMs": 226.6089159999974
+    },
+    "runtimeErrors": 0
+  },
+  "featureLarge200": {
+    "parameters": {
+      "seed": 1105,
+      "users": 200,
+      "duration": 120,
+      "sendRate": 2,
+      "scenario": "large",
+      "reconnectFraction": 0.1,
+      "drain": 20
+    },
+    "assessment": {
+      "passed": true,
+      "failures": 0,
+      "offeredDispatchedMismatch": 0
+    },
+    "phases": {
+      "setupExcluded": true,
+      "measurementMs": 120005.056541,
+      "drainIncludedInRequestHistograms": true
+    },
+    "rates": {
+      "offeredMessagesPerSecond": 2,
+      "dispatchedMessagesPerSecond": 1.9999157278677124,
+      "savedMessagesPerSecond": 1.9999157278677124
+    },
+    "passed": true,
+    "counts": {
+      "ticketAdmission.started.setup": 200,
+      "send.offered": 240,
+      "send.dispatched": 240,
+      "send.large.dispatched": 240,
+      "send.reply": 48,
+      "summary.attempted": 60,
+      "edit.attempted": 1,
+      "summary.succeeded": 60,
+      "around.attempted": 60,
+      "frame.queued": 240,
+      "around.succeeded": 60,
+      "details.attempted": 60,
+      "frame.message_saved": 47912,
+      "saved.liveNotification": 47912,
+      "frame.history_changed": 402,
+      "edit.succeeded": 1,
+      "staleEdit.attempted": 2,
+      "staleEdit.succeeded": 2,
+      "details.succeeded": 60,
+      "read.admissionDeferred": 3363,
+      "read.attempted": 22882,
+      "read.succeeded": 22882,
+      "frame.reads_changed": 12176,
+      "lookup.admissionDeferred": 10,
+      "frame.presence": 13954,
+      "delete.attempted": 1,
+      "delete.succeeded": 1,
+      "reconnect.initiated": 20,
+      "ticketAdmission.started.measure": 20,
+      "ticket.attempted": 20,
+      "ticket.succeeded": 20,
+      "frame.recovery_failed": 20,
+      "frame.other": 20,
+      "mutationRecovery.attempted": 20,
+      "mutationRecovery.succeeded": 20,
+      "recovery.attempted": 40,
+      "recovery.succeeded": 40,
+      "saved.duplicateNotification": 2400,
+      "saved.recoveredNotification": 88,
+      "reconnect.completed": 20,
+      "send.admissionBlockedAttempts": 599,
+      "send.deferred": 3,
+      "chatDeleteGROUP.attempted": 1,
+      "chatDeleteGROUP.succeeded": 1,
+      "deletedChatVerify.attempted": 4,
+      "deletedChatVerify.succeeded": 4,
+      "chatDeleteDIRECT.attempted": 1,
+      "chatDeleteDIRECT.succeeded": 1,
+      "frame.chat_deleted": 2,
+      "send.saved": 240,
+      "saved.expectedNotification": 48000,
+      "saved.missingNotification": 0,
+      "mutationVerify.attempted": 1,
+      "mutationVerify.succeeded": 1,
+      "mutation.missingLiveNotification": 0,
+      "read.pendingAtEnd": 0
+    },
+    "latencies": {
+      "send.schedulingLag": {
+        "count": 240,
+        "meanMs": 45.500569279165056,
+        "p50UpperMs": 16.384,
+        "p95UpperMs": 32.768,
+        "p99UpperMs": 1048.576,
+        "maxMs": 3945.577250000002
+      },
+      "summary": {
+        "count": 60,
+        "meanMs": 5.160531950001678,
+        "p50UpperMs": 4.096,
+        "p95UpperMs": 16.384,
+        "p99UpperMs": 53.4565419999999,
+        "maxMs": 53.4565419999999
+      },
+      "around": {
+        "count": 60,
+        "meanMs": 9.080144350000166,
+        "p50UpperMs": 8.192,
+        "p95UpperMs": 32.768,
+        "p99UpperMs": 100.8682919999992,
+        "maxMs": 100.8682919999992
+      },
+      "saved.notification": {
+        "count": 47912,
+        "meanMs": 34.30948905474636,
+        "p50UpperMs": 32.768,
+        "p95UpperMs": 65.536,
+        "p99UpperMs": 131.072,
+        "maxMs": 406.5478749999893
+      },
+      "edit": {
+        "count": 1,
+        "meanMs": 106.54754200000025,
+        "p50UpperMs": 106.54754200000025,
+        "p95UpperMs": 106.54754200000025,
+        "p99UpperMs": 106.54754200000025,
+        "maxMs": 106.54754200000025
+      },
+      "staleEdit": {
+        "count": 2,
+        "meanMs": 21.901124999996682,
+        "p50UpperMs": 16.384,
+        "p95UpperMs": 33.12870799999655,
+        "p99UpperMs": 33.12870799999655,
+        "maxMs": 33.12870799999655
+      },
+      "details": {
+        "count": 60,
+        "meanMs": 8.72171038333181,
+        "p50UpperMs": 4.096,
+        "p95UpperMs": 8.192,
+        "p99UpperMs": 105.74741699999868,
+        "maxMs": 105.74741699999868
+      },
+      "read": {
+        "count": 22882,
+        "meanMs": 15.071033675378091,
+        "p50UpperMs": 16.384,
+        "p95UpperMs": 32.768,
+        "p99UpperMs": 65.536,
+        "maxMs": 348.22233300000516
+      },
+      "delete": {
+        "count": 1,
+        "meanMs": 21.78679099999863,
+        "p50UpperMs": 21.78679099999863,
+        "p95UpperMs": 21.78679099999863,
+        "p99UpperMs": 21.78679099999863,
+        "maxMs": 21.78679099999863
+      },
+      "ticketAdmission.wait": {
+        "count": 20,
+        "meanMs": 1539.4935063000012,
+        "p50UpperMs": 1985.9090419999993,
+        "p95UpperMs": 1985.9090419999993,
+        "p99UpperMs": 1985.9090419999993,
+        "maxMs": 1985.9090419999993
+      },
+      "ticket": {
+        "count": 20,
+        "meanMs": 1542.0650061500019,
+        "p50UpperMs": 1988.1189169999998,
+        "p95UpperMs": 1988.1189169999998,
+        "p99UpperMs": 1988.1189169999998,
+        "maxMs": 1988.1189169999998
+      },
+      "mutationRecovery": {
+        "count": 20,
+        "meanMs": 5.788252099998499,
+        "p50UpperMs": 8.192,
+        "p95UpperMs": 16.384,
+        "p99UpperMs": 29.93162499999744,
+        "maxMs": 29.93162499999744
+      },
+      "recovery": {
+        "count": 40,
+        "meanMs": 5.185345824998512,
+        "p50UpperMs": 8.192,
+        "p95UpperMs": 12.195208999997703,
+        "p99UpperMs": 12.195208999997703,
+        "maxMs": 12.195208999997703
+      },
+      "chatDeleteGROUP": {
+        "count": 1,
+        "meanMs": 22.958542000007583,
+        "p50UpperMs": 22.958542000007583,
+        "p95UpperMs": 22.958542000007583,
+        "p99UpperMs": 22.958542000007583,
+        "maxMs": 22.958542000007583
+      },
+      "deletedChatVerify": {
+        "count": 4,
+        "meanMs": 3.796333499994944,
+        "p50UpperMs": 4.096,
+        "p95UpperMs": 4.416583999991417,
+        "p99UpperMs": 4.416583999991417,
+        "maxMs": 4.416583999991417
+      },
+      "chatDeleteDIRECT": {
+        "count": 1,
+        "meanMs": 17.653417000023182,
+        "p50UpperMs": 17.653417000023182,
+        "p95UpperMs": 17.653417000023182,
+        "p99UpperMs": 17.653417000023182,
+        "maxMs": 17.653417000023182
+      },
+      "mutationVerify": {
+        "count": 1,
+        "meanMs": 3.4339580000087153,
+        "p50UpperMs": 3.4339580000087153,
+        "p95UpperMs": 3.4339580000087153,
+        "p99UpperMs": 3.4339580000087153,
+        "maxMs": 3.4339580000087153
+      }
+    },
+    "errors": []
+  },
+  "mixed1000": {
+    "driverBinarySha256": "a2b282ec858dbd8f3ab2dc9d6e0d7be4f8aead4435be80b8f87cb5a37480cac1",
+    "driverRuntime": "Go1.26.7",
+    "scenario": "tests/load/ws/scenarios/mixed-1000.json",
+    "samePrivateSessionsAndTopology": true,
+    "durationSeconds": 60,
+    "rampConnectionsPerSecond": 5,
+    "offeredMessagesPerSecond": 20,
+    "runs": [
+      {
+        "name": "baseline",
+        "sent": 1183,
+        "queued": 1183,
+        "receivedNotifications": 123305,
+        "missingHealthyNotifications": 0,
+        "errorFramesAndFailures": 0,
+        "connections": 1000,
+        "connectedAtEnd": 1000,
+        "latencyUpperBounds": {
+          "p50": "26ms",
+          "p95": "212ms",
+          "p99": "568ms"
+        }
+      },
+      {
+        "name": "candidateA",
+        "sent": 1183,
+        "queued": 1183,
+        "receivedNotifications": 123305,
+        "missingHealthyNotifications": 0,
+        "errorFramesAndFailures": 0,
+        "connections": 1000,
+        "connectedAtEnd": 1000,
+        "latencyUpperBounds": {
+          "p50": "26ms",
+          "p95": "179ms",
+          "p99": "332ms"
+        }
+      },
+      {
+        "name": "candidateB",
+        "sent": 1183,
+        "queued": 1183,
+        "receivedNotifications": 123305,
+        "missingHealthyNotifications": 0,
+        "errorFramesAndFailures": 0,
+        "connections": 1000,
+        "connectedAtEnd": 1000,
+        "latencyUpperBounds": {
+          "p50": "26ms",
+          "p95": "189ms",
+          "p99": "340ms"
+        }
+      }
+    ]
+  },
+  "limits": [
+    "Shared local host and existing Docker projects; descriptive measurements, not isolated capacity or causal speedup claims.",
+    "Two replicas per app role exercise real routing and workers; no linear scaling or vertical scaling ratio is claimed.",
+    "SQL-seeded history omits historical outbox/send-request growth. Warm API requests and repository-equivalent EXPLAIN plans, not cold-cache or captured HTTP SQL traces.",
+    "SQL row deletion does not erase WAL, backups, unacknowledged broker commands, browser memory or already-delivered packets.",
+    "Physical touch/mobile hardware, OS-level focus, exact-boundary independent browser grouping, forced million-row body eviction and long browser memory behavior remain unverified."
+  ],
+  "ciFollowup": {
+    "failedHead": "1cbceae16900e9a0bfff402974e9893ab9f90adb",
+    "cause": "Shared async pool starvation on two CPUs and scheduled cleanup deleting fixed-clock notification fixtures",
+    "localActiveProcessorCount": 2,
+    "apiTests": 208,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "lintPassed": true,
+    "productionCodeChanged": false,
+    "timeoutsOrAssertionsRelaxed": false,
+    "reviewRound": 6,
+    "bothReviewPerspectives": "No findings"
+  },
+  "ciReadinessFollowup": {
+    "failedRun": 41869866699,
+    "cause": "Resilience harness assumed started containers were ready; publisher restoration raced Redis recovery",
+    "processorStartupSecondsObserved": 36.304,
+    "messageWaitSecondsUnchanged": 30,
+    "localAffectedTests": 9,
+    "failures": 0,
+    "skipped": 0,
+    "localDurationSeconds": 112.919,
+    "productionCodeChanged": false,
+    "bothReviewPerspectives": "No findings"
+  },
+  "automaticCi": {
+    "compile": [
+      "Kotlin application classes",
+      "Go modules",
+      "TypeScript/client production build"
+    ],
+    "lint": [
+      "Kotlin ktlint",
+      "Go vet and formatting",
+      "client formatting"
+    ],
+    "fastChecks": [
+      "Go short unit tests",
+      "client unit tests",
+      "AsyncAPI contract validation/fixtures and model generation"
+    ],
+    "localOnly": [
+      "Kotlin Testcontainers tests",
+      "dependency audits",
+      "race detector",
+      "infrastructure/system/resilience/load",
+      "live HTTP/SQL/gRPC generation checks"
+    ]
+  }
+}

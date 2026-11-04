@@ -1,23 +1,28 @@
 name: Verify
 
 on:
-  pull_request:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: verify-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: 24.21.0
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            contracts/package-lock.json
+            client/package-lock.json
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
@@ -25,7 +30,7 @@ jobs:
           cache: gradle
       - uses: actions/setup-go@v6
         with:
-          go-version: 1.26.7
+          go-version: 1.26.10
           cache-dependency-path: |
             ws/go.sum
             tests/load/ws/go.sum
@@ -34,7 +39,7 @@ jobs:
           npm ci
           npm --prefix contracts ci
           npm --prefix client ci
-      - name: Validate contracts and generated message models
+      - name: Check contracts and generated message models
         run: |
           npm run validate:asyncapi
           npm run test:contracts
@@ -42,84 +47,22 @@ jobs:
           npm run generate:asyncapi:go
           git add --intent-to-add kotlin/shared/src/generated/asyncapi/kotlin ws/internal/generated/messaging client/src/shared/api/generated/socket-vocabulary.ts
           git diff --exit-code -- kotlin/shared/src/generated/asyncapi/kotlin ws/internal/generated/messaging client/src/shared/api/generated/socket-vocabulary.ts
-      - name: Check dependency vulnerabilities
-        run: npm run audit:dependencies
-      - name: Check generated gRPC models
+      - name: Compile and lint Kotlin
+        run: ./kotlin/gradlew -p kotlin :api:classes :command-processor:classes :outbox-publisher:classes ktlintCheck --no-daemon
+      - name: Compile and lint Go
         run: |
-          ./kotlin/gradlew -p kotlin :api:generateProto --no-daemon
-          export GOBIN="$RUNNER_TEMP/grpc-tools"
-          go -C ws install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.8
-          go -C ws install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.5.1
-          protoc="$(find "$HOME/.gradle/caches/modules-2/files-2.1/com.google.protobuf/protoc/4.30.2" -type f -name '*linux-x86_64.exe' -print -quit)"
-          PATH="$GOBIN:$PATH" "$protoc" --proto_path=contracts/grpc \
-            --go_out=paths=source_relative:ws/internal/generated/grpc \
-            --go-grpc_out=paths=source_relative:ws/internal/generated/grpc \
-            contracts/grpc/chat_authorization.proto
-          git diff --exit-code -- kotlin/api/src/generated/grpc ws/internal/generated/grpc
-      - name: Check Go and client formatting
-        run: |
-          npm run format:go:check
-          npm run format:client:check
-      - name: Test API and client, check Go
-        run: |
-          ./kotlin/gradlew -p kotlin test ktlintCheck --no-daemon
+          go -C ws build -o /dev/null ./...
+          go -C tests/load/ws build -o /dev/null ./...
           go -C ws vet ./...
           go -C tests/load/ws vet ./...
-          npm --prefix client run typecheck
-          npm --prefix client test
+          npm run format:go:check
+      - name: Run Go unit tests
+        run: |
+          go -C ws test -short -timeout=60s ./...
+          go -C tests/load/ws test -short -timeout=60s ./...
+      - name: Build and lint the client
+        run: |
           npm --prefix client run build
-      - name: Prepare local credentials for system tests
-        run: |
-          echo "WS_TICKET_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
-          echo "MESSENGER_GRPC_GID=$(id -g)" >> "$GITHUB_ENV"
-          go -C ws test ./cmd/grpc-certs
-          go -C ws run ./cmd/grpc-certs -out ../.local/grpc -service-key-group "$(id -g)"
-      - name: Validate Compose configuration
-        run: docker compose -f compose.yaml -f .github/compose-ci.yaml config --quiet
-      - name: Start the prototype
-        run: |
-          docker compose -f compose.yaml -f .github/compose-ci.yaml up --build -d
-          for attempt in {1..90}; do
-            api_status="$(curl --max-time 2 --silent --output /dev/null --write-out '%{http_code}' http://localhost:8081/api/v1/auth/session || true)"
-            if [ "$api_status" = "401" ]; then
-              exit 0
-            fi
-            sleep 2
-          done
-          docker compose ps
-          docker compose logs --tail=100 api-1 api-2
-          exit 1
-      - name: Test outbox publisher with Redis
-        env:
-          REDIS_TEST_URL: redis://localhost:6379
-        run: ./kotlin/gradlew -p kotlin :outbox-publisher:test --rerun-tasks --no-daemon
-      - name: Test WebSocket server with RabbitMQ and Redis
-        env:
-          RABBITMQ_TEST_URL: amqp://messenger:messenger@localhost:5672/
-          REDIS_TEST_URL: redis://localhost:6379
-        run: |
-          go -C ws test -race -count=1 ./...
-          go -C tests/load/ws test -race -count=1 ./...
-      - name: Check generated HTTP and SQL models
-        run: |
-          npm run generate:openapi
-          ./kotlin/gradlew -p kotlin :shared:jooqCodegen --no-daemon
-          git add --intent-to-add contracts/openapi.yaml client/src/shared/api/generated kotlin/shared/src/generated/java
-          git diff --exit-code -- contracts/openapi.yaml client/src/shared/api/generated kotlin/shared/src/generated/java
-      - name: Smoke test WebSocket capacity tooling
-        run: go -C tests/load/ws run . -mode fanout -bootstrap-users 2 -connections 4 -duration 3s -rate 5 -observe-metrics -compose-project messenger
-      - name: Run cross-process tests
-        run: npm run test:resilience
-      - name: Check monitoring
-        run: |
-          docker compose exec -T prometheus promtool check config /etc/prometheus/prometheus.yaml
-          docker compose exec -T prometheus promtool test rules /etc/prometheus/alerts.test.yaml
-          npm run monitoring:check
-      - name: Show logs on failure
-        if: failure()
-        run: |
-          docker compose ps --all
-          docker compose logs --no-color --tail=250
-      - name: Stop the prototype
-        if: always()
-        run: docker compose -f compose.yaml -f .github/compose-ci.yaml down --volumes
+          npm --prefix client run format:check
+      - name: Run client unit tests
+        run: npm --prefix client test

@@ -32,9 +32,9 @@ export function isContiguous(messages: Message[]): boolean {
   )
 }
 
-export function replaceWindow(incoming: Message[]): Message[] {
+export function replaceWindow(incoming: Message[], sparse = false): Message[] {
   const sorted = mergeMessages([], incoming)
-  if (!isContiguous(sorted)) throw new Error('History contains a sequence gap')
+  if (!sparse && !isContiguous(sorted)) throw new Error('History contains a sequence gap')
   return sorted.slice(-MAX_VISIBLE_MESSAGES)
 }
 
@@ -42,10 +42,11 @@ export function pageWindow(
   current: Message[],
   incoming: Message[],
   direction: Direction,
+  sparse = false,
 ): Message[] {
   if (incoming.length === 0) return current
   const merged = mergeMessages(current, incoming)
-  if (!isContiguous(merged)) throw new Error('History contains a sequence gap')
+  if (!sparse && !isContiguous(merged)) throw new Error('History contains a sequence gap')
   return direction === 'older'
     ? merged.slice(0, MAX_VISIBLE_MESSAGES)
     : merged.slice(-MAX_VISIBLE_MESSAGES)
@@ -55,13 +56,15 @@ export function appendLiveWindow(
   current: Message[],
   incoming: Message,
   browsingOlder: boolean,
+  certifiedThrough?: string,
 ): Message[] {
   if (current.length === 0) return [incoming]
   const first = BigInt(current[0].sequence)
   const last = BigInt(current[current.length - 1].sequence)
   const sequence = BigInt(incoming.sequence)
   if (sequence < first || browsingOlder) return current
-  if (sequence > last + 1n) return current
+  const contiguousThrough = BigInt(certifiedThrough ?? last.toString())
+  if (sequence > (contiguousThrough > last ? contiguousThrough : last) + 1n) return current
   return mergeMessages(current, [incoming]).slice(-MAX_VISIBLE_MESSAGES)
 }
 

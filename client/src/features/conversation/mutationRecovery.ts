@@ -1,17 +1,19 @@
+import type {
+  ChangesSnapshot,
+  MessageChange,
+  SnapshotMetadata,
+} from '../../entities/message/historySnapshot'
 import type { Message } from '../../entities/message/model'
 
 interface Adapters {
-  changes(
-    chatId: string,
-    after: string,
-  ): Promise<{
-    changes: { revision: string; message: Message }[]
-    lastRevision: string
-    nextRevision: string
-    resetRequired: boolean
-  }>
+  changes(chatId: string, after: string): Promise<ChangesSnapshot | undefined>
   reset(chatId: string): Promise<string>
   patch(chatId: string, messages: Message[]): void
+  apply?(
+    chatId: string,
+    changes: MessageChange[],
+    snapshot: Partial<SnapshotMetadata>,
+  ): boolean | void
 }
 
 export class MutationRecovery {
@@ -44,15 +46,12 @@ export class MutationRecovery {
       for (let page = 0; page < 10 && valid(); page += 1) {
         const changes = await this.adapters.changes(chatId, this.revision!)
         if (!valid()) return
-        if (changes.resetRequired || page === 9) {
+        if (!changes) continue
+        if (changes.resetRequired) {
           const revision = await this.adapters.reset(chatId)
           if (valid()) this.revision = revision
           return
         }
-        this.adapters.patch(
-          chatId,
-          changes.changes.map((change) => change.message),
-        )
         if (BigInt(changes.nextRevision) < BigInt(this.revision!))
           throw new Error('Message changes cursor moved backwards')
         if (
@@ -60,6 +59,22 @@ export class MutationRecovery {
           BigInt(changes.lastRevision) > BigInt(changes.nextRevision)
         )
           throw new Error('Message changes cursor did not advance')
+        if (this.adapters.apply) {
+          const applied = this.adapters.apply(chatId, changes.changes, {
+            ...changes,
+            mutationRevision: changes.lastRevision,
+          })
+          if (applied === false) continue
+        } else
+          this.adapters.patch(
+            chatId,
+            changes.changes.flatMap((change) => (change.message ? [change.message] : [])),
+          )
+        if (page === 9) {
+          const revision = await this.adapters.reset(chatId)
+          if (valid()) this.revision = revision
+          return
+        }
         this.revision = changes.nextRevision
         if (BigInt(this.revision) >= BigInt(changes.lastRevision)) return
       }

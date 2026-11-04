@@ -32,7 +32,9 @@ Password encoders are configured under `messenger.auth.password` in [the API YAM
 
 The same YAML configures browser origins, CORS methods, headers and credentials under `messenger.web.cors`, and endpoint rules under `messenger.web.security`. Endpoint patterns are relative to `spring.mvc.servlet.path`: with `/api`, use `/v1/auth/login` for the URL `/api/v1/auth/login`. The first matching group wins in this order: OPTIONS preflight, public, monitoring, denied. Remaining requests reach the application's session checks. Every configured origin must be an exact HTTP or HTTPS origin without a path or trailing slash; browser mutations still require one Origin header and `X-Messenger-CSRF: 1`.
 
-Use [CI](.github/workflows/verify.yaml) for checks, [package.json](package.json) for generation commands, and [compose.yaml](compose.yaml) for runtime settings. [CONTEXT.md](CONTEXT.md) defines terms; the [broker decision](docs/adr/0001-messenger-broker-split.md) records delivery guarantees.
+Automatic [CI](.github/workflows/verify.yaml) compiles Kotlin and Go, builds the client, runs linters and Go/client unit tests, and checks contracts plus fast AsyncAPI model generation. Superseded runs are canceled. Kotlin tests with Testcontainers, dependency audits, infrastructure, race, HTTP/SQL/gRPC generation checks, resilience and load checks run locally.
+
+Use [package.json](package.json) for generation and verification commands, and [compose.yaml](compose.yaml) for runtime settings. [CONTEXT.md](CONTEXT.md) defines terms; the [broker decision](docs/adr/0001-messenger-broker-split.md) records delivery guarantees.
 
 See [WebSocket scalability](docs/scalability.md) for replica settings, capacity workloads, and measured performance changes.
 

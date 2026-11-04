@@ -158,7 +158,7 @@ func (socket *client) read(ctx context.Context, conn *websocket.Conn) error {
 				return err
 			}
 
-		case "recovery_failed":
+		case "history_changed", "recovery_failed":
 			if socket.owner.mixed != nil {
 				if err := socket.recoverMixed(ctx, frame.ChatID); err != nil {
 					return err

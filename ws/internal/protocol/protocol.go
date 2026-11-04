@@ -35,6 +35,7 @@ const (
 	EventMessageChanged      = messaging.EventMessageChanged
 	EventChatDeleted         = messaging.EventChatDeleted
 	EventReadsChanged        = messaging.EventReadsChanged
+	EventHistoryChanged      = messaging.EventHistoryChanged
 	EventPresence            = messaging.EventPresence
 	EventSendRejected        = messaging.EventSendRejected
 	EventChatCreated         = messaging.EventChatCreated
@@ -206,6 +207,10 @@ func ValidateEvent(event Event) error {
 		}
 		if _, err := time.Parse(time.RFC3339Nano, event.CreatedAt); err != nil {
 			return errors.New("invalid event timestamp")
+		}
+	case EventHistoryChanged:
+		if !ValidULID(event.ChatID) || !validSequence(event.Sequence) || !validSequence(event.MutationRevision) || !validSequence(event.VisibilityRevision) || event.Body != "" || event.MessageID != "" || event.RequestID != "" || event.SenderID != "" || event.CreatedAt != "" || event.RecipientID != "" || event.Reason != "" {
+			return errors.New("invalid history change event")
 		}
 	case EventMessageChanged:
 		return validateChangedMessage(event)

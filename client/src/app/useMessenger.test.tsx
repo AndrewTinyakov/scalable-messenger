@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Message } from '../entities/message/model'
 import type { Session } from '../entities/session/model'
 import { ChatKind, FrameType } from '../shared/api/generated/socket-vocabulary'
+import { ChatPanel } from '../widgets/chat-panel/ChatPanel'
 import { App } from './App'
 import { TestSocket } from './TestSocket.fixtures'
 import { useMessenger } from './useMessenger'
@@ -48,12 +49,59 @@ let failDirectLookup: boolean
 let historyMessages: Message[]
 let groupMemberCount: number
 let groupMembers: Session['user'][]
+let renderPanel: boolean
+let readCalls: string[]
+let visibilityRevision: string
+let clearedThrough: string
+let hidden: boolean
+
+function snapshotFor(id: string) {
+  return {
+    snapshotSequence:
+      historyMessages.filter((message) => message.chatId === id).at(-1)?.sequence ?? '0',
+    mutationRevision: '0',
+    visibilityRevision,
+    clearedThroughSequence: clearedThrough,
+    globalClearedThroughSequence: '0',
+  }
+}
 
 function Harness() {
   const current = useMessenger(session, onSessionRevoked)
   useEffect(() => {
     messenger = current
   })
+  const selected = current.chats.find((chat) => chat.id === current.selectedId)
+  if (renderPanel)
+    return (
+      <ChatPanel
+        chat={selected}
+        currentUser={session.user}
+        messages={selected ? (current.messages[selected.id] ?? []) : []}
+        pending={current.pending}
+        connection={current.connection}
+        features={current.features}
+        onSend={current.sendMessage}
+        onRetry={current.retryMessage}
+        onBack={current.closeChat}
+        onNew={() => {}}
+        hasOlder={current.hasOlderMessages}
+        hasNewer={current.hasNewerMessages}
+        hasUnresolvedGap={current.hasUnresolvedGap}
+        loadingOlder={current.loadingOlder}
+        loadingNewer={current.loadingNewer}
+        onLoadOlder={() => selected && void current.loadOlder(selected.id)}
+        onLoadNewer={() => selected && void current.loadNewer(selected.id)}
+        onJumpToLatest={() => selected && void current.showLatest(selected.id)}
+        jumpRevision={current.jumpRevision}
+        onViewPositionChange={(latest) =>
+          selected && current.setAtLatestPosition(selected.id, latest)
+        }
+        readingLocation={current.location}
+        locationRevision={current.locationRevision}
+        onLocationChange={current.rememberLocation}
+      />
+    )
   return (
     <div>
       {current.chats.map((chat) => (
@@ -82,7 +130,10 @@ async function renderMessenger() {
 }
 
 beforeEach(() => {
-  dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost' })
+  dom = new JSDOM('<!doctype html><html><body></body></html>', {
+    url: 'http://localhost',
+    pretendToBeVisual: true,
+  })
   vi.stubGlobal('window', dom.window)
   vi.stubGlobal('document', dom.window.document)
   vi.stubGlobal('localStorage', dom.window.localStorage)
@@ -100,6 +151,11 @@ beforeEach(() => {
   historyMessages = []
   groupMemberCount = group.memberCount
   groupMembers = [session.user]
+  renderPanel = false
+  readCalls = []
+  visibilityRevision = '0'
+  clearedThrough = '0'
+  hidden = false
   vi.stubGlobal(
     'WebSocket',
     class extends TestSocket {
@@ -109,9 +165,47 @@ beforeEach(() => {
       }
     },
   )
-  vi.stubGlobal('fetch', async (input: string) => {
+  vi.stubGlobal('fetch', async (input: string, options?: RequestInit) => {
     const path = new URL(input, 'http://localhost').pathname
     paths.push(path)
+    const requestedChat = path.split('/chats/')[1]?.split('/')[0] ?? chatId
+    const metadata = snapshotFor(requestedChat)
+    if (path.endsWith('/visibility')) return Response.json({ ...metadata, hidden })
+    if (path.endsWith('/changes'))
+      return Response.json({
+        ...metadata,
+        mutationRevision: undefined,
+        changes: [],
+        lastRevision: '0',
+        nextRevision: '0',
+        resetRequired: false,
+      })
+    if (path.endsWith('/resolve')) {
+      const { messageIds } = JSON.parse(String(options?.body)) as { messageIds: string[] }
+      return Response.json({
+        ...metadata,
+        messages: historyMessages.filter(
+          (message) =>
+            messageIds.includes(message.id) && BigInt(message.sequence) > BigInt(clearedThrough),
+        ),
+      })
+    }
+    if (path.endsWith('/reads')) {
+      if (options?.method === 'POST') {
+        const { throughSequence } = JSON.parse(String(options.body)) as { throughSequence: string }
+        readCalls.push(throughSequence)
+        return Response.json({
+          throughSequence,
+          readAt: new Date().toISOString(),
+          serverTime: new Date().toISOString(),
+        })
+      }
+      return Response.json({
+        throughSequence: readCalls.at(-1) ?? '0',
+        maxOtherReadSequence: '0',
+        serverTime: new Date().toISOString(),
+      })
+    }
     if (path.endsWith('/session'))
       return new Promise<Response>((resolve) => {
         sessionRequests.push(resolve)
@@ -135,15 +229,35 @@ beforeEach(() => {
         return Response.json({ message: 'Unavailable' }, { status: 503 })
       }
       const after = new URL(input, 'http://localhost').searchParams.get('afterSeq')
-      const messages = historyMessages.filter(
+      const before = new URL(input, 'http://localhost').searchParams.get('beforeSeq')
+      const eligible = historyMessages.filter(
         (message) =>
           path.endsWith(`/chats/${message.chatId}/messages`) &&
-          (after === null || BigInt(message.sequence) > BigInt(after)),
+          (after === null || BigInt(message.sequence) > BigInt(after)) &&
+          (before === null || BigInt(message.sequence) < BigInt(before)) &&
+          BigInt(message.sequence) > BigInt(clearedThrough),
       )
+      const messages = after === null ? eligible.slice(-50) : eligible.slice(0, 50)
+      const hasMore = eligible.length > messages.length
       return Response.json({
         messages,
-        nextSequence: messages.at(-1)?.sequence || '0',
-        hasMore: false,
+        ...metadata,
+        coverageAfterSequence:
+          after ??
+          (hasMore && messages.length ? (BigInt(messages[0].sequence) - 1n).toString() : '0'),
+        coverageThroughSequence:
+          after !== null && hasMore
+            ? messages.at(-1)!.sequence
+            : before === null
+              ? metadata.snapshotSequence
+              : (BigInt(before) - 1n).toString(),
+        nextSequence:
+          after === null
+            ? (messages[0]?.sequence ?? '0')
+            : hasMore
+              ? messages.at(-1)!.sequence
+              : metadata.snapshotSequence,
+        hasMore,
       })
     }
     if (path.endsWith(`/chats/${chatId}`))
@@ -158,7 +272,15 @@ beforeEach(() => {
           chatRequests.push(resolve)
         })
       return Response.json({
-        chats: [{ ...group, memberCount: groupMemberCount }],
+        chats: hidden
+          ? []
+          : [
+              {
+                ...group,
+                memberCount: groupMemberCount,
+                lastSequence: snapshotFor(chatId).snapshotSequence,
+              },
+            ],
         nextCursor: null,
       })
     }
@@ -179,6 +301,214 @@ afterEach(async () => {
 })
 
 describe('messenger request coordination', () => {
+  it('pauses directory and pending-send polling for the whole offline interval', async () => {
+    vi.useFakeTimers()
+    let online = true
+    vi.spyOn(dom.window.navigator, 'onLine', 'get').mockImplementation(() => online)
+    await renderMessenger()
+    await act(async () => {
+      sockets[0].open()
+      messenger.sendMessage(chatId, 'Waiting for a result')
+    })
+    paths = []
+    await act(async () => {
+      online = false
+      window.dispatchEvent(new dom.window.Event('offline'))
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(90000)
+    })
+    expect(paths).toEqual([])
+    expect(messenger.pending).toHaveLength(1)
+    expect(messenger.error).toBeNull()
+    await act(async () => {
+      online = true
+      window.dispatchEvent(new dom.window.Event('online'))
+      await vi.advanceTimersByTimeAsync(1000)
+      sockets[1].open()
+    })
+    expect(paths.some((path) => path.includes('/sends/status'))).toBe(true)
+  })
+
+  it('keeps cached chats without a toast when an in-flight refresh fails offline', async () => {
+    let online = true
+    vi.spyOn(dom.window.navigator, 'onLine', 'get').mockImplementation(() => online)
+    await renderMessenger()
+    const chats = messenger.chats
+    holdChatRequests = true
+    let refresh!: Promise<unknown>
+    await act(async () => {
+      refresh = messenger.refreshChats()
+    })
+    await act(async () => {
+      online = false
+      window.dispatchEvent(new dom.window.Event('offline'))
+      chatRequests[0](Response.json({ message: 'Failed to fetch' }, { status: 503 }))
+      await refresh
+    })
+    expect(messenger.chats).toEqual(chats)
+    expect(messenger.error).toBeNull()
+  })
+
+  it('hides another device history and sidebar, then resurfaces the same chat with its cutoff', async () => {
+    historyMessages = ['1', '2'].map((sequence) => ({
+      id: sequence.padStart(26, '0'),
+      chatId,
+      senderId: recipient.id,
+      sequence,
+      body: `Original ${sequence}`,
+      createdAt: '2026-11-04T10:00:00Z',
+    }))
+    window.history.replaceState(null, '', `/groups/${chatId}`)
+    await renderMessenger()
+    await act(async () => sockets[0].open())
+    expect(messenger.messages[chatId]).toHaveLength(2)
+    clearedThrough = '2'
+    visibilityRevision = '1'
+    hidden = true
+    await act(async () =>
+      sockets[0].event({
+        type: 'history_changed',
+        version: 1,
+        eventId: '01ARZ3NDEKTSV4RRFFQ69G5FAZ',
+        room: `user:${userId}`,
+        epoch: 'epoch',
+        streamId: '3-0',
+        chatId,
+        sequence: '2',
+        mutationRevision: '0',
+        visibilityRevision: '1',
+      }),
+    )
+    expect(messenger.selectedId).toBeNull()
+    expect(messenger.chats.some((chat) => chat.id === chatId)).toBe(false)
+    expect(messenger.messages[chatId]).toEqual([])
+    historyMessages.push({
+      id: '00000000000000000000000003',
+      chatId,
+      senderId: recipient.id,
+      sequence: '3',
+      body: 'New message',
+      createdAt: '2026-11-04T10:01:00Z',
+    })
+    hidden = false
+    await act(async () =>
+      sockets[0].event({
+        type: 'message_saved',
+        version: 1,
+        eventId: '01ARZ3NDEKTSV4RRFFQ69G5FB0',
+        room: `group:${chatId}`,
+        epoch: 'epoch',
+        streamId: '4-0',
+        chatId,
+        requestId: '01ARZ3NDEKTSV4RRFFQ69G5FB1',
+        messageId: '00000000000000000000000003',
+        sequence: '3',
+        senderId: recipient.id,
+        body: 'New message',
+        createdAt: '2026-11-04T10:01:00Z',
+      }),
+    )
+    expect(messenger.chats.some((chat) => chat.id === chatId)).toBe(true)
+    await act(async () => messenger.selectChat(chatId))
+    expect(messenger.messages[chatId].map((message) => message.sequence)).toEqual(['3'])
+  })
+  it('reads visible rows after a background burst through the actual socket, messenger and panel callers', async () => {
+    vi.useFakeTimers()
+    renderPanel = true
+    let focused = false
+    vi.spyOn(document, 'hasFocus').mockImplementation(() => focused)
+    const positions = new WeakMap<HTMLElement, number>()
+    Object.defineProperty(dom.window.HTMLElement.prototype, 'scrollHeight', {
+      configurable: true,
+      get() {
+        return this.matches('.chat-body')
+          ? this.querySelectorAll('[data-message-id]').length * 40
+          : 0
+      },
+    })
+    Object.defineProperty(dom.window.HTMLElement.prototype, 'clientHeight', {
+      configurable: true,
+      get() {
+        return this.matches('.chat-body') ? 400 : 0
+      },
+    })
+    Object.defineProperty(dom.window.HTMLElement.prototype, 'scrollTop', {
+      configurable: true,
+      get() {
+        return positions.get(this) ?? 0
+      },
+      set(value) {
+        positions.set(
+          this,
+          Math.min(Math.max(0, value), Math.max(0, this.scrollHeight - this.clientHeight)),
+        )
+      },
+    })
+    vi.spyOn(dom.window.HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        const scroller = this.closest<HTMLElement>('.chat-body')
+        const index = scroller
+          ? [...scroller.querySelectorAll('[data-message-id]')].indexOf(this)
+          : -1
+        const top = this.matches('.chat-body') ? 0 : index * 40 - (scroller?.scrollTop ?? 0)
+        const height = this.matches('.chat-body') ? 400 : 40
+        return {
+          top,
+          bottom: top + height,
+          height,
+          left: 0,
+          right: 500,
+          width: 500,
+          x: 0,
+          y: top,
+          toJSON: () => ({}),
+        } as DOMRect
+      },
+    )
+    window.history.replaceState(null, '', `/groups/${chatId}`)
+    await renderMessenger()
+    await act(async () => sockets[0].open())
+    for (let batch = 0; batch < 10; batch += 1)
+      await act(async () => {
+        for (let index = 1; index <= 40; index += 1) {
+          const sequence = String(batch * 40 + index)
+          const row = {
+            id: sequence.padStart(26, '0'),
+            chatId,
+            senderId: recipient.id,
+            sequence,
+            body: `Message ${sequence}`,
+            createdAt: '2026-11-04T10:00:00Z',
+          }
+          historyMessages.push(row)
+          const { id, ...fields } = row
+          sockets[0].event({
+            type: 'message_saved',
+            version: 1,
+            eventId: String(Number(sequence) + 1000).padStart(26, '0'),
+            room: `group:${chatId}`,
+            epoch: 'epoch',
+            streamId: `${sequence}-0`,
+            requestId: String(Number(sequence) + 2000).padStart(26, '0'),
+            messageId: id,
+            ...fields,
+          })
+        }
+        await vi.advanceTimersByTimeAsync(50)
+      })
+    await act(async () => vi.advanceTimersByTimeAsync(2000))
+    expect(messenger.messages[chatId].at(-1)?.sequence).toBe('400')
+    expect(readCalls).toEqual([])
+    focused = true
+    await act(async () => {
+      window.dispatchEvent(new dom.window.Event('focus'))
+      await vi.advanceTimersByTimeAsync(699)
+    })
+    expect(readCalls).toEqual([])
+    await act(async () => vi.advanceTimersByTimeAsync(1001))
+    expect(readCalls.at(-1)).toBe('400')
+  })
   it('refreshes an open group after a member is added on another device', async () => {
     groupMemberCount = 2
     groupMembers = [session.user, recipient]
@@ -408,6 +738,90 @@ describe('messenger request coordination', () => {
       window.dispatchEvent(new dom.window.Event('focus'))
     })
     expect(sessionRequests).toHaveLength(2)
+  })
+
+  it('keeps the current chat offline, skips focus requests, and validates the session on reconnect', async () => {
+    let online = true
+    vi.spyOn(dom.window.navigator, 'onLine', 'get').mockImplementation(() => online)
+    await act(async () => {
+      root.render(<App />)
+    })
+    await act(async () => {
+      sessionRequests[0](Response.json({ userId, username: 'alice', deviceId: 'device' }))
+      sockets[0]?.open()
+    })
+    const workspace = container.querySelector('.workspace')
+    expect(workspace).not.toBeNull()
+    paths = []
+    await act(async () => {
+      online = false
+      window.dispatchEvent(new dom.window.Event('offline'))
+      window.dispatchEvent(new dom.window.Event('focus'))
+    })
+    expect(container.querySelector('.workspace')).toBe(workspace)
+    expect(container.textContent).toContain("You're offline")
+    expect(container.querySelector('.toast')).toBeNull()
+    expect(paths).toEqual([])
+    expect(sessionRequests).toHaveLength(1)
+    await act(async () => {
+      online = true
+      window.dispatchEvent(new dom.window.Event('online'))
+    })
+    expect(sessionRequests).toHaveLength(2)
+    await act(async () => {
+      sessionRequests[1](Response.json({ message: 'Unauthorized' }, { status: 401 }))
+    })
+    expect(container.querySelector('h1')?.textContent).toBe('Sign in')
+  })
+
+  it('waits offline on startup and restores automatically without showing the sign-in form', async () => {
+    let online = false
+    vi.spyOn(dom.window.navigator, 'onLine', 'get').mockImplementation(() => online)
+    await act(async () => {
+      root.render(<App />)
+    })
+    expect(sessionRequests).toHaveLength(0)
+    expect(container.textContent).toContain("You're offline")
+    expect(container.querySelector('form')).toBeNull()
+    await act(async () => {
+      online = true
+      window.dispatchEvent(new dom.window.Event('online'))
+    })
+    expect(sessionRequests).toHaveLength(1)
+    await act(async () => {
+      sessionRequests[0](Response.json({ userId, username: 'alice', deviceId: 'device' }))
+    })
+    expect(container.querySelector('.workspace')).not.toBeNull()
+  })
+
+  it('rechecks after reconnect without waiting for an old session request or accepting its late response', async () => {
+    let online = true
+    vi.spyOn(dom.window.navigator, 'onLine', 'get').mockImplementation(() => online)
+    await act(async () => {
+      root.render(<App />)
+    })
+    await act(async () => {
+      sessionRequests[0](Response.json({ userId, username: 'alice', deviceId: 'device' }))
+    })
+    await act(async () => {
+      window.dispatchEvent(new dom.window.Event('focus'))
+    })
+    expect(sessionRequests).toHaveLength(2)
+    await act(async () => {
+      online = false
+      window.dispatchEvent(new dom.window.Event('offline'))
+    })
+    await act(async () => {
+      online = true
+      window.dispatchEvent(new dom.window.Event('online'))
+    })
+    expect(sessionRequests).toHaveLength(3)
+    await act(async () => {
+      sessionRequests[2](Response.json({ userId, username: 'alice', deviceId: 'device' }))
+      sessionRequests[1](Response.json({ message: 'Old authorization' }, { status: 401 }))
+    })
+    expect(container.querySelector('.workspace')).not.toBeNull()
+    expect(container.querySelector('.toast')).toBeNull()
   })
 
   it('checks fresh session state after logout races an older focus response', async () => {

@@ -16,6 +16,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 
+import org.jooq.Check;
 import org.jooq.Condition;
 import org.jooq.Field;
 import org.jooq.ForeignKey;
@@ -75,6 +76,21 @@ public class ChatMembers extends TableImpl<ChatMembersRecord> {
      * The column <code>public.chat_members.joined_at</code>.
      */
     public final TableField<ChatMembersRecord, OffsetDateTime> JOINED_AT = createField(DSL.name("joined_at"), SQLDataType.TIMESTAMPWITHTIMEZONE(6).nullable(false).defaultValue(DSL.field(DSL.raw("now()"), SQLDataType.TIMESTAMPWITHTIMEZONE)), this, "");
+
+    /**
+     * The column <code>public.chat_members.cleared_through_sequence</code>.
+     */
+    public final TableField<ChatMembersRecord, Long> CLEARED_THROUGH_SEQUENCE = createField(DSL.name("cleared_through_sequence"), SQLDataType.BIGINT.nullable(false).defaultValue(DSL.field(DSL.raw("0"), SQLDataType.BIGINT)), this, "");
+
+    /**
+     * The column <code>public.chat_members.hidden_through_sequence</code>.
+     */
+    public final TableField<ChatMembersRecord, Long> HIDDEN_THROUGH_SEQUENCE = createField(DSL.name("hidden_through_sequence"), SQLDataType.BIGINT, this, "");
+
+    /**
+     * The column <code>public.chat_members.visibility_revision</code>.
+     */
+    public final TableField<ChatMembersRecord, Long> VISIBILITY_REVISION = createField(DSL.name("visibility_revision"), SQLDataType.BIGINT.nullable(false).defaultValue(DSL.field(DSL.raw("0"), SQLDataType.BIGINT)), this, "");
 
     private ChatMembers(Name alias, Table<ChatMembersRecord> aliased) {
         this(alias, aliased, (Field<?>[]) null, null);
@@ -180,6 +196,15 @@ public class ChatMembers extends TableImpl<ChatMembersRecord> {
             _users = new UsersPath(this, Keys.CHAT_MEMBERS__CHAT_MEMBERS_USER_ID_FKEY, null);
 
         return _users;
+    }
+
+    @Override
+    public List<Check<ChatMembersRecord>> getChecks() {
+        return Arrays.asList(
+            Internal.createCheck(this, DSL.name("chat_members_cleared_through_sequence_check"), "((cleared_through_sequence >= 0))", true),
+            Internal.createCheck(this, DSL.name("chat_members_hidden_through_sequence_check"), "((hidden_through_sequence >= 0))", true),
+            Internal.createCheck(this, DSL.name("chat_members_visibility_revision_check"), "((visibility_revision >= 0))", true)
+        );
     }
 
     @Override

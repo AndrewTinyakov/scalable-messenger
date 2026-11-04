@@ -1,0 +1,40 @@
+$schema: http://json-schema.org/draft-07/schema#
+title: SocketHistoryChangedV1
+type: object
+additionalProperties: false
+required:
+  - type
+  - version
+  - eventId
+  - room
+  - chatId
+  - sequence
+  - mutationRevision
+  - visibilityRevision
+  - epoch
+  - streamId
+properties:
+  type:
+    const: history_changed
+  version:
+    type: integer
+    const: 1
+  eventId: &id
+    type: string
+    pattern: ^[0-7][0-9A-HJKMNP-TV-Z]{25}$
+  room:
+    type: string
+    pattern: ^(user|group):[0-7][0-9A-HJKMNP-TV-Z]{25}$
+  chatId: *id
+  sequence: &sequence
+    type: string
+    pattern: ^(0|[1-9][0-9]{0,18})$
+  mutationRevision: *sequence
+  visibilityRevision: *sequence
+  epoch:
+    type: string
+    minLength: 1
+  streamId:
+    type: string
+    pattern: ^[0-9]+-[0-9]+$
+x-messenger-direction: server

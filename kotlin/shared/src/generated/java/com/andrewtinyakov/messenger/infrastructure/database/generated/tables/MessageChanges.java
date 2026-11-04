@@ -8,7 +8,6 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.Indexes;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Keys;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Public;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Chats.ChatsPath;
-import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Messages.MessagesPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.MessageChangesRecord;
 
 import java.time.OffsetDateTime;
@@ -75,12 +74,27 @@ public class MessageChanges extends TableImpl<MessageChangesRecord> {
     /**
      * The column <code>public.message_changes.message_id</code>.
      */
-    public final TableField<MessageChangesRecord, String> MESSAGE_ID = createField(DSL.name("message_id"), SQLDataType.VARCHAR(26).nullable(false), this, "");
+    public final TableField<MessageChangesRecord, String> MESSAGE_ID = createField(DSL.name("message_id"), SQLDataType.VARCHAR(26), this, "");
 
     /**
      * The column <code>public.message_changes.changed_at</code>.
      */
     public final TableField<MessageChangesRecord, OffsetDateTime> CHANGED_AT = createField(DSL.name("changed_at"), SQLDataType.TIMESTAMPWITHTIMEZONE(6).nullable(false), this, "");
+
+    /**
+     * The column <code>public.message_changes.kind</code>.
+     */
+    public final TableField<MessageChangesRecord, String> KIND = createField(DSL.name("kind"), SQLDataType.VARCHAR(8).nullable(false).defaultValue(DSL.field(DSL.raw("'UPSERT'::character varying"), SQLDataType.VARCHAR)), this, "");
+
+    /**
+     * The column <code>public.message_changes.sequence</code>.
+     */
+    public final TableField<MessageChangesRecord, Long> SEQUENCE = createField(DSL.name("sequence"), SQLDataType.BIGINT, this, "");
+
+    /**
+     * The column <code>public.message_changes.cleared_through_sequence</code>.
+     */
+    public final TableField<MessageChangesRecord, Long> CLEARED_THROUGH_SEQUENCE = createField(DSL.name("cleared_through_sequence"), SQLDataType.BIGINT, this, "");
 
     private MessageChanges(Name alias, Table<MessageChangesRecord> aliased) {
         this(alias, aliased, (Field<?>[]) null, null);
@@ -161,7 +175,7 @@ public class MessageChanges extends TableImpl<MessageChangesRecord> {
 
     @Override
     public List<ForeignKey<MessageChangesRecord, ?>> getReferences() {
-        return Arrays.asList(Keys.MESSAGE_CHANGES__MESSAGE_CHANGES_CHAT_ID_FKEY, Keys.MESSAGE_CHANGES__MESSAGE_CHANGES_CHAT_ID_MESSAGE_ID_FKEY);
+        return Arrays.asList(Keys.MESSAGE_CHANGES__MESSAGE_CHANGES_CHAT_ID_FKEY);
     }
 
     private transient ChatsPath _chats;
@@ -176,21 +190,10 @@ public class MessageChanges extends TableImpl<MessageChangesRecord> {
         return _chats;
     }
 
-    private transient MessagesPath _messages;
-
-    /**
-     * Get the implicit join path to the <code>public.messages</code> table.
-     */
-    public MessagesPath messages() {
-        if (_messages == null)
-            _messages = new MessagesPath(this, Keys.MESSAGE_CHANGES__MESSAGE_CHANGES_CHAT_ID_MESSAGE_ID_FKEY, null);
-
-        return _messages;
-    }
-
     @Override
     public List<Check<MessageChangesRecord>> getChecks() {
         return Arrays.asList(
+            Internal.createCheck(this, DSL.name("message_changes_kind_check"), "(((kind)::text = ANY ((ARRAY['UPSERT'::character varying, 'REMOVED'::character varying, 'CLEARED'::character varying])::text[])))", true),
             Internal.createCheck(this, DSL.name("message_changes_revision_check"), "((revision > 0))", true)
         );
     }

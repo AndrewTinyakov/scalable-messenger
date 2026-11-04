@@ -28,7 +28,6 @@ import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.http.HttpStatus
 import java.time.OffsetDateTime
-import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
 class MessageFeatureTests
@@ -61,16 +60,16 @@ class MessageFeatureTests
             val page = history.changes(ChatId(chat), UserId(member), "0", 1)
             assertEquals("2", page.lastRevision)
             assertEquals("1", page.nextRevision)
-            assertEquals("3", page.changes.single().message.messageVersion)
-            assertEquals("changed again", page.changes.single().message.body)
+            assertEquals("3", page.changes.single().message!!.messageVersion)
+            assertEquals("changed again", page.changes.single().message!!.body)
             assertEquals("2", history.changes(ChatId(chat), UserId(member), page.nextRevision, 1).nextRevision)
             assertEquals("2", history.messages(ChatId(chat), UserId(member), null, null, 10).mutationRevision)
             val events = db.queryForList(
-                "SELECT payload->>'messageVersion' FROM messenger_outbox_events WHERE payload->>'type'='message_changed' AND payload->>'chatId'=? ORDER BY payload->>'mutationRevision'",
+                "SELECT payload->>'mutationRevision' FROM messenger_outbox_events WHERE payload->>'type'='history_changed' AND payload->>'chatId'=? ORDER BY payload->>'mutationRevision'",
                 String::class.java,
                 chat,
             )
-            assertEquals(listOf("2", "3"), events)
+            assertEquals(listOf("1", "2"), events)
         }
 
         @Test
@@ -105,7 +104,7 @@ class MessageFeatureTests
             val chat = group(owner, member)
             val target = send(owner, chat, "original")
             val results = listOf("left", "right").map { body ->
-                CompletableFuture.supplyAsync {
+                concurrently {
                     try {
                         mutations.edit(ChatId(chat), UserId(owner), MessageId(target.id), body, "1")
                         "saved"
@@ -120,7 +119,7 @@ class MessageFeatureTests
         }
 
         @Test
-        fun `replies hydrate current bounded Unicode previews and tombstones stay navigable`() {
+        fun `replies hydrate current bounded Unicode previews and deleted targets become unavailable`() {
             val owner = user("reply-owner")
             val member = user("reply-member")
             val chat = group(owner, member)
@@ -139,14 +138,17 @@ class MessageFeatureTests
             assertEquals("", deleted.body)
             assertEquals("3", deleted.messageVersion)
             assertNotNull(deleted.deletedAt)
-            assertEquals(deleted, mutations.delete(ChatId(chat), UserId(owner), MessageId(target.id), "1"))
+            assertEquals(0, db.queryForObject("SELECT count(*) FROM messages WHERE id=?", Int::class.java, target.id))
             val current = history.messages(ChatId(chat), UserId(member), null, null, 10).messages
-            assertEquals("", current.last().replyBody)
-            assertEquals(true, current.last().replyDeleted)
-            assertEquals("3", current.last().replyVersion)
-            assertEquals(target.id, history.around(ChatId(chat), UserId(member), MessageId(target.id), 1).messages.single().id)
+            assertEquals(null, current.last().replyBody)
+            assertEquals(null, current.last().replyDeleted)
+            assertEquals(null, current.last().replyVersion)
             assertEquals(
-                HttpStatus.CONFLICT,
+                reply.id,
+                history.around(ChatId(chat), UserId(member), MessageId(target.id), target.sequence, 1).messages.single().id,
+            )
+            assertEquals(
+                HttpStatus.NOT_FOUND,
                 assertThrows(ApiException::class.java) {
                     mutations.edit(ChatId(chat), UserId(owner), MessageId(target.id), "resurrect", "3")
                 }.status,
@@ -165,32 +167,22 @@ class MessageFeatureTests
             sends.process(command(member, newId(), "reply", chat = chat).copy(replyToMessageId = target.id))
             val reply = history.messages(ChatId(chat), UserId(member), null, null, 10).messages.last()
             val deleted = mutations.delete(ChatId(chat), UserId(member), MessageId(reply.id), "1")
-            val snapshots = listOf(
-                deleted,
-                history.messages(ChatId(chat), UserId(member), null, null, 10).messages.last(),
-                history.around(ChatId(chat), UserId(member), MessageId(reply.id), 1).messages.single(),
-                history.changes(ChatId(chat), UserId(member), "0", 100).changes.single().message,
+            assertEquals("", deleted.body)
+            assertEquals(listOf(target.id), history.messages(ChatId(chat), UserId(member), null, null, 10).messages.map { it.id })
+            assertEquals(target.id, history.around(ChatId(chat), UserId(member), MessageId(reply.id), reply.sequence, 1).anchorMessageId)
+            val removed = history.changes(ChatId(chat), UserId(member), "0", 100).changes.single()
+            assertEquals(com.andrewtinyakov.messenger.message.web.payload.MessageChangeKind.REMOVED, removed.kind)
+            assertEquals(reply.id, removed.messageId)
+            assertEquals(null, removed.message)
+            assertEquals(0, db.queryForObject("SELECT count(*) FROM messages WHERE id=?", Int::class.java, reply.id))
+            assertEquals(
+                0,
+                db.queryForObject(
+                    "SELECT count(*) FROM messenger_outbox_events WHERE payload->>'type'='history_changed' AND payload->>'chatId'=? AND (jsonb_exists(payload,'body') OR jsonb_exists(payload,'replyBody'))",
+                    Int::class.java,
+                    chat,
+                ),
             )
-            for (snapshot in snapshots) {
-                assertEquals("", snapshot.body)
-                assertNotNull(snapshot.deletedAt)
-                assertEquals(
-                    listOf(null, null, null, null, null),
-                    listOf(
-                        snapshot.replyToMessageId,
-                        snapshot.replySenderId,
-                        snapshot.replyBody,
-                        snapshot.replyDeleted,
-                        snapshot.replyVersion,
-                    ),
-                )
-            }
-            val events = db.queryForList(
-                "SELECT payload->>'replyToMessageId' AS reply_id, payload->>'replySenderId' AS reply_sender, payload->>'replyBody' AS reply_body, payload->>'replyDeleted' AS reply_deleted, payload->>'replyVersion' AS reply_version FROM messenger_outbox_events WHERE payload->>'type'='message_changed' AND payload->>'messageId'=?",
-                reply.id,
-            )
-            assertEquals(1, events.size)
-            assertEquals(listOf(null, null, null, null, null), events.single().values.toList())
         }
 
         @Test
@@ -212,9 +204,8 @@ class MessageFeatureTests
             assertEquals(SendRejectionReason.INVALID_REPLY_TARGET, history.status(UserId(member), RequestId(bad.requestId)).reason)
             assertEquals(listOf("1", "2", "3"), history.messages(ChatId(chat), UserId(member), null, null, 10).messages.map { it.sequence })
             assertEquals(target.id, history.messages(ChatId(chat), UserId(member), null, null, 10).messages.last().replyToMessageId)
-            assertThrows(RuntimeException::class.java) {
-                db.update("UPDATE messages SET reply_to_message_id=? WHERE id=?", foreign.id, target.id)
-            }
+            db.update("UPDATE messages SET reply_to_message_id=? WHERE id=?", foreign.id, target.id)
+            assertEquals(null, history.resolve(ChatId(chat), UserId(member), listOf(MessageId(target.id))).messages.single().replyBody)
         }
 
         @Test
@@ -273,7 +264,7 @@ class MessageFeatureTests
             assertEquals(emptyList<Any>(), reset.changes)
             val retained = history.changes(ChatId(chat), UserId(member), "1", 100)
             assertEquals(false, retained.resetRequired)
-            assertEquals("recent edit", retained.changes.single().message.body)
+            assertEquals("recent edit", retained.changes.single().message!!.body)
             assertEquals("recent edit", history.messages(ChatId(chat), UserId(member), null, null, 10).messages.single().body)
             assertEquals(true, history.changes(ChatId(chat), UserId(member), "99", 100).resetRequired)
         }
@@ -286,7 +277,7 @@ class MessageFeatureTests
             val target = send(owner, chat, "original")
             val constraint = "reject_${newId()}"
             db.execute(
-                "ALTER TABLE messenger_outbox_events ADD CONSTRAINT \"$constraint\" CHECK (payload->>'type' <> 'message_changed' OR payload->>'chatId' <> '$chat')",
+                "ALTER TABLE messenger_outbox_events ADD CONSTRAINT \"$constraint\" CHECK (payload->>'type' <> 'history_changed' OR payload->>'chatId' <> '$chat')",
             )
             try {
                 assertThrows(RuntimeException::class.java) {
@@ -311,7 +302,7 @@ class MessageFeatureTests
                 { mutations.delete(ChatId(chat), UserId(owner), MessageId(target.id), "1") },
             )
             val results = attempts.map { action ->
-                CompletableFuture.supplyAsync {
+                concurrently {
                     try {
                         action()
                         "saved"

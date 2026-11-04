@@ -8,6 +8,8 @@ import com.andrewtinyakov.messenger.message.web.payload.EditMessageRequest
 import com.andrewtinyakov.messenger.message.web.payload.MessageAroundResponse
 import com.andrewtinyakov.messenger.message.web.payload.MessageChangesResponse
 import com.andrewtinyakov.messenger.message.web.payload.MessageHistoryResponse
+import com.andrewtinyakov.messenger.message.web.payload.MessageResolveRequest
+import com.andrewtinyakov.messenger.message.web.payload.MessageResolveResponse
 import com.andrewtinyakov.messenger.message.web.payload.MessageResponse
 import com.andrewtinyakov.messenger.shared.id.ChatId
 import com.andrewtinyakov.messenger.shared.id.MessageId
@@ -16,6 +18,7 @@ import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PathVariable
+import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestAttribute
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
@@ -54,9 +57,31 @@ class MessageController(
     fun around(
         @RequestAttribute(AUTHENTICATED_SESSION_ATTRIBUTE) session: AuthenticatedSession,
         @PathVariable id: String,
-        @RequestParam messageId: String,
+        @RequestParam(required = false) messageId: String?,
+        @RequestParam(required = false) anchorSequence: String?,
         @RequestParam(defaultValue = "50") limit: Int,
-    ): MessageAroundResponse = messageHistoryService.around(ChatId(requireId(id)), session.userId, MessageId(requireId(messageId)), limit)
+    ): MessageAroundResponse = messageHistoryService.around(
+        ChatId(requireId(id)),
+        session.userId,
+        messageId?.let {
+            MessageId(requireId(it))
+        },
+        anchorSequence,
+        limit,
+    )
+
+    @PostMapping("/{id}/messages/resolve")
+    fun resolve(
+        @RequestAttribute(AUTHENTICATED_SESSION_ATTRIBUTE) session: AuthenticatedSession,
+        @PathVariable id: String,
+        @RequestBody input: MessageResolveRequest,
+    ): MessageResolveResponse = messageHistoryService.resolve(
+        ChatId(requireId(id)),
+        session.userId,
+        input.messageIds.map {
+            MessageId(requireId(it))
+        },
+    )
 
     @GetMapping("/{id}/messages/changes")
     fun changes(

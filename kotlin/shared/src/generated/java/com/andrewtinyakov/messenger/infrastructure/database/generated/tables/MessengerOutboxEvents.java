@@ -163,6 +163,7 @@ public class MessengerOutboxEvents extends TableImpl<MessengerOutboxEventsRecord
     @Override
     public List<Check<MessengerOutboxEventsRecord>> getChecks() {
         return Arrays.asList(
+            Internal.createCheck(this, DSL.name("messenger_outbox_bodyless"), "(((NOT (payload ? 'body'::text)) AND (NOT (payload ? 'replyBody'::text)))) NOT VALID", true),
             Internal.createCheck(this, DSL.name("messenger_outbox_events_attempts_check"), "((attempts >= 0))", true)
         );
     }

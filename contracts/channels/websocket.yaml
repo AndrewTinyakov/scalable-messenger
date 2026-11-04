@@ -53,3 +53,5 @@ socketFrames:
       $ref: ../messages.yaml#/messages/SocketUnwatchPresenceV1
     SocketPresenceV1:
       $ref: ../messages.yaml#/messages/SocketPresenceV1
+    SocketHistoryChangedV1:
+      $ref: ../messages.yaml#/messages/SocketHistoryChangedV1

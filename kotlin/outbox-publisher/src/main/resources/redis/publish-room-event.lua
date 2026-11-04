@@ -1,19 +1,22 @@
-assert(#KEYS == 4 and #ARGV == 2, 'invalid publication argument count')
+assert(#KEYS == 4 and #ARGV == 3, 'invalid publication argument count')
 
 local options = cjson.decode(ARGV[2])
 local event = cjson.decode(ARGV[1])
+local replay = cjson.decode(ARGV[3])
 assert(type(options) == 'table' and options.version == 1, 'unsupported publication arguments')
 assert(type(options.room) == 'string' and options.room ~= '', 'invalid publication room')
 assert(type(options.epoch) == 'string' and options.epoch ~= '', 'invalid publication epoch')
 assert(type(options.eventId) == 'string' and options.eventId ~= '', 'invalid publication identity')
 assert(type(options.historyMaxLength) == 'number' and options.historyMaxLength > 0
     and options.historyMaxLength % 1 == 0, 'invalid history length')
-assert(type(options.historyMaxBytes) == 'number' and options.historyMaxBytes >= #ARGV[1], 'invalid history byte budget')
+assert(type(options.historyMaxBytes) == 'number' and options.historyMaxBytes >= #ARGV[3], 'invalid history byte budget')
 assert(type(options.historySeconds) == 'number' and options.historySeconds > 0, 'invalid history window')
 assert(type(options.idleTtlSeconds) == 'number' and options.idleTtlSeconds > 0
     and options.idleTtlSeconds % 1 == 0, 'invalid idle TTL')
 assert(type(event) == 'table' and event.room == options.room, 'event room mismatch')
 assert(event.eventId == options.eventId, 'event identity mismatch')
+assert(type(replay) == 'table' and replay.room == options.room and replay.eventId == options.eventId, 'replay identity mismatch')
+assert(replay.body == nil and replay.replyBody == nil, 'replay content is forbidden')
 local order = options.groupPublicationOrder
 if order == cjson.null then order = nil end
 assert(not order or (type(order) == 'string' and string.match(order, '^[1-9]%d*$')), 'invalid publication order')
@@ -49,11 +52,11 @@ else
 end
 local streamId
 if order then
-    streamId = redis.call('XADD', KEYS[1], '*', 'event', ARGV[1], 'groupPublicationOrder', order)
+    streamId = redis.call('XADD', KEYS[1], '*', 'event', ARGV[3], 'groupPublicationOrder', order)
 else
-    streamId = redis.call('XADD', KEYS[1], '*', 'event', ARGV[1])
+    streamId = redis.call('XADD', KEYS[1], '*', 'event', ARGV[3])
 end
-historyBytes = historyBytes + #ARGV[1]
+historyBytes = historyBytes + #ARGV[3]
 local count = redis.call('XLEN', KEYS[1])
 local now = redis.call('TIME')
 local cutoff = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000) - options.historySeconds * 1000

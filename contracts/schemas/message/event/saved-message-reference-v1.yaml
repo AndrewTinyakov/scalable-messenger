@@ -1,0 +1,31 @@
+$schema: http://json-schema.org/draft-07/schema#
+title: SavedMessageReferenceV1
+type: object
+additionalProperties: false
+required:
+  - type
+  - version
+  - eventId
+  - room
+  - chatId
+  - requestId
+  - messageId
+  - sequence
+properties:
+  type:
+    const: message_saved
+  version:
+    type: integer
+    const: 1
+  eventId: &id
+    type: string
+    pattern: ^[0-7][0-9A-HJKMNP-TV-Z]{25}$
+  room:
+    type: string
+    pattern: ^(user|group):[0-7][0-9A-HJKMNP-TV-Z]{25}$
+  chatId: *id
+  requestId: *id
+  messageId: *id
+  sequence:
+    type: string
+    pattern: ^[1-9][0-9]{0,18}$

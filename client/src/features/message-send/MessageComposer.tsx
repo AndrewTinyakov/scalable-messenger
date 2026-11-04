@@ -108,8 +108,8 @@ export function MessageComposer({
             (edit ? setEditDraft : setDraft)([...event.target.value].slice(0, 4000).join(''))
           }
           onKeyDown={onKeyDown}
-          placeholder={connected ? 'Write a message…' : 'Waiting for connection…'}
-          disabled={!connected || saving}
+          placeholder={connected ? 'Write a message…' : 'Write a draft…'}
+          disabled={saving}
           rows={1}
           aria-label={edit ? 'Edit message' : 'Write a message'}
         />
@@ -128,7 +128,13 @@ export function MessageComposer({
         </p>
       )}
       <div className="composer-foot">
-        <span>{saving ? 'Saving your edit…' : 'Enter to send · Shift+Enter for a new line'}</span>
+        <span>
+          {saving
+            ? 'Saving your edit…'
+            : connected
+              ? 'Enter to send · Shift+Enter for a new line'
+              : 'You can send when reconnected'}
+        </span>
         {length > 0 && <span>{length}/4000</span>}
       </div>
     </div>

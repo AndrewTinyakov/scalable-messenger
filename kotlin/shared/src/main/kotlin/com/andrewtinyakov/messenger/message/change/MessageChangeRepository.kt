@@ -12,7 +12,10 @@ data class MutationCursor(
 
 data class MessageChange(
     val revision: Long,
-    val messageId: MessageId,
+    val messageId: MessageId?,
+    val kind: String = "UPSERT",
+    val sequence: Long? = null,
+    val clearedThroughSequence: Long? = null,
 )
 
 interface MessageChangeRepository {
@@ -20,7 +23,7 @@ interface MessageChangeRepository {
 
     fun changes(chatId: ChatId, afterRevision: Long, throughRevision: Long, limit: Int): List<MessageChange>
 
-    fun mutate(chatId: ChatId, messageId: MessageId, body: String, deleted: Boolean, now: OffsetDateTime): Long
+    fun mutate(chatId: ChatId, messageId: MessageId, body: String, now: OffsetDateTime): Long
 
     fun prune(before: OffsetDateTime, limit: Int): Int
 }

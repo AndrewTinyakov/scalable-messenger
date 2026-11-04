@@ -27,4 +27,5 @@ var RoomShapes = map[EventType]WireShape{
 	"message_changed":    {Required: []string{"type", "version", "eventId", "room", "chatId", "messageId", "sequence", "senderId", "body", "createdAt", "messageVersion", "mutationRevision"}, Optional: []string{"editedAt", "deletedAt", "replyToMessageId", "replySenderId", "replyBody", "replyDeleted", "replyVersion"}},
 	"chat_deleted":       {Required: []string{"type", "version", "eventId", "room", "chatId"}, Optional: []string{}},
 	"reads_changed":      {Required: []string{"type", "version", "eventId", "room", "chatId"}, Optional: []string{}},
+	"history_changed":    {Required: []string{"type", "version", "eventId", "room", "chatId", "sequence", "mutationRevision", "visibilityRevision"}, Optional: []string{}},
 }

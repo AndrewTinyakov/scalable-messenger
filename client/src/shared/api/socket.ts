@@ -69,6 +69,13 @@ type LiveEvent = { eventId: string; room: string; epoch: string; streamId: strin
 
 type MessageFields = Omit<Message, 'id'> & { messageId: string }
 export type SocketEvent = { version: 1 } & (
+  | ({
+      type: 'history_changed'
+      chatId: string
+      sequence: string
+      mutationRevision: string
+      visibilityRevision: string
+    } & LiveEvent)
   | ({ type: 'message_changed'; mutationRevision: string } & MessageFields & LiveEvent)
   | ({ type: 'chat_deleted' | 'reads_changed'; chatId: string } & LiveEvent)
   | {
@@ -129,6 +136,7 @@ const messageFields = [
   'replyVersion',
 ]
 const eventFields = {
+  history_changed: [...liveFields, 'chatId', 'sequence', 'mutationRevision', 'visibilityRevision'],
   message_changed: [...liveFields, ...messageFields, 'mutationRevision'],
   chat_deleted: [...liveFields, 'chatId'],
   reads_changed: [...liveFields, 'chatId'],
@@ -198,6 +206,14 @@ export function decodeSocketEvent(data: unknown): SocketEvent | null {
     isStreamId(frame.streamId)
   let valid = false
   switch (frame.type) {
+    case 'history_changed':
+      valid =
+        live &&
+        isId(frame.chatId) &&
+        isSequence(frame.sequence) &&
+        isSequence(frame.mutationRevision) &&
+        isSequence(frame.visibilityRevision)
+      break
     case 'presence':
       valid =
         isId(frame.chatId) &&

@@ -10,9 +10,13 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.enums.Chat
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.ChatMembers.ChatMembersPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.ChatReadNotifications.ChatReadNotificationsPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.ChatReadProgress.ChatReadProgressPath;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.DeletionOperations.DeletionOperationsPath;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.HiddenMessageRanges.HiddenMessageRangesPath;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.HistoryPurgeJobs.HistoryPurgeJobsPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.MessageChanges.MessageChangesPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Messages.MessagesPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Users.UsersPath;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.VisibilityCleanupJobs.VisibilityCleanupJobsPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.ChatsRecord;
 
 import java.time.OffsetDateTime;
@@ -124,6 +128,21 @@ public class Chats extends TableImpl<ChatsRecord> {
      * The column <code>public.chats.mutation_floor</code>.
      */
     public final TableField<ChatsRecord, Long> MUTATION_FLOOR = createField(DSL.name("mutation_floor"), SQLDataType.BIGINT.nullable(false).defaultValue(DSL.field(DSL.raw("0"), SQLDataType.BIGINT)), this, "");
+
+    /**
+     * The column <code>public.chats.cleared_through_sequence</code>.
+     */
+    public final TableField<ChatsRecord, Long> CLEARED_THROUGH_SEQUENCE = createField(DSL.name("cleared_through_sequence"), SQLDataType.BIGINT.nullable(false).defaultValue(DSL.field(DSL.raw("0"), SQLDataType.BIGINT)), this, "");
+
+    /**
+     * The column <code>public.chats.purged_through_sequence</code>.
+     */
+    public final TableField<ChatsRecord, Long> PURGED_THROUGH_SEQUENCE = createField(DSL.name("purged_through_sequence"), SQLDataType.BIGINT.nullable(false).defaultValue(DSL.field(DSL.raw("0"), SQLDataType.BIGINT)), this, "");
+
+    /**
+     * The column <code>public.chats.purged_rows</code>.
+     */
+    public final TableField<ChatsRecord, Long> PURGED_ROWS = createField(DSL.name("purged_rows"), SQLDataType.BIGINT.nullable(false).defaultValue(DSL.field(DSL.raw("0"), SQLDataType.BIGINT)), this, "");
 
     private Chats(Name alias, Table<ChatsRecord> aliased) {
         this(alias, aliased, (Field<?>[]) null, null);
@@ -272,6 +291,45 @@ public class Chats extends TableImpl<ChatsRecord> {
         return _chatReadProgress;
     }
 
+    private transient DeletionOperationsPath _deletionOperations;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.deletion_operations</code> table
+     */
+    public DeletionOperationsPath deletionOperations() {
+        if (_deletionOperations == null)
+            _deletionOperations = new DeletionOperationsPath(this, null, Keys.DELETION_OPERATIONS__DELETION_OPERATIONS_CHAT_ID_FKEY.getInverseKey());
+
+        return _deletionOperations;
+    }
+
+    private transient HiddenMessageRangesPath _hiddenMessageRanges;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.hidden_message_ranges</code> table
+     */
+    public HiddenMessageRangesPath hiddenMessageRanges() {
+        if (_hiddenMessageRanges == null)
+            _hiddenMessageRanges = new HiddenMessageRangesPath(this, null, Keys.HIDDEN_MESSAGE_RANGES__HIDDEN_MESSAGE_RANGES_CHAT_ID_FKEY.getInverseKey());
+
+        return _hiddenMessageRanges;
+    }
+
+    private transient HistoryPurgeJobsPath _historyPurgeJobs;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.history_purge_jobs</code> table
+     */
+    public HistoryPurgeJobsPath historyPurgeJobs() {
+        if (_historyPurgeJobs == null)
+            _historyPurgeJobs = new HistoryPurgeJobsPath(this, null, Keys.HISTORY_PURGE_JOBS__HISTORY_PURGE_JOBS_CHAT_ID_FKEY.getInverseKey());
+
+        return _historyPurgeJobs;
+    }
+
     private transient MessageChangesPath _messageChanges;
 
     /**
@@ -298,6 +356,19 @@ public class Chats extends TableImpl<ChatsRecord> {
         return _messages;
     }
 
+    private transient VisibilityCleanupJobsPath _visibilityCleanupJobs;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.visibility_cleanup_jobs</code> table
+     */
+    public VisibilityCleanupJobsPath visibilityCleanupJobs() {
+        if (_visibilityCleanupJobs == null)
+            _visibilityCleanupJobs = new VisibilityCleanupJobsPath(this, null, Keys.VISIBILITY_CLEANUP_JOBS__VISIBILITY_CLEANUP_JOBS_CHAT_ID_FKEY.getInverseKey());
+
+        return _visibilityCleanupJobs;
+    }
+
     /**
      * Get the implicit many-to-many join path to the <code>public.users</code>
      * table, via the <code>chat_members_user_id_fkey</code> key
@@ -314,14 +385,25 @@ public class Chats extends TableImpl<ChatsRecord> {
         return chatReadProgress().users();
     }
 
+    /**
+     * Get the implicit many-to-many join path to the <code>public.users</code>
+     * table, via the <code>visibility_cleanup_jobs_user_id_fkey</code> key
+     */
+    public UsersPath visibilityCleanupJobsUserIdFkey() {
+        return visibilityCleanupJobs().users();
+    }
+
     @Override
     public List<Check<ChatsRecord>> getChecks() {
         return Arrays.asList(
+            Internal.createCheck(this, DSL.name("chats_cleared_through_sequence_check"), "((cleared_through_sequence >= 0))", true),
             Internal.createCheck(this, DSL.name("chats_kind_shape"), "((((kind = 'DIRECT'::chat_kind) AND (name IS NULL) AND ((direct_pair_key IS NOT NULL) OR (deleted_at IS NOT NULL))) OR ((kind = 'GROUP'::chat_kind) AND (name IS NOT NULL) AND (direct_pair_key IS NULL))))", true),
             Internal.createCheck(this, DSL.name("chats_member_count_check"), "(((member_count >= 0) AND (member_count <= 100000)))", true),
             Internal.createCheck(this, DSL.name("chats_mutation_floor_check"), "((mutation_floor >= 0))", true),
             Internal.createCheck(this, DSL.name("chats_mutation_revision_check"), "((mutation_revision >= 0))", true),
-            Internal.createCheck(this, DSL.name("chats_next_sequence_check"), "((next_sequence > 0))", true)
+            Internal.createCheck(this, DSL.name("chats_next_sequence_check"), "((next_sequence > 0))", true),
+            Internal.createCheck(this, DSL.name("chats_purged_rows_check"), "((purged_rows >= 0))", true),
+            Internal.createCheck(this, DSL.name("chats_purged_through_sequence_check"), "((purged_through_sequence >= 0))", true)
         );
     }
 

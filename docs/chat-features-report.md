@@ -1,5 +1,7 @@
 # Chat features and performance verification
 
+This is the earlier feature verification record. The later [scoped deletion report](scoped-deletion-report.md) describes current deletion, message interactions and final verification.
+
 Implemented locally on 4 November 2026. The app runs at http://127.0.0.1:18080. Use that origin because the configured browser CORS origin is 127.0.0.1. The changes are recorded in local commits; no push or pull request was made. Benchmark logs, private test sessions and screenshots live outside the repository in `/tmp/messenger-features-1103`.
 
 ## Behavior and architecture

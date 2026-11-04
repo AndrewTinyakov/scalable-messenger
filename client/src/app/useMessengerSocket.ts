@@ -100,6 +100,7 @@ export function useMessengerSocket({
         void reconcilePending(true)
       },
       onEvent: (frame, socket) => {
+        if (frame.type === 'history_changed') void refreshChats(false, true)
         if (frame.type === 'message_changed') requests.revised(frame.messageId)
         if (onFeatureEvent(frame)) return
         if (frame.type === EventType.SUBSCRIBED && frame.chatId === selectedRef.current) {
@@ -121,7 +122,20 @@ export function useMessengerSocket({
         } else if (frame.type === EventType.QUEUED) {
           requests.queued(frame.requestId)
         } else if (frame.type === EventType.MESSAGE_SAVED) {
-          if (!listChats().some((item) => item.id === frame.chatId)) void refreshChats(false, true)
+          if (!listChats().some((item) => item.id === frame.chatId)) {
+            if (
+              frame.chatId === selectedRef.current ||
+              requests.list().some((send) => send.requestId === frame.requestId)
+            )
+              createdChatRef.current = frame.chatId
+            void refreshChats(false, true).then((list) => {
+              if (disposed || socketRef.current !== socket) return
+              const created = createdChatRef.current
+              createdChatRef.current = null
+              if (created && list.some((chat) => chat.id === created))
+                recovery.onChatCreated(created)
+            })
+          }
           void recovery.onLive(
             {
               id: frame.messageId,
@@ -150,6 +164,8 @@ export function useMessengerSocket({
               frame.sequence,
             )
             if (saved) selectResolvedDraft(saved)
+            if (!recovery.acceptsSaved(frame.chatId, frame.messageId, frame.sequence))
+              requests.revised(frame.messageId)
           }
         } else if (frame.type === EventType.SEND_REJECTED) {
           requests.rejected(frame.requestId, frame.reason)

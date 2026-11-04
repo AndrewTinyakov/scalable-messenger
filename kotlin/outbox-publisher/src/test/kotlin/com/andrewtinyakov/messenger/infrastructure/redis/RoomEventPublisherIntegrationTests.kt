@@ -39,6 +39,49 @@ class RoomEventPublisherIntegrationTests {
     private val publishers = mutableListOf<RoomEventPublisher>()
 
     @Test
+    fun `body-bearing replay is rejected before retained history changes`() {
+        withRedis { factory ->
+            val row = outboxEvent().let { it.copy(payload = it.payload.dropLast(1) + ",\"body\":\"content\"}") }
+            val failure = assertThrows(RuntimeException::class.java) {
+                roomPublisher(ReactiveStringRedisTemplate(factory)).publish(row)
+            }
+            assertTrue(
+                generateSequence<Throwable>(failure) {
+                    it.cause
+                }.any { it.message?.contains("replay content is forbidden") == true },
+            )
+            assertEquals(false, StringRedisTemplate(factory).hasKey("messenger:{${row.room}}:stream"))
+        }
+    }
+
+    @Test
+    fun `live content is published while replay retains only recovery metadata`() {
+        withRedis { factory ->
+            val room = "group:${newId()}"
+            val mapper = JsonMapper.builder().build()
+            val id = newId()
+            val hint = """{"type":"history_changed","version":1,"eventId":"$id","room":"$room","chatId":"${room.removePrefix(
+                "group:",
+            )}","sequence":"9","mutationRevision":"0","visibilityRevision":"0"}"""
+            val live = """{"type":"message_saved","eventId":"$id","room":"$room","body":"ephemeral message content"}"""
+            val row = OutboxMessage(EventId(id), room, live, replayPayload = hint)
+            val publisher = roomPublisher(ReactiveStringRedisTemplate(factory))
+            withLiveMessages(factory, room) { received ->
+                publisher.publish(row)
+                val envelope = mapper.readValue(received.poll(2, TimeUnit.SECONDS), Map::class.java)
+                assertEquals("ephemeral message content", (envelope["event"] as Map<*, *>)["body"])
+            }
+            val retained = StringRedisTemplate(factory).opsForStream<String, String>()
+                .range("messenger:{$room}:stream", Range.unbounded())!!
+            assertEquals(listOf(hint), retained.map { it.value["event"] })
+            assertEquals(
+                hint.toByteArray().size.toString(),
+                StringRedisTemplate(factory).opsForValue().get("messenger:{$room}:history-bytes"),
+            )
+        }
+    }
+
+    @Test
     fun `busy rooms retain a useful reconnect window beyond one thousand events`() {
         withRedis { factory ->
             val room = "group:test-${newId()}"
@@ -60,7 +103,7 @@ class RoomEventPublisherIntegrationTests {
             )
             val rows = List(6) {
                 val row = outboxEvent(room)
-                row.copy(payload = row.payload.dropLast(1) + ",\"body\":\"${"x".repeat(22000)}\"}")
+                row.copy(payload = row.payload.dropLast(1) + ",\"padding\":\"${"x".repeat(22000)}\"}")
             }
             rows.forEach(publisher::publish)
             val key = "messenger:{$room}:stream"
@@ -125,7 +168,7 @@ class RoomEventPublisherIntegrationTests {
     }
 
     @Test
-    fun `shared broker fixtures retain their JSON types in live and replay history`() {
+    fun `shared fixtures preserve live types and bodyless replay types`() {
         withRedis { factory ->
             val redis = StringRedisTemplate(factory)
             val mapper = JsonMapper.builder().build()
@@ -137,7 +180,23 @@ class RoomEventPublisherIntegrationTests {
                 val room = "${event.path("room").stringValue().substringBefore(':')}:${newId()}"
                 event.put("room", room)
                 val payload = mapper.writeValueAsString(event)
-                val message = OutboxMessage(EventId(event.path("eventId").stringValue()), room, payload)
+                val replay = if (event.path("type").stringValue() == "message_saved") {
+                    mapper.writeValueAsString(
+                        mapOf(
+                            "type" to "history_changed",
+                            "version" to 1,
+                            "eventId" to event.path("eventId").stringValue(),
+                            "room" to room,
+                            "chatId" to event.path("chatId").stringValue(),
+                            "sequence" to event.path("sequence").stringValue(),
+                            "mutationRevision" to "0",
+                            "visibilityRevision" to "0",
+                        ),
+                    )
+                } else {
+                    payload
+                }
+                val message = OutboxMessage(EventId(event.path("eventId").stringValue()), room, payload, replayPayload = replay)
 
                 withLiveMessages(factory, room) { messages ->
                     publisher.publish(message)
@@ -145,7 +204,7 @@ class RoomEventPublisherIntegrationTests {
                     val envelope = mapper.readTree(checkNotNull(messages.poll(3, TimeUnit.SECONDS)))
                     val history = redis.opsForStream<String, String>().range("messenger:{$room}:stream", Range.unbounded())!!
                     assertEquals(event, envelope.path("event"), name)
-                    assertEquals(listOf(payload), history.map { it.value["event"] }, name)
+                    assertEquals(listOf(replay), history.map { it.value["event"] }, name)
                     assertEquals(history.single().id.value, envelope.path("streamId").stringValue(), name)
                     assertEquals(redis.opsForValue().get("messenger:{$room}:epoch"), envelope.path("epoch").stringValue(), name)
                     assertEquals("", envelope.path("previousStreamId").stringValue(), name)

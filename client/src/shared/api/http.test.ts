@@ -13,6 +13,116 @@ afterEach(() => {
 })
 
 describe('HTTP transport', () => {
+  it('accepts certified sparse and empty history while rejecting inconsistent coverage', async () => {
+    const id = session.user.id
+    const row = {
+      id,
+      chatId: id,
+      senderId: id,
+      sequence: '8',
+      body: 'Visible',
+      createdAt: '2026-11-04T10:00:00Z',
+    }
+    const page = {
+      messages: [row],
+      nextSequence: '10',
+      hasMore: false,
+      mutationRevision: '2',
+      snapshotSequence: '10',
+      visibilityRevision: '1',
+      clearedThroughSequence: '3',
+      globalClearedThroughSequence: '0',
+      coverageAfterSequence: '3',
+      coverageThroughSequence: '10',
+    }
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json(page))
+    vi.stubGlobal('fetch', fetch)
+    await expect(authenticated.messages(id, '3')).resolves.toMatchObject(page)
+    fetch.mockResolvedValueOnce(Response.json({ ...page, messages: [] }))
+    await expect(authenticated.messages(id, '3')).resolves.toMatchObject({
+      messages: [],
+      nextSequence: '10',
+    })
+    for (const fields of [
+      { visibilityRevision: undefined },
+      { snapshotSequence: 10 },
+      { coverageAfterSequence: '11' },
+      { coverageThroughSequence: '7' },
+      { clearedThroughSequence: '8' },
+      { snapshotSequence: '9', coverageThroughSequence: '10' },
+      { messages: [row, row] },
+    ]) {
+      fetch.mockResolvedValueOnce(Response.json({ ...page, ...fields }))
+      await expect(authenticated.messages(id, '3')).rejects.toThrow('Invalid response from server')
+    }
+  })
+
+  it('uses the scoped authenticated deletion operation and validates its accepted identity', async () => {
+    const id = session.user.id
+    const result = {
+      operationId: id,
+      scope: 'SELF',
+      target: 'MESSAGES',
+      clearedThroughSequence: '0',
+      mutationRevision: '0',
+      visibilityRevision: '1',
+      state: 'COMPLETED',
+      deletedRows: '1',
+    }
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json(result))
+    vi.stubGlobal('fetch', fetch)
+    await expect(authenticated.delete(id, id, 'SELF', 'MESSAGES', [id])).resolves.toEqual(result)
+    expect(fetch.mock.calls[0][1]).toMatchObject({
+      method: 'POST',
+      body: JSON.stringify({ requestId: id, scope: 'SELF', target: 'MESSAGES', messageIds: [id] }),
+      headers: { 'X-Messenger-CSRF': '1' },
+    })
+    fetch.mockResolvedValueOnce(
+      Response.json({ ...result, operationId: '01ARZ3NDEKTSV4RRFFQ69G5FAW' }),
+    )
+    await expect(authenticated.delete(id, id, 'SELF', 'MESSAGES', [id])).rejects.toThrow(
+      'Invalid response from server',
+    )
+  })
+
+  it('resolves bounded viewer identities and rejects unsolicited rows', async () => {
+    const id = session.user.id
+    const snapshot = {
+      messages: [],
+      snapshotSequence: '10',
+      mutationRevision: '1',
+      visibilityRevision: '1',
+      clearedThroughSequence: '0',
+      globalClearedThroughSequence: '0',
+    }
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json(snapshot))
+    vi.stubGlobal('fetch', fetch)
+    await expect(authenticated.resolveMessages(id, [id])).resolves.toEqual(snapshot)
+    fetch.mockResolvedValueOnce(
+      Response.json({
+        ...snapshot,
+        messages: [
+          {
+            id: '01ARZ3NDEKTSV4RRFFQ69G5FAW',
+            chatId: id,
+            senderId: id,
+            sequence: '8',
+            body: 'Other row',
+            createdAt: '2026-11-04T10:00:00Z',
+          },
+        ],
+      }),
+    )
+    await expect(authenticated.resolveMessages(id, [id])).rejects.toThrow(
+      'Invalid response from server',
+    )
+    expect(() =>
+      authenticated.resolveMessages(
+        id,
+        Array.from({ length: 101 }, (_, index) => String(index)),
+      ),
+    ).toThrow('Choose at most 100 messages')
+  })
   it('loads the requested author and rejects a response for another user', async () => {
     const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json(session.user))
     vi.stubGlobal('fetch', fetch)

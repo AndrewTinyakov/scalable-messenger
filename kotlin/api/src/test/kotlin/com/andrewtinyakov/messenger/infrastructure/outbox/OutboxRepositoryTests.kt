@@ -13,7 +13,6 @@ import org.springframework.transaction.support.TransactionTemplate
 import java.sql.SQLException
 import java.time.Instant
 import java.time.OffsetDateTime
-import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
@@ -23,6 +22,17 @@ class OutboxRepositoryTests
         private val outboxRepository: OutboxRepository,
         private val tx: TransactionTemplate,
     ) : MessengerIntegrationTest() {
+        @Test
+        fun `durable outbox rejects message and quote content`() {
+            for (field in listOf("body", "replyBody")) {
+                val id = EventId(newId())
+                assertThrows(DataIntegrityViolationException::class.java) {
+                    outboxRepository.enqueue(listOf(OutboxMessage(id, "user:${newId()}", """{"$field":"retained content"}""")))
+                }
+                assertEquals(0, db.queryForObject("SELECT count(*) FROM messenger_outbox_events WHERE id=?", Int::class.java, id.value))
+            }
+        }
+
         @Test
         fun `expired group prefixes transfer ownership without changing publication order`() {
             val room = "group:${newId()}"
@@ -169,7 +179,7 @@ class OutboxRepositoryTests
             val now = OffsetDateTime.now()
             val locked = CountDownLatch(1)
             val release = CountDownLatch(1)
-            val first = CompletableFuture.supplyAsync {
+            val first = concurrently {
                 tx.execute {
                     val claimed = outboxRepository.claim(now = now, limit = 1, owner = "claim-first", leaseUntil = now.plusSeconds(30))
                     locked.countDown()
@@ -180,7 +190,7 @@ class OutboxRepositoryTests
 
             try {
                 assertTrue(locked.await(10, TimeUnit.SECONDS))
-                val second = CompletableFuture.supplyAsync {
+                val second = concurrently {
                     tx.execute {
                         outboxRepository.claim(now = now, limit = 2, owner = "claim-second", leaseUntil = now.plusSeconds(30))
                     }

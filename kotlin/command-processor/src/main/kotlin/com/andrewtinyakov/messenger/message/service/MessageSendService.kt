@@ -6,7 +6,7 @@ import com.andrewtinyakov.messenger.chat.model.ChatKind
 import com.andrewtinyakov.messenger.chat.repository.ChatRepository
 import com.andrewtinyakov.messenger.chat.service.DirectChatService
 import com.andrewtinyakov.messenger.generated.messaging.command.SendMessageCommandV1
-import com.andrewtinyakov.messenger.generated.messaging.event.MessageSavedEventV1
+import com.andrewtinyakov.messenger.generated.messaging.event.SavedMessageReferenceV1
 import com.andrewtinyakov.messenger.generated.messaging.event.SendRejectedEventV1
 import com.andrewtinyakov.messenger.generated.messaging.event.SendRejectionReason
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseTransaction
@@ -164,15 +164,11 @@ class MessageSendService(
                 chatRepository.existingMemberIds(chatId, requests.map { it.senderId }.distinct())
             }
             SendStageRecorder.requests(SendStage.MEMBERSHIP_CHECKED, requests) { it.requestId.value }
-            val replyTargets = if (members.isEmpty()) {
-                emptyMap()
-            } else {
-                repository.findMessagesByIds(
-                    chatId,
-                    members.first(),
-                    requests.mapNotNull { it.replyToMessageId }.distinct(),
-                ).filter { it.deletedAt == null }.associateBy { it.id }
-            }
+            val replyTargets = requests.filter { it.senderId in members && it.replyToMessageId != null }
+                .groupBy { it.senderId }.flatMap { (sender, sends) ->
+                    repository.findMessagesByIds(chatId, sender, sends.mapNotNull { it.replyToMessageId }.distinct())
+                        .filter { it.deletedAt == null }.map { (sender to it.id) to it }
+                }.toMap()
             val accepted = linkedMapOf<Pair<UserId, RequestId>, PreparedSend>()
             val results = requests.map { request ->
                 val key = request.senderId to request.requestId
@@ -203,7 +199,7 @@ class MessageSendService(
                             SendRejectionReason.NOT_A_MEMBER
                         }
 
-                        request.replyToMessageId != null && request.replyToMessageId !in replyTargets -> {
+                        request.replyToMessageId != null && (request.senderId to request.replyToMessageId) !in replyTargets -> {
                             SendRejectionReason.INVALID_REPLY_TARGET
                         }
 
@@ -240,7 +236,7 @@ class MessageSendService(
                         chat,
                         firstSequence + index,
                         rooms,
-                        replyTargets[prepared.request.replyToMessageId]?.asReply(),
+                        replyTargets[prepared.request.senderId to prepared.request.replyToMessageId]?.asReply(),
                     )
                 }
                 repository.insertSavedMessages(pending.map { it.saved })
@@ -365,22 +361,13 @@ class MessageSendService(
             ),
         )
         val events = rooms.map { room ->
-            MessageSavedEventV1.create(
+            SavedMessageReferenceV1.create(
                 eventId = newId(),
                 room = room,
                 chatId = chatId.value,
                 requestId = command.requestId.value,
                 messageId = messageId.value,
                 sequence = sequence.toString(),
-                senderId = command.senderId.value,
-                body = command.body,
-                createdAt = now,
-                messageVersion = message.messageVersion.toString(),
-                replyToMessageId = reply?.messageId?.value,
-                replySenderId = reply?.senderId?.value,
-                replyBody = reply?.body,
-                replyDeleted = reply?.deleted,
-                replyVersion = reply?.version?.toString(),
             )
         }
         if (SendStageRecorder.isEnabled) {

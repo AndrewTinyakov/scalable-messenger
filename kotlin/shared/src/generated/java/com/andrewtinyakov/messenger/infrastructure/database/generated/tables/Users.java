@@ -10,8 +10,11 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.Public;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.ChatMembers.ChatMembersPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.ChatReadProgress.ChatReadProgressPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Chats.ChatsPath;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.DeletionOperations.DeletionOperationsPath;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.HiddenMessageRanges.HiddenMessageRangesPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Messages.MessagesPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Sessions.SessionsPath;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.VisibilityCleanupJobs.VisibilityCleanupJobsPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.UsersRecord;
 
 import java.time.OffsetDateTime;
@@ -218,6 +221,32 @@ public class Users extends TableImpl<UsersRecord> {
         return _chatsOwnerIdFkey;
     }
 
+    private transient DeletionOperationsPath _deletionOperations;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.deletion_operations</code> table
+     */
+    public DeletionOperationsPath deletionOperations() {
+        if (_deletionOperations == null)
+            _deletionOperations = new DeletionOperationsPath(this, null, Keys.DELETION_OPERATIONS__DELETION_OPERATIONS_ACTOR_ID_FKEY.getInverseKey());
+
+        return _deletionOperations;
+    }
+
+    private transient HiddenMessageRangesPath _hiddenMessageRanges;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.hidden_message_ranges</code> table
+     */
+    public HiddenMessageRangesPath hiddenMessageRanges() {
+        if (_hiddenMessageRanges == null)
+            _hiddenMessageRanges = new HiddenMessageRangesPath(this, null, Keys.HIDDEN_MESSAGE_RANGES__HIDDEN_MESSAGE_RANGES_USER_ID_FKEY.getInverseKey());
+
+        return _hiddenMessageRanges;
+    }
+
     private transient MessagesPath _messages;
 
     /**
@@ -244,6 +273,19 @@ public class Users extends TableImpl<UsersRecord> {
         return _sessions;
     }
 
+    private transient VisibilityCleanupJobsPath _visibilityCleanupJobs;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.visibility_cleanup_jobs</code> table
+     */
+    public VisibilityCleanupJobsPath visibilityCleanupJobs() {
+        if (_visibilityCleanupJobs == null)
+            _visibilityCleanupJobs = new VisibilityCleanupJobsPath(this, null, Keys.VISIBILITY_CLEANUP_JOBS__VISIBILITY_CLEANUP_JOBS_USER_ID_FKEY.getInverseKey());
+
+        return _visibilityCleanupJobs;
+    }
+
     /**
      * Get the implicit many-to-many join path to the <code>public.chats</code>
      * table, via the <code>chat_members_chat_id_fkey</code> key
@@ -258,6 +300,14 @@ public class Users extends TableImpl<UsersRecord> {
      */
     public ChatsPath chatReadProgressChatIdFkey() {
         return chatReadProgress().chats();
+    }
+
+    /**
+     * Get the implicit many-to-many join path to the <code>public.chats</code>
+     * table, via the <code>visibility_cleanup_jobs_chat_id_fkey</code> key
+     */
+    public ChatsPath visibilityCleanupJobsChatIdFkey() {
+        return visibilityCleanupJobs().chats();
     }
 
     @Override

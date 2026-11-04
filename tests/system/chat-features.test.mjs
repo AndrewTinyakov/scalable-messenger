@@ -85,33 +85,41 @@ test('chat features preserve live state, human reads, mutation recovery and glob
 
   const reply = await saved(authorSocket, readerSocket, { chatId }, 'Reply text', first.messageId);
   assert.equal(reply.replyToMessageId, first.messageId);
-  assert.equal(reply.replyBody, first.body);
-  assert.equal(reply.replyDeleted, false);
+  assert.equal(Object.hasOwn(reply, 'replyBody'), false);
+  const resolvedReply = await api(`${base}/messages/resolve`, { cookie: reader.cookie, method: 'POST', body: { messageIds: [reply.messageId] } });
+  assert.equal(resolvedReply.messages[0].replyBody, first.body);
+  assert.equal(resolvedReply.messages[0].replyDeleted, false);
+  const editAt = readerSocket.frames.length;
   const edited = await api(`${base}/messages/${first.messageId}`, { cookie: author.cookie, method: 'PATCH', body: { body: 'Edited original', expectedVersion: '1' } });
   assert.equal(edited.messageVersion, '2');
-  await readerSocket.waitFor((frame) => frame.type === 'message_changed' && frame.messageId === first.messageId && frame.messageVersion === '2');
+  await readerSocket.waitFor((frame) => frame.type === 'history_changed' && frame.chatId === chatId && frame.mutationRevision === '1', 20000, editAt);
   assert.equal((await api(`${base}/messages`, { cookie: reader.cookie })).messages.find((message) => message.id === reply.messageId).replyBody, edited.body);
   assert.equal(await status(`${base}/messages/${first.messageId}`, reader.cookie, 'PATCH', { body: 'Foreign edit', expectedVersion: '2' }), 403);
   assert.equal(await status(`${base}/messages/${first.messageId}`, author.cookie, 'PATCH', { body: 'Stale edit', expectedVersion: '1' }), 409);
 
-  const deleted = await api(`${base}/messages/${first.messageId}?expectedVersion=2`, { cookie: author.cookie, method: 'DELETE' });
-  assert.equal(deleted.body, '');
-  assert.equal(deleted.messageVersion, '3');
-  await readerSocket.waitFor((frame) => frame.type === 'message_changed' && frame.messageId === first.messageId && frame.body === '' && frame.deletedAt);
-  const around = await api(`${base}/messages/around?messageId=${first.messageId}&limit=50`, { cookie: reader.cookie });
-  assert.equal(around.anchorMessageId, first.messageId);
-  assert.equal(around.messages[0].body, '');
+  const deletionAt = readerSocket.frames.length;
+  const deleted = await api(`${base}/deletions`, { cookie: author.cookie, method: 'POST', body: {
+    requestId: ulid(), scope: 'EVERYONE', target: 'MESSAGES', messageIds: [first.messageId],
+  } });
+  assert.equal(deleted.state, 'COMPLETED');
+  assert.equal(deleted.deletedRows, '1');
+  await readerSocket.waitFor((frame) => frame.type === 'history_changed' && frame.chatId === chatId && frame.mutationRevision === '2', 20000, deletionAt);
+  assert.equal(await status(`${base}/messages/around?messageId=${first.messageId}&limit=50`, reader.cookie), 404);
+  const around = await api(`${base}/messages/around?messageId=${reply.messageId}&limit=50`, { cookie: reader.cookie });
+  assert.equal(around.anchorMessageId, reply.messageId);
+  assert.equal(around.messages.some((message) => message.id === first.messageId), false);
   const currentReply = around.messages.find((message) => message.id === reply.messageId);
-  assert.equal(currentReply.replyDeleted, true);
-  assert.equal(currentReply.replyBody, '');
-  assert.equal((await api(`${base}/messages/${first.messageId}/reads`, { cookie: author.cookie })).detailsAvailable, false);
+  assert.equal(currentReply.replyToMessageId, first.messageId);
+  assert.equal(currentReply.replySenderId, null);
+  assert.equal(currentReply.replyBody, null);
+  assert.equal(await status(`${base}/messages/${first.messageId}/reads`, author.cookie), 404);
   const changes = await api(`${base}/messages/changes?afterRevision=0&limit=100`, { cookie: reader.cookie });
   assert.deepEqual(changes.changes.map((change) => change.revision), ['1', '2']);
-  assert.ok(changes.changes.every((change) => change.message.deletedAt && change.message.messageVersion === '3'));
+  assert.ok(changes.changes.every((change) => change.kind === 'REMOVED' && change.messageId === first.messageId && change.message === null));
   const invalidRequest = ulid();
   authorSocket.send({ type: 'send', chatId, requestId: invalidRequest, body: 'Deleted target', replyToMessageId: first.messageId });
   await authorSocket.waitFor((frame) => frame.type === 'send_rejected' && frame.requestId === invalidRequest && frame.reason === 'INVALID_REPLY_TARGET');
-  assert.equal((await api(`${base}/messages`, { cookie: author.cookie })).messages.length, 2);
+  assert.equal((await api(`${base}/messages`, { cookie: author.cookie })).messages.length, 1);
 
   await api(base, { cookie: reader.cookie, method: 'DELETE' });
   await authorSocket.waitFor((frame) => frame.type === 'chat_deleted' && frame.chatId === chatId);

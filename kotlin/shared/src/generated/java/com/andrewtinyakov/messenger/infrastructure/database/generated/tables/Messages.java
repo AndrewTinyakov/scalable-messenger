@@ -7,7 +7,6 @@ package com.andrewtinyakov.messenger.infrastructure.database.generated.tables;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Keys;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Public;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Chats.ChatsPath;
-import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.MessageChanges.MessageChangesPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Users.UsersPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.MessagesRecord;
 
@@ -190,7 +189,7 @@ public class Messages extends TableImpl<MessagesRecord> {
 
     @Override
     public List<ForeignKey<MessagesRecord, ?>> getReferences() {
-        return Arrays.asList(Keys.MESSAGES__MESSAGES_CHAT_ID_FKEY, Keys.MESSAGES__MESSAGES_REPLY_SAME_CHAT, Keys.MESSAGES__MESSAGES_SENDER_ID_FKEY);
+        return Arrays.asList(Keys.MESSAGES__MESSAGES_CHAT_ID_FKEY, Keys.MESSAGES__MESSAGES_SENDER_ID_FKEY);
     }
 
     private transient ChatsPath _chats;
@@ -205,18 +204,6 @@ public class Messages extends TableImpl<MessagesRecord> {
         return _chats;
     }
 
-    private transient MessagesPath _messages;
-
-    /**
-     * Get the implicit join path to the <code>public.messages</code> table.
-     */
-    public MessagesPath messages() {
-        if (_messages == null)
-            _messages = new MessagesPath(this, Keys.MESSAGES__MESSAGES_REPLY_SAME_CHAT, null);
-
-        return _messages;
-    }
-
     private transient UsersPath _users;
 
     /**
@@ -227,19 +214,6 @@ public class Messages extends TableImpl<MessagesRecord> {
             _users = new UsersPath(this, Keys.MESSAGES__MESSAGES_SENDER_ID_FKEY, null);
 
         return _users;
-    }
-
-    private transient MessageChangesPath _messageChanges;
-
-    /**
-     * Get the implicit to-many join path to the
-     * <code>public.message_changes</code> table
-     */
-    public MessageChangesPath messageChanges() {
-        if (_messageChanges == null)
-            _messageChanges = new MessageChangesPath(this, null, Keys.MESSAGE_CHANGES__MESSAGE_CHANGES_CHAT_ID_MESSAGE_ID_FKEY.getInverseKey());
-
-        return _messageChanges;
     }
 
     @Override

@@ -3,6 +3,7 @@ import type { Chat } from '../entities/chat/model'
 import type { ChatRecovery } from '../entities/message/chatRecovery'
 import { hasUnresolvedGap } from '../entities/message/historyWindow'
 import type { SendRequests } from '../entities/message/sendRequests'
+import { isNetworkOnline } from '../shared/lib/network'
 
 interface MessengerFocusOptions {
   recovery: ChatRecovery
@@ -37,7 +38,7 @@ export function useMessengerFocus({
 }: MessengerFocusOptions) {
   useEffect(() => {
     const onFocus = () => {
-      if (focusRequestRef.current) return
+      if (!isNetworkOnline() || focusRequestRef.current) return
       const chatId = selectedRef.current
       const needsRecovery =
         socketRef.current?.readyState !== WebSocket.OPEN ||

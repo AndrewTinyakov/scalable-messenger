@@ -62,6 +62,15 @@ export class Driver {
         if (event.deletedAt) this.check(event.body === '', 'Tombstone leaked body');
       }
     }
+    if (event.type === 'history_changed') {
+      this.check(decimal(event.sequence) && decimal(event.mutationRevision) && decimal(event.visibilityRevision), 'Invalid history hint');
+      for (const expected of this.expectedMutations.values()) {
+        if (expected.chatId === event.chatId && decimal(event.mutationRevision) && BigInt(event.mutationRevision) >= BigInt(expected.revision)) {
+          expected.observed.add(socket.index);
+          if (recovered) this.metrics.count('mutation.recoveredNotification');
+        }
+      }
+    }
     if (event.type !== 'message_saved') return;
     const record = this.records.get(event.requestId) ?? this.byMessage.get(event.messageId ?? event.id);
     if (!record) return;
@@ -154,13 +163,20 @@ export class Driver {
       const expectedVersion = target.version;
       const operation = deleting ? 'delete' : 'edit';
       const version = (BigInt(expectedVersion) + 1n).toString();
-      const expected = { version, observed: new Set() };
+      const revision = (BigInt(chat.currentMutationRevision ?? chat.mutationBaseline) + 1n).toString();
+      const expected = { version, revision, chatId: chat.id, observed: new Set() };
       this.expectedMutations.set(target.id, expected);
-      const message = await this.http.request(this.sockets[target.sender].session, `/chats/${chat.id}/messages/${target.id}${deleting ? `?expectedVersion=${expectedVersion}` : ''}`, { method: deleting ? 'DELETE' : 'PATCH', operation, body: deleting ? undefined : { expectedVersion, body: `Edited version ${version}` } });
-      this.check(message.id === target.id && message.messageVersion === version && (deleting ? message.body === '' && timestamp(message.deletedAt) : timestamp(message.editedAt)), 'Mutation response version/body/timestamp mismatch');
-      target.version = message.messageVersion;
+      if (deleting) {
+        const deletion = await this.http.request(this.sockets[target.sender].session, `/chats/${chat.id}/deletions`, { method: 'POST', operation, body: { requestId: ulid(), scope: 'EVERYONE', target: 'MESSAGES', messageIds: [target.id] } });
+        this.check(deletion.state === 'COMPLETED' && deletion.deletedRows === '1' && deletion.mutationRevision === revision, 'Message removal did not complete');
+      } else {
+        const message = await this.http.request(this.sockets[target.sender].session, `/chats/${chat.id}/messages/${target.id}`, { method: 'PATCH', operation, body: { expectedVersion, body: `Edited version ${version}` } });
+        this.check(message.id === target.id && message.messageVersion === version && timestamp(message.editedAt), 'Mutation response version/body/timestamp mismatch');
+      }
+      target.version = version;
+      chat.currentMutationRevision = revision;
       target.deleted = deleting;
-      await this.http.request(this.sockets[target.sender].session, `/chats/${chat.id}/messages/${target.id}`, { method: 'PATCH', operation: 'staleEdit', expect: [409], body: { body: 'stale', expectedVersion } });
+      await this.http.request(this.sockets[target.sender].session, `/chats/${chat.id}/messages/${target.id}`, { method: 'PATCH', operation: 'staleEdit', expect: deleting ? [404] : [409], body: { body: 'stale', expectedVersion } });
     } finally { target.busy = false; }
   }
   async lookup(chat, index) {
@@ -204,21 +220,33 @@ export class Driver {
       for (let pageIndex = 0; pageIndex < 200; pageIndex++) {
         const page = await this.http.request(socket.session, `/chats/${chat.id}/messages/changes?afterRevision=${revision}&limit=100`, { operation: 'mutationRecovery' });
         if (page.resetRequired) throw new Error('Mutation recovery reset required during bounded run');
-        for (const change of page.changes) this.receive(socket, { ...change.message, messageId: change.message.id, type: 'message_changed', mutationRevision: change.revision }, performance.now(), true);
+        for (const change of page.changes) {
+          if (change.kind === 'UPSERT') {
+            this.check(Boolean(change.message), 'Upsert change omitted its message');
+            if (change.message) this.receive(socket, { ...change.message, messageId: change.message.id, type: 'message_changed', mutationRevision: change.revision }, performance.now(), true);
+          } else if (change.kind === 'REMOVED') {
+            const expected = this.expectedMutations.get(change.messageId);
+            this.check(change.message === null && decimal(change.sequence), 'Removed change retained content or omitted sequence');
+            if (expected && BigInt(change.revision) >= BigInt(expected.revision)) expected.observed.add(socket.index);
+          } else this.check(false, 'Unexpected clear in preserved benchmark history');
+        }
         if (page.nextRevision === page.lastRevision) break;
         if (BigInt(page.nextRevision) <= BigInt(revision) || pageIndex === 199) throw new Error('Mutation recovery did not advance within bounded pages');
         revision = page.nextRevision;
       }
       let sequence = chat.baseline;
       for (let pageIndex = 0; pageIndex < 200; pageIndex++) {
+        const requestedSequence = sequence;
         const page = await this.http.request(socket.session, `/chats/${chat.id}/messages?afterSeq=${sequence}&limit=100`, { operation: 'recovery' });
         for (const message of page.messages) {
           this.check(BigInt(message.sequence) > BigInt(sequence), 'Recovery sequence did not advance');
           sequence = message.sequence;
           this.receive(socket, { ...message, messageId: message.id, type: 'message_saved' }, performance.now(), true);
         }
+        this.check(decimal(page.nextSequence) && page.coverageAfterSequence === requestedSequence && page.coverageThroughSequence === page.nextSequence && BigInt(page.nextSequence) >= BigInt(sequence), 'Invalid sparse recovery coverage');
+        sequence = page.nextSequence;
         if (!page.hasMore) break;
-        if (pageIndex === 199 || !page.messages.length) throw new Error('Recovery exceeded bounded pages');
+        if (pageIndex === 199 || BigInt(sequence) <= BigInt(requestedSequence)) throw new Error('Recovery exceeded bounded pages or stopped advancing');
       }
     }
   }
@@ -349,9 +377,9 @@ export class Driver {
     }
     for (const [messageId, expected] of this.expectedMutations) {
       const chat = this.chats.find(chat => chat.mutable.id === messageId);
-      const page = await this.http.request(this.sockets[chat.members[0]].session, `/chats/${chat.id}/messages/around?messageId=${messageId}&limit=1`, { operation: 'mutationVerify' });
+      const page = await this.http.request(this.sockets[chat.members[0]].session, `/chats/${chat.id}/messages/resolve`, { method: 'POST', body: { messageIds: [messageId] }, operation: 'mutationVerify' });
       const message = page.messages.find(message => message.id === messageId);
-      this.check(message?.messageVersion === expected.version && (!chat.mutable.deleted || message.body === '' && timestamp(message.deletedAt)), 'Final durable mutation version mismatch');
+      this.check(chat.mutable.deleted ? message === undefined : message?.messageVersion === expected.version, 'Final durable mutation version/removal mismatch');
       this.metrics.count('mutation.missingLiveNotification', chat.members.length - expected.observed.size);
     }
   }

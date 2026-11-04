@@ -34,23 +34,28 @@ class JooqMessageChangeRepository(
 
     override fun changes(chatId: ChatId, afterRevision: Long, throughRevision: Long, limit: Int): List<MessageChange> =
         DatabaseObservation.query(DatabaseOperation.MESSAGE_CHANGE_PAGE) {
-            db.select(MESSAGE_CHANGES.REVISION, MESSAGE_CHANGES.MESSAGE_ID).from(MESSAGE_CHANGES)
+            db.select(
+                MESSAGE_CHANGES.REVISION,
+                MESSAGE_CHANGES.MESSAGE_ID,
+                MESSAGE_CHANGES.KIND,
+                MESSAGE_CHANGES.SEQUENCE,
+                MESSAGE_CHANGES.CLEARED_THROUGH_SEQUENCE,
+            ).from(MESSAGE_CHANGES)
                 .where(
                     MESSAGE_CHANGES.CHAT_ID.eq(chatId.value),
                     MESSAGE_CHANGES.REVISION.gt(afterRevision),
                     MESSAGE_CHANGES.REVISION.le(throughRevision),
                 )
                 .orderBy(MESSAGE_CHANGES.REVISION).limit(limit)
-                .fetch { MessageChange(it.value1()!!, MessageId(it.value2()!!)) }
+                .fetch { MessageChange(it.value1()!!, it.value2()?.let(::MessageId), it.value3()!!, it.value4(), it.value5()) }
         }
 
-    override fun mutate(chatId: ChatId, messageId: MessageId, body: String, deleted: Boolean, now: OffsetDateTime): Long =
+    override fun mutate(chatId: ChatId, messageId: MessageId, body: String, now: OffsetDateTime): Long =
         DatabaseObservation.query(DatabaseOperation.MESSAGE_MUTATE) {
             check(
                 db.update(MESSAGES).set(MESSAGES.BODY, body)
                     .set(MESSAGES.MESSAGE_VERSION, MESSAGES.MESSAGE_VERSION.plus(1L))
-                    .set(MESSAGES.EDITED_AT, if (deleted) MESSAGES.EDITED_AT else DSL.`val`(now))
-                    .set(MESSAGES.DELETED_AT, if (deleted) now else null)
+                    .set(MESSAGES.EDITED_AT, now)
                     .where(MESSAGES.CHAT_ID.eq(chatId.value), MESSAGES.ID.eq(messageId.value)).execute() == 1,
             )
             val revision = db.update(CHATS).set(CHATS.MUTATION_REVISION, CHATS.MUTATION_REVISION.plus(1L))
@@ -59,6 +64,10 @@ class JooqMessageChangeRepository(
             check(
                 db.insertInto(MESSAGE_CHANGES).set(MESSAGE_CHANGES.CHAT_ID, chatId.value)
                     .set(MESSAGE_CHANGES.REVISION, revision).set(MESSAGE_CHANGES.MESSAGE_ID, messageId.value)
+                    .set(
+                        MESSAGE_CHANGES.SEQUENCE,
+                        DSL.field(db.select(MESSAGES.SEQUENCE).from(MESSAGES).where(MESSAGES.ID.eq(messageId.value))),
+                    )
                     .set(MESSAGE_CHANGES.CHANGED_AT, now).execute() == 1,
             )
             revision

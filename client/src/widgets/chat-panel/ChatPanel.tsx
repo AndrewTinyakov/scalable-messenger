@@ -1,16 +1,23 @@
-import { ArrowDown, MessageSquare } from 'lucide-react'
+import { ArrowDown, MessageSquare, Trash2, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { Chat } from '../../entities/chat/model'
+import type { DeleteScope } from '../../entities/message/historySnapshot'
 import { MessageItem } from '../../entities/message/MessageItem'
 import type { Message, PendingSend } from '../../entities/message/model'
+import type { ReadingLocation } from '../../entities/message/readingLocation'
 import type { User } from '../../entities/session/model'
-import { DeleteConfirmation } from '../../features/conversation/DeleteConfirmation'
-import { ReaderDialog } from '../../features/conversation/ReaderDialog'
+import {
+  DeleteConfirmation,
+  type DeletionTarget,
+} from '../../features/conversation/DeleteConfirmation'
+import { MessageActionMenu } from '../../features/conversation/MessageActionMenu'
 import type { useConversationFeatures } from '../../features/conversation/useConversationFeatures'
 import { MessageComposer } from '../../features/message-send/MessageComposer'
 import { ChatKind } from '../../shared/api/generated/socket-vocabulary'
 import { ChatHeader } from './ChatHeader'
 import { messageEntries } from './messageEntries'
+import { sameMessageRun } from './messageGrouping'
+import { useMessageSelection } from './useMessageSelection'
 import { useMessageViewport } from './useMessageViewport'
 import { useSenderNames } from './useSenderNames'
 
@@ -23,7 +30,6 @@ interface Props {
   onSend: (chatId: string, body: string, replyToMessageId?: string) => boolean
   features?: ReturnType<typeof useConversationFeatures>
   detached?: boolean
-  onDeleteChat?: (chatId: string) => Promise<void>
   onRetry: (requestId: string) => void
   onBack: () => void
   onNew: () => void
@@ -39,13 +45,15 @@ interface Props {
   onJumpToLatest: () => void
   jumpRevision: number
   onViewPositionChange: (atLatest: boolean) => void
+  readingLocation?: ReadingLocation
+  locationRevision?: number
+  onLocationChange?: (chatId: string, location: ReadingLocation) => void
 }
 
 export function ChatPanel({
   chat,
   features,
   detached = false,
-  onDeleteChat,
   currentUser,
   messages,
   pending,
@@ -66,14 +74,22 @@ export function ChatPanel({
   onJumpToLatest,
   jumpRevision,
   onViewPositionChange,
+  readingLocation,
+  locationRevision = 0,
+  onLocationChange,
 }: Props) {
   const senderNames = useSenderNames(chat, messages, lookupUser)
   const [reply, setReply] = useState<Message | undefined>()
   const [edit, setEdit] = useState<Message | undefined>()
-  const [confirm, setConfirm] = useState<Message | 'chat' | null>(null)
-  const [readers, setReaders] = useState<Message | null>(null)
+  const [confirm, setConfirm] = useState<DeletionTarget | null>(null)
+  const [popup, setPopup] = useState<{
+    messageId: string
+    anchor: HTMLElement
+    keyboard: boolean
+  } | null>(null)
   const [busy, setBusy] = useState(false)
   const busyRef = useRef(false)
+  const actionGeneration = useRef(0)
   const [actionError, setActionError] = useState<string | null>(null)
   const [announcement, setAnnouncement] = useState('')
   const recipient =
@@ -92,7 +108,10 @@ export function ChatPanel({
     setReply(undefined)
     setEdit(undefined)
     setConfirm(null)
-    setReaders(null)
+    setPopup(null)
+    actionGeneration.current += 1
+    busyRef.current = false
+    setBusy(false)
     setActionError(null)
   }, [modeKey])
   useEffect(() => {
@@ -108,6 +127,31 @@ export function ChatPanel({
       setAnnouncement('The message you were editing was deleted.')
     }
   }, [messages, reply, edit])
+
+  useEffect(() => {
+    const resolve = features?.resolveTarget
+    if (!resolve) return
+    let cancelled = false
+    for (const target of [reply, edit]) {
+      if (!target) continue
+      void resolve(target.id)
+        .then((current) => {
+          if (cancelled) return
+          if (!current) {
+            setReply((previous) => (previous?.id === target.id ? undefined : previous))
+            setEdit((previous) => (previous?.id === target.id ? undefined : previous))
+            setAnnouncement('This message is no longer available.')
+          } else {
+            setReply((previous) => (previous?.id === target.id ? current : previous))
+            setEdit((previous) => (previous?.id === target.id ? current : previous))
+          }
+        })
+        .catch(() => {})
+    }
+    return () => {
+      cancelled = true
+    }
+  }, [reply?.id, edit?.id, features?.revisionKey, features?.resolveTarget])
 
   const { scrollRef, highlight, rememberAnchor, handleScroll } = useMessageViewport({
     chatId: chat?.id,
@@ -126,26 +170,50 @@ export function ChatPanel({
     onLoadNewer,
     onViewPositionChange,
     announce: setAnnouncement,
+    readingLocation,
+    locationRevision,
+    onLocationChange,
   })
 
-  async function confirmDelete() {
+  const selection = useMessageSelection(scrollRef, messages, chat?.id)
+  useEffect(() => {
+    if (selection.enabled) setPopup(null)
+  }, [selection.enabled])
+  const popupMessage = popup
+    ? messages.find((message) => message.id === popup.messageId && !message.deletedAt)
+    : undefined
+
+  function beginReply(target: Message) {
+    setPopup(null)
+    setEdit(undefined)
+    setReply(target)
+  }
+
+  async function confirmDelete(scope: DeleteScope) {
     if (!confirm || !chat || busyRef.current) return
     busyRef.current = true
+    const generation = ++actionGeneration.current
     setBusy(true)
     setActionError(null)
     try {
-      if (confirm === 'chat') await onDeleteChat?.(chat.id)
-      else await features?.deleteMessage(confirm)
-      if (active.current) {
+      if (confirm.kind === 'chat') await features?.deleteChat(scope)
+      else if (confirm.kind === 'history') await features?.clearHistory(scope)
+      else await features?.deleteMessages(confirm.messages, scope)
+      if (active.current && generation === actionGeneration.current) {
         setConfirm(null)
-        setAnnouncement(confirm === 'chat' ? 'Chat deleted for everyone.' : 'Message deleted.')
+        selection.clear()
+        setAnnouncement(
+          `${confirm.kind === 'chat' ? 'Chat deleted' : confirm.kind === 'history' ? 'History cleared' : 'Messages deleted'} for ${scope === 'SELF' ? 'you' : 'everyone'}.`,
+        )
       }
     } catch (cause) {
-      if (active.current)
+      if (active.current && generation === actionGeneration.current)
         setActionError(cause instanceof Error ? cause.message : 'Could not delete')
     } finally {
-      busyRef.current = false
-      if (active.current) setBusy(false)
+      if (active.current && generation === actionGeneration.current) {
+        busyRef.current = false
+        setBusy(false)
+      }
     }
   }
 
@@ -172,10 +240,20 @@ export function ChatPanel({
         onBack={onBack}
         onMembers={onMembers}
         onDelete={
-          onDeleteChat
+          features
             ? () => {
-                setConfirm('chat')
+                setConfirm({ kind: 'chat' })
                 setActionError(null)
+                setPopup(null)
+              }
+            : undefined
+        }
+        onClear={
+          features
+            ? () => {
+                setConfirm({ kind: 'history' })
+                setActionError(null)
+                setPopup(null)
               }
             : undefined
         }
@@ -187,6 +265,7 @@ export function ChatPanel({
         onScroll={handleScroll}
         role="region"
         aria-label="Messages"
+        {...selection.handlers}
       >
         <div className="chat-body-inner">
           {hasOlder && (
@@ -201,7 +280,7 @@ export function ChatPanel({
               {loadingOlder ? 'Loading…' : 'Load earlier messages'}
             </button>
           )}
-          {entries.map(({ key, message, send }) => {
+          {entries.map(({ key, message, send }, index) => {
             const mine = Boolean(send || message?.senderId === currentUser.id)
             const sender = send
               ? currentUser.username
@@ -220,31 +299,17 @@ export function ChatPanel({
                   message &&
                   BigInt(message.sequence) <= BigInt(features?.summary.maxOtherReadSequence ?? '0'),
                 )}
-                onReaders={features ? setReaders : undefined}
-                onReply={
-                  features
-                    ? (target) => {
-                        setEdit(undefined)
-                        setReply(target)
-                      }
+                onActions={
+                  features && !selection.enabled
+                    ? (target, anchor, keyboard) =>
+                        setPopup({ messageId: target.id, anchor, keyboard })
                     : undefined
                 }
-                onEdit={
-                  features
-                    ? (target) => {
-                        setReply(undefined)
-                        setEdit(target)
-                      }
-                    : undefined
-                }
-                onDelete={
-                  features
-                    ? (target) => {
-                        setConfirm(target)
-                        setActionError(null)
-                      }
-                    : undefined
-                }
+                onReply={features ? beginReply : undefined}
+                runStart={!sameMessageRun(entries[index - 1], entries[index], currentUser.id)}
+                runEnd={!sameMessageRun(entries[index], entries[index + 1], currentUser.id)}
+                selectionMode={selection.enabled}
+                selected={Boolean(message && selection.selected.has(message.id))}
                 onQuote={features?.jumpToMessage}
                 quoteSender={
                   message?.replySenderId === currentUser.id
@@ -291,44 +356,94 @@ export function ChatPanel({
       <span className="visually-hidden" role="status" aria-live="polite">
         {announcement}
       </span>
-      <MessageComposer
-        key={modeKey}
-        chatId={chat.id}
-        connected={connection === 'connected'}
-        onSend={onSend}
-        reply={
-          reply
-            ? {
-                message: reply,
-                sender:
-                  reply.senderId === currentUser.id
-                    ? currentUser.username
-                    : (senderNames.get(reply.senderId) ?? 'Member'),
-              }
-            : undefined
-        }
-        edit={edit}
-        onCancelMode={() => {
-          setReply(undefined)
-          setEdit(undefined)
-        }}
-        onSave={features?.editMessage}
-      />
+      {selection.enabled && (
+        <div className="message-selection-toolbar" aria-label="Selected messages">
+          <button
+            className="icon-button"
+            aria-label="Cancel selection"
+            onClick={() => selection.clear()}
+          >
+            <X size={19} />
+          </button>
+          <span role="status">
+            {selection.selected.size} selected <small>of 100 maximum</small>
+          </span>
+          <button
+            className="button button-danger"
+            disabled={!selection.selected.size}
+            onClick={() => {
+              setConfirm({ kind: 'messages', messages: [...selection.selected.values()] })
+              setActionError(null)
+            }}
+          >
+            <Trash2 size={15} />
+            Delete
+          </button>
+        </div>
+      )}
+      <div className="chat-composer-region" hidden={selection.enabled}>
+        <MessageComposer
+          key={modeKey}
+          chatId={chat.id}
+          connected={connection === 'connected'}
+          onSend={onSend}
+          reply={
+            reply
+              ? {
+                  message: reply,
+                  sender:
+                    reply.senderId === currentUser.id
+                      ? currentUser.username
+                      : (senderNames.get(reply.senderId) ?? 'Member'),
+                }
+              : undefined
+          }
+          edit={edit}
+          onCancelMode={() => {
+            setReply(undefined)
+            setEdit(undefined)
+          }}
+          onSave={features?.editMessage}
+        />
+      </div>
       {confirm && (
         <DeleteConfirmation
+          key={confirm.kind}
           target={confirm}
+          canDeleteEveryone={
+            chat.kind === ChatKind.DIRECT ||
+            chat.ownerId === currentUser.id ||
+            (confirm.kind === 'messages' &&
+              confirm.messages.every((message) => message.senderId === currentUser.id))
+          }
           busy={busy}
           error={actionError}
           onCancel={() => setConfirm(null)}
-          onConfirm={() => void confirmDelete()}
+          onConfirm={(scope) => void confirmDelete(scope)}
         />
       )}
-      {readers && features && (
-        <ReaderDialog
-          key={readers.id}
-          message={messages.find((message) => message.id === readers.id) ?? readers}
-          load={features.readers}
-          onClose={() => setReaders(null)}
+      {popup && popupMessage && features && !selection.enabled && (
+        <MessageActionMenu
+          message={popupMessage}
+          anchor={popup.anchor}
+          keyboard={popup.keyboard}
+          mine={popupMessage.senderId === currentUser.id}
+          readers={features.readers}
+          onReply={() => beginReply(popupMessage)}
+          onEdit={
+            popupMessage.senderId === currentUser.id
+              ? () => {
+                  setReply(undefined)
+                  setEdit(popupMessage)
+                }
+              : undefined
+          }
+          onDelete={() => {
+            setConfirm({ kind: 'messages', messages: [popupMessage] })
+            setActionError(null)
+          }}
+          onSelect={() => selection.start(popupMessage)}
+          onClose={() => setPopup(null)}
         />
       )}
     </section>

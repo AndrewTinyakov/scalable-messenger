@@ -7,7 +7,7 @@ export type ConnectionState = 'connecting' | 'connected' | 'offline'
 
 export interface SocketConnectionOptions {
   url: string
-  ticket(): Promise<{ token: string; expiresAt: number }>
+  ticket(signal: AbortSignal): Promise<{ token: string; expiresAt: number }>
   onRetryScheduled?(nextRetryAt: number | null): void
   onState(state: ConnectionState): void
   onOpen(socket: WebSocket): void
@@ -27,6 +27,7 @@ export function connectSocket(options: SocketConnectionOptions): SocketConnectio
   let stableTimer: ReturnType<typeof setTimeout> | undefined
   let attempts = 0
   let generation = 0
+  let ticketController: AbortController | undefined
   let connecting = false
   let revoked = false
 
@@ -57,13 +58,16 @@ export function connectSocket(options: SocketConnectionOptions): SocketConnectio
 
   async function connect(): Promise<void> {
     if (disposed || revoked || connecting || socket || !isNetworkOnline()) return
+    ticketController = new AbortController()
     connecting = true
     const current = ++generation
     const currentAttempt = () => !disposed && current === generation
     options.onState('connecting')
     try {
       const freshTicket =
-        !ticket || ticket.expiresAt <= Date.now() / 1000 + 60 ? await options.ticket() : ticket
+        !ticket || ticket.expiresAt <= Date.now() / 1000 + 60
+          ? await options.ticket(ticketController.signal)
+          : ticket
       if (!currentAttempt() || !isNetworkOnline()) return
       ticket = freshTicket
       const active = new WebSocket(options.url, ['messenger', `messenger-ticket.${ticket.token}`])
@@ -117,6 +121,7 @@ export function connectSocket(options: SocketConnectionOptions): SocketConnectio
       if (!socket && !connecting) retry()
       return
     }
+    ticketController?.abort()
     generation += 1
     connecting = false
     clearTimers()
@@ -130,6 +135,7 @@ export function connectSocket(options: SocketConnectionOptions): SocketConnectio
   else options.onState('offline')
   const close = () => {
     if (disposed) return
+    ticketController?.abort()
     disposed = true
     unsubscribe()
     clearTimers()

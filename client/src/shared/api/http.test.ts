@@ -497,7 +497,7 @@ describe('silent HTTP recovery', () => {
     }
   })
 
-  it('never exhausts a rate-limit retry budget, but exposes genuine permission errors immediately', async () => {
+  it('bounds rate-limit retries', async () => {
     vi.useFakeTimers()
     try {
       const fetch = vi.fn<typeof globalThis.fetch>()
@@ -506,14 +506,14 @@ describe('silent HTTP recovery', () => {
       vi.stubGlobal('fetch', fetch)
       const outcome = authenticated.chats().catch((error: unknown) => error)
       await vi.advanceTimersByTimeAsync(120000)
-      expect(await outcome).toMatchObject({ status: 403 })
-      expect(fetch).toHaveBeenCalledTimes(7)
+      expect(await outcome).toMatchObject({ status: 429 })
+      expect(fetch).toHaveBeenCalledTimes(4)
     } finally {
       vi.useRealTimers()
     }
   })
 
-  it('stops retrying a failed explicit mutation after three retries', async () => {
+  it('does not replay a failed explicit mutation', async () => {
     vi.useFakeTimers()
     try {
       const fetch = vi.fn<typeof globalThis.fetch>(async () => new Response(null, { status: 503 }))
@@ -521,7 +521,7 @@ describe('silent HTTP recovery', () => {
       const outcome = authenticated.deleteChat(session.user.id).catch((error: unknown) => error)
       await vi.advanceTimersByTimeAsync(20000)
       expect(await outcome).toMatchObject({ status: 503 })
-      expect(fetch).toHaveBeenCalledTimes(4)
+      expect(fetch).toHaveBeenCalledTimes(1)
     } finally {
       vi.useRealTimers()
     }
@@ -532,5 +532,68 @@ it('does not replay a group creation whose server outcome is uncertain', async (
   const fetch = vi.fn<typeof globalThis.fetch>(async () => new Response(null, { status: 503 }))
   vi.stubGlobal('fetch', fetch)
   await expect(authenticated.createGroup('test', [])).rejects.toMatchObject({ status: 503 })
+  expect(fetch).toHaveBeenCalledTimes(1)
+})
+
+it('cancels a ticket fetch with its owner signal', async () => {
+  const controller = new AbortController()
+  const fetch = vi.fn<typeof globalThis.fetch>(
+    (_url, init) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(init.signal?.reason))
+      }),
+  )
+  vi.stubGlobal('fetch', fetch)
+  const outcome = authenticated.wsTicket(controller.signal).catch((error: unknown) => error)
+  controller.abort(new Error('owner closed'))
+  expect(await outcome).toMatchObject({ message: 'owner closed' })
+  expect(fetch).toHaveBeenCalledTimes(1)
+})
+
+it('caps a huge Retry-After and cancels the retry wait', async () => {
+  vi.useFakeTimers()
+  try {
+    const fetch = vi.fn<typeof globalThis.fetch>(
+      async () => new Response(null, { status: 429, headers: { 'Retry-After': '999999999999' } }),
+    )
+    vi.stubGlobal('fetch', fetch)
+    const outcome = authenticated.chats().catch((error: unknown) => error)
+    await vi.advanceTimersByTimeAsync(29999)
+    expect(fetch).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(fetch).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(60000)
+    expect(await outcome).toMatchObject({ status: 429 })
+    expect(fetch).toHaveBeenCalledTimes(4)
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+it('cancels a ticket rate-limit wait before another attempt', async () => {
+  vi.useFakeTimers()
+  const controller = new AbortController()
+  try {
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => new Response(null, { status: 429 }))
+    vi.stubGlobal('fetch', fetch)
+    const outcome = authenticated.wsTicket(controller.signal).catch((error: unknown) => error)
+    await vi.advanceTimersByTimeAsync(0)
+    controller.abort(new Error('connection closed'))
+    await vi.advanceTimersByTimeAsync(60000)
+    expect(await outcome).toMatchObject({ message: 'connection closed' })
+    expect(fetch).toHaveBeenCalledTimes(1)
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+it('never replays member removal after losing its response', async () => {
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => {
+    throw new TypeError('response lost')
+  })
+  vi.stubGlobal('fetch', fetch)
+  await expect(authenticated.removeGroupMember(session.user.id, session.user.id)).rejects.toThrow(
+    'response lost',
+  )
   expect(fetch).toHaveBeenCalledTimes(1)
 })

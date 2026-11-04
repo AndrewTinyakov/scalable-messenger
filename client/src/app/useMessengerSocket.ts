@@ -124,7 +124,7 @@ export function useMessengerSocket({
     }
     const close = connectSocket({
       url: websocketUrl(),
-      ticket: () => sessionApi.wsTicket(),
+      ticket: (signal) => sessionApi.wsTicket(signal),
       onState: setConnection,
       onRetryScheduled: setNextRetryAt,
       onSessionRevoked,

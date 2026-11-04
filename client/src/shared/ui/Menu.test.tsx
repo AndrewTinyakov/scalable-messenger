@@ -74,7 +74,7 @@ describe('floating menu placement', () => {
     expect(menu.style.transformOrigin).toBe('bottom right')
   })
 
-  it('closes on an outside press and on Escape, and keeps the anchor press for its owner', async () => {
+  it('closes on an outside press and on Escape with focus outside it, and keeps the anchor press for its owner', async () => {
     const { close } = await open(rect(100, 100, 40, 40), {})
     await act(async () => {
       document.body.lastElementChild!.dispatchEvent(
@@ -87,9 +87,9 @@ describe('floating menu placement', () => {
     })
     expect(close).toHaveBeenCalledTimes(1)
     await act(async () => {
-      document
-        .querySelector('.menu')!
-        .dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+      document.body.dispatchEvent(
+        new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      )
     })
     expect(close).toHaveBeenCalledTimes(2)
   })

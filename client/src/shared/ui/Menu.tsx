@@ -105,11 +105,19 @@ export function Menu({
     const scroll = (event: Event) => {
       if (!ref.current?.contains(event.target as Node)) close.current()
     }
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopPropagation()
+      close.current()
+    }
     document.addEventListener('pointerdown', dismiss)
     document.addEventListener('scroll', scroll, true)
+    document.addEventListener('keydown', escape, true)
     return () => {
       document.removeEventListener('pointerdown', dismiss)
       document.removeEventListener('scroll', scroll, true)
+      document.removeEventListener('keydown', escape, true)
     }
   }, [anchor])
 
@@ -120,12 +128,6 @@ export function Menu({
       style={{ top: position.top, left: position.left, transformOrigin: position.origin }}
       onContextMenu={(event) => event.preventDefault()}
       onKeyDown={(event) => {
-        if (event.key === 'Escape') {
-          event.preventDefault()
-          event.stopPropagation()
-          close.current()
-          return
-        }
         if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
         const items = [...(ref.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])]
         const index = items.indexOf(document.activeElement as HTMLElement)

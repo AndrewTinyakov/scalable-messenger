@@ -58,7 +58,16 @@ export function ChatActions({ target, user, onDelete, onClear, onClose }: Props)
     )
 
   return (
-    <Menu label="Chat options" anchor={anchor} point={point} keyboard={keyboard} onClose={onClose}>
+    <Menu
+      label="Chat options"
+      anchor={anchor}
+      point={point}
+      keyboard={keyboard}
+      onClose={() => {
+        anchor.focus({ preventScroll: true })
+        onClose()
+      }}
+    >
       <MenuItem icon={<Eraser size={18} />} onClick={() => setConfirm('history')}>
         Clear history
       </MenuItem>

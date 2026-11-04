@@ -1,6 +1,6 @@
 import { Pencil, Search, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { chatPeer, chatTitle, type Chat } from '../../entities/chat/model'
+import { chatPeer, chatTitle, hasUnread, type Chat } from '../../entities/chat/model'
 import type { Message } from '../../entities/message/model'
 import type { User } from '../../entities/session/model'
 import { ChatKind } from '../../shared/api/generated/socket-vocabulary'
@@ -30,7 +30,7 @@ interface Props {
 }
 
 function inFolder(chat: Chat, folder: ChatFolder): boolean {
-  if (folder === 'unread') return (chat.unreadCount ?? 0) > 0
+  if (folder === 'unread') return hasUnread(chat)
   if (folder === 'direct') return chat.kind === ChatKind.DIRECT
   if (folder === 'groups') return chat.kind === ChatKind.GROUP
   return true

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { useMessenger } from '../../app/useMessenger'
+import { hasUnread } from '../../entities/chat/model'
 import type { Session } from '../../entities/session/model'
 import { ChatActions, type ChatMenuTarget } from '../../features/chat-actions/ChatActions'
 import { CreateChatDialog } from '../../features/chat-create/CreateChatDialog'
@@ -37,7 +38,7 @@ export function MessengerPage({ session, onSignOut, onSessionRevoked }: Props) {
   const unreadChats = useMemo(() => {
     const counts = { all: 0, unread: 0, direct: 0, groups: 0 }
     for (const chat of messenger.chats) {
-      if (!chat.unreadCount) continue
+      if (!hasUnread(chat)) continue
       counts.all += 1
       counts.unread += 1
       counts[chat.kind === ChatKind.GROUP ? 'groups' : 'direct'] += 1

@@ -116,7 +116,7 @@ export const ChatRow = memo(function ChatRow({
           </span>
           {unread > 0 && (
             <span className="unread-badge" aria-label={`${unread} unread messages`}>
-              {formatUnread(unread)}
+              {formatUnread(unread, chat.unreadCountCapped)}
             </span>
           )}
         </span>

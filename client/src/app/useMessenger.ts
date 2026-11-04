@@ -28,8 +28,6 @@ import { useMessengerSocket } from './useMessengerSocket'
 import { useRecoveryLifecycle } from './useRecoveryLifecycle'
 import { useSidebarWatch } from './useSidebarWatch'
 
-const NO_SIDEBAR_WATCH = (_chatIds: string[]) => {}
-
 export function useMessenger(session: Session, onSessionRevoked: () => void) {
   const location = useChatLocation()
   const { navigate } = location
@@ -364,8 +362,6 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     deleteChatById: features.deleteChatById,
     clearChatHistory: features.clearChatHistory,
     features,
-    sidebarPresence: {} as Record<string, 'online' | 'offline' | 'unknown'>,
-    watchSidebarPeers: NO_SIDEBAR_WATCH,
     deleteChat: features.deleteChat,
     latestMessages: recovery.latestWindows(),
     detached: Boolean(selectedId && recovery.isDetached(selectedId)),

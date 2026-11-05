@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { isMuted, type Chat } from '../../entities/chat/model'
 import type { DeleteScope } from '../../entities/message/historySnapshot'
 import { MessageItem } from '../../entities/message/MessageItem'
-import type { ForwardSource, Message, PendingSend } from '../../entities/message/model'
+import type { Message, PendingSend } from '../../entities/message/model'
 import type { ReadingLocation } from '../../entities/message/readingLocation'
 import type { User } from '../../entities/session/model'
 import { MuteDialog } from '../../features/chat-preferences/MuteDialog'
@@ -59,7 +59,7 @@ interface Props {
   onLocationChange?: (chatId: string, location: ReadingLocation) => void
   pins?: MessagePins
   forwardTargets?: Chat[]
-  onForward?: (targetChatId: string, sources: ForwardSource[], bodies: string[]) => void
+  onForward?: (targetChatId: string, messages: Message[]) => void
   onMute?: (chatId: string, durationSeconds: number | null) => Promise<void>
   onUnmute?: (chatId: string) => Promise<void>
 }
@@ -639,20 +639,10 @@ export function ChatPanel({
           count={forwarding.length}
           onCancel={() => setForwarding(null)}
           onForward={(targetId) => {
-            const ordered = [...forwarding]
-              .filter((message) => !message.deletedAt)
-              .sort((left, right) => (BigInt(left.sequence) < BigInt(right.sequence) ? -1 : 1))
+            const messages = forwarding
             setForwarding(null)
             selection.clear()
-            onForward(
-              targetId,
-              ordered.map((message) => ({
-                chatId: message.chatId,
-                messageId: message.id,
-                authorId: message.forwardedFromUserId ?? message.senderId,
-              })),
-              ordered.map((message) => message.body),
-            )
+            onForward(targetId, messages)
           }}
         />
       )}

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Chat, ChatPreferences } from '../entities/chat/model'
 import { ChatRecovery } from '../entities/message/chatRecovery'
 import { HISTORY_PAGE_SIZE, historyAvailability } from '../entities/message/historyWindow'
-import type { ForwardSource, Message, PendingSend } from '../entities/message/model'
+import type { Message, PendingSend } from '../entities/message/model'
 import type { ReadingLocation } from '../entities/message/readingLocation'
 import type { SendRequests } from '../entities/message/sendRequests'
 import type { Session } from '../entities/session/model'
@@ -404,11 +404,19 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     [applyChatPreferences, markRead, sessionApi, settleRead],
   )
   const forwardMessages = useCallback(
-    (targetChatId: string, sources: ForwardSource[], bodies: string[]) => {
+    (targetChatId: string, messages: Message[]) => {
       let failed = 0
-      sources.forEach((source, index) => {
-        if (!startSend(targetChatId, bodies[index], undefined, source)) failed += 1
-      })
+      const ordered = messages
+        .filter((message) => !message.deletedAt)
+        .sort((left, right) => (BigInt(left.sequence) < BigInt(right.sequence) ? -1 : 1))
+      for (const message of ordered) {
+        const source = {
+          chatId: message.chatId,
+          messageId: message.id,
+          authorId: message.forwardedFromUserId ?? message.senderId,
+        }
+        if (!startSend(targetChatId, message.body, undefined, source)) failed += 1
+      }
       if (failed)
         setError(`${failed} ${failed === 1 ? 'message' : 'messages'} could not be forwarded.`)
       return failed === 0

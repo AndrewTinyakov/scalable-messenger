@@ -76,6 +76,21 @@ export function useMessagePins(
     return () => clearTimeout(timer.current)
   }, [chatId, connected, refresh])
 
+  useEffect(() => {
+    if (!chatId || chatId.startsWith('draft:') || !connected) return
+    const timer = window.setInterval(() => void refresh(), 12000 + Math.random() * 3000)
+    const focus = () => {
+      if (document.visibilityState === 'visible') void refresh()
+    }
+    window.addEventListener('focus', focus)
+    document.addEventListener('visibilitychange', focus)
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener('focus', focus)
+      document.removeEventListener('visibilitychange', focus)
+    }
+  }, [chatId, connected, refresh])
+
   const loadOlder = useCallback(async () => {
     const current = state
     if (!current?.next || loadingOlder) return

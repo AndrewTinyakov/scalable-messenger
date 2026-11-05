@@ -180,6 +180,23 @@ class TelegramFeatureHttpTests
         }
 
         @Test
+        fun `removing a personal pin notifies only its owner`() {
+            val alice = account()
+            val bob = account()
+            sends.process(command(alice.first, newId(), "private reminder", recipient = bob.first))
+            val direct = db.queryForObject("SELECT chat_id FROM messages WHERE sender_id=?", String::class.java, alice.first)!!
+            val message = db.queryForObject("SELECT id FROM messages WHERE chat_id=?", String::class.java, direct)!!
+            assertEquals(204, request("/$direct/pins/$message", alice.second, "PUT", """{"scope":"SELF"}""").statusCode())
+            assertEquals(204, request("/$direct/pins/$message", alice.second, "DELETE").statusCode())
+            assertEquals(204, request("/$direct/pins/$message", alice.second, "PUT", """{"scope":"SELF"}""").statusCode())
+            assertEquals(204, request("/$direct/pins", alice.second, "DELETE").statusCode())
+            assertEquals(4, outbox(alice.first, "pins_changed", direct))
+            assertEquals(0, outbox(bob.first, "pins_changed", direct))
+            assertEquals(204, request("/$direct/pins/$message", bob.second, "DELETE").statusCode())
+            assertEquals(0, outbox(bob.first, "pins_changed", direct))
+        }
+
+        @Test
         fun `a chat keeps at most two hundred shared pins`() {
             val owner = account()
             val member = account()

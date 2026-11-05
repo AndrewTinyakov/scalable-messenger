@@ -75,13 +75,20 @@ class MessagePinService(
     fun unpin(chatId: ChatId, userId: UserId, messageId: MessageId) = tx.observedExecuteWithoutResult(DatabaseTransaction.MESSAGE_PIN) {
         val (chat, message) = target(chatId, userId, messageId)
         pins.lock(chatId)
-        if (pins.unpin(chatId, message.sequence, userId) > 0) notify(chat, null)
+        notifyRemoved(chat, userId, pins.unpin(chatId, message.sequence, userId))
     }
 
     fun unpinAll(chatId: ChatId, userId: UserId) = tx.observedExecuteWithoutResult(DatabaseTransaction.MESSAGE_PIN) {
         val chat = chats.findById(chatId)?.takeIf { chats.isMember(chatId, userId) } ?: notFound()
         pins.lock(chatId)
-        if (pins.unpinAll(chatId, userId) > 0) notify(chat, null)
+        notifyRemoved(chat, userId, pins.unpinAll(chatId, userId))
+    }
+
+    private fun notifyRemoved(chat: Chat, userId: UserId, removed: Set<PinScope>) {
+        when {
+            PinScope.EVERYONE in removed -> notify(chat, null)
+            PinScope.SELF in removed -> notify(chat, userId)
+        }
     }
 
     private fun target(chatId: ChatId, userId: UserId, messageId: MessageId): Pair<Chat, Message> {

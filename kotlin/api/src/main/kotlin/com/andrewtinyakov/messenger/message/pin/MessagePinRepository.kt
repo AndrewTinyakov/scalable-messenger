@@ -22,9 +22,9 @@ interface MessagePinRepository {
 
     fun pin(chatId: ChatId, sequence: Long, viewerId: UserId?): Boolean
 
-    fun unpin(chatId: ChatId, sequence: Long, viewerId: UserId): Int
+    fun unpin(chatId: ChatId, sequence: Long, viewerId: UserId): Set<PinScope>
 
-    fun unpinAll(chatId: ChatId, viewerId: UserId): Int
+    fun unpinAll(chatId: ChatId, viewerId: UserId): Set<PinScope>
 
     fun page(chatId: ChatId, viewerId: UserId, beforeSequence: Long?, limit: Int): List<PinnedMessage>
 

@@ -132,8 +132,8 @@ export function MessengerPage({ session, onSignOut, onSessionRevoked }: Props) {
           onLocationChange={messenger.rememberLocation}
           pins={messenger.pins}
           forwardTargets={messenger.chats}
-          onForward={(targetId, sources, bodies) => {
-            if (messenger.forwardMessages(targetId, sources, bodies)) messenger.selectChat(targetId)
+          onForward={(targetId, messages) => {
+            if (messenger.forwardMessages(targetId, messages)) messenger.selectChat(targetId)
           }}
           onMute={messenger.muteChat}
           onUnmute={messenger.unmuteChat}

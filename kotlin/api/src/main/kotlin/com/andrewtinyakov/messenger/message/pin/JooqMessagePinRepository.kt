@@ -37,17 +37,22 @@ class JooqMessagePinRepository(
             .execute() == 1
     }
 
-    override fun unpin(chatId: ChatId, sequence: Long, viewerId: UserId): Int = DatabaseObservation.query(
+    override fun unpin(chatId: ChatId, sequence: Long, viewerId: UserId): Set<PinScope> = DatabaseObservation.query(
         DatabaseOperation.MESSAGE_PIN_WRITE,
     ) {
-        db.deleteFrom(MESSAGE_PINS)
-            .where(MESSAGE_PINS.CHAT_ID.eq(chatId.value), MESSAGE_PINS.SEQUENCE.eq(sequence), viewable(viewerId))
-            .execute()
+        removedScopes(MESSAGE_PINS.CHAT_ID.eq(chatId.value).and(MESSAGE_PINS.SEQUENCE.eq(sequence)).and(viewable(viewerId)))
     }
 
-    override fun unpinAll(chatId: ChatId, viewerId: UserId): Int = DatabaseObservation.query(DatabaseOperation.MESSAGE_PIN_WRITE) {
-        db.deleteFrom(MESSAGE_PINS).where(MESSAGE_PINS.CHAT_ID.eq(chatId.value), viewable(viewerId)).execute()
+    override fun unpinAll(chatId: ChatId, viewerId: UserId): Set<PinScope> = DatabaseObservation.query(
+        DatabaseOperation.MESSAGE_PIN_WRITE,
+    ) {
+        removedScopes(MESSAGE_PINS.CHAT_ID.eq(chatId.value).and(viewable(viewerId)))
     }
+
+    private fun removedScopes(condition: Condition): Set<PinScope> = db.deleteFrom(MESSAGE_PINS).where(condition)
+        .returningResult(MESSAGE_PINS.VIEWER_ID)
+        .fetch { if (it.value1() == null) PinScope.EVERYONE else PinScope.SELF }
+        .toSet()
 
     override fun page(chatId: ChatId, viewerId: UserId, beforeSequence: Long?, limit: Int): List<PinnedMessage> =
         DatabaseObservation.query(DatabaseOperation.MESSAGE_PIN_PAGE) {

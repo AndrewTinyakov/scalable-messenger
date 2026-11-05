@@ -17,11 +17,12 @@ import com.andrewtinyakov.messenger.shared.id.EventId
 import com.andrewtinyakov.messenger.shared.id.MessageId
 import com.andrewtinyakov.messenger.shared.id.UserId
 import com.andrewtinyakov.messenger.shared.id.newId
-import com.andrewtinyakov.messenger.shared.id.requireId
 import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
 import com.andrewtinyakov.messenger.shared.web.ApiException
 import com.andrewtinyakov.messenger.shared.web.badRequest
 import com.andrewtinyakov.messenger.shared.web.notFound
+import com.andrewtinyakov.messenger.shared.web.parseSequence
+import com.andrewtinyakov.messenger.shared.web.requirePageLimit
 import org.springframework.http.HttpStatus
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Service
@@ -43,7 +44,7 @@ class ReadService(
     fun advance(chatId: ChatId, userId: UserId, input: AdvanceReadRequest): ReadProgressResponse = measured("advance") {
         tx.observedExecute(DatabaseTransaction.READ_ADVANCE) {
             val lastSequence = repository.requireMember(chatId, userId)
-            val sequence = input.throughSequence.takeIf { Regex("0|[1-9][0-9]{0,18}").matches(it) }?.toLongOrNull()
+            val sequence = parseSequence(input.throughSequence)
                 ?: badRequest(ApiErrorCode.INVALID_SEQUENCE, "throughSequence must be a nonnegative decimal integer")
             if (sequence > lastSequence) badRequest(ApiErrorCode.INVALID_SEQUENCE, "throughSequence exceeds saved history")
             val advanced = repository.advance(chatId, userId, sequence)
@@ -92,8 +93,8 @@ class ReadService(
         "details",
     ) {
         val target = repository.messageTarget(chatId, userId, messageId) ?: notFound()
-        if (limit !in 1..100) badRequest(ApiErrorCode.INVALID_LIMIT, "limit must be 1 to 100")
-        val after = afterUserId?.let { UserId(requireId(it)) }
+        requirePageLimit(limit)
+        val after = afterUserId?.let { UserId.parse(it) }
         val now = OffsetDateTime.now(clock)
         val expiresAt = target.createdAt.plusDays(7)
         if (target.deleted || target.createdAt.isAfter(now) || !now.isBefore(expiresAt)) {

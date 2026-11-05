@@ -255,9 +255,7 @@ class JooqDeletionRepository(
             ).set(DELETION_OPERATIONS.FINGERPRINT, fingerprint).set(DELETION_OPERATIONS.SCOPE, request.scope.name)
             .set(DELETION_OPERATIONS.TARGET, request.target.name).set(
                 DELETION_OPERATIONS.THROUGH_SEQUENCE,
-                if (request.target ==
-                    DeletionTarget.MESSAGES
-                ) {
+                if (request.target == DeletionTarget.MESSAGES) {
                     0L
                 } else {
                     chat.high

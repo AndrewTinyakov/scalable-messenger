@@ -37,6 +37,11 @@ import java.time.OffsetDateTime
 import java.util.Base64
 import java.util.UUID
 
+private val usernamePattern = Regex("[a-z0-9_]{3,40}")
+private const val SESSION_LIFETIME_DAYS = 30L
+
+private fun SessionToken.sessionId() = SessionId(sha256(value))
+
 @Service
 class AuthenticationService(
     private val userRepository: UserRepository,
@@ -53,7 +58,7 @@ class AuthenticationService(
     fun register(input: AuthRequest): SessionCredentials {
         validateInput(input)
         val username = input.username.trim().lowercase()
-        if (!Regex("[a-z0-9_]{3,40}").matches(username)) {
+        if (!usernamePattern.matches(username)) {
             badRequest(ApiErrorCode.INVALID_USERNAME, "Use letters, digits, or underscore")
         }
         val user = User(
@@ -86,11 +91,11 @@ class AuthenticationService(
         sessionIfActive(token) ?: throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.UNAUTHORIZED, "Session expired or invalid")
 
     fun sessionIfActive(token: SessionToken?): AuthenticatedSession? =
-        token?.let { sessionRepository.findSession(sessionId = SessionId(sha256(it.value)), now = OffsetDateTime.now(clock)) }
+        token?.let { sessionRepository.findSession(sessionId = it.sessionId(), now = OffsetDateTime.now(clock)) }
 
     fun logout(token: SessionToken?, expectedIdentity: ExpectedSessionIdentity = ExpectedSessionIdentity()) {
         if (token == null) return
-        val sessionId = SessionId(sha256(token.value))
+        val sessionId = token.sessionId()
         tx.observedExecuteWithoutResult(DatabaseTransaction.AUTH_LOGOUT) {
             val session = sessionRepository.deleteSession(sessionId = sessionId) ?: return@observedExecuteWithoutResult
             if (session.expiresAt > clock.instant()) requireExpectedIdentity(expectedIdentity = expectedIdentity, session = session)
@@ -107,8 +112,8 @@ class AuthenticationService(
         val deviceId = requestedDeviceId ?: DeviceId(UUID.randomUUID().toString())
         val bytes = ByteArray(32).also(random::nextBytes)
         val token = SessionToken(Base64.getUrlEncoder().withoutPadding().encodeToString(bytes))
-        val expiresAt = OffsetDateTime.now(clock).plusDays(30)
-        val sessionId = SessionId(sha256(token.value))
+        val expiresAt = OffsetDateTime.now(clock).plusDays(SESSION_LIFETIME_DAYS)
+        val sessionId = token.sessionId()
         sessionRepository.insertSession(sessionId = sessionId, userId = user.id, deviceId = deviceId, expiresAt = expiresAt)
         return SessionCredentials(
             token = token,

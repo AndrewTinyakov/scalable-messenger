@@ -3,6 +3,7 @@ package com.andrewtinyakov.messenger.auth.web
 import com.andrewtinyakov.messenger.auth.config.AuthProperties
 import com.andrewtinyakov.messenger.auth.model.SessionCredentials
 import com.andrewtinyakov.messenger.shared.id.SessionToken
+import com.andrewtinyakov.messenger.shared.id.isValidSessionToken
 import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
 import com.andrewtinyakov.messenger.shared.web.ApiException
 import jakarta.servlet.http.HttpServletRequest
@@ -24,7 +25,7 @@ class SessionCookie(
     fun read(request: HttpServletRequest): SessionToken? {
         val values = request.cookies.orEmpty().filter { it.name == NAME }.map { it.value }
         if (values.isEmpty()) return null
-        if (values.size != 1 || !Regex("[A-Za-z0-9_-]{43}").matches(values.single())) {
+        if (values.size != 1 || !isValidSessionToken(values.single())) {
             throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.UNAUTHORIZED, "Invalid session cookie")
         }
         return SessionToken(values.single())

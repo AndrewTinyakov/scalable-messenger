@@ -48,6 +48,24 @@ class JooqSessionRepository(
             .fetchOne()?.toSession()
     }
 
+    override fun deleteExpired(now: OffsetDateTime, limit: Int): Int = DatabaseObservation.query(
+        DatabaseOperation.SESSION_DELETE_EXPIRED,
+    ) {
+        db.deleteFrom(SESSIONS)
+            .where(
+                SESSIONS.TOKEN_HASH.`in`(
+                    db.select(SESSIONS.TOKEN_HASH)
+                        .from(SESSIONS)
+                        .where(SESSIONS.EXPIRES_AT.le(now))
+                        .orderBy(SESSIONS.EXPIRES_AT)
+                        .limit(limit)
+                        .forUpdate()
+                        .skipLocked(),
+                ),
+            )
+            .execute()
+    }
+
     private fun SessionsRecord.toSession(): AuthenticatedSession = AuthenticatedSession(
         userId = UserId(userId!!),
         deviceId = DeviceId(deviceId!!),

@@ -39,6 +39,7 @@ enum class DatabaseOperation(
     OUTBOX_CLAIM_GROUP_TAIL("outbox.claim_group_tail"),
     OUTBOX_COMPLETE("outbox.complete"),
     OUTBOX_ENQUEUE("outbox.enqueue"),
+    SESSION_DELETE_EXPIRED("session.delete_expired"),
     SESSION_DELETE_SESSION("session.delete_session"),
     SESSION_FIND("session.find"),
     SESSION_INSERT_SESSION("session.insert_session"),

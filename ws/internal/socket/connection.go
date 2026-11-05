@@ -50,6 +50,12 @@ type Connection struct {
 	presenceChatID    string
 }
 
+type frameGrants struct {
+	group    *groupGrant
+	presence *presenceWatch
+	sidebar  *sidebarWatch
+}
+
 type outbound struct {
 	frame         *protocol.EventFrame
 	groupGrant    *groupGrant
@@ -95,18 +101,11 @@ func (c *Connection) Enqueue(event protocol.Event) bool {
 }
 
 func (c *Connection) EnqueueFrame(frame *protocol.EventFrame) bool {
-	return c.enqueueFrame(frame, nil)
+	return c.enqueueFrame(frame, frameGrants{})
 }
 
-func (c *Connection) enqueueFrame(frame *protocol.EventFrame, expected *groupGrant, presence ...*presenceWatch) bool {
-	var presenceWatch *presenceWatch
-	if len(presence) > 0 {
-		presenceWatch = presence[0]
-	}
-	return c.enqueueWithGrants(frame, expected, presenceWatch, nil)
-}
-
-func (c *Connection) enqueueWithGrants(frame *protocol.EventFrame, expected *groupGrant, presenceWatch *presenceWatch, sidebarWatch *sidebarWatch) bool {
+func (c *Connection) enqueueFrame(frame *protocol.EventFrame, grants frameGrants) bool {
+	expected, presenceWatch, sidebarWatch := grants.group, grants.presence, grants.sidebar
 	terminalChat := frame.Event().Type == protocol.EventChatDeleted
 	event := frame.Event()
 	if expected != nil && (event.ChatID != expected.chatID || event.Room != roomname.Group(expected.chatID)) {

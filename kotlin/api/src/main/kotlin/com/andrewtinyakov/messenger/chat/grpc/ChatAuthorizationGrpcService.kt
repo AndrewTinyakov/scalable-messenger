@@ -15,7 +15,7 @@ import com.andrewtinyakov.messenger.infrastructure.redis.RoomAddress
 import com.andrewtinyakov.messenger.shared.id.ChatId
 import com.andrewtinyakov.messenger.shared.id.SessionId
 import com.andrewtinyakov.messenger.shared.id.UserId
-import com.andrewtinyakov.messenger.shared.id.requireId
+import com.andrewtinyakov.messenger.shared.id.isValidSessionId
 import com.andrewtinyakov.messenger.shared.web.ApiException
 import io.grpc.Status
 import io.grpc.StatusRuntimeException
@@ -118,7 +118,7 @@ class ChatAuthorizationGrpcService(
             ?: throw Status.UNAUTHENTICATED.withDescription("Session expired or revoked").asRuntimeException()
 
     private fun requireSessionId(value: String): SessionId {
-        if (!Regex("[0-9a-f]{64}").matches(value)) {
+        if (!isValidSessionId(value)) {
             throw Status.UNAUTHENTICATED.withDescription("Invalid session ID").asRuntimeException()
         }
         return SessionId(value)
@@ -126,7 +126,7 @@ class ChatAuthorizationGrpcService(
 
     private fun requireUserId(value: String): UserId {
         try {
-            return UserId(requireId(value))
+            return UserId.parse(value)
         } catch (_: ApiException) {
             throw Status.INVALID_ARGUMENT.withDescription("Invalid user ID").asRuntimeException()
         }
@@ -134,7 +134,7 @@ class ChatAuthorizationGrpcService(
 
     private fun requireChatId(value: String): ChatId {
         try {
-            return ChatId(requireId(value))
+            return ChatId.parse(value)
         } catch (_: ApiException) {
             throw Status.INVALID_ARGUMENT.withDescription("Invalid chat ID").asRuntimeException()
         }

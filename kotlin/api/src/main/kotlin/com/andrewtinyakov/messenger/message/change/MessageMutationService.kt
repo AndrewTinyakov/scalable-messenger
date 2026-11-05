@@ -24,6 +24,7 @@ import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
 import com.andrewtinyakov.messenger.shared.web.ApiException
 import com.andrewtinyakov.messenger.shared.web.badRequest
 import com.andrewtinyakov.messenger.shared.web.notFound
+import com.andrewtinyakov.messenger.shared.web.parseSequence
 import io.micrometer.core.instrument.MeterRegistry
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -48,15 +49,9 @@ class MessageMutationService(
         mutate(chatId, userId, messageId, body, expectedVersion)
 
     fun delete(chatId: ChatId, userId: UserId, messageId: MessageId, expectedVersion: String): MessageResponse {
-        if (!Regex("[1-9][0-9]{0,18}").matches(expectedVersion) ||
-            expectedVersion.toLongOrNull() == null
-        ) {
-            badRequest(ApiErrorCode.INVALID_REQUEST, "expectedVersion must be a positive decimal integer")
-        }
+        requireVersion(expectedVersion)
         val previous = messages.findMessage(chatId, userId, messageId) ?: notFound()
-        if (previous.messageVersion.toString() !=
-            expectedVersion
-        ) {
+        if (previous.messageVersion.toString() != expectedVersion) {
             throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.INVALID_REQUEST, "Message version changed")
         }
         deletions.delete(
@@ -90,8 +85,7 @@ class MessageMutationService(
                     outcome = "forbidden"
                     throw ApiException(HttpStatus.FORBIDDEN, ApiErrorCode.FORBIDDEN, "Only the author can change a message")
                 }
-                val version = expectedVersion.takeIf { Regex("[1-9][0-9]{0,18}").matches(it) }?.toLongOrNull()
-                    ?: badRequest(ApiErrorCode.INVALID_REQUEST, "expectedVersion must be a positive decimal integer")
+                val version = requireVersion(expectedVersion)
                 if (message.deletedAt != null || version != message.messageVersion) {
                     outcome = "conflict"
                     throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.INVALID_REQUEST, "Message version changed")
@@ -127,4 +121,8 @@ class MessageMutationService(
             metrics.counter("messenger.message.mutations", "kind", "edit", "outcome", outcome).increment()
         }
     }
+
+    private fun requireVersion(value: String): Long =
+        parseSequence(value)?.takeIf { it > 0 }
+            ?: badRequest(ApiErrorCode.INVALID_REQUEST, "expectedVersion must be a positive decimal integer")
 }

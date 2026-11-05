@@ -33,9 +33,7 @@ class JooqHistoryPurgeRepository(
             .orderBy(MESSAGES.SEQUENCE).limit(limit).fetch()
         val ids = candidates.map { it.value1()!! }
         val progress = candidates.lastOrNull()?.value2()
-        if (progress !=
-            null
-        ) {
+        if (progress != null) {
             db.update(
                 CHATS,
             ).set(

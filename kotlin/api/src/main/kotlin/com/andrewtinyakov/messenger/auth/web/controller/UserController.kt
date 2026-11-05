@@ -5,7 +5,6 @@ import com.andrewtinyakov.messenger.auth.service.UserSearchService
 import com.andrewtinyakov.messenger.auth.web.payload.UserResponse
 import com.andrewtinyakov.messenger.auth.web.payload.toResponse
 import com.andrewtinyakov.messenger.shared.id.UserId
-import com.andrewtinyakov.messenger.shared.id.requireId
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.RequestMapping
@@ -21,7 +20,7 @@ class UserController(
     @GetMapping("/{userId}")
     fun get(
         @PathVariable userId: String,
-    ): UserResponse = userLookupService.get(UserId(requireId(userId))).toResponse()
+    ): UserResponse = userLookupService.get(UserId.parse(userId)).toResponse()
 
     @GetMapping
     fun search(

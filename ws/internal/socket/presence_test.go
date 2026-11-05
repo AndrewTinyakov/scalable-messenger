@@ -371,7 +371,7 @@ func TestPresenceWriterDiscardsOldWatchBeforeSendingReplacement(t *testing.T) {
 		t.Fatal(err)
 	}
 	frame, _ := protocol.NewEventFrame(protocol.Event{Type: protocol.EventPresence, ChatID: raceChatID, ObservedAt: time.Now().UTC().Format(time.RFC3339Nano), Statuses: []protocol.PresenceStatus{{UserID: presencePeer(0), State: "online"}}})
-	if !c.enqueueFrame(frame, nil, old) {
+	if !c.enqueueFrame(frame, frameGrants{presence: old}) {
 		t.Fatal("old snapshot not queued")
 	}
 	replacement := presenceTestWatch(secondRaceChatID, presencePeer(1))
@@ -379,7 +379,7 @@ func TestPresenceWriterDiscardsOldWatchBeforeSendingReplacement(t *testing.T) {
 		t.Fatal(err)
 	}
 	frame, _ = protocol.NewEventFrame(protocol.Event{Type: protocol.EventPresence, ChatID: secondRaceChatID, ObservedAt: time.Now().UTC().Format(time.RFC3339Nano), Statuses: []protocol.PresenceStatus{}})
-	if !c.enqueueFrame(frame, nil, replacement) {
+	if !c.enqueueFrame(frame, frameGrants{presence: replacement}) {
 		t.Fatal("replacement heartbeat not queued")
 	}
 	presenceStartWriter(t, c)
@@ -442,7 +442,7 @@ func TestPresenceWriterDiscardsSnapshotAfterAuthorizationSubsetShrinks(t *testin
 		t.Fatal(err)
 	}
 	frame, _ := protocol.NewEventFrame(protocol.Event{Type: protocol.EventPresence, ChatID: raceChatID, ObservedAt: time.Now().UTC().Format(time.RFC3339Nano), Statuses: []protocol.PresenceStatus{{UserID: a, State: "online"}, {UserID: b, State: "offline"}}})
-	if !c.enqueueFrame(frame, nil, watch) {
+	if !c.enqueueFrame(frame, frameGrants{presence: watch}) {
 		t.Fatal("old snapshot not queued")
 	}
 	d.allowed = []string{b}
@@ -452,7 +452,7 @@ func TestPresenceWriterDiscardsSnapshotAfterAuthorizationSubsetShrinks(t *testin
 		t.Fatal("grant did not shrink")
 	}
 	frame, _ = protocol.NewEventFrame(protocol.Event{Type: protocol.EventPresence, ChatID: raceChatID, ObservedAt: time.Now().UTC().Format(time.RFC3339Nano), Statuses: []protocol.PresenceStatus{{UserID: b, State: "offline"}}})
-	if !c.enqueueFrame(frame, nil, current) {
+	if !c.enqueueFrame(frame, frameGrants{presence: current}) {
 		t.Fatal("current snapshot not queued")
 	}
 	presenceStartWriter(t, c)

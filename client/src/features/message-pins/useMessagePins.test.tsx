@@ -32,15 +32,18 @@ let root: Root
 let latest: MessagePins
 let bodies: Map<number, string>
 let requests: (string | undefined)[]
+let holding: boolean
+let held: (() => void)[]
 
-function pinnedMessages(_chatId: string, beforeSequence?: string) {
+async function pinnedMessages(_chatId: string, beforeSequence?: string) {
+  if (holding) await new Promise<void>((resolve) => held.push(resolve))
   requests.push(beforeSequence)
   const sequences = [...bodies.keys()].sort((a, b) => b - a)
   const older = sequences.filter(
     (sequence) => beforeSequence === undefined || sequence < Number(beforeSequence),
   )
   const slice = older.slice(0, pageSize)
-  return Promise.resolve({
+  return {
     pins: slice.map((sequence) => ({
       message: message(sequence, bodies.get(sequence)!),
       scope: 'EVERYONE' as const,
@@ -48,6 +51,13 @@ function pinnedMessages(_chatId: string, beforeSequence?: string) {
     totalCount: sequences.length,
     pinnedMessageIds: sequences.map((sequence) => `m${sequence}`),
     nextBeforeSequence: older.length > pageSize ? String(slice.at(-1)) : null,
+  }
+}
+
+async function releaseNext() {
+  await act(async () => {
+    while (!held.length) await new Promise((resolve) => setTimeout(resolve, 0))
+    held.shift()!()
   })
 }
 
@@ -68,6 +78,8 @@ beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   bodies = new Map(Array.from({ length: 60 }, (_, index) => [index + 1, `body ${index + 1}`]))
   requests = []
+  holding = false
+  held = []
   root = createRoot(dom.window.document.body.appendChild(dom.window.document.createElement('div')))
   await act(async () => root.render(<Probe />))
 })
@@ -98,5 +110,44 @@ describe('useMessagePins', () => {
     expect(requests).toEqual([undefined])
     expect(latest.pins).toHaveLength(50)
     expect(latest.hasOlder).toBe(true)
+  })
+  it('keeps a page loaded while an earlier refresh was in flight', async () => {
+    holding = true
+    let refreshing!: Promise<void>
+    act(() => {
+      refreshing = latest.refresh()
+    })
+    holding = false
+    let loading!: Promise<void>
+    act(() => {
+      loading = latest.loadOlder()
+    })
+    await releaseNext()
+    await act(async () => {
+      await refreshing
+      await loading
+    })
+
+    expect(latest.pins).toHaveLength(60)
+    expect(latest.hasOlder).toBe(false)
+  })
+
+  it('restarts when the pinned set changes between page requests', async () => {
+    await act(async () => latest.loadOlder())
+    holding = true
+    let refreshing!: Promise<void>
+    act(() => {
+      refreshing = latest.refresh()
+    })
+    await releaseNext()
+    bodies.clear()
+    holding = false
+    await releaseNext()
+    await act(async () => refreshing)
+
+    expect(latest.pins).toEqual([])
+    expect(latest.total).toBe(0)
+    expect(latest.pinnedIds.size).toBe(0)
+    expect(latest.hasOlder).toBe(false)
   })
 })

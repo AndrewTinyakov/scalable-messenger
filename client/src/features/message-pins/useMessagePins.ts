@@ -35,6 +35,7 @@ export function useMessagePins(
   const timer = useRef<ReturnType<typeof setTimeout>>()
   const running = useRef<Promise<void> | null>(null)
   const again = useRef(false)
+  const wanted = useRef(0)
 
   const refresh = useCallback(async () => {
     const id = chatRef.current
@@ -48,19 +49,21 @@ export function useMessagePins(
       try {
         do {
           again.current = false
-          const loaded = stateRef.current?.chatId === id ? stateRef.current.pins.length : 0
           let page = await sessionApi.pinnedMessages(id)
           if (current !== generation.current) return
+          const ids = page.pinnedMessageIds.join()
           const pins = [...page.pins]
-          while (page.nextBeforeSequence && pins.length < loaded) {
+          while (page.nextBeforeSequence && pins.length < wanted.current && !again.current) {
             page = await sessionApi.pinnedMessages(id, page.nextBeforeSequence)
             if (current !== generation.current) return
+            if (page.pinnedMessageIds.join() !== ids) again.current = true
             pins.push(
               ...page.pins.filter(
                 (pin) => !pins.some((item) => item.message.id === pin.message.id),
               ),
             )
           }
+          if (again.current) continue
           setState({
             chatId: id,
             pins,
@@ -85,6 +88,7 @@ export function useMessagePins(
   useEffect(() => {
     generation.current += 1
     running.current = null
+    wanted.current = 0
     setState(null)
     setLoadingOlder(false)
     clearTimeout(timer.current)
@@ -108,33 +112,17 @@ export function useMessagePins(
   }, [chatId, connected, refresh])
 
   const loadOlder = useCallback(async () => {
-    const current = state
+    const current = stateRef.current
     if (!current?.next || loadingOlder) return
     const marker = generation.current
+    wanted.current = current.pins.length + 1
     setLoadingOlder(true)
     try {
-      const page = await sessionApi.pinnedMessages(current.chatId, current.next)
-      if (marker !== generation.current) return
-      setState((previous) =>
-        previous && previous.chatId === current.chatId
-          ? {
-              ...previous,
-              pins: [
-                ...previous.pins,
-                ...page.pins.filter(
-                  (pin) => !previous.pins.some((item) => item.message.id === pin.message.id),
-                ),
-              ],
-              total: page.totalCount,
-              ids: page.pinnedMessageIds,
-              next: page.nextBeforeSequence,
-            }
-          : previous,
-      )
+      await refresh()
     } finally {
       if (marker === generation.current) setLoadingOlder(false)
     }
-  }, [loadingOlder, sessionApi, state])
+  }, [loadingOlder, refresh])
 
   const pin = useCallback(
     async (message: Message, scope: PinScope) => {

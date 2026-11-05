@@ -1,5 +1,5 @@
 import { Check, CheckCheck, CircleAlert, Clock3, Pin } from 'lucide-react'
-import { memo, useRef } from 'react'
+import { memo, useRef, type ReactNode } from 'react'
 import { colorIndex } from '../../shared/lib/color'
 import { formatMessageTime } from '../../shared/lib/time'
 import { Avatar } from '../../shared/ui/Avatar'
@@ -28,6 +28,7 @@ interface Props {
   runEnd?: boolean
   selectionMode?: boolean
   selected?: boolean
+  aside?: ReactNode
 }
 
 const EMOJI_ONLY =
@@ -61,6 +62,7 @@ export const MessageItem = memo(function MessageItem({
   runEnd = true,
   selectionMode = false,
   selected = false,
+  aside,
 }: Props) {
   const bubbleRef = useRef<HTMLDivElement>(null)
   const pointer = useRef({ x: 0, y: 0, moved: false, touch: false })
@@ -231,6 +233,7 @@ export const MessageItem = memo(function MessageItem({
           </div>
         )}
       </div>
+      {aside}
     </div>
   )
 })

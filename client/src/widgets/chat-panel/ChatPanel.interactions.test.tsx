@@ -242,7 +242,7 @@ describe('message actions and scoped deletion', () => {
       '2026-11-04T10:01:00Z',
     )
     expect(document.querySelector('[role="dialog"]')).toBeNull()
-    await click(button('Copy'))
+    await click(button('Copy text'))
     expect(document.querySelector('[role="alert"]')?.textContent).toContain('Could not copy')
   })
 

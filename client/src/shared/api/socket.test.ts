@@ -297,7 +297,7 @@ describe('personal chat events and forwards', () => {
         new URL(`../../../../contracts/fixtures/valid/${name}.json`, import.meta.url),
         'utf8',
       ),
-    ) as Record<string, unknown>
+    ) as Record<string, string>
   const live = { epoch: 'epoch', streamId: '1-0' }
 
   it('accepts shared preference, pin and forwarded fixtures', () => {
@@ -309,9 +309,11 @@ describe('personal chat events and forwards', () => {
   })
 
   it('rejects personal events outside their rooms and invalid forwarded authors', () => {
-    const preferences = { ...fixture('chat-preferences-changed'), ...live }
+    const preferences: Record<string, unknown> = { ...fixture('chat-preferences-changed'), ...live }
     expect(
-      decodeSocketEvent(JSON.stringify({ ...preferences, room: `group:${preferences.chatId}` })),
+      decodeSocketEvent(
+        JSON.stringify({ ...preferences, room: `group:${String(preferences.chatId)}` }),
+      ),
     ).toBeNull()
     const pins = { ...fixture('pins-changed'), ...live }
     expect(

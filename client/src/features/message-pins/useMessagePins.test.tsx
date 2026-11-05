@@ -174,4 +174,31 @@ describe('useMessagePins', () => {
     await releaseNext()
     await act(async () => refreshing)
   })
+  it('frees pagination once the requested page is published', async () => {
+    for (let sequence = 61; sequence <= 150; sequence += 1) bodies.set(sequence, `body ${sequence}`)
+    await act(async () => latest.refresh())
+    expect(latest.pins).toHaveLength(50)
+
+    holding = true
+    let loading!: Promise<void>
+    act(() => {
+      loading = latest.loadOlder()
+    })
+    await releaseNext()
+    act(() => {
+      void latest.refresh()
+    })
+    await releaseNext()
+    await act(async () => {
+      while (!held.length) await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+
+    expect(latest.pins).toHaveLength(100)
+    expect(latest.hasOlder).toBe(true)
+    expect(latest.loadingOlder).toBe(false)
+
+    holding = false
+    await releaseNext()
+    await act(async () => loading)
+  })
 })

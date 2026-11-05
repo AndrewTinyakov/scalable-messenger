@@ -75,6 +75,7 @@ export function useMessagePins(
             ids: page.pinnedMessageIds,
             next: page.nextBeforeSequence,
           })
+          if (pins.length >= wanted.current || !page.nextBeforeSequence) setLoadingOlder(false)
         } while (again.current && current === generation.current)
       } catch {
       } finally {

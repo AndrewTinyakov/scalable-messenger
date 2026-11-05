@@ -80,12 +80,24 @@ class JooqMessagePinRepository(
                 }
         }
 
-    override fun visibleCount(chatId: ChatId, viewerId: UserId): Int = DatabaseObservation.query(DatabaseOperation.MESSAGE_PIN_COUNT) {
-        db.select(DSL.countDistinct(MESSAGE_PINS.SEQUENCE))
+    override fun visibleIds(chatId: ChatId, viewerId: UserId): List<MessageId> = DatabaseObservation.query(
+        DatabaseOperation.MESSAGE_PIN_COUNT,
+    ) {
+        db.selectDistinct(MESSAGES.ID, MESSAGES.SEQUENCE)
             .from(MESSAGE_PINS)
             .join(MESSAGES).on(MESSAGES.CHAT_ID.eq(MESSAGE_PINS.CHAT_ID), MESSAGES.SEQUENCE.eq(MESSAGE_PINS.SEQUENCE))
             .where(visiblePins(chatId, viewerId))
-            .fetchOne(0, Int::class.java) ?: 0
+            .orderBy(MESSAGES.SEQUENCE.desc())
+            .fetch { MessageId(it.value1()!!) }
+    }
+
+    override fun exists(chatId: ChatId, sequence: Long, viewerId: UserId?): Boolean = DatabaseObservation.query(
+        DatabaseOperation.MESSAGE_PIN_COUNT,
+    ) {
+        db.fetchExists(
+            MESSAGE_PINS,
+            MESSAGE_PINS.CHAT_ID.eq(chatId.value).and(MESSAGE_PINS.SEQUENCE.eq(sequence)).and(scope(viewerId)),
+        )
     }
 
     private fun visiblePins(chatId: ChatId, viewerId: UserId): Condition = MESSAGE_PINS.CHAT_ID.eq(chatId.value)

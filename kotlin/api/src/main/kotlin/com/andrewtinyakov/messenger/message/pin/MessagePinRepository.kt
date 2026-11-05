@@ -28,5 +28,7 @@ interface MessagePinRepository {
 
     fun page(chatId: ChatId, viewerId: UserId, beforeSequence: Long?, limit: Int): List<PinnedMessage>
 
-    fun visibleCount(chatId: ChatId, viewerId: UserId): Int
+    fun visibleIds(chatId: ChatId, viewerId: UserId): List<MessageId>
+
+    fun exists(chatId: ChatId, sequence: Long, viewerId: UserId?): Boolean
 }

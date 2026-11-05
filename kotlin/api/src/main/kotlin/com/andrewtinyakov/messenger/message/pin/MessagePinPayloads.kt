@@ -21,6 +21,8 @@ data class PinnedMessagePageResponse(
     val pins: List<PinnedMessageResponse>,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED, minimum = "0", maximum = "400")
     val totalCount: Int,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED, description = "Every visible pinned message ID, newest first")
+    val pinnedMessageIds: List<String>,
     @field:JsonInclude(JsonInclude.Include.ALWAYS)
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED, nullable = true, description = "Pass as beforeSequence for older pins")
     val nextBeforeSequence: String?,

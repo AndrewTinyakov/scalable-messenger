@@ -714,6 +714,8 @@ export interface components {
             pins: components["schemas"]["PinnedMessageResponse"][];
             /** Format: int32 */
             totalCount: number;
+            /** @description Every visible pinned message ID, newest first */
+            pinnedMessageIds: string[];
             /** @description Pass as beforeSequence for older pins */
             nextBeforeSequence: string | null;
         };

@@ -133,6 +133,7 @@ class TelegramFeatureHttpTests
             assertEquals(2, alicePins.path("totalCount").intValue())
             assertEquals(listOf(third, first), alicePins.path("pins").toList().map { it.path("message").path("id").stringValue() })
             assertEquals(listOf("EVERYONE", "SELF"), alicePins.path("pins").toList().map { it.path("scope").stringValue() })
+            assertEquals(listOf(third, first), alicePins.path("pinnedMessageIds").toList().map { it.stringValue() })
             assertEquals(
                 listOf(third),
                 json(request("/$direct/pins", bob.second)).path("pins").toList().map {
@@ -208,7 +209,13 @@ class TelegramFeatureHttpTests
             )
             val last = db.queryForObject("SELECT id FROM messages WHERE chat_id=? AND sequence=201", String::class.java, group)
             assertEquals(409, request("/$group/pins/$last", owner.second, "PUT", """{"scope":"EVERYONE"}""").statusCode())
-            assertEquals(200, json(request("/$group/pins", member.second)).path("totalCount").intValue())
+            val pinned = db.queryForObject("SELECT id FROM messages WHERE chat_id=? AND sequence=1", String::class.java, group)
+            assertEquals(204, request("/$group/pins/$pinned", owner.second, "PUT", """{"scope":"EVERYONE"}""").statusCode())
+            val page = json(request("/$group/pins", member.second))
+            assertEquals(200, page.path("totalCount").intValue())
+            assertEquals(50, page.path("pins").size())
+            assertEquals(200, page.path("pinnedMessageIds").size())
+            assertEquals(pinned, page.path("pinnedMessageIds").toList().last().stringValue())
         }
 
         private fun outbox(target: String, type: String, chatId: String, user: Boolean = true): Int =

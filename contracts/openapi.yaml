@@ -2932,6 +2932,11 @@ components:
           format: int32
           maximum: 400
           minimum: 0
+        pinnedMessageIds:
+          type: array
+          description: "Every visible pinned message ID, newest first"
+          items:
+            type: string
         nextBeforeSequence:
           type:
           - string
@@ -2939,6 +2944,7 @@ components:
           description: Pass as beforeSequence for older pins
       required:
       - nextBeforeSequence
+      - pinnedMessageIds
       - pins
       - totalCount
     PinnedMessageResponse:

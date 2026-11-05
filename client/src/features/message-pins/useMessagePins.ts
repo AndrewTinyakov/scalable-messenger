@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Message } from '../../entities/message/model'
+import { EventType } from '../../shared/api/generated/socket-vocabulary'
 import type { api } from '../../shared/api/http'
 import type { SocketEvent } from '../../shared/api/socket'
 
@@ -13,6 +14,7 @@ interface PinsState {
   chatId: string
   pins: PinnedEntry[]
   total: number
+  ids: string[]
   next: string | null
 }
 
@@ -46,11 +48,25 @@ export function useMessagePins(
           again.current = false
           const page = await sessionApi.pinnedMessages(id)
           if (current !== generation.current) return
-          setState({
-            chatId: id,
-            pins: page.pins,
-            total: page.totalCount,
-            next: page.nextBeforeSequence,
+          setState((previous) => {
+            const head = page.pins.map((pin) => pin.message.id)
+            const merged = [
+              ...page.pins,
+              ...(previous?.chatId === id
+                ? previous.pins.filter((pin) => !head.includes(pin.message.id))
+                : []),
+            ]
+            const contiguous = merged.every(
+              (pin, index) => page.pinnedMessageIds[index] === pin.message.id,
+            )
+            const pins = contiguous ? merged : page.pins
+            return {
+              chatId: id,
+              pins,
+              total: page.totalCount,
+              ids: page.pinnedMessageIds,
+              next: pins.length < page.totalCount ? (pins.at(-1)?.message.sequence ?? null) : null,
+            }
           })
         } while (again.current && current === generation.current)
       } catch {
@@ -110,6 +126,7 @@ export function useMessagePins(
                 ),
               ],
               total: page.totalCount,
+              ids: page.pinnedMessageIds,
               next: page.nextBeforeSequence,
             }
           : previous,
@@ -133,6 +150,7 @@ export function useMessagePins(
           ? {
               ...previous,
               pins: previous.pins.filter((pin) => pin.message.id !== message.id),
+              ids: previous.ids.filter((id) => id !== message.id),
               total: Math.max(0, previous.total - 1),
             }
           : previous,
@@ -150,7 +168,7 @@ export function useMessagePins(
     if (!id) return
     await sessionApi.unpinAllMessages(id)
     setState((previous) =>
-      previous?.chatId === id ? { ...previous, pins: [], total: 0, next: null } : previous,
+      previous?.chatId === id ? { ...previous, pins: [], ids: [], total: 0, next: null } : previous,
     )
     await refresh()
   }, [refresh, sessionApi])
@@ -162,7 +180,9 @@ export function useMessagePins(
         return true
       }
       if (
-        (event.type === 'history_changed' || event.type === 'message_changed') &&
+        (event.type === 'history_changed' ||
+          event.type === 'message_changed' ||
+          event.type === EventType.SUBSCRIBED) &&
         event.chatId === chatRef.current
       )
         schedule()
@@ -177,7 +197,7 @@ export function useMessagePins(
     total: visible?.total ?? 0,
     hasOlder: Boolean(visible?.next),
     loadingOlder,
-    pinnedIds: new Set(visible?.pins.map((pin) => pin.message.id) ?? []),
+    pinnedIds: new Set(visible?.ids ?? []),
     loadOlder,
     pin,
     unpin,

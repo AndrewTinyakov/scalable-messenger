@@ -226,7 +226,7 @@ export function decodeReaders(value: unknown): ReaderPage {
 
 export type PinnedMessagePage = components['schemas']['PinnedMessagePageResponse']
 export function decodePinnedMessages(value: unknown, chatId: string): PinnedMessagePage {
-  const page = record(value, ['pins', 'totalCount', 'nextBeforeSequence'])
+  const page = record(value, ['pins', 'totalCount', 'pinnedMessageIds', 'nextBeforeSequence'])
   check(
     Array.isArray(page.pins) &&
       page.pins.length <= 100 &&
@@ -234,7 +234,11 @@ export function decodePinnedMessages(value: unknown, chatId: string): PinnedMess
       Number.isInteger(page.totalCount) &&
       page.totalCount >= page.pins.length &&
       page.totalCount <= 400 &&
-      (page.nextBeforeSequence === null || isSequence(page.nextBeforeSequence)),
+      (page.nextBeforeSequence === null || isSequence(page.nextBeforeSequence)) &&
+      Array.isArray(page.pinnedMessageIds) &&
+      page.pinnedMessageIds.length === page.totalCount &&
+      page.pinnedMessageIds.every(isId) &&
+      new Set(page.pinnedMessageIds).size === page.pinnedMessageIds.length,
   )
   const pins = (page.pins as unknown[]).map((pin) => {
     const entry = record(pin, ['message', 'scope'])
@@ -244,9 +248,12 @@ export function decodePinnedMessages(value: unknown, chatId: string): PinnedMess
     return { message, scope: entry.scope as 'SELF' | 'EVERYONE' }
   })
   check(new Set(pins.map((pin) => pin.message.id)).size === pins.length)
+  const pinnedMessageIds = page.pinnedMessageIds as string[]
+  check(pins.every((pin) => pinnedMessageIds.includes(pin.message.id)))
   return {
     pins,
     totalCount: page.totalCount as number,
+    pinnedMessageIds,
     nextBeforeSequence: page.nextBeforeSequence as string | null,
   }
 }

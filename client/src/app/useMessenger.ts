@@ -424,9 +424,16 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     [setError, startSend],
   )
 
+  const openedRef = useRef<string | null>(null)
   useEffect(() => {
-    const chat = chats.find((item) => item.id === selectedId)
-    if (!chat?.markedUnread) return
+    openedRef.current = selectedId
+  }, [selectedId])
+  useEffect(() => {
+    const opened = openedRef.current
+    const chat = opened ? chats.find((item) => item.id === opened) : undefined
+    if (!chat) return
+    openedRef.current = null
+    if (!chat.markedUnread) return
     applyChatPreferences(chat.id, { ...chat, markedUnread: false })
     void sessionApi
       .markUnread(chat.id, false)

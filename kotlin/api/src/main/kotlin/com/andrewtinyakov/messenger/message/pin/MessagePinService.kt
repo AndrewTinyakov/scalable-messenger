@@ -47,11 +47,13 @@ class MessagePinService(
         return tx.observedExecute(DatabaseTransaction.MESSAGE_PIN) {
             if (!chats.isMember(chatId, userId)) notFound()
             val fetched = pins.page(chatId, userId, before, limit + 1)
+            val pinnedIds = pins.visibleIds(chatId, userId)
             val page = fetched.take(limit)
             val loaded = messages.findMessagesByIds(chatId, userId, page.map { it.messageId }).associateBy { it.id }
             PinnedMessagePageResponse(
                 pins = page.mapNotNull { pin -> loaded[pin.messageId]?.let { PinnedMessageResponse(it.toResponse(), pin.scope) } },
-                totalCount = pins.visibleCount(chatId, userId),
+                totalCount = pinnedIds.size,
+                pinnedMessageIds = pinnedIds.map { it.value },
                 nextBeforeSequence = page.lastOrNull()?.takeIf { fetched.size > limit }?.sequence?.toString(),
             )
         }
@@ -66,6 +68,7 @@ class MessagePinService(
         }
         val viewer = userId.takeIf { scope == PinScope.SELF }
         pins.lock(chatId)
+        if (pins.exists(chatId, message.sequence, viewer)) return@observedExecuteWithoutResult
         if (pins.count(chatId, viewer) >= MAX_PINS_PER_SCOPE) {
             conflict(ApiErrorCode.PIN_LIMIT, "A chat can have up to $MAX_PINS_PER_SCOPE pinned messages")
         }

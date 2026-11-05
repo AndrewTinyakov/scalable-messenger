@@ -38,7 +38,7 @@ type PreviewState = PendingSend['status'] | undefined
 function latestVisible(chat: Chat, loaded: Message | undefined) {
   const last = chat.lastMessage
   const usable = loaded && !loaded.deletedAt ? loaded : undefined
-  if (usable && (!last || BigInt(usable.sequence) > BigInt(last.sequence)))
+  if (usable && BigInt(usable.sequence) > BigInt(chat.lastSequence))
     return {
       senderId: usable.senderId,
       body: usable.body,

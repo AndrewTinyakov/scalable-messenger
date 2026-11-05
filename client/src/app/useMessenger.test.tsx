@@ -61,6 +61,8 @@ let lastSummary: Chat['lastMessage']
 let hidden: boolean
 let deletionCalls: { chatId: string; requestId: string; scope: string; target: string }[]
 let failDeletion: boolean
+let markedUnread: boolean
+let unreadMarkCalls: string[]
 
 function snapshotFor(id: string) {
   return {
@@ -168,6 +170,8 @@ beforeEach(() => {
   lastSummary = null
   deletionCalls = []
   failDeletion = false
+  markedUnread = false
+  unreadMarkCalls = []
   vi.stubGlobal(
     'WebSocket',
     class extends TestSocket {
@@ -197,6 +201,24 @@ beforeEach(() => {
         deletedRows: '0',
       })
     }
+    if (path.endsWith('/unread-mark')) {
+      unreadMarkCalls.push(options?.method ?? 'GET')
+      markedUnread = options?.method === 'PUT'
+      return Response.json({
+        chatId: requestedChat,
+        pinnedRank: null,
+        mutedUntil: null,
+        mutedForever: false,
+        markedUnread,
+      })
+    }
+    if (path.endsWith('/pins'))
+      return Response.json({
+        pins: [],
+        totalCount: 0,
+        pinnedMessageIds: [],
+        nextBeforeSequence: null,
+      })
     if (path.endsWith('/visibility')) return Response.json({ ...metadata, hidden })
     if (path.endsWith('/changes'))
       return Response.json({
@@ -292,6 +314,7 @@ beforeEach(() => {
       return Response.json({
         ...group,
         lastMessage: lastSummary,
+        markedUnread,
         unreadCount: fakeUnread,
         memberCount: groupMemberCount,
         members: groupMembers,
@@ -311,6 +334,7 @@ beforeEach(() => {
           : [
               {
                 ...group,
+                markedUnread,
                 unreadCount: fakeUnread,
                 memberCount: groupMemberCount,
                 lastSequence: snapshotFor(chatId).snapshotSequence,
@@ -476,6 +500,42 @@ describe('messenger request coordination', () => {
     })
     expect(messenger.chats.find((chat) => chat.id === chatId)?.unreadCount).toBe(0)
     expect(paths.some((path) => path.endsWith('/messages'))).toBe(false)
+  })
+
+  it('keeps an unread mark made while the chat stays selected and clears it on the next opening', async () => {
+    vi.useFakeTimers()
+    await renderMessenger()
+    await act(async () => {
+      sockets[0].open()
+      messenger.selectChat(chatId)
+      await vi.advanceTimersByTimeAsync(100)
+    })
+    const chat = () => messenger.chats.find((item) => item.id === chatId)!
+    await act(async () => {
+      await messenger.markChatUnread(chat(), true)
+    })
+    await act(async () => {
+      sockets[0].event({
+        type: 'chat_preferences_changed',
+        version: 1,
+        eventId: recipient.id,
+        room: `user:${userId}`,
+        epoch: 'epoch',
+        streamId: '1-0',
+        chatId,
+      })
+      await vi.advanceTimersByTimeAsync(2500)
+      await messenger.refreshChats(true, true)
+    })
+    expect(chat().markedUnread).toBe(true)
+    expect(unreadMarkCalls).toEqual(['PUT'])
+    await act(async () => messenger.closeChat())
+    await act(async () => {
+      messenger.selectChat(chatId)
+      await vi.advanceTimersByTimeAsync(100)
+    })
+    expect(unreadMarkCalls).toEqual(['PUT', 'DELETE'])
+    expect(chat().markedUnread).toBe(false)
   })
 
   it.each(['rate_limited', 'room_limit', 'dependency_unavailable', 'publish_failed'])(

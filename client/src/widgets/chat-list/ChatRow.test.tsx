@@ -188,6 +188,23 @@ describe('chat row personal state and latest preview', () => {
     expect(row.querySelector('[aria-label="Not sent"]')).not.toBeNull()
   })
 
+  it('trusts the authoritative summary over a cached message it already covers', async () => {
+    const row = await renderWith(
+      { ...direct, lastSequence: '10', lastMessage: summary },
+      {
+        loaded: {
+          id: 'hidden-elsewhere',
+          chatId: 'direct',
+          sequence: '10',
+          senderId: me.id,
+          body: 'deleted for me on another device',
+          createdAt: '2026-11-04T10:01:00Z',
+        },
+      },
+    )
+    expect(row.querySelector('.chat-preview')?.textContent).toBe('line one line two')
+  })
+
   it('ignores a loaded tombstone and an older pending send', async () => {
     const row = await renderWith(
       { ...direct, lastMessage: summary },

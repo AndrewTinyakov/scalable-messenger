@@ -26,6 +26,8 @@ export function useMessagePins(
   connected: boolean,
 ) {
   const [state, setState] = useState<PinsState | null>(null)
+  const stateRef = useRef(state)
+  stateRef.current = state
   const [loadingOlder, setLoadingOlder] = useState(false)
   const generation = useRef(0)
   const chatRef = useRef(chatId)
@@ -46,27 +48,25 @@ export function useMessagePins(
       try {
         do {
           again.current = false
-          const page = await sessionApi.pinnedMessages(id)
+          const loaded = stateRef.current?.chatId === id ? stateRef.current.pins.length : 0
+          let page = await sessionApi.pinnedMessages(id)
           if (current !== generation.current) return
-          setState((previous) => {
-            const head = page.pins.map((pin) => pin.message.id)
-            const merged = [
-              ...page.pins,
-              ...(previous?.chatId === id
-                ? previous.pins.filter((pin) => !head.includes(pin.message.id))
-                : []),
-            ]
-            const contiguous = merged.every(
-              (pin, index) => page.pinnedMessageIds[index] === pin.message.id,
+          const pins = [...page.pins]
+          while (page.nextBeforeSequence && pins.length < loaded) {
+            page = await sessionApi.pinnedMessages(id, page.nextBeforeSequence)
+            if (current !== generation.current) return
+            pins.push(
+              ...page.pins.filter(
+                (pin) => !pins.some((item) => item.message.id === pin.message.id),
+              ),
             )
-            const pins = contiguous ? merged : page.pins
-            return {
-              chatId: id,
-              pins,
-              total: page.totalCount,
-              ids: page.pinnedMessageIds,
-              next: pins.length < page.totalCount ? (pins.at(-1)?.message.sequence ?? null) : null,
-            }
+          }
+          setState({
+            chatId: id,
+            pins,
+            total: page.totalCount,
+            ids: page.pinnedMessageIds,
+            next: page.nextBeforeSequence,
           })
         } while (again.current && current === generation.current)
       } catch {

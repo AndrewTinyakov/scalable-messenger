@@ -109,21 +109,12 @@
 .pinned-view-body {
   flex: 1;
 }
-.pinned-entry {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.pinned-entry > .message-row {
-  flex: 1;
-  min-width: 0;
-}
-.pinned-entry.mine {
-  flex-direction: row-reverse;
+.pinned-view-body .message-row {
+  margin-top: 9px;
 }
 .pinned-jump {
   display: grid;
+  align-self: flex-end;
   width: 34px;
   height: 34px;
   flex: none;
@@ -132,6 +123,9 @@
   border-radius: 50%;
   background: var(--bg-raised);
   color: var(--text-2);
+}
+.message-row.mine .pinned-jump {
+  order: -1;
 }
 .pinned-jump:hover {
   background: var(--bg-active);

@@ -1,4 +1,4 @@
-import type { Message, PendingSend } from '../../entities/message/model'
+import type { Message, PendingSend } from './model'
 
 interface Entry {
   key: string

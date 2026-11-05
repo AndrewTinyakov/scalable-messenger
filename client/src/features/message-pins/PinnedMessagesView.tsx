@@ -1,7 +1,9 @@
 import { ArrowLeft, ArrowRight, Copy, PinOff } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { MessageItem } from '../../entities/message/MessageItem'
+import { groupByDay } from '../../entities/message/messageDays'
 import type { Message } from '../../entities/message/model'
+import { formatDayLabel } from '../../shared/lib/time'
 import { Dialog } from '../../shared/ui/Dialog'
 import { Menu, MenuItem, type MenuPoint } from '../../shared/ui/Menu'
 import type { MessagePins } from './useMessagePins'
@@ -33,6 +35,7 @@ export function PinnedMessagesView({
   const [error, setError] = useState<string | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const ordered = [...pins.pins].reverse()
+  const days = groupByDay(ordered.map(({ message }) => ({ key: message.id, message })))
   const total = pins.total
   const firstLoad = useRef(true)
   useEffect(() => {
@@ -83,37 +86,45 @@ export function PinnedMessagesView({
           {pins.loadingOlder && (
             <span className="history-spinner" role="status" aria-label="Loading" />
           )}
-          {ordered.map(({ message }) => {
-            const mine = message.senderId === currentUserId
-            return (
-              <div className={`pinned-entry ${mine ? 'mine' : ''}`} key={message.id}>
-                <MessageItem
-                  message={message}
-                  mine={mine}
-                  sender={mine ? 'You' : senderName(message.senderId)}
-                  forwardedFrom={
-                    message.forwardedFromUserId
-                      ? senderName(message.forwardedFromUserId)
-                      : undefined
-                  }
-                  group={group}
-                  connected
-                  onRetry={() => {}}
-                  onActions={(target, anchor, _keyboard, point) =>
-                    setMenu({ message: target, anchor, point })
-                  }
-                />
-                <button
-                  className="pinned-jump"
-                  onClick={() => onJump(message.id)}
-                  aria-label="Go to message"
-                  title="Go to message"
-                >
-                  <ArrowRight size={18} />
-                </button>
+          {days.map((day) => (
+            <section className="message-day" key={day.key}>
+              <div className="message-day-label">
+                <span>{formatDayLabel(day.timestamp)}</span>
               </div>
-            )
-          })}
+              {day.entries.map(({ entry: { message } }) => {
+                const mine = message.senderId === currentUserId
+                return (
+                  <MessageItem
+                    key={message.id}
+                    message={message}
+                    mine={mine}
+                    sender={mine ? 'You' : senderName(message.senderId)}
+                    forwardedFrom={
+                      message.forwardedFromUserId
+                        ? senderName(message.forwardedFromUserId)
+                        : undefined
+                    }
+                    group={group}
+                    connected
+                    onRetry={() => {}}
+                    onActions={(target, anchor, _keyboard, point) =>
+                      setMenu({ message: target, anchor, point })
+                    }
+                    aside={
+                      <button
+                        className="pinned-jump"
+                        onClick={() => onJump(message.id)}
+                        aria-label="Go to message"
+                        title="Go to message"
+                      >
+                        <ArrowRight size={18} />
+                      </button>
+                    }
+                  />
+                )
+              })}
+            </section>
+          ))}
         </div>
       </div>
       <footer className="pinned-view-footer">

@@ -65,6 +65,7 @@ class PublicationHydration(
                         createdAt = message.createdAt,
                         messageVersion = message.messageVersion.toString(),
                         replyToMessageId = message.replyToMessageId?.value,
+                        forwardedFromUserId = message.forwardedFromUserId?.value,
                     ),
                 )
             }

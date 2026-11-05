@@ -2,6 +2,7 @@ package com.andrewtinyakov.messenger.chat.service
 
 import com.andrewtinyakov.messenger.chat.model.Chat
 import com.andrewtinyakov.messenger.chat.model.ChatKind
+import com.andrewtinyakov.messenger.chat.model.ChatPreferences
 import com.andrewtinyakov.messenger.chat.repository.ChatRepository
 import com.andrewtinyakov.messenger.chat.web.payload.AddGroupMembersRequest
 import com.andrewtinyakov.messenger.chat.web.payload.ChatPageResponse
@@ -52,7 +53,13 @@ class ChatService(
             beforeChatId = position?.chatId,
             limit = limit + 1,
         )
-        val page = fetched.take(limit)
+        val pinned = if (position == null) {
+            repository.findByMember(userId, null, null, ChatPreferences.MAX_PINNED_CHATS, pinned = true)
+        } else {
+            emptyList()
+        }
+        val unpinned = fetched.take(limit)
+        val page = pinned + unpinned
         if (page.isEmpty()) {
             return ChatPageResponse(
                 chats = emptyList(),
@@ -64,7 +71,7 @@ class ChatService(
             chats.filter { it.kind == ChatKind.DIRECT }
                 .map { it.id },
         )
-        val nextCursor = page.last().takeIf { fetched.size > limit }?.let { ChatCursor(it.activityAt, it.chat.id).encode() }
+        val nextCursor = unpinned.lastOrNull()?.takeIf { fetched.size > limit }?.let { ChatCursor(it.activityAt, it.chat.id).encode() }
         return ChatPageResponse(
             chats = page.map {
                 it.chat.toResponse(members = members[it.chat.id].orEmpty())

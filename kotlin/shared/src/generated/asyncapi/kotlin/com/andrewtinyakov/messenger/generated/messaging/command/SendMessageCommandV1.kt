@@ -10,6 +10,8 @@ data class SendMessageCommandV1(
     val body: String,
     val sentAt: java.time.OffsetDateTime,
     val replyToMessageId: String? = null,
+    val forwardFromChatId: String? = null,
+    val forwardFromMessageId: String? = null,
 ) {
     init {
         require(version == 1)
@@ -24,6 +26,8 @@ data class SendMessageCommandV1(
             body: String,
             sentAt: java.time.OffsetDateTime,
             replyToMessageId: String? = null,
+            forwardFromChatId: String? = null,
+            forwardFromMessageId: String? = null,
         ): SendMessageCommandV1 = SendMessageCommandV1(
             version = 1,
             chatId = chatId,
@@ -33,6 +37,8 @@ data class SendMessageCommandV1(
             body = body,
             sentAt = sentAt,
             replyToMessageId = replyToMessageId,
+            forwardFromChatId = forwardFromChatId,
+            forwardFromMessageId = forwardFromMessageId,
         )
     }
 }

@@ -73,6 +73,7 @@ messenger:
       allowed-methods:
         - GET
         - POST
+        - PUT
         - PATCH
         - DELETE
         - OPTIONS

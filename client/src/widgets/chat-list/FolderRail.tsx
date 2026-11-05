@@ -1,4 +1,6 @@
 import {
+  Bell,
+  BellOff,
   LogOut,
   Menu as MenuIcon,
   MessageCircleMore,
@@ -6,11 +8,18 @@ import {
   MessagesSquare,
   User as UserIcon,
   UsersRound,
+  Volume2,
+  VolumeX,
   type LucideIcon,
 } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { formatUnread } from '../../entities/chat/model'
 import type { User } from '../../entities/session/model'
+import {
+  notificationPermission,
+  useNotificationSettings,
+} from '../../features/notifications/notificationSettings'
+import { playNotificationSound } from '../../features/notifications/notificationSound'
 import { Avatar } from '../../shared/ui/Avatar'
 import { Menu, MenuItem } from '../../shared/ui/Menu'
 
@@ -34,6 +43,9 @@ interface Props {
 
 export function FolderRail({ user, folder, unreadChats, onFolder, onCreate, onSignOut }: Props) {
   const [open, setOpen] = useState(false)
+  const { settings, update } = useNotificationSettings()
+  const permission = notificationPermission()
+  const desktopOn = settings.desktop && permission === 'granted'
   const menuRef = useRef<HTMLButtonElement>(null)
   function run(action: () => void) {
     setOpen(false)
@@ -78,6 +90,36 @@ export function FolderRail({ user, folder, unreadChats, onFolder, onCreate, onSi
           </MenuItem>
           <MenuItem icon={<UsersRound size={18} />} onClick={() => run(() => onCreate('group'))}>
             New group
+          </MenuItem>
+          {permission !== 'unsupported' && (
+            <MenuItem
+              icon={desktopOn ? <Bell size={18} /> : <BellOff size={18} />}
+              role="menuitemcheckbox"
+              aria-checked={desktopOn}
+              disabled={permission === 'denied'}
+              title={
+                permission === 'denied'
+                  ? 'Notifications are blocked in browser settings'
+                  : undefined
+              }
+              onClick={() => void update({ desktop: !desktopOn })}
+            >
+              {permission === 'denied'
+                ? 'Notifications blocked'
+                : `Desktop notifications: ${desktopOn ? 'on' : 'off'}`}
+            </MenuItem>
+          )}
+          <MenuItem
+            icon={settings.sound ? <Volume2 size={18} /> : <VolumeX size={18} />}
+            role="menuitemcheckbox"
+            aria-checked={settings.sound}
+            onClick={() => {
+              const sound = !settings.sound
+              void update({ sound })
+              if (sound) playNotificationSound()
+            }}
+          >
+            Sound: {settings.sound ? 'on' : 'off'}
           </MenuItem>
           <MenuItem icon={<LogOut size={18} />} danger onClick={() => run(onSignOut)}>
             Sign out

@@ -240,6 +240,22 @@ describe('send requests', () => {
     expect(fixture.values.get('relay.user.device.pending')).toBe('[]')
   })
 
+  it('keeps forward sources and exact bodies through storage, and refuses forwards that also reply', async () => {
+    const fixture = setup()
+    const source = { chatId: messageId, messageId, authorId: messageId }
+    expect(fixture.requests.start(chatId, '  spaced  ', undefined, source).ok).toBe(true)
+    expect(fixture.sent[0]).toMatchObject({
+      body: '  spaced  ',
+      forwardFromChatId: messageId,
+      forwardFromMessageId: messageId,
+      forwardedFromUserId: messageId,
+    })
+    const reloaded = new SendRequests('relay.user.device', fixture.adapters)
+    expect(reloaded.list()[0]).toMatchObject({ forwardFromMessageId: messageId })
+    expect(fixture.requests.start(chatId, 'x', messageId, source).ok).toBe(false)
+    expect(fixture.requests.start(`draft:${messageId}`, 'x', undefined, source).ok).toBe(false)
+  })
+
   it('counts message limits in Unicode codepoints', () => {
     const fixture = setup()
     expect(fixture.requests.start(chatId, '😀'.repeat(4000))).toEqual({ ok: true })

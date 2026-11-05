@@ -143,6 +143,7 @@ class JooqMessageRepository(
             MESSAGES.BODY,
             MESSAGES.CREATED_AT,
             MESSAGES.REPLY_TO_MESSAGE_ID,
+            MESSAGES.FORWARDED_FROM_USER_ID,
         )
         val resultInsert = db.insertInto(
             SEND_REQUESTS,
@@ -165,6 +166,7 @@ class JooqMessageRepository(
                 message.body,
                 message.createdAt,
                 message.reply?.messageId?.value,
+                message.forwardedFromUserId?.value,
             )
             resultInsert.values(
                 result.senderId.value,
@@ -269,6 +271,7 @@ class JooqMessageRepository(
             editedAt = editedAt,
             deletedAt = deletedAt,
             replyToMessageId = replyToMessageId?.let(::MessageId),
+            forwardedFromUserId = forwardedFromUserId?.let(::UserId),
         )
 
     private fun SendRequestsRecord.toSendResult(): SendResult =

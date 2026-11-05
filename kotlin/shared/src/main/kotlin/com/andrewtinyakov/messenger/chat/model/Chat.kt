@@ -15,6 +15,7 @@ data class Chat(
     val activityAt: java.time.OffsetDateTime? = null,
     val unreadCount: Int = 0,
     val unreadCountCapped: Boolean = false,
+    val preferences: ChatPreferences = ChatPreferences(),
 ) {
     init {
         require(lastSequence >= 0) { "Chat sequence must be nonnegative" }
@@ -32,6 +33,22 @@ data class Chat(
                 require(ownerId != null) { "Group chat requires an owner" }
             }
         }
+    }
+}
+
+data class ChatPreferences(
+    val pinnedRank: Int? = null,
+    val mutedUntil: java.time.OffsetDateTime? = null,
+    val mutedForever: Boolean = false,
+    val markedUnread: Boolean = false,
+) {
+    init {
+        require(pinnedRank == null || pinnedRank in 1..MAX_PINNED_CHATS) { "Pinned rank must be 1 to $MAX_PINNED_CHATS" }
+        require(!(mutedForever && mutedUntil != null)) { "A permanent mute has no end time" }
+    }
+
+    companion object {
+        const val MAX_PINNED_CHATS = 10
     }
 }
 

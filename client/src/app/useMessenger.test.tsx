@@ -61,6 +61,8 @@ let lastSummary: Chat['lastMessage']
 let hidden: boolean
 let deletionCalls: { chatId: string; requestId: string; scope: string; target: string }[]
 let failDeletion: boolean
+let markedUnread: boolean
+let unreadMarkCalls: string[]
 
 function snapshotFor(id: string) {
   return {
@@ -168,6 +170,8 @@ beforeEach(() => {
   lastSummary = null
   deletionCalls = []
   failDeletion = false
+  markedUnread = false
+  unreadMarkCalls = []
   vi.stubGlobal(
     'WebSocket',
     class extends TestSocket {
@@ -197,6 +201,24 @@ beforeEach(() => {
         deletedRows: '0',
       })
     }
+    if (path.endsWith('/unread-mark')) {
+      unreadMarkCalls.push(options?.method ?? 'GET')
+      markedUnread = options?.method === 'PUT'
+      return Response.json({
+        chatId: requestedChat,
+        pinnedRank: null,
+        mutedUntil: null,
+        mutedForever: false,
+        markedUnread,
+      })
+    }
+    if (path.endsWith('/pins'))
+      return Response.json({
+        pins: [],
+        totalCount: 0,
+        pinnedMessageIds: [],
+        nextBeforeSequence: null,
+      })
     if (path.endsWith('/visibility')) return Response.json({ ...metadata, hidden })
     if (path.endsWith('/changes'))
       return Response.json({
@@ -292,6 +314,7 @@ beforeEach(() => {
       return Response.json({
         ...group,
         lastMessage: lastSummary,
+        markedUnread,
         unreadCount: fakeUnread,
         memberCount: groupMemberCount,
         members: groupMembers,
@@ -311,6 +334,7 @@ beforeEach(() => {
           : [
               {
                 ...group,
+                markedUnread,
                 unreadCount: fakeUnread,
                 memberCount: groupMemberCount,
                 lastSequence: snapshotFor(chatId).snapshotSequence,
@@ -336,6 +360,47 @@ afterEach(async () => {
 })
 
 describe('messenger request coordination', () => {
+  it('jumps into a cached latest window that skips a hidden sequence', async () => {
+    historyMessages = Array.from({ length: 100 }, (_, index) => ({
+      id: String(index + 1).padStart(26, '0'),
+      chatId,
+      senderId: recipient.id,
+      sequence: String(index + 1),
+      body: `Message ${index + 1}`,
+      createdAt: '2026-11-04T10:00:00Z',
+    })).filter((message) => message.sequence !== '90')
+    window.history.replaceState(null, '', `/groups/${chatId}`)
+    await renderMessenger()
+    await act(async () => sockets[0].open())
+    const fetch = globalThis.fetch
+    const around: string[] = []
+    vi.stubGlobal('fetch', (input: string, options?: RequestInit) => {
+      if (!input.includes('/messages/around')) return fetch(input, options)
+      const anchor = new URL(input, 'http://localhost').searchParams.get('messageId')!
+      around.push(anchor)
+      const index = historyMessages.findIndex((message) => message.id === anchor)
+      const messages = index < 50 ? historyMessages.slice(0, 50) : historyMessages.slice(-50)
+      return Promise.resolve(
+        Response.json({
+          ...snapshotFor(chatId),
+          messages,
+          anchorMessageId: anchor,
+          hasOlder: index >= 50,
+          hasNewer: index < 50,
+          coverageAfterSequence: (BigInt(messages[0].sequence) - 1n).toString(),
+          coverageThroughSequence: messages.at(-1)!.sequence,
+        }),
+      )
+    })
+    await act(async () => messenger.features.jumpToMessage(historyMessages[0].id, false))
+    expect(messenger.detached).toBe(true)
+    const target = historyMessages.find((message) => message.sequence === '95')!
+    await act(async () => messenger.features.jumpToMessage(target.id, false))
+    expect(messenger.messages[chatId].some((message) => message.id === target.id)).toBe(true)
+    expect(messenger.features.reveal?.messageId).toBe(target.id)
+    expect(messenger.error).toBeNull()
+  })
+
   it.each(['quote navigation', 'location restore'] as const)(
     'keeps the latest window when an accepted send supersedes delayed %s',
     async (navigation) => {
@@ -476,6 +541,42 @@ describe('messenger request coordination', () => {
     })
     expect(messenger.chats.find((chat) => chat.id === chatId)?.unreadCount).toBe(0)
     expect(paths.some((path) => path.endsWith('/messages'))).toBe(false)
+  })
+
+  it('keeps an unread mark made while the chat stays selected and clears it on the next opening', async () => {
+    vi.useFakeTimers()
+    await renderMessenger()
+    await act(async () => {
+      sockets[0].open()
+      messenger.selectChat(chatId)
+      await vi.advanceTimersByTimeAsync(100)
+    })
+    const chat = () => messenger.chats.find((item) => item.id === chatId)!
+    await act(async () => {
+      await messenger.markChatUnread(chat(), true)
+    })
+    await act(async () => {
+      sockets[0].event({
+        type: 'chat_preferences_changed',
+        version: 1,
+        eventId: recipient.id,
+        room: `user:${userId}`,
+        epoch: 'epoch',
+        streamId: '1-0',
+        chatId,
+      })
+      await vi.advanceTimersByTimeAsync(2500)
+      await messenger.refreshChats(true, true)
+    })
+    expect(chat().markedUnread).toBe(true)
+    expect(unreadMarkCalls).toEqual(['PUT'])
+    await act(async () => messenger.closeChat())
+    await act(async () => {
+      messenger.selectChat(chatId)
+      await vi.advanceTimersByTimeAsync(100)
+    })
+    expect(unreadMarkCalls).toEqual(['PUT', 'DELETE'])
+    expect(chat().markedUnread).toBe(false)
   })
 
   it.each(['rate_limited', 'room_limit', 'dependency_unavailable', 'publish_failed'])(

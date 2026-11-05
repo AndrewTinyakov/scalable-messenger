@@ -1,4 +1,4 @@
-import { Check, CheckCheck, CircleAlert, Clock3 } from 'lucide-react'
+import { Check, CheckCheck, CircleAlert, Clock3, Pin } from 'lucide-react'
 import { memo, useRef } from 'react'
 import { colorIndex } from '../../shared/lib/color'
 import { formatMessageTime } from '../../shared/lib/time'
@@ -21,6 +21,8 @@ interface Props {
   quoteSender?: string
   quoteText?: string
   quoteLoading?: boolean
+  forwardedFrom?: string
+  pinned?: boolean
   highlighted?: boolean
   runStart?: boolean
   runEnd?: boolean
@@ -52,6 +54,8 @@ export const MessageItem = memo(function MessageItem({
   quoteSender,
   quoteText,
   quoteLoading,
+  forwardedFrom,
+  pinned = false,
   highlighted,
   runStart = true,
   runEnd = true,
@@ -73,7 +77,9 @@ export const MessageItem = memo(function MessageItem({
   const deleted = Boolean(message?.deletedAt)
   const senderId = message?.senderId ?? sender
   const text = message ? (deleted ? 'Message deleted' : message.body) : (send?.body ?? '')
-  const emojiOnly = !deleted && !message?.replyToMessageId && EMOJI_ONLY.test(text.trim())
+  const forwarded = !deleted && Boolean(message?.forwardedFromUserId ?? send?.forwardedFromUserId)
+  const emojiOnly =
+    !deleted && !forwarded && !message?.replyToMessageId && EMOJI_ONLY.test(text.trim())
   const unavailableQuote = Boolean(
     message?.replyToMessageId &&
     (message.replyDeleted || message.replySenderId == null || message.replyBody == null),
@@ -155,6 +161,13 @@ export const MessageItem = memo(function MessageItem({
           {group && !mine && runStart && (
             <span className={`message-sender peer-tone-${colorIndex(senderId)}`}>{sender}</span>
           )}
+          {forwarded && (
+            <span
+              className={`message-forwarded peer-tone-${colorIndex(message?.forwardedFromUserId ?? send?.forwardedFromUserId ?? '')}`}
+            >
+              Forwarded from <strong>{forwardedFrom ?? 'Member'}</strong>
+            </span>
+          )}
           {send && !message && send.replyToMessageId && (
             <button
               className={`message-quote peer-tone-${colorIndex(quoteSender ?? '')}`}
@@ -178,6 +191,11 @@ export const MessageItem = memo(function MessageItem({
           )}
           <span className="message-text">{text}</span>
           <span className="message-meta">
+            {pinned && !deleted && (
+              <span className="message-pinned" role="img" aria-label="Pinned" title="Pinned">
+                <Pin size={12} />
+              </span>
+            )}
             {message?.editedAt && !deleted && <span>edited</span>}
             <time dateTime={timestamp.current} title={new Date(timestamp.current).toLocaleString()}>
               {formatMessageTime(timestamp.current)}

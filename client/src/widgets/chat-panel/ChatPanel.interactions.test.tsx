@@ -235,12 +235,14 @@ describe('message actions and scoped deletion', () => {
     expect(container.querySelectorAll('.lucide-check')).toHaveLength(1)
     expect(container.querySelector('.message-action-trigger, .read-receipt')).toBeNull()
     await open()
-    expect(document.querySelector('[role="menu"]')?.textContent).toBe('ReplyEditCopySelectDelete')
+    expect(document.querySelector('[role="menu"]')?.textContent).toBe(
+      'ReplyEditCopy textSelectDelete',
+    )
     expect(document.querySelector('.inline-readers time')?.getAttribute('datetime')).toBe(
       '2026-11-04T10:01:00Z',
     )
     expect(document.querySelector('[role="dialog"]')).toBeNull()
-    await click(button('Copy'))
+    await click(button('Copy text'))
     expect(document.querySelector('[role="alert"]')?.textContent).toContain('Could not copy')
   })
 
@@ -248,7 +250,7 @@ describe('message actions and scoped deletion', () => {
     const messages = rows(1)
     await render(messages)
     await open()
-    expect(document.querySelector('[role="menu"]')?.textContent).toBe('ReplyCopySelectDelete')
+    expect(document.querySelector('[role="menu"]')?.textContent).toBe('ReplyCopy textSelectDelete')
     expect(features.readers).not.toHaveBeenCalled()
     await click(button('Delete'))
     expect((document.querySelector('input[value="SELF"]') as HTMLInputElement).checked).toBe(true)

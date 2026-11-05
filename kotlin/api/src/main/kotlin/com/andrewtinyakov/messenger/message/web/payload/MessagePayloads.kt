@@ -45,6 +45,8 @@ data class MessageResponse(
     @field:JsonInclude(JsonInclude.Include.ALWAYS)
     @field:Schema(nullable = true, requiredMode = Schema.RequiredMode.REQUIRED)
     val replyVersion: String?,
+    @field:Schema(nullable = true, requiredMode = Schema.RequiredMode.NOT_REQUIRED, description = "Original author of a forwarded message")
+    val forwardedFromUserId: String? = null,
 )
 
 data class MessageHistoryResponse(
@@ -118,6 +120,7 @@ fun Message.toResponse(): MessageResponse = MessageResponse(
     replyBody = reply?.body,
     replyDeleted = reply?.deleted,
     replyVersion = reply?.version?.toString(),
+    forwardedFromUserId = forwardedFromUserId?.value,
 )
 
 data class EditMessageRequest(

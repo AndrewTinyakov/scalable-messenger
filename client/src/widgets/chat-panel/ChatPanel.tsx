@@ -1,21 +1,27 @@
 import { useHotkey } from '@tanstack/react-hotkeys'
-import { ChevronDown, Trash2, X } from 'lucide-react'
+import { ChevronDown, Copy, Forward, Trash2, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { Chat } from '../../entities/chat/model'
+import { isMuted, type Chat } from '../../entities/chat/model'
 import type { DeleteScope } from '../../entities/message/historySnapshot'
 import { MessageItem } from '../../entities/message/MessageItem'
 import type { Message, PendingSend } from '../../entities/message/model'
 import type { ReadingLocation } from '../../entities/message/readingLocation'
 import type { User } from '../../entities/session/model'
+import { MuteDialog } from '../../features/chat-preferences/MuteDialog'
 import {
   DeleteConfirmation,
   type DeletionTarget,
 } from '../../features/conversation/DeleteConfirmation'
 import { MessageActionMenu } from '../../features/conversation/MessageActionMenu'
 import type { useConversationFeatures } from '../../features/conversation/useConversationFeatures'
+import { ForwardDialog } from '../../features/forward/ForwardDialog'
+import { PinMessageDialog } from '../../features/message-pins/PinMessageDialog'
+import { PinnedBar } from '../../features/message-pins/PinnedBar'
+import { PinnedMessagesView } from '../../features/message-pins/PinnedMessagesView'
+import type { MessagePins } from '../../features/message-pins/useMessagePins'
 import { MessageComposer } from '../../features/message-send/MessageComposer'
 import { ChatKind } from '../../shared/api/generated/socket-vocabulary'
-import { formatDayLabel } from '../../shared/lib/time'
+import { formatDayLabel, formatMessageTime } from '../../shared/lib/time'
 import type { MenuPoint } from '../../shared/ui/Menu'
 import { ChatHeader } from './ChatHeader'
 import { groupByDay } from './messageDays'
@@ -51,6 +57,27 @@ interface Props {
   readingLocation?: ReadingLocation
   locationRevision?: number
   onLocationChange?: (chatId: string, location: ReadingLocation) => void
+  pins?: MessagePins
+  forwardTargets?: Chat[]
+  onForward?: (targetChatId: string, messages: Message[]) => void
+  onMute?: (chatId: string, durationSeconds: number | null) => Promise<void>
+  onUnmute?: (chatId: string) => Promise<void>
+}
+
+export function copyableText(
+  messages: Message[],
+  senderName: (senderId: string) => string,
+): string {
+  const ordered = [...messages].sort((left, right) =>
+    BigInt(left.sequence) < BigInt(right.sequence) ? -1 : 1,
+  )
+  if (ordered.length === 1) return ordered[0].body
+  return ordered
+    .map(
+      (message) =>
+        `${senderName(message.senderId)}, [${new Date(message.createdAt).toLocaleDateString()} ${formatMessageTime(message.createdAt)}]\n${message.body}`,
+    )
+    .join('\n\n')
 }
 
 export function ChatPanel({
@@ -79,8 +106,29 @@ export function ChatPanel({
   readingLocation,
   locationRevision = 0,
   onLocationChange,
+  pins,
+  forwardTargets,
+  onForward,
+  onMute,
+  onUnmute,
 }: Props) {
-  const senderNames = useSenderNames(chat, messages, lookupUser)
+  const pendingForwardAuthors = useMemo(
+    () => [
+      ...new Set([
+        ...pending.flatMap((send) => (send.forwardedFromUserId ? [send.forwardedFromUserId] : [])),
+        ...(pins?.pins ?? []).flatMap(({ message }) => [
+          message.senderId,
+          ...(message.forwardedFromUserId ? [message.forwardedFromUserId] : []),
+        ]),
+      ]),
+    ],
+    [pending, pins?.pins],
+  )
+  const senderNames = useSenderNames(chat, messages, lookupUser, pendingForwardAuthors)
+  const [pinnedView, setPinnedView] = useState(false)
+  const [pinTarget, setPinTarget] = useState<Message | null>(null)
+  const [forwarding, setForwarding] = useState<Message[] | null>(null)
+  const [muting, setMuting] = useState(false)
   const [reply, setReply] = useState<Message | undefined>()
   const [edit, setEdit] = useState<Message | undefined>()
   const [confirm, setConfirm] = useState<DeletionTarget | null>(null)
@@ -113,6 +161,10 @@ export function ChatPanel({
     setEdit(undefined)
     setConfirm(null)
     setPopup(null)
+    setPinnedView(false)
+    setPinTarget(null)
+    setForwarding(null)
+    setMuting(false)
     actionGeneration.current += 1
     busyRef.current = false
     setBusy(false)
@@ -195,7 +247,8 @@ export function ChatPanel({
     'Escape',
     () => {
       if (document.querySelector('[role="dialog"]')) return
-      if (selection.enabled) selection.clear()
+      if (pinnedView) setPinnedView(false)
+      else if (selection.enabled) selection.clear()
       else if (reply || edit) {
         setReply(undefined)
         setEdit(undefined)
@@ -241,11 +294,31 @@ export function ChatPanel({
       setPopup({ messageId: target.id, anchor, keyboard, point }),
     [],
   )
+  const closePinnedView = useCallback(() => setPinnedView(false), [])
   const beginReply = useCallback((target: Message) => {
     setPopup(null)
     setEdit(undefined)
     setReply(target)
   }, [])
+  function senderName(senderId: string) {
+    return senderId === currentUser.id
+      ? currentUser.username
+      : (senderNames.get(senderId) ?? 'Member')
+  }
+  function forwardAuthor(senderId: string | null | undefined) {
+    return senderId ? senderName(senderId) : undefined
+  }
+  async function copyMessages(targets: Message[]) {
+    try {
+      await navigator.clipboard.writeText(copyableText(targets, senderName))
+      selection.clear()
+      setAnnouncement(
+        targets.length === 1 ? 'Message copied.' : `${targets.length} messages copied.`,
+      )
+    } catch {
+      setAnnouncement('Could not copy. Select the message text to copy it.')
+    }
+  }
   function quoteAuthor(senderId: string | null | undefined) {
     return senderId === currentUser.id ? currentUser.username : senderNames.get(senderId ?? '')
   }
@@ -321,10 +394,41 @@ export function ChatPanel({
               }
             : undefined
         }
+        muted={isMuted(chat)}
+        onMute={onMute && !chat.id.startsWith('draft:') ? () => setMuting(true) : undefined}
+        onUnmute={
+          onUnmute && !chat.id.startsWith('draft:')
+            ? () => void onUnmute(chat.id).catch(() => {})
+            : undefined
+        }
       />
+      {pins && pins.pins.length > 0 && !pinnedView && (
+        <PinnedBar
+          key={chat.id}
+          pins={pins.pins}
+          total={pins.total}
+          onJump={(messageId) => void features?.jumpToMessage(messageId, false)}
+          onOpenList={() => setPinnedView(true)}
+          onUnpin={(entry) => void pins.unpin(entry.message).catch(() => {})}
+        />
+      )}
+      {pins && pinnedView && (
+        <PinnedMessagesView
+          pins={pins}
+          currentUserId={currentUser.id}
+          group={chat.kind === ChatKind.GROUP}
+          senderName={(id) => senderName(id)}
+          onBack={closePinnedView}
+          onJump={(messageId) => {
+            setPinnedView(false)
+            void features?.jumpToMessage(messageId, false)
+          }}
+        />
+      )}
 
       <div
         className="chat-body"
+        hidden={pinnedView}
         ref={scrollRef}
         onScroll={handleScroll}
         role="region"
@@ -364,6 +468,10 @@ export function ChatPanel({
                     runEnd={!sameMessageRun(entries[index], entries[index + 1], currentUser.id)}
                     selectionMode={selection.enabled}
                     selected={Boolean(message && selection.selected.has(message.id))}
+                    forwardedFrom={forwardAuthor(
+                      message?.forwardedFromUserId ?? send?.forwardedFromUserId,
+                    )}
+                    pinned={Boolean(message && pins?.pinnedIds.has(message.id))}
                     onQuote={features ? jumpToQuote : undefined}
                     quoteSender={quoteAuthor(
                       message?.replySenderId ?? pendingTarget(send)?.senderId,
@@ -407,6 +515,26 @@ export function ChatPanel({
             {selection.selected.size} {selection.selected.size === 1 ? 'message' : 'messages'}
           </span>
           <button
+            className="icon-button"
+            aria-label="Copy selected messages"
+            title="Copy"
+            disabled={!selection.selected.size}
+            onClick={() => void copyMessages([...selection.selected.values()])}
+          >
+            <Copy size={19} />
+          </button>
+          {onForward && (
+            <button
+              className="icon-button"
+              aria-label="Forward selected messages"
+              title="Forward"
+              disabled={!selection.selected.size}
+              onClick={() => setForwarding([...selection.selected.values()])}
+            >
+              <Forward size={20} />
+            </button>
+          )}
+          <button
             className="button button-danger"
             disabled={!selection.selected.size}
             onClick={() => {
@@ -419,7 +547,11 @@ export function ChatPanel({
           </button>
         </div>
       )}
-      <div className="chat-composer-region" ref={composerRegion} hidden={selection.enabled}>
+      <div
+        className="chat-composer-region"
+        ref={composerRegion}
+        hidden={selection.enabled || pinnedView}
+      >
         <MessageComposer
           key={modeKey}
           initialDraft={drafts.current.get(modeKey ?? '')}
@@ -485,7 +617,42 @@ export function ChatPanel({
             setActionError(null)
           }}
           onSelect={() => selection.start(popupMessage)}
+          pinned={pins ? pins.pinnedIds.has(popupMessage.id) : undefined}
+          onPin={pins ? () => setPinTarget(popupMessage) : undefined}
+          onUnpin={pins ? () => void pins.unpin(popupMessage).catch(() => {}) : undefined}
+          onForward={onForward ? () => setForwarding([popupMessage]) : undefined}
           onClose={() => setPopup(null)}
+        />
+      )}
+      {pinTarget && pins && (
+        <PinMessageDialog
+          message={pinTarget}
+          peerName={chat.kind === ChatKind.DIRECT ? senderName(recipient ?? '') : undefined}
+          onCancel={() => setPinTarget(null)}
+          onPin={(scope) => pins.pin(pinTarget, scope)}
+        />
+      )}
+      {forwarding && onForward && (
+        <ForwardDialog
+          chats={forwardTargets ?? []}
+          userId={currentUser.id}
+          count={forwarding.length}
+          onCancel={() => setForwarding(null)}
+          onForward={(targetId) => {
+            const messages = forwarding
+            setForwarding(null)
+            selection.clear()
+            onForward(targetId, messages)
+          }}
+        />
+      )}
+      {muting && onMute && (
+        <MuteDialog
+          title={
+            chat.kind === ChatKind.GROUP ? (chat.name ?? 'this group') : senderName(recipient ?? '')
+          }
+          onCancel={() => setMuting(false)}
+          onMute={(seconds) => onMute(chat.id, seconds)}
         />
       )}
     </section>

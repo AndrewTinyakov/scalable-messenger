@@ -92,6 +92,21 @@ public class ChatMembers extends TableImpl<ChatMembersRecord> {
      */
     public final TableField<ChatMembersRecord, Long> VISIBILITY_REVISION = createField(DSL.name("visibility_revision"), SQLDataType.BIGINT.nullable(false).defaultValue(DSL.field(DSL.raw("0"), SQLDataType.BIGINT)), this, "");
 
+    /**
+     * The column <code>public.chat_members.pinned_rank</code>.
+     */
+    public final TableField<ChatMembersRecord, Short> PINNED_RANK = createField(DSL.name("pinned_rank"), SQLDataType.SMALLINT, this, "");
+
+    /**
+     * The column <code>public.chat_members.muted_until</code>.
+     */
+    public final TableField<ChatMembersRecord, OffsetDateTime> MUTED_UNTIL = createField(DSL.name("muted_until"), SQLDataType.TIMESTAMPWITHTIMEZONE(6), this, "");
+
+    /**
+     * The column <code>public.chat_members.marked_unread_at</code>.
+     */
+    public final TableField<ChatMembersRecord, OffsetDateTime> MARKED_UNREAD_AT = createField(DSL.name("marked_unread_at"), SQLDataType.TIMESTAMPWITHTIMEZONE(6), this, "");
+
     private ChatMembers(Name alias, Table<ChatMembersRecord> aliased) {
         this(alias, aliased, (Field<?>[]) null, null);
     }
@@ -161,7 +176,7 @@ public class ChatMembers extends TableImpl<ChatMembersRecord> {
 
     @Override
     public List<Index> getIndexes() {
-        return Arrays.asList(Indexes.CHAT_MEMBERS_USER_JOINED_IDX);
+        return Arrays.asList(Indexes.CHAT_MEMBERS_PINNED_IDX, Indexes.CHAT_MEMBERS_USER_JOINED_IDX);
     }
 
     @Override
@@ -203,6 +218,7 @@ public class ChatMembers extends TableImpl<ChatMembersRecord> {
         return Arrays.asList(
             Internal.createCheck(this, DSL.name("chat_members_cleared_through_sequence_check"), "((cleared_through_sequence >= 0))", true),
             Internal.createCheck(this, DSL.name("chat_members_hidden_through_sequence_check"), "((hidden_through_sequence >= 0))", true),
+            Internal.createCheck(this, DSL.name("chat_members_pinned_rank_check"), "(((pinned_rank >= 1) AND (pinned_rank <= 10)))", true),
             Internal.createCheck(this, DSL.name("chat_members_visibility_revision_check"), "((visibility_revision >= 0))", true)
         );
     }

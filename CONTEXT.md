@@ -37,4 +37,11 @@
 - **Sidebar watch** is a bounded selection of visible chat rows whose direct peers' presence and group activity are observed separately from the selected conversation.
 - **Sidebar activity hint** is a bodyless indication that a watched group has accepted a message. It requests an authoritative summary refresh and proves neither application nor human reading.
 
+- **Pinned chat** is an account's ordered sidebar shortcut, at most ten per account. Pinned chats lead the first directory page; activity keysets cover only unpinned chats. Hiding a chat for yourself unpins it.
+- **Mute** silences an account's alerts for one chat until a time or forever. An expired mute reads as unmuted without cleanup.
+- **Unread mark** is an account's reminder to return to a chat. It is separate from read progress and clears when the account opens the chat.
+- **Pinned message** is a message shown at the top of a chat for everyone or, in direct chats only, for one participant. Each scope keeps at most 200 pins. Pins follow the viewer's history visibility and disappear when the message row is removed.
+- **Forward** saves a new message whose body is copied from a source message visible to the sender at processing time, crediting the source's original author. Forwarded messages cannot be edited.
+- **Personal chat event** is a bodyless hint in the account's user room. It covers pin, mute and unread-mark changes. Devices refetch the chat summary.
+
 State the actual guarantee instead of calling a message "delivered". Request IDs identify retries, message IDs identify saved messages, and event IDs identify publications.

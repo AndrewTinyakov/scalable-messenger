@@ -218,3 +218,37 @@ test('sidebar watch and bodyless observations share strict bounded schemas', () 
   assert.equal(watch({ ...fixture, chatIds: [fixture.chatIds[0], fixture.chatIds[0]] }), false);
   assert.equal(watch({ ...fixture, chatIds: Array.from({length:101}, (_, i) => String(i).padStart(26, '0')) }), false);
 });
+
+test('personal chat preferences, message pins and forwards share strict wire fixtures', () => {
+  const preferences = validate('schemas/message/event/chat-preferences-changed-v1.yaml');
+  const socketPreferences = validate('schemas/socket/frame/chat-preferences-changed-v1.yaml');
+  const pins = validate('schemas/message/event/pins-changed-v1.yaml');
+  const socketPins = validate('schemas/socket/frame/pins-changed-v1.yaml');
+  const changed = readJSON('fixtures/valid/chat-preferences-changed.json');
+  const pinned = readJSON('fixtures/valid/pins-changed.json');
+  const live = { epoch: 'epoch-1', streamId: '1-0' };
+  assert.equal(preferences(changed), true, JSON.stringify(preferences.errors));
+  assert.equal(socketPreferences({ ...changed, ...live }), true, JSON.stringify(socketPreferences.errors));
+  assert.equal(preferences({ ...changed, room: `group:${changed.chatId}` }), false);
+  assert.equal(preferences({ ...changed, mutedUntil: '2026-11-05T10:00:00Z' }), false);
+  assert.equal(pins(pinned), true, JSON.stringify(pins.errors));
+  assert.equal(pins({ ...pinned, room: 'user:01ARZ3NDEKTSV4RRFFQ69G5FAX' }), true, JSON.stringify(pins.errors));
+  assert.equal(socketPins({ ...pinned, ...live }), true, JSON.stringify(socketPins.errors));
+  assert.equal(socketPins(pinned), false);
+
+  const forward = readJSON('fixtures/valid/send-forward-command.json');
+  assert.equal(command(forward), true, JSON.stringify(command.errors));
+  assert.equal(command({ ...forward, forwardFromMessageId: undefined }), false);
+  assert.equal(command({ ...forward, replyToMessageId: forward.forwardFromMessageId }), false);
+  const { chatId, ...withoutChat } = forward;
+  assert.equal(command({ ...withoutChat, recipientId: chatId }), false);
+  const frame = { type: 'send', version: 1, chatId, requestId: forward.requestId, body: forward.body, forwardFromChatId: forward.forwardFromChatId, forwardFromMessageId: forward.forwardFromMessageId };
+  assert.equal(socketSend(frame), true, JSON.stringify(socketSend.errors));
+  assert.equal(socketSend({ ...frame, forwardFromChatId: undefined }), false);
+
+  const forwarded = readJSON('fixtures/valid/message-saved-forward.json');
+  assert.equal(saved(forwarded), true, JSON.stringify(saved.errors));
+  assert.equal(socketSaved({ ...forwarded, ...live }), true, JSON.stringify(socketSaved.errors));
+  assert.equal(saved({ ...forwarded, forwardedFromUserId: 'nobody' }), false);
+  assert.equal(rejected({ ...readJSON('fixtures/valid/send-rejected.json'), reason: 'INVALID_FORWARD_SOURCE' }), true, JSON.stringify(rejected.errors));
+});

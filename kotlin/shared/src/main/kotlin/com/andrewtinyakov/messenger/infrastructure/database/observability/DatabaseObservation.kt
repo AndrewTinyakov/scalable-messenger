@@ -25,6 +25,8 @@ enum class DatabaseTransaction(
     DELETION_ACCEPT("deletion.accept"),
     DELETION_PURGE("deletion.purge"),
     DELETION_VISIBILITY_CLEANUP("deletion.visibility_cleanup"),
+    CHAT_PREFERENCES("chat.preferences"),
+    MESSAGE_PIN("message.pin"),
     OTHER("other"),
 }
 

@@ -36,26 +36,31 @@ class JooqChatRepository(
         beforeActivityAt: OffsetDateTime?,
         beforeChatId: ChatId?,
         limit: Int,
+        pinned: Boolean,
     ): List<MemberChat> = DatabaseObservation.query(DatabaseOperation.CHAT_FIND_BY_MEMBER) {
         val summary = chatSummary(userId)
         val activityAt = DSL.coalesce(CHATS.LAST_ACTIVITY_AT, CHAT_MEMBERS.JOINED_AT)
+        val preferences = ChatPreferenceFields(CHAT_MEMBERS)
         db.select(
-            activityAt,
-            summary,
-            CHATS.ID,
-            CHATS.KIND,
-            CHATS.NAME,
-            CHATS.NEXT_SEQUENCE,
-            CHATS.MEMBER_COUNT,
-            CHATS.OWNER_ID,
+            listOf(
+                activityAt,
+                summary,
+                CHATS.ID,
+                CHATS.KIND,
+                CHATS.NAME,
+                CHATS.NEXT_SEQUENCE,
+                CHATS.MEMBER_COUNT,
+                CHATS.OWNER_ID,
+            ) + preferences.all,
         )
             .from(CHAT_MEMBERS)
             .join(CHATS)
             .on(CHATS.ID.eq(CHAT_MEMBERS.CHAT_ID))
             .where(CHAT_MEMBERS.USER_ID.eq(userId.value), CHATS.DELETED_AT.isNull)
             .and(CHAT_MEMBERS.HIDDEN_THROUGH_SEQUENCE.isNull.or(CHATS.NEXT_SEQUENCE.minus(1L).gt(CHAT_MEMBERS.HIDDEN_THROUGH_SEQUENCE)))
+            .and(if (pinned) CHAT_MEMBERS.PINNED_RANK.isNotNull else CHAT_MEMBERS.PINNED_RANK.isNull)
             .and(
-                if (beforeActivityAt != null && beforeChatId != null) {
+                if (!pinned && beforeActivityAt != null && beforeChatId != null) {
                     activityAt.lt(beforeActivityAt)
                         .or(
                             activityAt.eq(beforeActivityAt)
@@ -66,8 +71,11 @@ class JooqChatRepository(
                 },
             )
             .orderBy(
-                activityAt.desc(),
-                CHAT_MEMBERS.CHAT_ID.desc(),
+                if (pinned) {
+                    listOf(CHAT_MEMBERS.PINNED_RANK.asc(), CHAT_MEMBERS.CHAT_ID.desc())
+                } else {
+                    listOf(activityAt.desc(), CHAT_MEMBERS.CHAT_ID.desc())
+                },
             )
             .limit(limit)
             .fetch { row ->
@@ -80,6 +88,7 @@ class JooqChatRepository(
                         ownerId = row.get(CHATS.OWNER_ID)
                             ?.let(::UserId),
                         memberCount = row.get(CHATS.MEMBER_COUNT)!!,
+                        preferences = preferences.read(row),
                     ).withSummary(row.get(summary), row.get(activityAt)),
                     activityAt = row.get(activityAt)!!,
                 )
@@ -387,33 +396,25 @@ class JooqChatRepository(
                 }
             }
         val summary = chatSummary(userId)
-        val activityAt = DSL.coalesce(
-            CHATS.LAST_ACTIVITY_AT,
-            DSL.select(
-                CHAT_MEMBERS.JOINED_AT,
-            ).from(CHAT_MEMBERS).where(CHAT_MEMBERS.CHAT_ID.eq(CHATS.ID), CHAT_MEMBERS.USER_ID.eq(userId.value)).asField<OffsetDateTime>(),
-        )
+        val viewer = CHAT_MEMBERS.`as`("viewer")
+        val preferences = ChatPreferenceFields(viewer)
+        val activityAt = DSL.coalesce(CHATS.LAST_ACTIVITY_AT, viewer.JOINED_AT)
         return db.select(
-            activityAt,
-            CHATS.asterisk(),
-            members,
-            summary,
+            listOf(
+                activityAt,
+                CHATS.asterisk(),
+                members,
+                summary,
+            ) + preferences.all,
         )
             .from(CHATS)
+            .join(viewer)
+            .on(viewer.CHAT_ID.eq(CHATS.ID), viewer.USER_ID.eq(userId.value))
             .where(CHATS.ID.eq(chatId.value), CHATS.DELETED_AT.isNull)
-            .and(
-                DSL.exists(
-                    DSL.selectOne()
-                        .from(CHAT_MEMBERS)
-                        .where(
-                            CHAT_MEMBERS.CHAT_ID.eq(CHATS.ID),
-                            CHAT_MEMBERS.USER_ID.eq(userId.value),
-                        ),
-                ),
-            )
             .fetchOne { row ->
                 MemberChatDetails(
-                    chat = row.into(CHATS).toModel().withSummary(row.get(summary), row.get(activityAt)),
+                    chat = row.into(CHATS).toModel().copy(preferences = preferences.read(row))
+                        .withSummary(row.get(summary), row.get(activityAt)),
                     members = row.get(members),
                 )
             }

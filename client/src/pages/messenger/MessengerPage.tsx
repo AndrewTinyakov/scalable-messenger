@@ -5,6 +5,7 @@ import type { Session } from '../../entities/session/model'
 import { ChatActions, type ChatMenuTarget } from '../../features/chat-actions/ChatActions'
 import { CreateChatDialog } from '../../features/chat-create/CreateChatDialog'
 import { GroupMembersDialog } from '../../features/group-members/GroupMembersDialog'
+import { useChatNotifications } from '../../features/notifications/useChatNotifications'
 import { ChatKind } from '../../shared/api/generated/socket-vocabulary'
 import { api } from '../../shared/api/http'
 import { isNetworkOnline, subscribeNetwork } from '../../shared/lib/network'
@@ -61,6 +62,23 @@ export function MessengerPage({ session, onSignOut, onSessionRevoked }: Props) {
     setManagingMembers(false)
   }, [selected?.id])
 
+  useChatNotifications({
+    chats: messenger.chats,
+    userId: session.user.id,
+    liveChatId: liveId,
+    ready: !messenger.loading,
+    onOpen: messenger.selectChat,
+  })
+  const pinnedOrder = useMemo(
+    () => messenger.chats.filter((chat) => chat.pinnedRank != null).map((chat) => chat.id),
+    [messenger.chats],
+  )
+  const reportError = useCallback(
+    (cause: unknown) =>
+      messenger.reportError(cause instanceof Error ? cause.message : String(cause)),
+    [messenger.reportError],
+  )
+
   useEffect(() => {
     document.title = unreadChats.all ? `(${unreadChats.all}) Messenger` : 'Messenger'
     return () => {
@@ -90,6 +108,8 @@ export function MessengerPage({ session, onSignOut, onSessionRevoked }: Props) {
           folder={folder}
           loading={messenger.loading}
           messages={messenger.latestMessages}
+          pending={messenger.pending}
+          onReorderPinned={(order) => void messenger.reorderPinnedChats(order).catch(reportError)}
           selectedId={messenger.selectedId}
           liveChatId={liveId}
           presence={messenger.sidebarPresence}
@@ -110,6 +130,13 @@ export function MessengerPage({ session, onSignOut, onSessionRevoked }: Props) {
           readingLocation={messenger.location}
           locationRevision={messenger.locationRevision}
           onLocationChange={messenger.rememberLocation}
+          pins={messenger.pins}
+          forwardTargets={messenger.chats}
+          onForward={(targetId, messages) => {
+            if (messenger.forwardMessages(targetId, messages)) messenger.selectChat(targetId)
+          }}
+          onMute={messenger.muteChat}
+          onUnmute={messenger.unmuteChat}
           currentUser={session.user}
           messages={selected ? messenger.messages[selected.id] || [] : []}
           pending={messenger.pending}
@@ -182,6 +209,13 @@ export function MessengerPage({ session, onSignOut, onSessionRevoked }: Props) {
             user={session.user}
             onDelete={messenger.deleteChatById}
             onClear={messenger.clearChatHistory}
+            pinnedOrder={pinnedOrder}
+            onPin={messenger.pinChat}
+            onMovePinned={messenger.movePinnedChat}
+            onMute={messenger.muteChat}
+            onUnmute={messenger.unmuteChat}
+            onMarkUnread={messenger.markChatUnread}
+            onError={messenger.reportError}
             onClose={() => setChatMenu(null)}
           />
         )}

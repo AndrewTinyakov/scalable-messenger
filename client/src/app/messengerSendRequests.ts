@@ -29,6 +29,12 @@ export function createMessengerSendRequests(
         requestId: send.requestId,
         body: send.body,
         ...(send.replyToMessageId ? { replyToMessageId: send.replyToMessageId } : {}),
+        ...(send.forwardFromChatId && send.forwardFromMessageId
+          ? {
+              forwardFromChatId: send.forwardFromChatId,
+              forwardFromMessageId: send.forwardFromMessageId,
+            }
+          : {}),
       })
     },
     isConnected: () => socketRef.current?.readyState === WebSocket.OPEN,

@@ -36,6 +36,8 @@ type SendFrame = {
   requestId: string
   body: string
   replyToMessageId?: string
+  forwardFromChatId?: string
+  forwardFromMessageId?: string
 } & ({ chatId: string; recipientId?: never } | { recipientId: string; chatId?: never })
 
 type Subscription = {
@@ -81,6 +83,7 @@ export type SocketEvent = { version: 1 } & (
     } & LiveEvent)
   | ({ type: 'message_changed'; mutationRevision: string } & MessageFields & LiveEvent)
   | ({ type: 'chat_deleted' | 'reads_changed'; chatId: string } & LiveEvent)
+  | ({ type: 'chat_preferences_changed' | 'pins_changed'; chatId: string } & LiveEvent)
   | {
       type: 'presence'
       chatId: string
@@ -106,6 +109,7 @@ export type SocketEvent = { version: 1 } & (
       replyBody?: string | null
       replyDeleted?: boolean | null
       replyVersion?: string | null
+      forwardedFromUserId?: string
     } & LiveEvent)
   | ({
       type: typeof EventType.SEND_REJECTED
@@ -145,6 +149,8 @@ const eventFields = {
   message_changed: [...liveFields, ...messageFields, 'mutationRevision'],
   chat_deleted: [...liveFields, 'chatId'],
   reads_changed: [...liveFields, 'chatId'],
+  chat_preferences_changed: [...liveFields, 'chatId'],
+  pins_changed: [...liveFields, 'chatId'],
   presence: ['chatId', 'observedAt', 'validForMs', 'statuses'],
   [EventType.QUEUED]: ['requestId', 'chatId', 'recipientId'],
   [EventType.SUBSCRIBED]: ['chatId', 'room'],
@@ -159,6 +165,7 @@ const eventFields = {
     'body',
     'createdAt',
     ...messageFields.filter((key) => key !== 'editedAt' && key !== 'deletedAt'),
+    'forwardedFromUserId',
   ],
   [EventType.SEND_REJECTED]: [...liveFields, 'requestId', 'chatId', 'recipientId', 'reason'],
   [EventType.ERROR]: ['requestId', 'code'],
@@ -199,6 +206,7 @@ export function decodeSocketEvent(data: unknown): SocketEvent | null {
     'senderId',
     'memberId',
     'eventId',
+    'forwardedFromUserId',
   ]) {
     if (key in frame && !isId(frame[key])) return null
   }
@@ -246,6 +254,15 @@ export function decodeSocketEvent(data: unknown): SocketEvent | null {
     case 'chat_deleted':
     case 'reads_changed':
       valid = live && isId(frame.chatId)
+      break
+    case 'chat_preferences_changed':
+      valid = live && isId(frame.chatId) && String(frame.room).startsWith('user:')
+      break
+    case 'pins_changed':
+      valid =
+        live &&
+        isId(frame.chatId) &&
+        (String(frame.room).startsWith('user:') || frame.room === groupRoom(frame.chatId))
       break
     case 'message_changed':
       if (

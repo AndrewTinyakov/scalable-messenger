@@ -337,7 +337,7 @@ func featureAssertJSONEqual(t *testing.T, actual, expected []byte) {
 }
 
 func TestFeatureSharedDurableFixturesRoundTripWithoutLosingTombstonesOrReplyFlags(t *testing.T) {
-	for _, name := range []string{"message-saved-reply", "message-changed", "message-deleted", "message-saved-deleted-reply", "chat-deleted", "reads-changed", "history-changed", "message-saved-reply-identity"} {
+	for _, name := range []string{"message-saved-reply", "message-changed", "message-deleted", "message-saved-deleted-reply", "chat-deleted", "reads-changed", "history-changed", "message-saved-reply-identity", "chat-preferences-changed", "pins-changed", "message-saved-forward"} {
 		t.Run(name, func(t *testing.T) {
 			payload, err := os.ReadFile("../../../contracts/fixtures/valid/" + name + ".json")
 			if err != nil {

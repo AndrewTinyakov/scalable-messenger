@@ -8,6 +8,7 @@ export function useSenderNames(
   chat: Chat | undefined,
   messages: Message[],
   lookup?: (id: string) => Promise<User>,
+  extraIds: string[] = [],
 ) {
   const cache = useRef(new Map<string, string>())
   const requested = useRef(new Set<string>())
@@ -15,19 +16,19 @@ export function useSenderNames(
   const running = useRef(false)
   const active = useRef(true)
   const [names, setNames] = useState(new Map<string, string>())
-  const senderIds =
-    chat?.kind === ChatKind.GROUP
-      ? [
-          ...new Set(
-            messages.flatMap((message) => [
-              message.senderId,
-              ...(message.replySenderId ? [message.replySenderId] : []),
-            ]),
-          ),
-        ]
-          .sort()
-          .join(',')
-      : ''
+  const group = chat?.kind === ChatKind.GROUP
+  const senderIds = [
+    ...new Set([
+      ...messages.flatMap((message) => [
+        ...(group ? [message.senderId] : []),
+        ...(group && message.replySenderId ? [message.replySenderId] : []),
+        ...(message.forwardedFromUserId ? [message.forwardedFromUserId] : []),
+      ]),
+      ...extraIds,
+    ]),
+  ]
+    .sort()
+    .join(',')
 
   useEffect(() => {
     active.current = true

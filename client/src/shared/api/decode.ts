@@ -83,7 +83,18 @@ export function decodeChat(value: unknown): Chat {
   fields(
     value,
     ['id', 'kind', 'members', 'memberCount', 'lastSequence'],
-    ['name', 'ownerId', 'lastMessage', 'unreadCount', 'unreadCountCapped', 'activityAt'],
+    [
+      'name',
+      'ownerId',
+      'lastMessage',
+      'unreadCount',
+      'unreadCountCapped',
+      'activityAt',
+      'pinnedRank',
+      'mutedUntil',
+      'mutedForever',
+      'markedUnread',
+    ],
   )
   if (
     !isId(value.id) ||
@@ -108,6 +119,7 @@ export function decodeChat(value: unknown): Chat {
     invalid()
   if (value.unreadCountCapped !== undefined && typeof value.unreadCountCapped !== 'boolean')
     invalid()
+  decodePreferenceFields(value)
   if (value.lastMessage != null) {
     fields(value.lastMessage, [
       'id',
@@ -138,6 +150,43 @@ export function decodeChat(value: unknown): Chat {
   }
   value.members.forEach(decodeUser)
   return { unreadCount: 0, unreadCountCapped: false, ...value } as Chat
+}
+
+function decodePreferenceFields(value: Record<string, unknown>): void {
+  if (
+    value.pinnedRank != null &&
+    (typeof value.pinnedRank !== 'number' ||
+      !Number.isInteger(value.pinnedRank) ||
+      value.pinnedRank < 1 ||
+      value.pinnedRank > 10)
+  )
+    invalid()
+  if (value.mutedUntil != null && !isDateTime(value.mutedUntil)) invalid()
+  for (const key of ['mutedForever', 'markedUnread'])
+    if (value[key] !== undefined && typeof value[key] !== 'boolean') invalid()
+  if (value.mutedForever === true && value.mutedUntil != null) invalid()
+}
+
+export function decodeChatPreferences(
+  value: unknown,
+  chatId: string,
+): components['schemas']['ChatPreferencesResponse'] {
+  fields(value, ['chatId', 'pinnedRank', 'mutedUntil', 'mutedForever', 'markedUnread'])
+  if (value.chatId !== chatId) invalid()
+  decodePreferenceFields(value)
+  return value as components['schemas']['ChatPreferencesResponse']
+}
+
+export function decodePinnedChats(value: unknown): string[] {
+  fields(value, ['chatIds'])
+  if (
+    !Array.isArray(value.chatIds) ||
+    value.chatIds.length > 10 ||
+    !value.chatIds.every(isId) ||
+    new Set(value.chatIds).size !== value.chatIds.length
+  )
+    invalid()
+  return value.chatIds as string[]
 }
 
 export function decodeGroupMembers(
@@ -202,8 +251,10 @@ export function decodeMessage(
       'replyBody',
       'replyDeleted',
       'replyVersion',
+      'forwardedFromUserId',
     ],
   )
+  if (value.forwardedFromUserId != null && !isId(value.forwardedFromUserId)) invalid()
   if (
     !isId(value.id) ||
     value.chatId !== chatId ||

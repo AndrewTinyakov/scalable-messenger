@@ -64,7 +64,7 @@ func (c *Connection) send(base context.Context, f protocol.Frame) error {
 	if err := c.admitSend(ctx); err != nil {
 		return err
 	}
-	command := protocol.SendCommand{Version: 1, ChatID: f.ChatID, RecipientID: f.RecipientID, RequestID: f.RequestID, SenderID: c.session.UserID, Body: f.Body, ReplyToMessageID: f.ReplyToMessageID, SentAt: time.Now().UTC().Format(time.RFC3339Nano)}
+	command := protocol.SendCommand{Version: 1, ChatID: f.ChatID, RecipientID: f.RecipientID, RequestID: f.RequestID, SenderID: c.session.UserID, Body: f.Body, ReplyToMessageID: f.ReplyToMessageID, ForwardChatID: f.ForwardFromChatID, ForwardMessageID: f.ForwardFromMsgID, SentAt: time.Now().UTC().Format(time.RFC3339Nano)}
 	started := time.Now()
 	if err := c.server.publisher.Publish(ctx, command); err != nil {
 		c.server.metrics.ObservePublish(time.Since(started), monitoring.PublishFailed)

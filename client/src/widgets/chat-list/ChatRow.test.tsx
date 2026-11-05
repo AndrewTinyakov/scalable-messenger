@@ -133,3 +133,95 @@ describe('chat row', () => {
     expect(menu).toHaveBeenCalledWith(direct, row, true)
   })
 })
+
+describe('chat row personal state and latest preview', () => {
+  async function renderWith(chat: Chat, extra: Partial<Parameters<typeof ChatRow>[0]> = {}) {
+    await act(async () =>
+      root.render(
+        <ChatRow
+          chat={chat}
+          userId={me.id}
+          selected={false}
+          online={false}
+          onSelect={vi.fn()}
+          onMenu={vi.fn()}
+          {...extra}
+        />,
+      ),
+    )
+    return container.querySelector<HTMLButtonElement>('.chat-item')!
+  }
+
+  it('previews a loaded live message newer than the server summary', async () => {
+    const row = await renderWith(
+      { ...direct, lastMessage: summary },
+      {
+        loaded: {
+          id: 'live',
+          chatId: 'direct',
+          sequence: '10',
+          senderId: me.id,
+          body: 'just arrived',
+          createdAt: '2026-11-04T10:01:00Z',
+        },
+      },
+    )
+    expect(row.querySelector('.chat-preview')?.textContent).toBe('You: just arrived')
+    expect(row.querySelector('[aria-label="Sent"]')).not.toBeNull()
+  })
+
+  it('previews an own send that is still waiting and its failure', async () => {
+    const send = {
+      chatId: 'direct',
+      requestId: 'request',
+      body: 'on its way',
+      createdAt: '2026-11-04T10:02:00Z',
+      status: 'sending' as const,
+    }
+    const row = await renderWith({ ...direct, lastMessage: summary }, { pending: send })
+    expect(row.querySelector('.chat-preview')?.textContent).toBe('You: on its way')
+    expect(row.querySelector('[aria-label="Sending"]')).not.toBeNull()
+    await renderWith(
+      { ...direct, lastMessage: summary },
+      { pending: { ...send, status: 'rejected' } },
+    )
+    expect(row.querySelector('[aria-label="Not sent"]')).not.toBeNull()
+  })
+
+  it('ignores a loaded tombstone and an older pending send', async () => {
+    const row = await renderWith(
+      { ...direct, lastMessage: summary },
+      {
+        loaded: {
+          id: 'gone',
+          chatId: 'direct',
+          sequence: '12',
+          senderId: peer.id,
+          body: '',
+          createdAt: '2026-11-04T10:03:00Z',
+          deletedAt: '2026-11-04T10:04:00Z',
+        },
+        pending: {
+          chatId: 'direct',
+          requestId: 'old',
+          body: 'older',
+          createdAt: '2026-11-04T09:00:00Z',
+          status: 'queued',
+        },
+      },
+    )
+    expect(row.querySelector('.chat-preview')?.textContent).toBe('line one line two')
+  })
+
+  it('marks unread, muted and pinned chats', async () => {
+    let row = await renderWith({ ...direct, markedUnread: true })
+    expect(row.querySelector('.unread-mark')).not.toBeNull()
+    row = await renderWith({ ...direct, unreadCount: 3, mutedForever: true })
+    expect(row.querySelector('.unread-badge.muted')?.textContent).toBe('3')
+    expect(row.querySelector('[aria-label="Muted"]')).not.toBeNull()
+    row = await renderWith({ ...direct, mutedUntil: '2000-01-01T00:00:00Z', pinnedRank: 1 })
+    expect(row.querySelector('[aria-label="Muted"]')).toBeNull()
+    expect(row.querySelector('[aria-label="Pinned"]')).not.toBeNull()
+    expect(row.getAttribute('draggable')).toBe('false')
+  })
+})

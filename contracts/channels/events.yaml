@@ -26,5 +26,9 @@ roomEvents:
       $ref: ../messages.yaml#/messages/ChatDeletedEventV1
     ReadsChangedEventV1:
       $ref: ../messages.yaml#/messages/ReadsChangedEventV1
+    ChatPreferencesChangedEventV1:
+      $ref: ../messages.yaml#/messages/ChatPreferencesChangedEventV1
+    PinsChangedEventV1:
+      $ref: ../messages.yaml#/messages/PinsChangedEventV1
     HistoryChangedEventV1:
       $ref: ../messages.yaml#/messages/HistoryChangedEventV1

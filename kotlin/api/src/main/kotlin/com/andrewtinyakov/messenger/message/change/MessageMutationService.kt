@@ -85,6 +85,10 @@ class MessageMutationService(
                     outcome = "forbidden"
                     throw ApiException(HttpStatus.FORBIDDEN, ApiErrorCode.FORBIDDEN, "Only the author can change a message")
                 }
+                if (message.forwardedFromUserId != null) {
+                    outcome = "forbidden"
+                    throw ApiException(HttpStatus.FORBIDDEN, ApiErrorCode.FORBIDDEN, "Forwarded messages cannot be edited")
+                }
                 val version = requireVersion(expectedVersion)
                 if (message.deletedAt != null || version != message.messageVersion) {
                     outcome = "conflict"

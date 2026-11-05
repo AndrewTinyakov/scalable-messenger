@@ -160,6 +160,20 @@ public class MessagesRecord extends UpdatableRecordImpl<MessagesRecord> {
         return (String) get(9);
     }
 
+    /**
+     * Setter for <code>public.messages.forwarded_from_user_id</code>.
+     */
+    public void setForwardedFromUserId(String value) {
+        set(10, value);
+    }
+
+    /**
+     * Getter for <code>public.messages.forwarded_from_user_id</code>.
+     */
+    public String getForwardedFromUserId() {
+        return (String) get(10);
+    }
+
     // -------------------------------------------------------------------------
     // Primary key information
     // -------------------------------------------------------------------------
@@ -183,7 +197,7 @@ public class MessagesRecord extends UpdatableRecordImpl<MessagesRecord> {
     /**
      * Create a detached, initialised MessagesRecord
      */
-    public MessagesRecord(String id, String chatId, Long sequence, String senderId, String body, OffsetDateTime createdAt, Long messageVersion, OffsetDateTime editedAt, OffsetDateTime deletedAt, String replyToMessageId) {
+    public MessagesRecord(String id, String chatId, Long sequence, String senderId, String body, OffsetDateTime createdAt, Long messageVersion, OffsetDateTime editedAt, OffsetDateTime deletedAt, String replyToMessageId, String forwardedFromUserId) {
         super(Messages.MESSAGES);
 
         setId(id);
@@ -196,6 +210,7 @@ public class MessagesRecord extends UpdatableRecordImpl<MessagesRecord> {
         setEditedAt(editedAt);
         setDeletedAt(deletedAt);
         setReplyToMessageId(replyToMessageId);
+        setForwardedFromUserId(forwardedFromUserId);
         resetTouchedOnNotNull();
     }
 }

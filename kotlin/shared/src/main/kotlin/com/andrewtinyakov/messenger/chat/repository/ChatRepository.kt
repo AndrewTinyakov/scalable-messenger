@@ -18,7 +18,13 @@ data class MemberChatDetails(
 )
 
 interface ChatRepository {
-    fun findByMember(userId: UserId, beforeActivityAt: OffsetDateTime?, beforeChatId: ChatId?, limit: Int): List<MemberChat>
+    fun findByMember(
+        userId: UserId,
+        beforeActivityAt: OffsetDateTime?,
+        beforeChatId: ChatId?,
+        limit: Int,
+        pinned: Boolean = false,
+    ): List<MemberChat>
 
     fun findMembersByChatIds(chatIds: List<ChatId>): Map<ChatId, List<UserSummary>>
 

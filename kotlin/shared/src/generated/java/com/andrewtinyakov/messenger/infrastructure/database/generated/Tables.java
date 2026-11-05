@@ -13,6 +13,7 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Del
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.HiddenMessageRanges;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.HistoryPurgeJobs;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.MessageChanges;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.MessagePins;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Messages;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.MessengerOutboxEvents;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.PendingReadNotifications;
@@ -72,6 +73,11 @@ public class Tables {
      * The table <code>public.message_changes</code>.
      */
     public static final MessageChanges MESSAGE_CHANGES = MessageChanges.MESSAGE_CHANGES;
+
+    /**
+     * The table <code>public.message_pins</code>.
+     */
+    public static final MessagePins MESSAGE_PINS = MessagePins.MESSAGE_PINS;
 
     /**
      * The table <code>public.messages</code>.

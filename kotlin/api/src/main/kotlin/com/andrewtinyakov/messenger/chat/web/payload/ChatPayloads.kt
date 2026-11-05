@@ -45,6 +45,20 @@ data class ChatResponse(
         description = "True for 256 raw unread candidates; real count may be higher even when unreadCount is zero",
     )
     val unreadCountCapped: Boolean = false,
+    @field:Schema(
+        requiredMode = Schema.RequiredMode.NOT_REQUIRED,
+        nullable = true,
+        minimum = "1",
+        maximum = "10",
+        description = "Viewer's pin position; pinned chats lead the first directory page",
+    )
+    val pinnedRank: Int? = null,
+    @field:Schema(requiredMode = Schema.RequiredMode.NOT_REQUIRED, nullable = true, description = "End of a timed mute")
+    val mutedUntil: java.time.OffsetDateTime? = null,
+    @field:Schema(requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+    val mutedForever: Boolean = false,
+    @field:Schema(requiredMode = Schema.RequiredMode.NOT_REQUIRED, description = "Viewer marked this chat to read later")
+    val markedUnread: Boolean = false,
 )
 
 data class DirectChatResponse(
@@ -96,6 +110,10 @@ fun Chat.toResponse(members: List<UserSummary>): ChatResponse = ChatResponse(
     unreadCount = unreadCount,
     activityAt = activityAt,
     unreadCountCapped = unreadCountCapped,
+    pinnedRank = preferences.pinnedRank,
+    mutedUntil = preferences.mutedUntil,
+    mutedForever = preferences.mutedForever,
+    markedUnread = preferences.markedUnread,
     lastMessage = lastMessage?.let {
         ChatLastMessageResponse(
             it.id.value,

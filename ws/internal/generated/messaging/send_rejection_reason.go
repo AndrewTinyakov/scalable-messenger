@@ -17,6 +17,7 @@ const (
 	SendRejectionReasonRequestIdConflict
 	SendRejectionReasonProcessingFailed
 	SendRejectionReasonInvalidReplyTarget
+	SendRejectionReasonInvalidForwardSource
 )
 
 // Value returns the value of the enum.
@@ -27,17 +28,18 @@ func (op SendRejectionReason) Value() any {
 	return SendRejectionReasonValues[op]
 }
 
-var SendRejectionReasonValues = []any{"NOT_A_MEMBER", "CHAT_NOT_FOUND", "RECIPIENT_NOT_FOUND", "INVALID_RECIPIENT", "EMPTY_BODY", "BODY_TOO_LONG", "REQUEST_ID_CONFLICT", "PROCESSING_FAILED", "INVALID_REPLY_TARGET"}
+var SendRejectionReasonValues = []any{"NOT_A_MEMBER", "CHAT_NOT_FOUND", "RECIPIENT_NOT_FOUND", "INVALID_RECIPIENT", "EMPTY_BODY", "BODY_TOO_LONG", "REQUEST_ID_CONFLICT", "PROCESSING_FAILED", "INVALID_REPLY_TARGET", "INVALID_FORWARD_SOURCE"}
 var ValuesToSendRejectionReason = map[any]SendRejectionReason{
-	SendRejectionReasonValues[SendRejectionReasonNotAMember]:         SendRejectionReasonNotAMember,
-	SendRejectionReasonValues[SendRejectionReasonChatNotFound]:       SendRejectionReasonChatNotFound,
-	SendRejectionReasonValues[SendRejectionReasonRecipientNotFound]:  SendRejectionReasonRecipientNotFound,
-	SendRejectionReasonValues[SendRejectionReasonInvalidRecipient]:   SendRejectionReasonInvalidRecipient,
-	SendRejectionReasonValues[SendRejectionReasonEmptyBody]:          SendRejectionReasonEmptyBody,
-	SendRejectionReasonValues[SendRejectionReasonBodyTooLong]:        SendRejectionReasonBodyTooLong,
-	SendRejectionReasonValues[SendRejectionReasonRequestIdConflict]:  SendRejectionReasonRequestIdConflict,
-	SendRejectionReasonValues[SendRejectionReasonProcessingFailed]:   SendRejectionReasonProcessingFailed,
-	SendRejectionReasonValues[SendRejectionReasonInvalidReplyTarget]: SendRejectionReasonInvalidReplyTarget,
+	SendRejectionReasonValues[SendRejectionReasonNotAMember]:           SendRejectionReasonNotAMember,
+	SendRejectionReasonValues[SendRejectionReasonChatNotFound]:         SendRejectionReasonChatNotFound,
+	SendRejectionReasonValues[SendRejectionReasonRecipientNotFound]:    SendRejectionReasonRecipientNotFound,
+	SendRejectionReasonValues[SendRejectionReasonInvalidRecipient]:     SendRejectionReasonInvalidRecipient,
+	SendRejectionReasonValues[SendRejectionReasonEmptyBody]:            SendRejectionReasonEmptyBody,
+	SendRejectionReasonValues[SendRejectionReasonBodyTooLong]:          SendRejectionReasonBodyTooLong,
+	SendRejectionReasonValues[SendRejectionReasonRequestIdConflict]:    SendRejectionReasonRequestIdConflict,
+	SendRejectionReasonValues[SendRejectionReasonProcessingFailed]:     SendRejectionReasonProcessingFailed,
+	SendRejectionReasonValues[SendRejectionReasonInvalidReplyTarget]:   SendRejectionReasonInvalidReplyTarget,
+	SendRejectionReasonValues[SendRejectionReasonInvalidForwardSource]: SendRejectionReasonInvalidForwardSource,
 }
 
 func (op *SendRejectionReason) UnmarshalJSON(raw []byte) error {

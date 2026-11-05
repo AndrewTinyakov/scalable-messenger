@@ -17,6 +17,7 @@ data class Message(
     val deletedAt: OffsetDateTime? = null,
     val reply: MessageReply? = null,
     val replyToMessageId: MessageId? = reply?.messageId,
+    val forwardedFromUserId: UserId? = null,
 ) {
     init {
         require(sequence > 0) { "Message sequence must be positive" }

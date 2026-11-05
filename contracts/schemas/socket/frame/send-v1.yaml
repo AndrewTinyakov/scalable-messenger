@@ -35,6 +35,12 @@ properties:
   replyToMessageId:
     type: string
     pattern: ^[0-7][0-9A-HJKMNP-TV-Z]{25}$
+  forwardFromChatId:
+    type: string
+    pattern: ^[0-7][0-9A-HJKMNP-TV-Z]{25}$
+  forwardFromMessageId:
+    type: string
+    pattern: ^[0-7][0-9A-HJKMNP-TV-Z]{25}$
 allOf:
   - if:
       required:
@@ -45,3 +51,20 @@ allOf:
       not:
         required:
           - recipientId
+  - if:
+      anyOf:
+        - required:
+            - forwardFromChatId
+        - required:
+            - forwardFromMessageId
+    then:
+      required:
+        - chatId
+        - forwardFromChatId
+        - forwardFromMessageId
+      not:
+        anyOf:
+          - required:
+              - recipientId
+          - required:
+              - replyToMessageId

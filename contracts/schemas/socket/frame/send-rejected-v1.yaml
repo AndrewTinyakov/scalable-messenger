@@ -50,6 +50,7 @@ properties:
       - REQUEST_ID_CONFLICT
       - PROCESSING_FAILED
       - INVALID_REPLY_TARGET
+      - INVALID_FORWARD_SOURCE
   epoch:
     type: string
     minLength: 1

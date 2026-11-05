@@ -1,7 +1,7 @@
 import type { components } from '../../shared/api/generated/schema'
 import { isDateTime, isId, isRecord } from '../../shared/lib/validation'
 import { MAX_VISIBLE_MESSAGES } from './historyWindow'
-import { advanceSend, type PendingSend, type SendState } from './model'
+import { advanceSend, type ForwardSource, type PendingSend, type SendState } from './model'
 
 export type SendResult = components['schemas']['SendStatusResponse']
 
@@ -47,6 +47,14 @@ function isStoredSend(value: unknown): value is PendingSend {
   if (
     value.replyToMessageId !== undefined &&
     (!isId(value.replyToMessageId) ||
+      (typeof value.chatId === 'string' && value.chatId.startsWith('draft:')))
+  )
+    return false
+  const forward = [value.forwardFromChatId, value.forwardFromMessageId, value.forwardedFromUserId]
+  if (
+    forward.some((field) => field !== undefined) &&
+    (!forward.every(isId) ||
+      value.replyToMessageId !== undefined ||
       (typeof value.chatId === 'string' && value.chatId.startsWith('draft:')))
   )
     return false
@@ -231,9 +239,15 @@ export class SendRequests {
     return [...this.sends]
   }
 
-  start(chatId: string, body: string, replyToMessageId?: string): { ok: boolean; error?: string } {
-    const trimmed = body.trim()
-    if (!trimmed || [...trimmed].length > 4000) return { ok: false }
+  start(
+    chatId: string,
+    body: string,
+    replyToMessageId?: string,
+    forward?: ForwardSource,
+  ): { ok: boolean; error?: string } {
+    const trimmed = forward ? body : body.trim()
+    if (!trimmed.trim() || [...trimmed].length > 4000) return { ok: false }
+    if (forward && (replyToMessageId || chatId.startsWith('draft:'))) return { ok: false }
     if (this.sends.filter((send) => this.unresolved(send)).length >= MAX_UNRESOLVED_SENDS) {
       return { ok: false }
     }
@@ -244,6 +258,13 @@ export class SendRequests {
       requestId: this.adapters.createId(),
       body: trimmed,
       ...(replyToMessageId ? { replyToMessageId } : {}),
+      ...(forward
+        ? {
+            forwardFromChatId: forward.chatId,
+            forwardFromMessageId: forward.messageId,
+            forwardedFromUserId: forward.authorId,
+          }
+        : {}),
       createdAt: new Date(this.adapters.now()).toISOString(),
       status: 'sending',
     }

@@ -2,7 +2,7 @@ import { useHotkey } from '@tanstack/react-hotkeys'
 import { Pencil, Search, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { chatPeer, chatTitle, hasUnread, type Chat } from '../../entities/chat/model'
-import type { Message } from '../../entities/message/model'
+import type { Message, PendingSend } from '../../entities/message/model'
 import type { User } from '../../entities/session/model'
 import { ChatKind } from '../../shared/api/generated/socket-vocabulary'
 import { Avatar } from '../../shared/ui/Avatar'
@@ -17,6 +17,8 @@ interface Props {
   folder: ChatFolder
   loading: boolean
   messages: Record<string, Message[]>
+  pending?: PendingSend[]
+  onReorderPinned?: (chatIds: string[]) => void
   selectedId: string | null
   liveChatId: string | null
   presence: Record<string, 'online' | 'offline' | 'unknown'>
@@ -112,6 +114,8 @@ export function ChatList({
   folder,
   loading,
   messages,
+  pending = [],
+  onReorderPinned,
   selectedId,
   liveChatId,
   presence,
@@ -136,6 +140,30 @@ export function ChatList({
       ),
     [chats, folder, query, user.id],
   )
+  const [dragged, setDragged] = useState<string | null>(null)
+  const latestPending = useMemo(() => {
+    const latest = new Map<string, PendingSend>()
+    for (const send of pending) {
+      const current = latest.get(send.chatId)
+      if (!current || Date.parse(send.createdAt) >= Date.parse(current.createdAt))
+        latest.set(send.chatId, send)
+    }
+    return latest
+  }, [pending])
+  const pinnedOrder = chats.filter((chat) => chat.pinnedRank != null).map((chat) => chat.id)
+  function dropOn(targetId: string) {
+    const source = dragged
+    setDragged(null)
+    if (!source || source === targetId || !onReorderPinned) return
+    const order = pinnedOrder.filter((id) => id !== source)
+    order.splice(
+      order.indexOf(targetId) +
+        (pinnedOrder.indexOf(source) < pinnedOrder.indexOf(targetId) ? 1 : 0),
+      0,
+      source,
+    )
+    onReorderPinned(order)
+  }
   const people = usePeopleSearch(query, searchUsers)
     .filter(
       (person) =>
@@ -227,8 +255,29 @@ export function ChatList({
               live={liveChatId === chat.id}
               online={peer !== undefined && presence[peer] === 'online'}
               loaded={messages[chat.id]?.at(-1)}
+              pending={latestPending.get(chat.id)}
+              dragging={dragged === chat.id}
               onSelect={onSelect}
               onMenu={onChatMenu}
+              {...(onReorderPinned && !query
+                ? {
+                    onDragStart: (event, id) => {
+                      event.dataTransfer.effectAllowed = 'move'
+                      event.dataTransfer.setData('text/plain', id)
+                      setDragged(id)
+                    },
+                    onDragOver: (event) => {
+                      if (!dragged) return
+                      event.preventDefault()
+                      event.dataTransfer.dropEffect = 'move'
+                    },
+                    onDrop: (event, id) => {
+                      event.preventDefault()
+                      dropOn(id)
+                    },
+                    onDragEnd: () => setDragged(null),
+                  }
+                : {})}
             />
           )
         })}

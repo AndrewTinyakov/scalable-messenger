@@ -147,6 +147,11 @@ export function useMessengerSocket({
           invalidateSummary(frame.chatId, frame.type === 'sidebar_activity')
         if (frame.type === 'history_changed') void refreshChats(false, true)
         if (frame.type === 'message_changed') requests.revised(frame.messageId)
+        if (frame.type === 'chat_preferences_changed') {
+          if (listChats().some((chat) => chat.id === frame.chatId)) invalidateSummary(frame.chatId)
+          else void refreshChats(false, true)
+          return
+        }
         if (onSidebarEvent(frame) || onFeatureEvent(frame)) return
         if (frame.type === EventType.SUBSCRIBED && frame.chatId === selectedRef.current) {
           window.clearTimeout(groupRetryRef.current)
@@ -195,6 +200,7 @@ export function useMessengerSocket({
               replyBody: frame.replyBody,
               replyDeleted: frame.replyDeleted,
               replyVersion: frame.replyVersion,
+              forwardedFromUserId: frame.forwardedFromUserId,
             },
             frame.room,
             () => !disposed && socketRef.current === socket && socket.readyState === WebSocket.OPEN,

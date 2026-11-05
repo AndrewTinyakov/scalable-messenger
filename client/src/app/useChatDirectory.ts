@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react'
-import type { Chat } from '../entities/chat/model'
+import {
+  compareChats,
+  withPinnedOrder,
+  type Chat,
+  type ChatPreferences,
+} from '../entities/chat/model'
 import { ChatKind } from '../shared/api/generated/socket-vocabulary'
 import { ApiError, type api } from '../shared/api/http'
 
@@ -12,13 +17,6 @@ interface ChatDirectoryOptions {
   recordLatest(chatId: string, sequence: string): void
   onRefreshed(chats: Chat[]): void
   setError(message: string | null): void
-}
-
-function compareActivity(left: Chat, right: Chat): number {
-  return (
-    Date.parse(right.activityAt ?? '1970-01-01T00:00:00Z') -
-      Date.parse(left.activityAt ?? '1970-01-01T00:00:00Z') || right.id.localeCompare(left.id)
-  )
 }
 
 export function useChatDirectory({
@@ -142,7 +140,7 @@ export function useChatDirectory({
                   !(removedSelected && chat.id === current?.id),
               ),
             ]
-        merged.sort(compareActivity)
+        merged.sort(compareChats)
         appliedDirectoryGenerationRef.current = requestGeneration
         chatsRef.current = merged
         refreshSuccessRef.current += 1
@@ -214,7 +212,7 @@ export function useChatDirectory({
         appliedSummaryGenerationsRef.current.set(chat.id, requestGeneration)
         applied.push(updated)
       }
-      const merged = [...byId.values()].sort(compareActivity)
+      const merged = [...byId.values()].sort(compareChats)
       chatsRef.current = merged
       setChats(merged)
       for (const chat of applied) recordLatest(chat.id, chat.lastSequence)
@@ -259,7 +257,7 @@ export function useChatDirectory({
       const next = [
         applyOptimisticRead(chat),
         ...chatsRef.current.filter((item) => item.id !== chat.id),
-      ]
+      ].sort(compareChats)
       chatsRef.current = next
       setChats(next)
       recordLatest(chat.id, chat.lastSequence)
@@ -289,9 +287,13 @@ export function useChatDirectory({
         unreadCount: chat.unreadCount,
         unreadCountCapped: chat.unreadCountCapped,
         activityAt: chat.activityAt,
+        pinnedRank: chat.pinnedRank,
+        mutedUntil: chat.mutedUntil,
+        mutedForever: chat.mutedForever,
+        markedUnread: chat.markedUnread,
       }
       const next = chatsRef.current.filter((item) => item.id !== chatId)
-      const index = next.findIndex((item) => compareActivity(updated, item) < 0)
+      const index = next.findIndex((item) => compareChats(updated, item) < 0)
       next.splice(index < 0 ? next.length : index, 0, updated)
       chatsRef.current = next
       setChats(next)
@@ -328,6 +330,23 @@ export function useChatDirectory({
     },
     [refreshChatSummary],
   )
+  const applyPreferences = useCallback((chatId: string, preferences: ChatPreferences) => {
+    appliedSummaryGenerationsRef.current.set(chatId, ++requestGenerationRef.current)
+    const next = chatsRef.current
+      .map((chat) => (chat.id === chatId ? { ...chat, ...preferences } : chat))
+      .sort(compareChats)
+    chatsRef.current = next
+    setChats(next)
+  }, [])
+  const applyPinnedOrder = useCallback((order: string[]) => {
+    const generation = ++requestGenerationRef.current
+    for (const chat of chatsRef.current)
+      if (order.includes(chat.id) || chat.pinnedRank != null)
+        appliedSummaryGenerationsRef.current.set(chat.id, generation)
+    const next = withPinnedOrder(chatsRef.current, order)
+    chatsRef.current = next
+    setChats(next)
+  }, [])
   const isRemoved = useCallback((chatId: string) => removedChatRef.current.has(chatId), [])
   const successfulRefreshes = useCallback(() => refreshSuccessRef.current, [])
   const removeChat = useCallback((chatId: string) => {
@@ -349,6 +368,8 @@ export function useChatDirectory({
     listChats,
     rememberChat,
     refreshChatSummary,
+    applyPreferences,
+    applyPinnedOrder,
     markRead,
     settleRead,
     isRemoved,

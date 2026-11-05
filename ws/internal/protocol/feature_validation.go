@@ -7,8 +7,14 @@ import (
 )
 
 func validateFeatureFrame(f Frame) error {
-	if f.Type != FrameSend && f.ReplyToMessageID != "" {
-		return errors.New("unexpected reply target")
+	if f.Type != FrameSend && (f.ReplyToMessageID != "" || f.ForwardFromChatID != "" || f.ForwardFromMsgID != "") {
+		return errors.New("unexpected send metadata")
+	}
+	if (f.ForwardFromChatID == "") != (f.ForwardFromMsgID == "") {
+		return errors.New("incomplete forward source")
+	}
+	if f.ForwardFromChatID != "" && (!ValidULID(f.ForwardFromChatID) || !ValidULID(f.ForwardFromMsgID) || f.ChatID == "" || f.RecipientID != "" || f.ReplyToMessageID != "") {
+		return errors.New("invalid forward source")
 	}
 	if f.Type != FrameWatchPresence && f.UserIDs != nil {
 		return errors.New("unexpected presence targets")
@@ -44,6 +50,9 @@ func validateFeatureFrame(f Frame) error {
 func validateFeatureEvent(e Event) error {
 	if e.ObservedAt != "" || e.ValidForMS != 0 || e.Statuses != nil {
 		return errors.New("unexpected presence metadata")
+	}
+	if e.ForwardedFromUserID != "" && (e.Type != EventMessageSaved || !ValidULID(e.ForwardedFromUserID)) {
+		return errors.New("invalid forwarded author")
 	}
 	if e.Type != EventHistoryChanged && e.VisibilityRevision != "" {
 		return errors.New("unexpected visibility revision")

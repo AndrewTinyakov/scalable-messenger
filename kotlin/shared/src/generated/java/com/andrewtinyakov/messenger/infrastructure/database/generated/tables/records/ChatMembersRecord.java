@@ -104,6 +104,48 @@ public class ChatMembersRecord extends UpdatableRecordImpl<ChatMembersRecord> {
         return (Long) get(5);
     }
 
+    /**
+     * Setter for <code>public.chat_members.pinned_rank</code>.
+     */
+    public void setPinnedRank(Short value) {
+        set(6, value);
+    }
+
+    /**
+     * Getter for <code>public.chat_members.pinned_rank</code>.
+     */
+    public Short getPinnedRank() {
+        return (Short) get(6);
+    }
+
+    /**
+     * Setter for <code>public.chat_members.muted_until</code>.
+     */
+    public void setMutedUntil(OffsetDateTime value) {
+        set(7, value);
+    }
+
+    /**
+     * Getter for <code>public.chat_members.muted_until</code>.
+     */
+    public OffsetDateTime getMutedUntil() {
+        return (OffsetDateTime) get(7);
+    }
+
+    /**
+     * Setter for <code>public.chat_members.marked_unread_at</code>.
+     */
+    public void setMarkedUnreadAt(OffsetDateTime value) {
+        set(8, value);
+    }
+
+    /**
+     * Getter for <code>public.chat_members.marked_unread_at</code>.
+     */
+    public OffsetDateTime getMarkedUnreadAt() {
+        return (OffsetDateTime) get(8);
+    }
+
     // -------------------------------------------------------------------------
     // Primary key information
     // -------------------------------------------------------------------------
@@ -127,7 +169,7 @@ public class ChatMembersRecord extends UpdatableRecordImpl<ChatMembersRecord> {
     /**
      * Create a detached, initialised ChatMembersRecord
      */
-    public ChatMembersRecord(String chatId, String userId, OffsetDateTime joinedAt, Long clearedThroughSequence, Long hiddenThroughSequence, Long visibilityRevision) {
+    public ChatMembersRecord(String chatId, String userId, OffsetDateTime joinedAt, Long clearedThroughSequence, Long hiddenThroughSequence, Long visibilityRevision, Short pinnedRank, OffsetDateTime mutedUntil, OffsetDateTime markedUnreadAt) {
         super(ChatMembers.CHAT_MEMBERS);
 
         setChatId(chatId);
@@ -136,6 +178,9 @@ public class ChatMembersRecord extends UpdatableRecordImpl<ChatMembersRecord> {
         setClearedThroughSequence(clearedThroughSequence);
         setHiddenThroughSequence(hiddenThroughSequence);
         setVisibilityRevision(visibilityRevision);
+        setPinnedRank(pinnedRank);
+        setMutedUntil(mutedUntil);
+        setMarkedUnreadAt(markedUnreadAt);
         resetTouchedOnNotNull();
     }
 }

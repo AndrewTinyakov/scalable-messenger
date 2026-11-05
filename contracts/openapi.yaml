@@ -7,6 +7,548 @@ servers:
 security:
 - sessionCookie: []
 paths:
+  /v1/chats/{id}/unread-mark:
+    put:
+      tags:
+      - chat-preferences-controller
+      operationId: markUnread
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: X-Messenger-CSRF
+        in: header
+        required: true
+        schema:
+          type: string
+          enum:
+          - "1"
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ChatPreferencesResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "401":
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+    delete:
+      tags:
+      - chat-preferences-controller
+      operationId: clearUnreadMark
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: X-Messenger-CSRF
+        in: header
+        required: true
+        schema:
+          type: string
+          enum:
+          - "1"
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ChatPreferencesResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "401":
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+  /v1/chats/{id}/pins/{messageId}:
+    put:
+      tags:
+      - message-pin-controller
+      operationId: pin
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: messageId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: X-Messenger-CSRF
+        in: header
+        required: true
+        schema:
+          type: string
+          enum:
+          - "1"
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PinMessageRequest"
+        required: true
+      responses:
+        "204":
+          description: No Content
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "401":
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+    delete:
+      tags:
+      - message-pin-controller
+      operationId: unpin
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: messageId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: X-Messenger-CSRF
+        in: header
+        required: true
+        schema:
+          type: string
+          enum:
+          - "1"
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
+      responses:
+        "204":
+          description: No Content
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "401":
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+  /v1/chats/{id}/pin:
+    put:
+      tags:
+      - chat-preferences-controller
+      operationId: pin_1
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: X-Messenger-CSRF
+        in: header
+        required: true
+        schema:
+          type: string
+          enum:
+          - "1"
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PinnedChatsResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "401":
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+    delete:
+      tags:
+      - chat-preferences-controller
+      operationId: unpin_1
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: X-Messenger-CSRF
+        in: header
+        required: true
+        schema:
+          type: string
+          enum:
+          - "1"
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PinnedChatsResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "401":
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+  /v1/chats/{id}/mute:
+    put:
+      tags:
+      - chat-preferences-controller
+      operationId: mute
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: X-Messenger-CSRF
+        in: header
+        required: true
+        schema:
+          type: string
+          enum:
+          - "1"
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MuteChatRequest"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ChatPreferencesResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "401":
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+    delete:
+      tags:
+      - chat-preferences-controller
+      operationId: unmute
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: X-Messenger-CSRF
+        in: header
+        required: true
+        schema:
+          type: string
+          enum:
+          - "1"
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ChatPreferencesResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "401":
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+  /v1/chats/pinned:
+    put:
+      tags:
+      - chat-preferences-controller
+      operationId: reorder
+      parameters:
+      - name: X-Messenger-CSRF
+        in: header
+        required: true
+        schema:
+          type: string
+          enum:
+          - "1"
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReorderPinnedChatsRequest"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PinnedChatsResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "401":
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
   /v1/sends/status:
     post:
       tags:
@@ -1206,6 +1748,124 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/ApiProblem"
+  /v1/chats/{id}/pins:
+    get:
+      tags:
+      - message-pin-controller
+      operationId: list_1
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: beforeSequence
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 50
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PinnedMessagePageResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+    delete:
+      tags:
+      - message-pin-controller
+      operationId: unpinAll
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: X-Messenger-CSRF
+        in: header
+        required: true
+        schema:
+          type: string
+          enum:
+          - "1"
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
+      responses:
+        "204":
+          description: No Content
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "401":
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
   /v1/chats/{id}/messages:
     get:
       tags:
@@ -1695,6 +2355,77 @@ paths:
                 $ref: "#/components/schemas/ApiProblem"
 components:
   schemas:
+    ChatPreferencesResponse:
+      type: object
+      properties:
+        chatId:
+          type: string
+        pinnedRank:
+          type:
+          - integer
+          - "null"
+          format: int32
+          maximum: 10
+          minimum: 1
+        mutedUntil:
+          type:
+          - string
+          - "null"
+          format: date-time
+        mutedForever:
+          type: boolean
+        markedUnread:
+          type: boolean
+      required:
+      - chatId
+      - markedUnread
+      - mutedForever
+      - mutedUntil
+      - pinnedRank
+    PinMessageRequest:
+      type: object
+      properties:
+        scope:
+          type: string
+          description: SELF is available only in direct chats
+          enum:
+          - SELF
+          - EVERYONE
+      required:
+      - scope
+    PinnedChatsResponse:
+      type: object
+      properties:
+        chatIds:
+          type: array
+          description: Pinned chat IDs in display order
+          items:
+            type: string
+      required:
+      - chatIds
+    MuteChatRequest:
+      type: object
+      properties:
+        durationSeconds:
+          type:
+          - integer
+          - "null"
+          format: int64
+          description: Mute length in seconds; omit or null to mute until unmuted
+          maximum: 31622400
+          minimum: 60
+    ReorderPinnedChatsRequest:
+      type: object
+      properties:
+        chatIds:
+          type: array
+          description: Every currently pinned chat ID in the new order
+          items:
+            type: string
+          maxItems: 10
+          minItems: 0
+      required:
+      - chatIds
     SendStatusesRequest:
       type: object
       properties:
@@ -1751,6 +2482,7 @@ components:
           - REQUEST_ID_CONFLICT
           - PROCESSING_FAILED
           - INVALID_REPLY_TARGET
+          - INVALID_FORWARD_SOURCE
       required:
       - status
     SendStatusesResponse:
@@ -1867,6 +2599,11 @@ components:
           type:
           - string
           - "null"
+        forwardedFromUserId:
+          type:
+          - string
+          - "null"
+          description: Original author of a forwarded message
       required:
       - body
       - chatId
@@ -2048,6 +2785,26 @@ components:
           type: boolean
           description: True for 256 raw unread candidates; real count may be higher
             even when unreadCount is zero
+        pinnedRank:
+          type:
+          - integer
+          - "null"
+          format: int32
+          description: Viewer's pin position; pinned chats lead the first directory
+            page
+          maximum: 10
+          minimum: 1
+        mutedUntil:
+          type:
+          - string
+          - "null"
+          format: date-time
+          description: End of a timed mute
+        mutedForever:
+          type: boolean
+        markedUnread:
+          type: boolean
+          description: Viewer marked this chat to read later
       required:
       - id
       - kind
@@ -2162,6 +2919,42 @@ components:
       - maxOtherReadSequence
       - serverTime
       - throughSequence
+    PinnedMessagePageResponse:
+      type: object
+      properties:
+        pins:
+          type: array
+          description: Newest pinned messages first
+          items:
+            $ref: "#/components/schemas/PinnedMessageResponse"
+        totalCount:
+          type: integer
+          format: int32
+          maximum: 400
+          minimum: 0
+        nextBeforeSequence:
+          type:
+          - string
+          - "null"
+          description: Pass as beforeSequence for older pins
+      required:
+      - nextBeforeSequence
+      - pins
+      - totalCount
+    PinnedMessageResponse:
+      type: object
+      properties:
+        message:
+          $ref: "#/components/schemas/MessageResponse"
+        scope:
+          type: string
+          description: EVERYONE when any member-visible pin exists
+          enum:
+          - SELF
+          - EVERYONE
+      required:
+      - message
+      - scope
     MessageHistoryResponse:
       type: object
       properties:

@@ -12,6 +12,7 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Cha
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Chats.ChatsPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.DeletionOperations.DeletionOperationsPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.HiddenMessageRanges.HiddenMessageRangesPath;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.MessagePins.MessagePinsPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Messages.MessagesPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.PendingReadNotifications.PendingReadNotificationsPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Sessions.SessionsPath;
@@ -248,17 +249,43 @@ public class Users extends TableImpl<UsersRecord> {
         return _hiddenMessageRanges;
     }
 
-    private transient MessagesPath _messages;
+    private transient MessagePinsPath _messagePins;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.message_pins</code> table
+     */
+    public MessagePinsPath messagePins() {
+        if (_messagePins == null)
+            _messagePins = new MessagePinsPath(this, null, Keys.MESSAGE_PINS__MESSAGE_PINS_VIEWER_ID_FKEY.getInverseKey());
+
+        return _messagePins;
+    }
+
+    private transient MessagesPath _messagesForwardedFromUserIdFkey;
 
     /**
      * Get the implicit to-many join path to the <code>public.messages</code>
-     * table
+     * table, via the <code>messages_forwarded_from_user_id_fkey</code> key
      */
-    public MessagesPath messages() {
-        if (_messages == null)
-            _messages = new MessagesPath(this, null, Keys.MESSAGES__MESSAGES_SENDER_ID_FKEY.getInverseKey());
+    public MessagesPath messagesForwardedFromUserIdFkey() {
+        if (_messagesForwardedFromUserIdFkey == null)
+            _messagesForwardedFromUserIdFkey = new MessagesPath(this, null, Keys.MESSAGES__MESSAGES_FORWARDED_FROM_USER_ID_FKEY.getInverseKey());
 
-        return _messages;
+        return _messagesForwardedFromUserIdFkey;
+    }
+
+    private transient MessagesPath _messagesSenderIdFkey;
+
+    /**
+     * Get the implicit to-many join path to the <code>public.messages</code>
+     * table, via the <code>messages_sender_id_fkey</code> key
+     */
+    public MessagesPath messagesSenderIdFkey() {
+        if (_messagesSenderIdFkey == null)
+            _messagesSenderIdFkey = new MessagesPath(this, null, Keys.MESSAGES__MESSAGES_SENDER_ID_FKEY.getInverseKey());
+
+        return _messagesSenderIdFkey;
     }
 
     private transient PendingReadNotificationsPath _pendingReadNotifications;
@@ -314,6 +341,14 @@ public class Users extends TableImpl<UsersRecord> {
      */
     public ChatsPath chatReadProgressChatIdFkey() {
         return chatReadProgress().chats();
+    }
+
+    /**
+     * Get the implicit many-to-many join path to the
+     * <code>public.messages</code> table
+     */
+    public MessagesPath messages() {
+        return messagePins().messages();
     }
 
     /**

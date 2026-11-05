@@ -1,4 +1,4 @@
-import { ArrowLeft, Eraser, MoreVertical, Trash2, UsersRound } from 'lucide-react'
+import { ArrowLeft, Bell, BellOff, Eraser, MoreVertical, Trash2, UsersRound } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { chatTitle, type Chat } from '../../entities/chat/model'
 import type { User } from '../../entities/session/model'
@@ -15,6 +15,9 @@ interface Props {
   onMembers?: () => void
   onDelete?: () => void
   onClear?: () => void
+  muted?: boolean
+  onMute?: () => void
+  onUnmute?: () => void
 }
 
 function subtitle(
@@ -41,6 +44,9 @@ export function ChatHeader({
   onMembers,
   onDelete,
   onClear,
+  muted = false,
+  onMute,
+  onUnmute,
 }: Props) {
   const [menuOpen, setMenuOpen] = useState(false)
   const actionsRef = useRef<HTMLButtonElement>(null)
@@ -71,7 +77,10 @@ export function ChatHeader({
         online={status.online}
       />
       <div className="chat-header-info">
-        <h2>{title}</h2>
+        <h2>
+          {title}
+          {muted && <BellOff className="chat-muted-icon" size={15} aria-label="Muted" />}
+        </h2>
         {status.text && <p className={status.online ? 'online' : ''}>{status.text}</p>}
       </div>
       {group && onMembers && (
@@ -100,6 +109,16 @@ export function ChatHeader({
             actionsRef.current?.focus()
           }}
         >
+          {muted && onUnmute && (
+            <MenuItem icon={<Bell size={18} />} onClick={() => run(onUnmute)}>
+              Unmute
+            </MenuItem>
+          )}
+          {!muted && onMute && (
+            <MenuItem icon={<BellOff size={18} />} onClick={() => run(onMute)}>
+              Mute notifications
+            </MenuItem>
+          )}
           {onClear && (
             <MenuItem icon={<Eraser size={18} />} onClick={() => run(onClear)}>
               Clear history

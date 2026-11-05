@@ -289,3 +289,35 @@ describe('shared sidebar contracts', () => {
     }
   })
 })
+
+describe('personal chat events and forwards', () => {
+  const fixture = (name: string) =>
+    JSON.parse(
+      readFileSync(
+        new URL(`../../../../contracts/fixtures/valid/${name}.json`, import.meta.url),
+        'utf8',
+      ),
+    ) as Record<string, unknown>
+  const live = { epoch: 'epoch', streamId: '1-0' }
+
+  it('accepts shared preference, pin and forwarded fixtures', () => {
+    for (const name of ['chat-preferences-changed', 'pins-changed', 'message-saved-forward'])
+      expect(decodeSocketEvent(JSON.stringify({ ...fixture(name), ...live }))).not.toBeNull()
+    expect(decodeSocketEvent(JSON.stringify({ ...message, forwardedFromUserId: id }))?.type).toBe(
+      'message_saved',
+    )
+  })
+
+  it('rejects personal events outside their rooms and invalid forwarded authors', () => {
+    const preferences = { ...fixture('chat-preferences-changed'), ...live }
+    expect(
+      decodeSocketEvent(JSON.stringify({ ...preferences, room: `group:${preferences.chatId}` })),
+    ).toBeNull()
+    const pins = { ...fixture('pins-changed'), ...live }
+    expect(
+      decodeSocketEvent(JSON.stringify({ ...pins, room: `group:${id.replace('V', 'W')}` })),
+    ).toBeNull()
+    expect(decodeSocketEvent(JSON.stringify({ ...pins, body: 'leak' }))).toBeNull()
+    expect(decodeSocketEvent(JSON.stringify({ ...message, forwardedFromUserId: 'bad' }))).toBeNull()
+  })
+})

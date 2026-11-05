@@ -19,6 +19,7 @@ data class MessageSavedEventV1(
     val replyBody: String? = null,
     val replyDeleted: Boolean? = null,
     val replyVersion: String? = null,
+    val forwardedFromUserId: String? = null,
 ) {
     init {
         require(type == "message_saved" && version == 1)
@@ -41,6 +42,7 @@ data class MessageSavedEventV1(
             replyBody: String? = null,
             replyDeleted: Boolean? = null,
             replyVersion: String? = null,
+            forwardedFromUserId: String? = null,
         ): MessageSavedEventV1 = MessageSavedEventV1(
             type = RoomEventType.MESSAGE_SAVED.value,
             version = 1,
@@ -59,6 +61,7 @@ data class MessageSavedEventV1(
             replyBody = replyBody,
             replyDeleted = replyDeleted,
             replyVersion = replyVersion,
+            forwardedFromUserId = forwardedFromUserId,
         )
     }
 }

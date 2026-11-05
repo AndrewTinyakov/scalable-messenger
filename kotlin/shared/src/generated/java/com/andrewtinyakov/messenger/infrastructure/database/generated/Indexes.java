@@ -33,6 +33,7 @@ public class Indexes {
     // INDEX definitions
     // -------------------------------------------------------------------------
 
+    public static final Index CHAT_MEMBERS_PINNED_IDX = Internal.createIndex(DSL.name("chat_members_pinned_idx"), ChatMembers.CHAT_MEMBERS, new OrderField[] { ChatMembers.CHAT_MEMBERS.USER_ID, ChatMembers.CHAT_MEMBERS.PINNED_RANK }, false);
     public static final Index CHAT_MEMBERS_USER_JOINED_IDX = Internal.createIndex(DSL.name("chat_members_user_joined_idx"), ChatMembers.CHAT_MEMBERS, new OrderField[] { ChatMembers.CHAT_MEMBERS.USER_ID, ChatMembers.CHAT_MEMBERS.JOINED_AT.desc(), ChatMembers.CHAT_MEMBERS.CHAT_ID.desc() }, false);
     public static final Index CHAT_READ_NOTIFICATIONS_EXPIRY_IDX = Internal.createIndex(DSL.name("chat_read_notifications_expiry_idx"), ChatReadNotifications.CHAT_READ_NOTIFICATIONS, new OrderField[] { ChatReadNotifications.CHAT_READ_NOTIFICATIONS.EXPIRES_AT, ChatReadNotifications.CHAT_READ_NOTIFICATIONS.CHAT_ID, ChatReadNotifications.CHAT_READ_NOTIFICATIONS.BUCKET }, false);
     public static final Index CHAT_READ_PROGRESS_HIGHEST_IDX = Internal.createIndex(DSL.name("chat_read_progress_highest_idx"), ChatReadProgress.CHAT_READ_PROGRESS, new OrderField[] { ChatReadProgress.CHAT_READ_PROGRESS.CHAT_ID, ChatReadProgress.CHAT_READ_PROGRESS.THROUGH_SEQUENCE.desc(), ChatReadProgress.CHAT_READ_PROGRESS.USER_ID }, false);

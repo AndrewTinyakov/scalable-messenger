@@ -90,7 +90,7 @@ export function Menu({
     const resize = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(place) : null
     resize?.observe(menu)
     window.addEventListener('resize', place)
-    if (keyboard) menu.querySelector<HTMLElement>('[role="menuitem"]')?.focus()
+    if (keyboard) menu.querySelector<HTMLElement>('[role^="menuitem"]')?.focus()
     return () => {
       resize?.disconnect()
       window.removeEventListener('resize', place)
@@ -129,7 +129,7 @@ export function Menu({
       onContextMenu={(event) => event.preventDefault()}
       onKeyDown={(event) => {
         if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
-        const items = [...(ref.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])]
+        const items = [...(ref.current?.querySelectorAll<HTMLElement>('[role^="menuitem"]') ?? [])]
         const index = items.indexOf(document.activeElement as HTMLElement)
         if (index < 0) return
         event.preventDefault()

@@ -7,6 +7,7 @@ package com.andrewtinyakov.messenger.infrastructure.database.generated.tables;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Keys;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Public;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Chats.ChatsPath;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.MessagePins.MessagePinsPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Users.UsersPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.MessagesRecord;
 
@@ -110,6 +111,11 @@ public class Messages extends TableImpl<MessagesRecord> {
      */
     public final TableField<MessagesRecord, String> REPLY_TO_MESSAGE_ID = createField(DSL.name("reply_to_message_id"), SQLDataType.VARCHAR(26), this, "");
 
+    /**
+     * The column <code>public.messages.forwarded_from_user_id</code>.
+     */
+    public final TableField<MessagesRecord, String> FORWARDED_FROM_USER_ID = createField(DSL.name("forwarded_from_user_id"), SQLDataType.VARCHAR(26), this, "");
+
     private Messages(Name alias, Table<MessagesRecord> aliased) {
         this(alias, aliased, (Field<?>[]) null, null);
     }
@@ -189,7 +195,7 @@ public class Messages extends TableImpl<MessagesRecord> {
 
     @Override
     public List<ForeignKey<MessagesRecord, ?>> getReferences() {
-        return Arrays.asList(Keys.MESSAGES__MESSAGES_CHAT_ID_FKEY, Keys.MESSAGES__MESSAGES_SENDER_ID_FKEY);
+        return Arrays.asList(Keys.MESSAGES__MESSAGES_CHAT_ID_FKEY, Keys.MESSAGES__MESSAGES_FORWARDED_FROM_USER_ID_FKEY, Keys.MESSAGES__MESSAGES_SENDER_ID_FKEY);
     }
 
     private transient ChatsPath _chats;
@@ -204,16 +210,51 @@ public class Messages extends TableImpl<MessagesRecord> {
         return _chats;
     }
 
-    private transient UsersPath _users;
+    private transient UsersPath _messagesForwardedFromUserIdFkey;
 
     /**
-     * Get the implicit join path to the <code>public.users</code> table.
+     * Get the implicit join path to the <code>public.users</code> table, via
+     * the <code>messages_forwarded_from_user_id_fkey</code> key.
+     */
+    public UsersPath messagesForwardedFromUserIdFkey() {
+        if (_messagesForwardedFromUserIdFkey == null)
+            _messagesForwardedFromUserIdFkey = new UsersPath(this, Keys.MESSAGES__MESSAGES_FORWARDED_FROM_USER_ID_FKEY, null);
+
+        return _messagesForwardedFromUserIdFkey;
+    }
+
+    private transient UsersPath _messagesSenderIdFkey;
+
+    /**
+     * Get the implicit join path to the <code>public.users</code> table, via
+     * the <code>messages_sender_id_fkey</code> key.
+     */
+    public UsersPath messagesSenderIdFkey() {
+        if (_messagesSenderIdFkey == null)
+            _messagesSenderIdFkey = new UsersPath(this, Keys.MESSAGES__MESSAGES_SENDER_ID_FKEY, null);
+
+        return _messagesSenderIdFkey;
+    }
+
+    private transient MessagePinsPath _messagePins;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.message_pins</code> table
+     */
+    public MessagePinsPath messagePins() {
+        if (_messagePins == null)
+            _messagePins = new MessagePinsPath(this, null, Keys.MESSAGE_PINS__MESSAGE_PINS_MESSAGE_FKEY.getInverseKey());
+
+        return _messagePins;
+    }
+
+    /**
+     * Get the implicit many-to-many join path to the <code>public.users</code>
+     * table
      */
     public UsersPath users() {
-        if (_users == null)
-            _users = new UsersPath(this, Keys.MESSAGES__MESSAGES_SENDER_ID_FKEY, null);
-
-        return _users;
+        return messagePins().users();
     }
 
     @Override

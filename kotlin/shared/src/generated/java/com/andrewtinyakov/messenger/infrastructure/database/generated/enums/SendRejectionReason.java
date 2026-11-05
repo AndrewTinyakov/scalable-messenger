@@ -33,7 +33,9 @@ public enum SendRejectionReason implements EnumType {
 
     PROCESSING_FAILED("PROCESSING_FAILED"),
 
-    INVALID_REPLY_TARGET("INVALID_REPLY_TARGET");
+    INVALID_REPLY_TARGET("INVALID_REPLY_TARGET"),
+
+    INVALID_FORWARD_SOURCE("INVALID_FORWARD_SOURCE");
 
     private final String literal;
 

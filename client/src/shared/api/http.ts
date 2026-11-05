@@ -3,11 +3,13 @@ import type { Session } from '../../entities/session/model'
 import { isRecord } from '../lib/validation'
 import {
   decodeChat,
+  decodeChatPreferences,
   decodeChats,
   decodeDirectChat,
   decodeGroupMembers,
   decodeHistory,
   decodeMessage,
+  decodePinnedChats,
   decodeSendStatus,
   decodeSendStatuses,
   decodeSession,
@@ -20,6 +22,7 @@ import {
   decodeAround,
   decodeChanges,
   decodeDeletion,
+  decodePinnedMessages,
   decodeReadProgress,
   decodeReaders,
   decodeReads,
@@ -56,6 +59,12 @@ const routes = {
   deletion: '/v1/chats/{id}/deletions/{operationId}',
   reads: '/v1/chats/{id}/reads',
   messageReads: '/v1/chats/{id}/messages/{messageId}/reads',
+  pinnedChats: '/v1/chats/pinned',
+  chatPin: '/v1/chats/{id}/pin',
+  chatMute: '/v1/chats/{id}/mute',
+  unreadMark: '/v1/chats/{id}/unread-mark',
+  messagePins: '/v1/chats/{id}/pins',
+  messagePin: '/v1/chats/{id}/pins/{messageId}',
   sendStatus: '/v1/sends/{requestId}',
   sendStatuses: '/v1/sends/status',
 } as const satisfies Record<string, keyof paths>
@@ -413,6 +422,67 @@ export const api = {
           ),
           decodeReaders,
         )
+      },
+      pinChat(chatId: string, pinned: boolean) {
+        return authenticated(endpoint(routes.chatPin, { id: chatId }), decodePinnedChats, {
+          method: pinned ? 'PUT' : 'DELETE',
+        })
+      },
+      reorderPinnedChats(chatIds: string[]) {
+        const body: components['schemas']['ReorderPinnedChatsRequest'] = { chatIds }
+        return authenticated(endpoint(routes.pinnedChats), decodePinnedChats, {
+          method: 'PUT',
+          body: JSON.stringify(body),
+        })
+      },
+      muteChat(chatId: string, durationSeconds: number | null) {
+        const body: components['schemas']['MuteChatRequest'] = { durationSeconds }
+        return authenticated(
+          endpoint(routes.chatMute, { id: chatId }),
+          (value) => decodeChatPreferences(value, chatId),
+          { method: 'PUT', body: JSON.stringify(body) },
+        )
+      },
+      unmuteChat(chatId: string) {
+        return authenticated(
+          endpoint(routes.chatMute, { id: chatId }),
+          (value) => decodeChatPreferences(value, chatId),
+          { method: 'DELETE' },
+        )
+      },
+      markUnread(chatId: string, unread: boolean) {
+        return authenticated(
+          endpoint(routes.unreadMark, { id: chatId }),
+          (value) => decodeChatPreferences(value, chatId),
+          { method: unread ? 'PUT' : 'DELETE' },
+        )
+      },
+      pinnedMessages(chatId: string, beforeSequence?: string) {
+        return authenticated(
+          endpoint(
+            routes.messagePins,
+            { id: chatId },
+            { limit: 50, ...(beforeSequence ? { beforeSequence } : {}) },
+          ),
+          (value) => decodePinnedMessages(value, chatId),
+        )
+      },
+      pinMessage(chatId: string, messageId: string, scope: 'SELF' | 'EVERYONE') {
+        const body: components['schemas']['PinMessageRequest'] = { scope }
+        return authenticated(endpoint(routes.messagePin, { id: chatId, messageId }), noContent, {
+          method: 'PUT',
+          body: JSON.stringify(body),
+        })
+      },
+      unpinMessage(chatId: string, messageId: string) {
+        return authenticated(endpoint(routes.messagePin, { id: chatId, messageId }), noContent, {
+          method: 'DELETE',
+        })
+      },
+      unpinAllMessages(chatId: string) {
+        return authenticated(endpoint(routes.messagePins, { id: chatId }), noContent, {
+          method: 'DELETE',
+        })
       },
       sendStatus(requestId: string) {
         return authenticated(endpoint(routes.sendStatus, { requestId }), decodeSendStatus)

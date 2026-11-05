@@ -151,6 +151,26 @@ messages:
     contentType: application/json
     payload:
       $ref: ./schemas/message/event/reads-changed-v1.yaml
+  ChatPreferencesChangedEventV1:
+    name: ChatPreferencesChangedEventV1
+    contentType: application/json
+    payload:
+      $ref: ./schemas/message/event/chat-preferences-changed-v1.yaml
+  SocketChatPreferencesChangedV1:
+    name: SocketChatPreferencesChangedV1
+    contentType: application/json
+    payload:
+      $ref: ./schemas/socket/frame/chat-preferences-changed-v1.yaml
+  PinsChangedEventV1:
+    name: PinsChangedEventV1
+    contentType: application/json
+    payload:
+      $ref: ./schemas/message/event/pins-changed-v1.yaml
+  SocketPinsChangedV1:
+    name: SocketPinsChangedV1
+    contentType: application/json
+    payload:
+      $ref: ./schemas/socket/frame/pins-changed-v1.yaml
   SocketReadsChangedV1:
     name: SocketReadsChangedV1
     contentType: application/json

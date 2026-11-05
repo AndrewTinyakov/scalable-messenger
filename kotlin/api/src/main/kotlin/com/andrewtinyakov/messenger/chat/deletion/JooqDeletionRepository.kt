@@ -138,6 +138,7 @@ class JooqDeletionRepository(
             CHAT_MEMBERS,
         ).set(CHAT_MEMBERS.CLEARED_THROUGH_SEQUENCE, DSL.greatest(CHAT_MEMBERS.CLEARED_THROUGH_SEQUENCE, DSL.`val`(through)))
             .set(CHAT_MEMBERS.HIDDEN_THROUGH_SEQUENCE, if (hide) through else null)
+            .set(CHAT_MEMBERS.PINNED_RANK, if (hide) DSL.inline(null, CHAT_MEMBERS.PINNED_RANK) else CHAT_MEMBERS.PINNED_RANK)
             .where(CHAT_MEMBERS.CHAT_ID.eq(chatId.value), CHAT_MEMBERS.USER_ID.eq(actorId.value)).execute()
         db.insertInto(
             VISIBILITY_CLEANUP_JOBS,

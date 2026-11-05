@@ -70,6 +70,7 @@ properties:
   replyDeleted:
     type: boolean
   replyVersion: *a2
+  forwardedFromUserId: *a1
 allOf:
   - if:
       anyOf:

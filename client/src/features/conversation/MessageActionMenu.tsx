@@ -1,4 +1,4 @@
-import { CheckSquare, Copy, CornerUpLeft, Pencil, Trash2 } from 'lucide-react'
+import { CheckSquare, Copy, CornerUpLeft, Forward, Pencil, Pin, PinOff, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import type { Message } from '../../entities/message/model'
 import type { ReaderPage } from '../../shared/api/featureDecode'
@@ -16,6 +16,10 @@ interface Props {
   onEdit?: () => void
   onDelete(): void
   onSelect(): void
+  pinned?: boolean
+  onPin?: () => void
+  onUnpin?: () => void
+  onForward?: () => void
   onClose(): void
 }
 
@@ -30,6 +34,10 @@ export function MessageActionMenu({
   onEdit,
   onDelete,
   onSelect,
+  pinned = false,
+  onPin,
+  onUnpin,
+  onForward,
   onClose,
 }: Props) {
   const [copyError, setCopyError] = useState(false)
@@ -60,9 +68,19 @@ export function MessageActionMenu({
       <MenuItem icon={<CornerUpLeft size={18} />} onClick={() => action(onReply)}>
         Reply
       </MenuItem>
-      {onEdit && (
+      {onEdit && !message.forwardedFromUserId && (
         <MenuItem icon={<Pencil size={18} />} onClick={() => action(onEdit)}>
           Edit
+        </MenuItem>
+      )}
+      {pinned && onUnpin && (
+        <MenuItem icon={<PinOff size={18} />} onClick={() => action(onUnpin)}>
+          Unpin
+        </MenuItem>
+      )}
+      {!pinned && onPin && (
+        <MenuItem icon={<Pin size={18} />} onClick={() => action(onPin)}>
+          Pin
         </MenuItem>
       )}
       <MenuItem
@@ -76,8 +94,13 @@ export function MessageActionMenu({
           }
         }}
       >
-        Copy
+        Copy text
       </MenuItem>
+      {onForward && (
+        <MenuItem icon={<Forward size={18} />} onClick={() => action(onForward)}>
+          Forward
+        </MenuItem>
+      )}
       <MenuItem icon={<CheckSquare size={18} />} onClick={() => action(onSelect)}>
         Select
       </MenuItem>

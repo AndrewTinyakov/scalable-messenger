@@ -223,3 +223,30 @@ export function decodeReaders(value: unknown): ReaderPage {
   }
   return page as unknown as ReaderPage
 }
+
+export type PinnedMessagePage = components['schemas']['PinnedMessagePageResponse']
+export function decodePinnedMessages(value: unknown, chatId: string): PinnedMessagePage {
+  const page = record(value, ['pins', 'totalCount', 'nextBeforeSequence'])
+  check(
+    Array.isArray(page.pins) &&
+      page.pins.length <= 100 &&
+      typeof page.totalCount === 'number' &&
+      Number.isInteger(page.totalCount) &&
+      page.totalCount >= page.pins.length &&
+      page.totalCount <= 400 &&
+      (page.nextBeforeSequence === null || isSequence(page.nextBeforeSequence)),
+  )
+  const pins = (page.pins as unknown[]).map((pin) => {
+    const entry = record(pin, ['message', 'scope'])
+    check(entry.scope === 'SELF' || entry.scope === 'EVERYONE')
+    const message = decodeMessage(entry.message, chatId)
+    check(!message.deletedAt)
+    return { message, scope: entry.scope as 'SELF' | 'EVERYONE' }
+  })
+  check(new Set(pins.map((pin) => pin.message.id)).size === pins.length)
+  return {
+    pins,
+    totalCount: page.totalCount as number,
+    nextBeforeSequence: page.nextBeforeSequence as string | null,
+  }
+}

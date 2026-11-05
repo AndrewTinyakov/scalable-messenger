@@ -1,6 +1,6 @@
 import { useCallback, useEffect, type Dispatch, type SetStateAction } from 'react'
 import type { Chat } from '../entities/chat/model'
-import type { PendingSend } from '../entities/message/model'
+import type { ForwardSource, PendingSend } from '../entities/message/model'
 import type { SavedSend, SendRequests } from '../entities/message/sendRequests'
 import { isNetworkOnline } from '../shared/lib/network'
 
@@ -72,8 +72,8 @@ export function useMessengerSends({
   }, [pending, reconcilePending])
 
   const sendMessage = useCallback(
-    (chatId: string, body: string, replyToMessageId?: string) => {
-      const result = requests.start(chatId, body, replyToMessageId)
+    (chatId: string, body: string, replyToMessageId?: string, forward?: ForwardSource) => {
+      const result = requests.start(chatId, body, replyToMessageId, forward)
       if (result.error) setError(result.error)
       else if (result.ok) setError(null)
       return result.ok

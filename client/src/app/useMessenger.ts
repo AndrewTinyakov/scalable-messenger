@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { Chat } from '../entities/chat/model'
+import type { Chat, ChatPreferences } from '../entities/chat/model'
 import { ChatRecovery } from '../entities/message/chatRecovery'
 import { HISTORY_PAGE_SIZE, historyAvailability } from '../entities/message/historyWindow'
-import type { Message, PendingSend } from '../entities/message/model'
+import type { ForwardSource, Message, PendingSend } from '../entities/message/model'
 import type { ReadingLocation } from '../entities/message/readingLocation'
 import type { SendRequests } from '../entities/message/sendRequests'
 import type { Session } from '../entities/session/model'
 import { useConversationFeatures } from '../features/conversation/useConversationFeatures'
+import { useMessagePins } from '../features/message-pins/useMessagePins'
 import { ChatKind } from '../shared/api/generated/socket-vocabulary'
 import { api } from '../shared/api/http'
 import {
@@ -161,6 +162,8 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     listChats,
     rememberChat,
     refreshChatSummary,
+    applyPreferences,
+    applyPinnedOrder,
     markRead,
     settleRead,
     isRemoved,
@@ -231,6 +234,20 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     onReadFailed: settleRead,
     fail: setError,
   })
+  const pins = useMessagePins(
+    selectedId && !selectedId.startsWith('draft:') ? selectedId : undefined,
+    sessionApi,
+    connection === 'connected',
+  )
+  const pinsEventRef = useRef(pins.onEvent)
+  pinsEventRef.current = pins.onEvent
+  const featuresEventRef = useRef(features.onEvent)
+  featuresEventRef.current = features.onEvent
+  const onFeatureEvent = useCallback(
+    (event: Parameters<typeof features.onEvent>[0]) =>
+      pinsEventRef.current(event) || featuresEventRef.current(event),
+    [],
+  )
   const withSnapshot = async (
     chatId: string,
     request: ReturnType<typeof sessionApi.latestMessages>,
@@ -317,8 +334,100 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     [startSend, recovery],
   )
 
+  const applyChatPreferences = useCallback(
+    (chatId: string, preferences: ChatPreferences) =>
+      applyPreferences(chatId, {
+        pinnedRank: preferences.pinnedRank,
+        mutedUntil: preferences.mutedUntil,
+        mutedForever: preferences.mutedForever,
+        markedUnread: preferences.markedUnread,
+      }),
+    [applyPreferences],
+  )
+  const pinChat = useCallback(
+    async (chatId: string, pinned: boolean) =>
+      applyPinnedOrder(await sessionApi.pinChat(chatId, pinned)),
+    [applyPinnedOrder, sessionApi],
+  )
+  const reorderPinnedChats = useCallback(
+    async (order: string[]) => {
+      applyPinnedOrder(order)
+      try {
+        applyPinnedOrder(await sessionApi.reorderPinnedChats(order))
+      } catch (cause) {
+        void refreshChats(false, true)
+        throw cause
+      }
+    },
+    [applyPinnedOrder, refreshChats, sessionApi],
+  )
+  const movePinnedChat = useCallback(
+    async (chatId: string, offset: number) => {
+      const order = listChats()
+        .filter((chat) => chat.pinnedRank != null)
+        .map((chat) => chat.id)
+      const index = order.indexOf(chatId)
+      const target = index + offset
+      if (index < 0 || target < 0 || target >= order.length) return
+      order.splice(index, 1)
+      order.splice(target, 0, chatId)
+      await reorderPinnedChats(order)
+    },
+    [listChats, reorderPinnedChats],
+  )
+  const muteChat = useCallback(
+    async (chatId: string, durationSeconds: number | null) =>
+      applyChatPreferences(chatId, await sessionApi.muteChat(chatId, durationSeconds)),
+    [applyChatPreferences, sessionApi],
+  )
+  const unmuteChat = useCallback(
+    async (chatId: string) => applyChatPreferences(chatId, await sessionApi.unmuteChat(chatId)),
+    [applyChatPreferences, sessionApi],
+  )
+  const markChatUnread = useCallback(
+    async (chat: Chat, unread: boolean) => {
+      if (!unread && (chat.unreadCount ?? 0) > 0 && chat.lastSequence !== '0') {
+        markRead(chat.id, chat.lastSequence)
+        try {
+          settleRead(
+            chat.id,
+            (await sessionApi.advanceRead(chat.id, chat.lastSequence)).throughSequence,
+          )
+        } catch (cause) {
+          settleRead(chat.id)
+          throw cause
+        }
+      }
+      if (unread || chat.markedUnread)
+        applyChatPreferences(chat.id, await sessionApi.markUnread(chat.id, unread))
+    },
+    [applyChatPreferences, markRead, sessionApi, settleRead],
+  )
+  const forwardMessages = useCallback(
+    (targetChatId: string, sources: ForwardSource[], bodies: string[]) => {
+      let failed = 0
+      sources.forEach((source, index) => {
+        if (!startSend(targetChatId, bodies[index], undefined, source)) failed += 1
+      })
+      if (failed)
+        setError(`${failed} ${failed === 1 ? 'message' : 'messages'} could not be forwarded.`)
+      return failed === 0
+    },
+    [setError, startSend],
+  )
+
+  useEffect(() => {
+    const chat = chats.find((item) => item.id === selectedId)
+    if (!chat?.markedUnread) return
+    applyChatPreferences(chat.id, { ...chat, markedUnread: false })
+    void sessionApi
+      .markUnread(chat.id, false)
+      .then((preferences) => applyChatPreferences(chat.id, preferences))
+      .catch(() => void refreshChatSummary(chat.id).catch(() => {}))
+  }, [chats, selectedId, applyChatPreferences, refreshChatSummary, sessionApi])
+
   useMessengerSocket({
-    onFeatureEvent: features.onEvent,
+    onFeatureEvent,
     onSidebarEvent: sidebar.onEvent,
     sessionApi,
     userId: session.user.id,
@@ -401,6 +510,14 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     clearChatHistory: features.clearChatHistory,
     features,
     deleteChat: features.deleteChat,
+    pins,
+    pinChat,
+    movePinnedChat,
+    reorderPinnedChats,
+    muteChat,
+    unmuteChat,
+    markChatUnread,
+    forwardMessages,
     latestMessages: recovery.latestWindows(),
     detached: Boolean(selectedId && recovery.isDetached(selectedId)),
     chats,
@@ -446,6 +563,7 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     loadOlder,
     loadNewer,
     showLatest,
+    reportError: setError,
     clearError: () => {
       setError(null)
       clearNavigationError()

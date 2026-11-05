@@ -47,6 +47,10 @@ socketFrames:
       $ref: ../messages.yaml#/messages/SocketChatDeletedV1
     SocketReadsChangedV1:
       $ref: ../messages.yaml#/messages/SocketReadsChangedV1
+    SocketChatPreferencesChangedV1:
+      $ref: ../messages.yaml#/messages/SocketChatPreferencesChangedV1
+    SocketPinsChangedV1:
+      $ref: ../messages.yaml#/messages/SocketPinsChangedV1
     SocketWatchPresenceV1:
       $ref: ../messages.yaml#/messages/SocketWatchPresenceV1
     SocketUnwatchPresenceV1:

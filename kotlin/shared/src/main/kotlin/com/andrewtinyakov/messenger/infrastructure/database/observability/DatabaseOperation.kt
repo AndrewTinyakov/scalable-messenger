@@ -80,5 +80,13 @@ enum class DatabaseOperation(
     DELETION_PURGE_BATCH("deletion.purge_batch"),
     DELETION_PERSONAL_CLEANUP("deletion.personal_cleanup"),
     DELETION_PURGE_BACKLOG("deletion.purge_backlog"),
+    CHAT_PREFERENCES_LOCK("chat_preferences.lock"),
+    CHAT_PREFERENCES_PINNED("chat_preferences.pinned"),
+    CHAT_PREFERENCES_WRITE("chat_preferences.write"),
+    CHAT_PREFERENCES_FIND("chat_preferences.find"),
+    MESSAGE_PIN_LOCK("message_pin.lock"),
+    MESSAGE_PIN_COUNT("message_pin.count"),
+    MESSAGE_PIN_WRITE("message_pin.write"),
+    MESSAGE_PIN_PAGE("message_pin.page"),
     OTHER("other"),
 }

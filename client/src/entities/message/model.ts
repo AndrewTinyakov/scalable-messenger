@@ -5,12 +5,21 @@ type MessageIdentity = 'id' | 'chatId' | 'sequence' | 'senderId' | 'body' | 'cre
 export type Message = Pick<WireMessage, MessageIdentity> &
   Partial<Omit<WireMessage, MessageIdentity>>
 
+export interface ForwardSource {
+  chatId: string
+  messageId: string
+  authorId: string
+}
+
 export type SendState = 'sending' | 'retryable' | 'queued' | 'saved' | 'rejected'
 
 export interface PendingSend {
   chatId: string
   recipientId?: string
   replyToMessageId?: string
+  forwardFromChatId?: string
+  forwardFromMessageId?: string
+  forwardedFromUserId?: string
   requestId: string
   body: string
   createdAt: string

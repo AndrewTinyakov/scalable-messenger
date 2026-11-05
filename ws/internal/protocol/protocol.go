@@ -36,6 +36,8 @@ const (
 	EventMessageChanged      = messaging.EventMessageChanged
 	EventChatDeleted         = messaging.EventChatDeleted
 	EventReadsChanged        = messaging.EventReadsChanged
+	EventChatPreferences     = messaging.EventChatPreferencesChanged
+	EventPinsChanged         = messaging.EventPinsChanged
 	EventHistoryChanged      = messaging.EventHistoryChanged
 	EventSidebarPresence     = messaging.EventSidebarPresence
 	EventSidebarActivity     = messaging.EventSidebarActivity
@@ -74,6 +76,8 @@ type Frame struct {
 	LastAppliedSequence string         `json:"lastAppliedSequence,omitempty"`
 	Subscriptions       []Subscription `json:"subscriptions,omitempty"`
 	ReplyToMessageID    string         `json:"replyToMessageId,omitempty"`
+	ForwardFromChatID   string         `json:"forwardFromChatId,omitempty"`
+	ForwardFromMsgID    string         `json:"forwardFromMessageId,omitempty"`
 	UserIDs             []string       `json:"userIds,omitempty"`
 }
 
@@ -94,10 +98,12 @@ type SendCommand struct {
 	Body             string `json:"body"`
 	SentAt           string `json:"sentAt"`
 	ReplyToMessageID string `json:"replyToMessageId,omitempty"`
+	ForwardChatID    string `json:"forwardFromChatId,omitempty"`
+	ForwardMessageID string `json:"forwardFromMessageId,omitempty"`
 }
 
 func (command SendCommand) Wire() messaging.SendMessageCommandV1 {
-	return messaging.SendMessageCommandV1{Version: command.Version, ChatId: command.ChatID, RecipientId: command.RecipientID, RequestId: command.RequestID, SenderId: command.SenderID, Body: command.Body, SentAt: command.SentAt, ReplyToMessageId: command.ReplyToMessageID}
+	return messaging.SendMessageCommandV1{Version: command.Version, ChatId: command.ChatID, RecipientId: command.RecipientID, RequestId: command.RequestID, SenderId: command.SenderID, Body: command.Body, SentAt: command.SentAt, ReplyToMessageId: command.ReplyToMessageID, ForwardFromChatId: command.ForwardChatID, ForwardFromMessageId: command.ForwardMessageID}
 }
 
 func DecodeFrame(data []byte) (Frame, error) {
@@ -229,6 +235,10 @@ func ValidateEvent(event Event) error {
 		}
 	case EventMessageChanged:
 		return validateChangedMessage(event)
+	case EventChatPreferences, EventPinsChanged:
+		if !ValidULID(event.ChatID) || (event.Type == EventChatPreferences && !roomname.IsUser(event.Room)) || (roomname.IsGroup(event.Room) && event.Room != roomname.Group(event.ChatID)) || event.RecipientID != "" || event.RequestID != "" || event.MessageID != "" || event.Sequence != "" || event.SenderID != "" || event.Body != "" || event.CreatedAt != "" || event.Reason != "" {
+			return errors.New("invalid personal chat event")
+		}
 	case EventChatDeleted, EventReadsChanged:
 		if !ValidULID(event.ChatID) || event.RecipientID != "" || event.RequestID != "" || event.MessageID != "" || event.Sequence != "" || event.SenderID != "" || event.Body != "" || event.CreatedAt != "" || event.Reason != "" {
 			return errors.New("invalid chat feature event")

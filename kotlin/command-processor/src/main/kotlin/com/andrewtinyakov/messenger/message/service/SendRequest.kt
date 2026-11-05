@@ -17,13 +17,17 @@ internal data class SendRequest(
     val senderId: UserId,
     val body: String,
     val replyToMessageId: MessageId?,
+    val forwardSource: ForwardSource? = null,
 ) {
     val key: Pair<UserId, RequestId> get() = senderId to requestId
 
     val fingerprint: String by lazy(LazyThreadSafetyMode.NONE) {
         val target = chatId?.value ?: "direct:${recipientId?.value}"
         val reply = replyToMessageId
-        if (reply == null) {
+        val forward = forwardSource
+        if (forward != null) {
+            sha256("forward-v1\u0000$target\u0000${senderId.value}\u0000${forward.chatId.value}\u0000${forward.messageId.value}\u0000$body")
+        } else if (reply == null) {
             sha256("$target\u0000${senderId.value}\u0000$body")
         } else {
             sha256("reply-v1\u0000$target\u0000${senderId.value}\u0000${reply.value}\u0000$body")
@@ -38,9 +42,15 @@ internal data class SendRequest(
         }
 }
 
+internal data class ForwardSource(
+    val chatId: ChatId,
+    val messageId: MessageId,
+)
+
 internal fun SendMessageCommandV1.toSendRequest(): SendRequest {
     require(version == 1) { "Unsupported command version" }
     require((chatId == null) != (recipientId == null)) { "Exactly one chat target is required" }
+    require((forwardFromChatId == null) == (forwardFromMessageId == null)) { "A forward needs both its source chat and message" }
     return SendRequest(
         chatId = chatId?.let(::ChatId),
         recipientId = recipientId?.let(::UserId),
@@ -48,5 +58,6 @@ internal fun SendMessageCommandV1.toSendRequest(): SendRequest {
         senderId = UserId(senderId),
         body = body,
         replyToMessageId = replyToMessageId?.let(::MessageId),
+        forwardSource = forwardFromChatId?.let { ForwardSource(ChatId(it), MessageId(forwardFromMessageId!!)) },
     )
 }

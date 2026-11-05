@@ -20,7 +20,12 @@ import java.util.concurrent.TimeUnit
 
 @SpringBootTest(
     classes = [ApiApplication::class],
-    properties = ["messenger.grpc.enabled=false", "spring.rabbitmq.dynamic=false", "spring.rabbitmq.listener.simple.auto-startup=false"],
+    properties = [
+        "messenger.read.notification-initial-delay-ms=3600000",
+        "messenger.grpc.enabled=false",
+        "spring.rabbitmq.dynamic=false",
+        "spring.rabbitmq.listener.simple.auto-startup=false",
+    ],
 )
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 abstract class MessengerIntegrationTest {

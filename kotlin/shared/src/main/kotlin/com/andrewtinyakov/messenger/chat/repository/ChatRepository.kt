@@ -9,7 +9,7 @@ import java.time.OffsetDateTime
 
 data class MemberChat(
     val chat: Chat,
-    val joinedAt: OffsetDateTime,
+    val activityAt: OffsetDateTime,
 )
 
 data class MemberChatDetails(
@@ -18,7 +18,7 @@ data class MemberChatDetails(
 )
 
 interface ChatRepository {
-    fun findByMember(userId: UserId, beforeJoinedAt: OffsetDateTime?, beforeChatId: ChatId?, limit: Int): List<MemberChat>
+    fun findByMember(userId: UserId, beforeActivityAt: OffsetDateTime?, beforeChatId: ChatId?, limit: Int): List<MemberChat>
 
     fun findMembersByChatIds(chatIds: List<ChatId>): Map<ChatId, List<UserSummary>>
 

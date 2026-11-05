@@ -52,3 +52,7 @@ components:
       name: SavedMessageReferenceV1
       payload:
         $ref: ./schemas/message/event/saved-message-reference-v1.yaml
+    SidebarActivityEventV1:
+      name: SidebarActivityEventV1
+      payload:
+        $ref: ./schemas/message/event/sidebar-activity-v1.yaml

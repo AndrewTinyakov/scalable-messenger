@@ -7,6 +7,7 @@ option java_multiple_files = true;
 option go_package = "messenger/ws/internal/generated/grpc;authorization";
 
 service ChatAuthorization {
+  rpc AuthorizeSidebar(AuthorizeSidebarRequest) returns (AuthorizeSidebarResponse);
   rpc ValidateSession(ValidateSessionRequest) returns (ValidateSessionResponse);
   rpc AuthorizeGroup(AuthorizeGroupRequest) returns (AuthorizeGroupResponse);
   rpc AuthorizeGroups(AuthorizeGroupsRequest) returns (AuthorizeGroupsResponse);
@@ -55,4 +56,17 @@ message AuthorizePresenceRequest {
 
 message AuthorizePresenceResponse {
   repeated string authorized_user_ids = 1;
+}
+
+message AuthorizeSidebarRequest {
+  string session_id = 1;
+  repeated string chat_ids = 2;
+}
+message SidebarChat {
+  string chat_id = 1;
+  string peer_id = 2;
+  bool group = 3;
+}
+message AuthorizeSidebarResponse {
+  repeated SidebarChat chats = 1;
 }

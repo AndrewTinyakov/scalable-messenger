@@ -248,18 +248,16 @@ describe('group membership management', () => {
     expect(container.textContent).not.toContain('Load more members')
   })
 
-  it('shows a failed load and recovers when the user refreshes', async () => {
+  it('shows a permission failure and recovers when the user refreshes', async () => {
     let failed = false
     respond = ({ url }) => {
       if (url.pathname === membersPath && !failed) {
         failed = true
-        return Response.json({ message: 'Members temporarily unavailable' }, { status: 503 })
+        return Response.json({ message: 'Members access denied' }, { status: 403 })
       }
     }
     await render()
-    expect(container.querySelector('[role="alert"]')?.textContent).toBe(
-      'Members temporarily unavailable',
-    )
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe('Members access denied')
     expect(memberRows()).toHaveLength(0)
     await click('Refresh members')
 

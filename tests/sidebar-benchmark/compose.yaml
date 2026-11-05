@@ -1,0 +1,24 @@
+name: messenger-sidebar-evidence
+services:
+  postgres:
+    image: postgres:17-alpine
+    mem_limit: 768m
+    cpus: 2
+    environment:
+      POSTGRES_USER: messenger
+      POSTGRES_PASSWORD: messenger
+      POSTGRES_DB: messenger
+    ports:
+      - '127.0.0.1:25457:5432'
+    command: [postgres, -c, shared_buffers=128MB, -c, track_io_timing=on]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U messenger']
+      interval: 1s
+      retries: 30
+    networks: [evidence]
+
+networks:
+  evidence:
+    ipam:
+      config:
+        - subnet: 10.249.57.0/24

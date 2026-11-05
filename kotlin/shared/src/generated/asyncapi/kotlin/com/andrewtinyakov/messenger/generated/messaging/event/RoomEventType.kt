@@ -11,4 +11,5 @@ enum class RoomEventType(val value: String) {
     READS_CHANGED("reads_changed"),
     SEND_REJECTED("send_rejected"),
     SESSION_REVOKED("session_revoked"),
+    SIDEBAR_ACTIVITY("sidebar_activity"),
 }

@@ -5,6 +5,7 @@ import com.andrewtinyakov.messenger.infrastructure.database.observability.Databa
 import com.andrewtinyakov.messenger.infrastructure.database.observability.observedExecute
 import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxMessage
 import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxRepository
+import com.andrewtinyakov.messenger.infrastructure.redis.RoomAddress
 import com.andrewtinyakov.messenger.read.repository.ReadRepository
 import com.andrewtinyakov.messenger.read.web.payload.AdvanceReadRequest
 import com.andrewtinyakov.messenger.read.web.payload.MessageReaderResponse
@@ -22,6 +23,7 @@ import com.andrewtinyakov.messenger.shared.web.ApiException
 import com.andrewtinyakov.messenger.shared.web.badRequest
 import com.andrewtinyakov.messenger.shared.web.notFound
 import org.springframework.http.HttpStatus
+import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
 import tools.jackson.databind.ObjectMapper
@@ -49,7 +51,9 @@ class ReadService(
             if (advanced.advanced) {
                 metrics.count("ranges", "inserted", advanced.rangesWritten)
                 metrics.count("batches", "ranges")
-                val rooms = repository.notificationRooms(chatId, advanced.progress.readAt!!)
+                val sharedRooms = repository.notificationRooms(chatId, advanced.progress.readAt!!)
+                if (sharedRooms.isNotEmpty()) repository.completeNotification(chatId, userId)
+                val rooms = (sharedRooms + RoomAddress.user(userId)).distinct()
                 metrics.count("notifications", if (rooms.isEmpty()) "coalesced" else "emitted")
                 outbox.enqueue(
                     rooms.map { room ->
@@ -59,6 +63,23 @@ class ReadService(
                 )
             }
             ReadProgressResponse(advanced.progress.throughSequence.toString(), advanced.progress.readAt, OffsetDateTime.now(clock))
+        }
+    }
+
+    @Scheduled(
+        fixedDelayString = "\${messenger.read.notification-delay-ms:100}",
+        initialDelayString = "\${messenger.read.notification-initial-delay-ms:100}",
+    )
+    fun publishPendingNotifications() {
+        tx.observedExecute(DatabaseTransaction.READ_ADVANCE) {
+            repository.pendingNotifications(OffsetDateTime.now(clock), 500).forEach { (chatId, rooms) ->
+                outbox.enqueue(
+                    rooms.map { room ->
+                        val event = ReadsChangedEventV1.create(eventId = newId(), room = room, chatId = chatId.value)
+                        OutboxMessage(id = EventId(event.eventId), room = room, payload = mapper.writeValueAsString(event))
+                    },
+                )
+            }
         }
     }
 

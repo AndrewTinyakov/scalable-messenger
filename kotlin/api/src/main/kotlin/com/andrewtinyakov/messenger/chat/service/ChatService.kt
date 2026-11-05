@@ -54,7 +54,7 @@ class ChatService(
         val position = cursor?.let(::decodeCursor)
         val fetched = repository.findByMember(
             userId = userId,
-            beforeJoinedAt = position?.first,
+            beforeActivityAt = position?.first,
             beforeChatId = position?.second,
             limit = limit + 1,
         )
@@ -76,7 +76,7 @@ class ChatService(
             }
             ?.let {
                 encodeCursor(
-                    joinedAt = it.joinedAt,
+                    activityAt = it.activityAt,
                     chatId = it.chat.id,
                 )
             }
@@ -89,12 +89,12 @@ class ChatService(
     }
 
     private fun encodeCursor(
-        joinedAt: OffsetDateTime,
+        activityAt: OffsetDateTime,
         chatId: ChatId,
     ): String =
         Base64.getUrlEncoder()
             .withoutPadding()
-            .encodeToString("$joinedAt|${chatId.value}".toByteArray(StandardCharsets.UTF_8))
+            .encodeToString("$activityAt|${chatId.value}".toByteArray(StandardCharsets.UTF_8))
 
     private fun decodeCursor(value: String): Pair<OffsetDateTime, ChatId> {
         if (value.length > 256) {
@@ -110,9 +110,9 @@ class ChatService(
                 StandardCharsets.UTF_8,
             ).split('|')
             require(parts.size == 2)
-            val joinedAt = OffsetDateTime.parse(parts[0])
+            val activityAt = OffsetDateTime.parse(parts[0])
             requireId(parts[1])
-            joinedAt to ChatId(parts[1])
+            activityAt to ChatId(parts[1])
         }.getOrElse {
             badRequest(
                 ApiErrorCode.INVALID_SEQUENCE,
@@ -160,7 +160,7 @@ class ChatService(
                     members = members,
                 ),
             )
-            chat.toResponse(members = repository.findMembers(chatId = chat.id))
+            get(chat.id, userId)
         }
     }
 

@@ -96,6 +96,139 @@ class ReadServiceTests
         )
 
         @Test
+        fun `pending advance locks out drain until progress commits`() {
+            val f = fixture(messages = 2)
+            val clock = MutableClock("2026-11-02T12:00:00Z")
+            val repository = JooqReadRepository(jooq, clock)
+            tx.execute { repository.advance(f.chat, f.members.first(), 1) }
+            val advanced = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            val future = concurrently {
+                tx.execute {
+                    repository.advance(f.chat, f.members.first(), 2)
+                    advanced.countDown()
+                    check(release.await(10, TimeUnit.SECONDS))
+                }
+            }
+            try {
+                assertTrue(advanced.await(10, TimeUnit.SECONDS))
+                assertTrue(tx.execute { repository.pendingNotifications(OffsetDateTime.now(clock), 1000) }!!.keys.none { it == f.chat })
+                assertEquals("1", service(clock).summary(f.chat, f.owner).maxOtherReadSequence)
+            } finally {
+                release.countDown()
+                future.get(10, TimeUnit.SECONDS)
+            }
+            assertTrue(tx.execute { repository.pendingNotifications(OffsetDateTime.now(clock), 1000) }!!.containsKey(f.chat))
+            assertEquals("2", service(clock).summary(f.chat, f.owner).maxOtherReadSequence)
+        }
+
+        @Test
+        fun `deleted chats discard pending read work`() {
+            val f = fixture(messages = 1)
+            val clock = MutableClock("2026-11-02T12:00:00Z")
+            val repository = JooqReadRepository(jooq, clock)
+            tx.execute { repository.advance(f.chat, f.members.first(), 1) }
+            db.update("UPDATE chats SET deleted_at=now() WHERE id=?", f.chat.value)
+            tx.execute { repository.pendingNotifications(OffsetDateTime.now(clock), 1000) }
+            assertEquals(
+                0,
+                db.queryForObject("SELECT count(*) FROM pending_read_notifications WHERE chat_id=?", Int::class.java, f.chat.value),
+            )
+        }
+
+        @Test
+        fun `an immediate notification does not spend the next bucket on unchanged progress`() {
+            val f = fixture(messages = 3)
+            val clock = MutableClock("2026-11-02T12:00:00Z")
+            val reads = service(clock)
+            reads.advance(f.chat, f.members.first(), AdvanceReadRequest("1"))
+            assertEquals(1, sharedNotifications(f.chat))
+            clock.set("2026-11-02T12:00:02Z")
+            reads.publishPendingNotifications()
+            assertEquals(1, sharedNotifications(f.chat))
+            clock.set("2026-11-02T12:00:02.100Z")
+            reads.advance(f.chat, f.members.first(), AdvanceReadRequest("3"))
+            assertEquals(2, sharedNotifications(f.chat))
+            assertEquals("3", reads.summary(f.chat, f.owner).maxOtherReadSequence)
+        }
+
+        @Test
+        fun `last read in an already notified bucket gets a durable trailing notification`() {
+            val f = fixture(messages = 3)
+            val clock = MutableClock("2026-11-02T12:00:00Z")
+            val reads = service(clock)
+            reads.advance(f.chat, f.members.first(), AdvanceReadRequest("1"))
+            db.update("DELETE FROM messenger_outbox_events WHERE room=?", "group:${f.chat.value}")
+            clock.set("2026-11-02T12:00:01Z")
+            reads.advance(f.chat, f.members.first(), AdvanceReadRequest("3"))
+            reads.publishPendingNotifications()
+            assertEquals(0, sharedNotifications(f.chat))
+            clock.set("2026-11-02T12:00:02Z")
+            reads.publishPendingNotifications()
+            assertEquals(1, sharedNotifications(f.chat))
+            assertEquals("3", reads.summary(f.chat, f.owner).maxOtherReadSequence)
+            reads.publishPendingNotifications()
+            assertEquals(1, sharedNotifications(f.chat))
+            assertEquals(
+                0,
+                db.queryForObject("SELECT count(*) FROM pending_read_notifications WHERE chat_id=?", Int::class.java, f.chat.value),
+            )
+        }
+
+        @Test
+        fun `committed reader retains notification work when the bucket winner rolls back`() {
+            val f = fixture(messages = 2)
+            val reads = service(MutableClock("2026-11-02T12:00:00Z"))
+            val claimed = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            val winner = concurrently {
+                tx.execute { status ->
+                    reads.advance(f.chat, f.members[0], AdvanceReadRequest("1"))
+                    claimed.countDown()
+                    check(release.await(10, TimeUnit.SECONDS))
+                    status.setRollbackOnly()
+                }
+            }
+            try {
+                assertTrue(claimed.await(10, TimeUnit.SECONDS))
+                assertEquals("2", reads.advance(f.chat, f.members[1], AdvanceReadRequest("2")).throughSequence)
+            } finally {
+                release.countDown()
+                winner.get(10, TimeUnit.SECONDS)
+            }
+            reads.publishPendingNotifications()
+            assertEquals(1, sharedNotifications(f.chat))
+            assertEquals("2", reads.summary(f.chat, f.owner).maxOtherReadSequence)
+        }
+
+        private fun sharedNotifications(chatId: ChatId): Int = db.queryForObject(
+            "SELECT count(*) FROM messenger_outbox_events WHERE room=? AND payload->>'type'='reads_changed'",
+            Int::class.java,
+            "group:${chatId.value}",
+        )!!
+
+        @Test
+        fun `every advanced read invalidates its account even when group notifications coalesce`() {
+            val f = fixture(messages = 2)
+            val reads = service(MutableClock("2026-11-02T12:00:00Z"))
+            assertEquals(2, chatService.get(f.chat, f.members[0]).unreadCount)
+            reads.advance(f.chat, f.members[0], AdvanceReadRequest("2"))
+            reads.advance(f.chat, f.members[1], AdvanceReadRequest("2"))
+            assertEquals(0, chatService.get(f.chat, f.members[0]).unreadCount)
+            for (member in f.members.take(2)) {
+                assertEquals(
+                    1,
+                    db.queryForObject(
+                        "SELECT count(*) FROM messenger_outbox_events WHERE room=? AND payload->>'type'='reads_changed' AND payload->>'chatId'=?",
+                        Int::class.java,
+                        "user:${member.value}",
+                        f.chat.value,
+                    ),
+                )
+            }
+        }
+
+        @Test
         fun `first accepted prefix timestamps survive repeats backwards progress and another device`() {
             val f = fixture()
             val clock = MutableClock("2026-11-02T12:00:00Z")
@@ -164,7 +297,7 @@ class ReadServiceTests
             assertEquals(
                 1,
                 db.queryForObject(
-                    "SELECT count(*) FROM messenger_outbox_events WHERE payload->>'type'='reads_changed' AND payload->>'chatId'=?",
+                    "SELECT count(*) FROM messenger_outbox_events WHERE payload->>'type'='reads_changed' AND payload->>'chatId'=? AND room LIKE 'group:%'",
                     Int::class.java,
                     f.chat.value,
                 ),
@@ -200,7 +333,7 @@ class ReadServiceTests
                 assertEquals(
                     0,
                     db.queryForObject(
-                        "SELECT count(*) FROM messenger_outbox_events WHERE payload->>'type'='reads_changed' AND payload->>'chatId'=?",
+                        "SELECT count(*) FROM messenger_outbox_events WHERE payload->>'type'='reads_changed' AND payload->>'chatId'=? AND room LIKE 'group:%'",
                         Int::class.java,
                         f.chat.value,
                     ),
@@ -214,7 +347,7 @@ class ReadServiceTests
             assertEquals(
                 1,
                 db.queryForObject(
-                    "SELECT count(*) FROM messenger_outbox_events WHERE payload->>'type'='reads_changed' AND payload->>'chatId'=?",
+                    "SELECT count(*) FROM messenger_outbox_events WHERE payload->>'type'='reads_changed' AND payload->>'chatId'=? AND room LIKE 'group:%'",
                     Int::class.java,
                     f.chat.value,
                 ),

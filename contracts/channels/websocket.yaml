@@ -55,3 +55,9 @@ socketFrames:
       $ref: ../messages.yaml#/messages/SocketPresenceV1
     SocketHistoryChangedV1:
       $ref: ../messages.yaml#/messages/SocketHistoryChangedV1
+    SocketWatchSidebarV1:
+      $ref: ../messages.yaml#/messages/SocketWatchSidebarV1
+    SocketSidebarPresenceV1:
+      $ref: ../messages.yaml#/messages/SocketSidebarPresenceV1
+    SocketSidebarActivityV1:
+      $ref: ../messages.yaml#/messages/SocketSidebarActivityV1

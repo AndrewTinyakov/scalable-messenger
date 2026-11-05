@@ -30,7 +30,34 @@ class ChatAuthorizationGrpcService(
     private val clock: Clock,
     private val groupAuthorizationRepository: GroupAuthorizationRepository,
     private val presenceAuthorizationRepository: PresenceAuthorizationRepository,
+    private val sidebarAuthorizationRepository: SidebarAuthorizationRepository,
 ) : ChatAuthorizationGrpc.ChatAuthorizationImplBase() {
+    override fun authorizeSidebar(
+        request: com.andrewtinyakov.messenger.generated.grpc.AuthorizeSidebarRequest,
+        responseObserver: StreamObserver<com.andrewtinyakov.messenger.generated.grpc.AuthorizeSidebarResponse>,
+    ) = respond(responseObserver) {
+        val ids = request.chatIdsList
+        if (ids.size > 100 ||
+            ids.size != ids.toSet().size
+        ) {
+            throw Status.INVALID_ARGUMENT.withDescription("Provide at most 100 distinct chats").asRuntimeException()
+        }
+        val chats =
+            sidebarAuthorizationRepository.authorize(
+                requireSessionId(request.sessionId),
+                ids.map(::requireChatId),
+                OffsetDateTime.now(clock),
+            )
+                ?: throw Status.UNAUTHENTICATED.withDescription("Session expired or revoked").asRuntimeException()
+        com.andrewtinyakov.messenger.generated.grpc.AuthorizeSidebarResponse.newBuilder().addAllChats(
+            chats.map {
+                com.andrewtinyakov.messenger.generated.grpc.SidebarChat.newBuilder().setChatId(
+                    it.chatId.value,
+                ).setPeerId(it.peerId?.value ?: "").setGroup(it.group).build()
+            },
+        ).build()
+    }
+
     override fun validateSession(request: ValidateSessionRequest, responseObserver: StreamObserver<ValidateSessionResponse>) =
         respond(responseObserver) {
             val session = requireSession(request.sessionId)

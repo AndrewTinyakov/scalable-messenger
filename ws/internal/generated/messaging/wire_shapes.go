@@ -15,6 +15,7 @@ var FrameShapes = map[FrameType]WireShape{
 	"received_message": {Required: []string{"type", "version", "chatId", "sequence"}, Optional: []string{}},
 	"watch_presence":   {Required: []string{"type", "version", "chatId", "userIds"}, Optional: []string{}},
 	"unwatch_presence": {Required: []string{"type", "version"}, Optional: []string{}},
+	"watch_sidebar":    {Required: []string{"type", "version", "chatIds"}, Optional: []string{}},
 }
 
 var RoomShapes = map[EventType]WireShape{
@@ -28,4 +29,5 @@ var RoomShapes = map[EventType]WireShape{
 	"chat_deleted":       {Required: []string{"type", "version", "eventId", "room", "chatId"}, Optional: []string{}},
 	"reads_changed":      {Required: []string{"type", "version", "eventId", "room", "chatId"}, Optional: []string{}},
 	"history_changed":    {Required: []string{"type", "version", "eventId", "room", "chatId", "sequence", "mutationRevision", "visibilityRevision"}, Optional: []string{}},
+	"sidebar_activity":   {Required: []string{"type", "version", "chatId", "sequence"}, Optional: []string{}},
 }

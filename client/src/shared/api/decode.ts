@@ -80,7 +80,11 @@ export function decodeUsers(value: unknown): User[] {
 }
 
 export function decodeChat(value: unknown): Chat {
-  fields(value, ['id', 'kind', 'members', 'memberCount', 'lastSequence'], ['name', 'ownerId'])
+  fields(
+    value,
+    ['id', 'kind', 'members', 'memberCount', 'lastSequence'],
+    ['name', 'ownerId', 'lastMessage', 'unreadCount', 'unreadCountCapped', 'activityAt'],
+  )
   if (
     !isId(value.id) ||
     (value.kind !== ChatKind.DIRECT && value.kind !== ChatKind.GROUP) ||
@@ -93,8 +97,47 @@ export function decodeChat(value: unknown): Chat {
     !isSequence(value.lastSequence)
   )
     invalid()
+  if (value.activityAt != null && !isDateTime(value.activityAt)) invalid()
+  if (
+    value.unreadCount !== undefined &&
+    (typeof value.unreadCount !== 'number' ||
+      !Number.isInteger(value.unreadCount) ||
+      value.unreadCount < 0 ||
+      value.unreadCount > 256)
+  )
+    invalid()
+  if (value.unreadCountCapped !== undefined && typeof value.unreadCountCapped !== 'boolean')
+    invalid()
+  if (value.lastMessage != null) {
+    fields(value.lastMessage, [
+      'id',
+      'sequence',
+      'senderId',
+      'senderUsername',
+      'createdAt',
+      'bodyPreview',
+      'deleted',
+    ])
+    const message = value.lastMessage
+    if (
+      !isId(message.id) ||
+      !isSequence(message.sequence) ||
+      message.sequence === '0' ||
+      !isId(message.senderId) ||
+      typeof message.senderUsername !== 'string' ||
+      !message.senderUsername ||
+      message.senderUsername.length > 40 ||
+      !isDateTime(message.createdAt) ||
+      typeof message.bodyPreview !== 'string' ||
+      [...message.bodyPreview].length > 160 ||
+      typeof message.deleted !== 'boolean' ||
+      (message.deleted && message.bodyPreview !== '') ||
+      (!message.deleted && message.bodyPreview === '')
+    )
+      invalid()
+  }
   value.members.forEach(decodeUser)
-  return value as Chat
+  return { unreadCount: 0, unreadCountCapped: false, ...value } as Chat
 }
 
 export function decodeGroupMembers(

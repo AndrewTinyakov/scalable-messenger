@@ -45,6 +45,7 @@ type Connection struct {
 	commandRunning    bool
 	commandScheduled  bool
 	nextLeaseRenewal  time.Time
+	sidebarSerial     atomic.Uint64
 	presenceSerial    atomic.Uint64
 	presenceChatID    string
 }
@@ -53,6 +54,7 @@ type outbound struct {
 	frame         *protocol.EventFrame
 	groupGrant    *groupGrant
 	presenceWatch *presenceWatch
+	sidebarWatch  *sidebarWatch
 }
 
 func newConnection(server *Server, socket *websocket.Conn, session ticket.Identity, leaseID string) *Connection {
@@ -101,6 +103,10 @@ func (c *Connection) enqueueFrame(frame *protocol.EventFrame, expected *groupGra
 	if len(presence) > 0 {
 		presenceWatch = presence[0]
 	}
+	return c.enqueueWithGrants(frame, expected, presenceWatch, nil)
+}
+
+func (c *Connection) enqueueWithGrants(frame *protocol.EventFrame, expected *groupGrant, presenceWatch *presenceWatch, sidebarWatch *sidebarWatch) bool {
 	terminalChat := frame.Event().Type == protocol.EventChatDeleted
 	event := frame.Event()
 	if expected != nil && (event.ChatID != expected.chatID || event.Room != roomname.Group(expected.chatID)) {
@@ -111,6 +117,12 @@ func (c *Connection) enqueueFrame(frame *protocol.EventFrame, expected *groupGra
 			c.closeRevoked()
 		}
 		return true
+	}
+	if terminalChat || (event.Type == protocol.EventMemberRemoved && event.MemberID == c.session.UserID) {
+		c.sidebarSerial.Add(1)
+		if c.server.sidebar != nil {
+			c.server.sidebar.remove(c)
+		}
 	}
 	if terminalChat {
 		if expected != nil {
@@ -162,7 +174,7 @@ func (c *Connection) enqueueFrame(frame *protocol.EventFrame, expected *groupGra
 		return false
 	}
 	select {
-	case c.out <- outbound{frame: frame, groupGrant: grant, presenceWatch: presenceWatch}:
+	case c.out <- outbound{frame: frame, groupGrant: grant, presenceWatch: presenceWatch, sidebarWatch: sidebarWatch}:
 		c.queuedBytes += frame.Size()
 		c.queuedItems++
 		c.server.metrics.QueuedItems.Inc()
@@ -212,6 +224,10 @@ func (c *Connection) Close() {
 		c.mu.Unlock()
 		c.cancel()
 		c.clearPresence()
+		c.sidebarSerial.Add(1)
+		if c.server.sidebar != nil {
+			c.server.sidebar.remove(c)
+		}
 		if c.socket != nil {
 			_ = c.socket.Close()
 		}
@@ -275,6 +291,9 @@ func (c *Connection) writeLoop() {
 			allowed := !c.closed && (next.groupGrant == nil || next.groupGrant == c.subscriptions.groupGrantLocked(next.frame.Event().ChatID))
 			c.mu.Unlock()
 			if next.presenceWatch != nil && (c.server.presence == nil || !c.server.presence.current(c, next.presenceWatch)) {
+				allowed = false
+			}
+			if next.sidebarWatch != nil && (c.server.sidebar == nil || !c.server.sidebar.current(c, next.sidebarWatch)) {
 				allowed = false
 			}
 			if !allowed {

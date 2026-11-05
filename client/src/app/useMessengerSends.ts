@@ -31,15 +31,28 @@ export function useMessengerSends({
     return true
   }, [])
 
-  const reconcilePending = useCallback(
-    async (retryUnknown = false) => {
-      if (!isNetworkOnline()) return
-      const saved = await requests.reconcile(retryUnknown)
+  const applySaved = useCallback(
+    async (saved: SavedSend[]) => {
       if (saved.map(selectResolvedDraft).some(Boolean)) await refreshChats(false, true)
       for (const chatId of new Set(saved.map((result) => result.chatId))) await catchUp(chatId)
     },
-    [catchUp, refreshChats, requests, selectResolvedDraft],
+    [catchUp, refreshChats, selectResolvedDraft],
   )
+
+  const reconcilePending = useCallback(
+    async (retryUnknown = false) => {
+      if (!isNetworkOnline()) return
+      await applySaved(await requests.reconcile(retryUnknown))
+    },
+    [applySaved, requests],
+  )
+
+  useEffect(() => {
+    requests.resolved = (saved) => void applySaved(saved)
+    return () => {
+      requests.resolved = undefined
+    }
+  }, [applySaved, requests])
 
   useEffect(() => {
     if (

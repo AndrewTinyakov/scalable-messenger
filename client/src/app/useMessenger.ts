@@ -16,6 +16,7 @@ import {
   type OutgoingSocketFrame,
 } from '../shared/api/socket'
 import type { ConnectionState } from '../shared/api/socketConnection'
+import { WatchPacer } from '../shared/api/watchPacer'
 import { isNetworkOnline } from '../shared/lib/network'
 import { createMessengerSendRequests } from './messengerSendRequests'
 import { useChatDirectory } from './useChatDirectory'
@@ -26,10 +27,11 @@ import { useMessengerFocus } from './useMessengerFocus'
 import { useMessengerSends } from './useMessengerSends'
 import { useMessengerSocket } from './useMessengerSocket'
 import { useRecoveryLifecycle } from './useRecoveryLifecycle'
+import { useSidebarWatch } from './useSidebarWatch'
 
 export function useMessenger(session: Session, onSessionRevoked: () => void) {
   const location = useChatLocation()
-  const { navigate, allowDefaultSelection } = location
+  const { navigate } = location
   const prefix = `relay.${session.user.id}.${session.deviceId}`
   const recoveryRef = useRef<{ prefix: string; value: ChatRecovery } | null>(null)
   if (recoveryRef.current?.prefix !== prefix)
@@ -40,6 +42,10 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
   const [jumpRevision, setJumpRevision] = useState(0)
   const [locationRevision, setLocationRevision] = useState(0)
   const [pending, setPending] = useState<PendingSend[]>([])
+  const [connectionGeneration, setConnectionGeneration] = useState(0)
+  const [nextRetryAt, setNextRetryAt] = useState<number | null>(null)
+  const retryNowRef = useRef<() => void>(() => {})
+  const retryNow = useCallback(() => retryNowRef.current(), [])
   const [connection, setConnection] = useState<ConnectionState>('connecting')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [draftChat, setDraftChat] = useState<Chat | undefined>()
@@ -89,15 +95,38 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     leaveHistory,
   } = useChatHistory(recovery, setError)
 
-  const sendConnectedFrame = useCallback((frame: OutgoingSocketFrame | null) => {
-    const socket = socketRef.current
-    if (!frame || socket?.readyState !== WebSocket.OPEN) return
-    try {
-      sendSocketFrame(socket, frame)
-    } catch {
-      socket.close()
-    }
-  }, [])
+  const watchPacer = useMemo(
+    () =>
+      new WatchPacer((frame) => {
+        const socket = socketRef.current
+        if (socket?.readyState !== WebSocket.OPEN) return
+        try {
+          sendSocketFrame(socket, frame)
+        } catch {
+          socket.close()
+        }
+      }),
+    [],
+  )
+
+  useEffect(() => () => watchPacer.reset(), [watchPacer, connectionGeneration])
+
+  const sendConnectedFrame = useCallback(
+    (frame: OutgoingSocketFrame | null) => {
+      const socket = socketRef.current
+      if (!frame || socket?.readyState !== WebSocket.OPEN) return
+      if (['watch_presence', 'watch_sidebar', 'unwatch_presence'].includes(frame.type)) {
+        watchPacer.offer(frame)
+        return
+      }
+      try {
+        sendSocketFrame(socket, frame)
+      } catch {
+        socket.close()
+      }
+    },
+    [watchPacer],
+  )
 
   const recordLatest = useCallback(
     (chatId: string, sequence: string) => {
@@ -118,11 +147,7 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
           )?.id || current
         )
       }
-      return current && chats.some((chat) => chat.id === current)
-        ? current
-        : allowDefaultSelection.current
-          ? chats[0]?.id || null
-          : null
+      return current && chats.some((chat) => chat.id === current) ? current : null
     })
   }, [])
 
@@ -135,6 +160,9 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     loadMoreChats,
     listChats,
     rememberChat,
+    refreshChatSummary,
+    markRead,
+    settleRead,
     isRemoved,
     successfulRefreshes,
     removeChat,
@@ -180,6 +208,13 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     },
     [removeChat, leaveHistory, closeChat],
   )
+  const sidebar = useSidebarWatch({
+    connectionGeneration,
+    connected: connection === 'connected',
+    userId: session.user.id,
+    listChats,
+    send: sendConnectedFrame,
+  })
   const features = useConversationFeatures({
     chat:
       chats.find((chat) => chat.id === selectedId) ??
@@ -190,6 +225,10 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     send: sendConnectedFrame,
     remove: removeConversation,
     hide: hideConversation,
+    refreshChats,
+    onReadPending: markRead,
+    onReadCommitted: settleRead,
+    onReadFailed: settleRead,
     fail: setError,
   })
   const withSnapshot = async (
@@ -254,7 +293,12 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     [recovery],
   )
 
-  const { selectResolvedDraft, reconcilePending, sendMessage, retryMessage } = useMessengerSends({
+  const {
+    selectResolvedDraft,
+    reconcilePending,
+    sendMessage: startSend,
+    retryMessage,
+  } = useMessengerSends({
     pending,
     requests,
     catchUp,
@@ -264,8 +308,18 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     setError,
   })
 
+  const sendMessage = useCallback(
+    (chatId: string, body: string, replyToMessageId?: string) => {
+      const accepted = startSend(chatId, body, replyToMessageId)
+      if (accepted && !chatId.startsWith('draft:')) recovery.beginNavigation()
+      return accepted
+    },
+    [startSend, recovery],
+  )
+
   useMessengerSocket({
     onFeatureEvent: features.onEvent,
+    onSidebarEvent: sidebar.onEvent,
     sessionApi,
     userId: session.user.id,
     recovery,
@@ -276,10 +330,14 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     focusRequestRef,
     selectedRef,
     setConnection,
+    setNextRetryAt,
+    setConnectionGeneration,
+    retryNowRef,
     onSessionRevoked,
     reconcilePending,
     refreshChats,
     listChats,
+    refreshChatSummary,
     catchUp,
     selectResolvedDraft,
     removeChat,
@@ -316,7 +374,6 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     session,
     sessionApi,
     location,
-    selectedId,
     selectedRef,
     setSelectedId,
     setDraftChat,
@@ -336,6 +393,12 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
   }, [refreshChats])
 
   return {
+    sidebarPresence: sidebar.sidebarPresence,
+    watchSidebarPeers: sidebar.watchSidebarPeers,
+    reconnect: { nextRetryAt },
+    retryNow,
+    deleteChatById: features.deleteChatById,
+    clearChatHistory: features.clearChatHistory,
     features,
     deleteChat: features.deleteChat,
     latestMessages: recovery.latestWindows(),

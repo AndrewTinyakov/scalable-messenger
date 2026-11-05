@@ -179,3 +179,19 @@ messages:
     name: SocketHistoryChangedV1
     payload:
       $ref: ./schemas/socket/frame/history-changed-v1.yaml
+  SocketWatchSidebarV1:
+    name: SocketWatchSidebarV1
+    payload:
+      $ref: ./schemas/socket/frame/watch-sidebar-v1.yaml
+  SocketSidebarPresenceV1:
+    name: SocketSidebarPresenceV1
+    payload:
+      $ref: ./schemas/socket/frame/sidebar-presence-v1.yaml
+  SocketSidebarActivityV1:
+    name: SocketSidebarActivityV1
+    payload:
+      $ref: ./schemas/socket/frame/sidebar-activity-v1.yaml
+  SidebarActivityEventV1:
+    name: SidebarActivityEventV1
+    payload:
+      $ref: ./schemas/message/event/sidebar-activity-v1.yaml

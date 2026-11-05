@@ -275,3 +275,17 @@ describe('socket event decoding', () => {
     ).toBeNull()
   })
 })
+
+describe('shared sidebar contracts', () => {
+  it('decodes bodyless observations and rejects extra content', () => {
+    for (const name of ['sidebar-activity', 'sidebar-presence']) {
+      const raw = readFileSync(
+        new URL(`../../../../contracts/fixtures/valid/${name}.json`, import.meta.url),
+        'utf8',
+      )
+      const value = JSON.parse(raw)
+      expect(decodeSocketEvent(raw)).toEqual(value)
+      expect(decodeSocketEvent(JSON.stringify({ ...value, body: 'forbidden' }))).toBeNull()
+    }
+  })
+})

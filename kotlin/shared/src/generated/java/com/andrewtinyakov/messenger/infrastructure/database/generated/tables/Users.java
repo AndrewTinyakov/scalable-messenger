@@ -13,6 +13,7 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Cha
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.DeletionOperations.DeletionOperationsPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.HiddenMessageRanges.HiddenMessageRangesPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Messages.MessagesPath;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.PendingReadNotifications.PendingReadNotificationsPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Sessions.SessionsPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.VisibilityCleanupJobs.VisibilityCleanupJobsPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.UsersRecord;
@@ -260,6 +261,19 @@ public class Users extends TableImpl<UsersRecord> {
         return _messages;
     }
 
+    private transient PendingReadNotificationsPath _pendingReadNotifications;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.pending_read_notifications</code> table
+     */
+    public PendingReadNotificationsPath pendingReadNotifications() {
+        if (_pendingReadNotifications == null)
+            _pendingReadNotifications = new PendingReadNotificationsPath(this, null, Keys.PENDING_READ_NOTIFICATIONS__PENDING_READ_NOTIFICATIONS_USER_ID_FKEY.getInverseKey());
+
+        return _pendingReadNotifications;
+    }
+
     private transient SessionsPath _sessions;
 
     /**
@@ -300,6 +314,14 @@ public class Users extends TableImpl<UsersRecord> {
      */
     public ChatsPath chatReadProgressChatIdFkey() {
         return chatReadProgress().chats();
+    }
+
+    /**
+     * Get the implicit many-to-many join path to the <code>public.chats</code>
+     * table, via the <code>pending_read_notifications_chat_id_fkey</code> key
+     */
+    public ChatsPath pendingReadNotificationsChatIdFkey() {
+        return pendingReadNotifications().chats();
     }
 
     /**

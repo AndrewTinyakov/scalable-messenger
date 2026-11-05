@@ -1,6 +1,7 @@
 package com.andrewtinyakov.messenger.chat.model
 
 import com.andrewtinyakov.messenger.shared.id.ChatId
+import com.andrewtinyakov.messenger.shared.id.MessageId
 import com.andrewtinyakov.messenger.shared.id.UserId
 
 data class Chat(
@@ -10,6 +11,10 @@ data class Chat(
     val lastSequence: Long,
     val ownerId: UserId?,
     val memberCount: Int,
+    val lastMessage: ChatLastMessage? = null,
+    val activityAt: java.time.OffsetDateTime? = null,
+    val unreadCount: Int = 0,
+    val unreadCountCapped: Boolean = false,
 ) {
     init {
         require(lastSequence >= 0) { "Chat sequence must be nonnegative" }
@@ -29,3 +34,13 @@ data class Chat(
         }
     }
 }
+
+data class ChatLastMessage(
+    val id: MessageId,
+    val sequence: Long,
+    val senderId: UserId,
+    val senderUsername: String,
+    val createdAt: java.time.OffsetDateTime,
+    val bodyPreview: String,
+    val deleted: Boolean,
+)

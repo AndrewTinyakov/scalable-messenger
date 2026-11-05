@@ -20,6 +20,8 @@ const (
 	EventRecoveryFailed      EventType = "recovery_failed"
 	EventSendRejected        EventType = "send_rejected"
 	EventSessionRevoked      EventType = "session_revoked"
+	EventSidebarActivity     EventType = "sidebar_activity"
+	EventSidebarPresence     EventType = "sidebar_presence"
 	EventSubscribed          EventType = "subscribed"
 	EventSubscriptionExpired EventType = "subscription_expired"
 )
@@ -34,6 +36,7 @@ const (
 	FrameUnsubscribe     FrameType = "unsubscribe"
 	FrameUnwatchPresence FrameType = "unwatch_presence"
 	FrameWatchPresence   FrameType = "watch_presence"
+	FrameWatchSidebar    FrameType = "watch_sidebar"
 )
 
 const (

@@ -6,6 +6,7 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHA
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHAT_READ_PROGRESS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHAT_READ_RANGES
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSAGES
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.PENDING_READ_NOTIFICATIONS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.USERS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.enums.ChatKind
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseObservation
@@ -78,6 +79,11 @@ class JooqReadRepository(
                     .set(CHAT_READ_RANGES.EXPIRES_AT, day.plusDays(8).atStartOfDay().atOffset(ZoneOffset.UTC))
             }
             if (inserts.isNotEmpty()) check(db.batch(inserts).execute().all { it == 1 })
+            db.insertInto(PENDING_READ_NOTIFICATIONS)
+                .set(PENDING_READ_NOTIFICATIONS.CHAT_ID, chatId.value)
+                .set(PENDING_READ_NOTIFICATIONS.USER_ID, userId.value)
+                .onConflict(PENDING_READ_NOTIFICATIONS.CHAT_ID, PENDING_READ_NOTIFICATIONS.USER_ID)
+                .doUpdate().set(PENDING_READ_NOTIFICATIONS.USER_ID, userId.value).execute()
             ReadAdvance(ReadProgress(sequence, acceptedAt), true, inserts.size)
         }
 
@@ -173,6 +179,40 @@ class JooqReadRepository(
         if (kind == null) return@query emptyList()
         db.select(CHAT_MEMBERS.USER_ID).from(CHAT_MEMBERS).where(CHAT_MEMBERS.CHAT_ID.eq(chatId.value)).limit(2)
             .fetch { RoomAddress.user(UserId(it.value1()!!)) }
+    }
+
+    override fun completeNotification(chatId: ChatId, userId: UserId) {
+        db.deleteFrom(PENDING_READ_NOTIFICATIONS).where(
+            PENDING_READ_NOTIFICATIONS.CHAT_ID.eq(chatId.value),
+            PENDING_READ_NOTIFICATIONS.USER_ID.eq(userId.value),
+        ).execute()
+    }
+
+    override fun pendingNotifications(now: OffsetDateTime, limit: Int): Map<ChatId, List<String>> {
+        require(limit in 1..1000)
+        val pending = db.selectFrom(PENDING_READ_NOTIFICATIONS)
+            .where(
+                DSL.notExists(
+                    DSL.selectOne().from(CHAT_READ_NOTIFICATIONS).where(
+                        CHAT_READ_NOTIFICATIONS.CHAT_ID.eq(PENDING_READ_NOTIFICATIONS.CHAT_ID),
+                        CHAT_READ_NOTIFICATIONS.BUCKET.eq(now.toEpochSecond() / 2),
+                    ),
+                ),
+            )
+            .orderBy(PENDING_READ_NOTIFICATIONS.CHAT_ID, PENDING_READ_NOTIFICATIONS.USER_ID)
+            .limit(limit).forUpdate().skipLocked().fetch()
+        return pending.groupBy { ChatId(it.chatId!!) }.mapNotNull { (chatId, rows) ->
+            val rooms = notificationRooms(chatId, now)
+            val deleted = !db.fetchExists(
+                db.selectOne().from(CHATS).where(CHATS.ID.eq(chatId.value), CHATS.DELETED_AT.isNull),
+            )
+            if (rooms.isEmpty() && !deleted) return@mapNotNull null
+            db.deleteFrom(PENDING_READ_NOTIFICATIONS).where(
+                PENDING_READ_NOTIFICATIONS.CHAT_ID.eq(chatId.value),
+                PENDING_READ_NOTIFICATIONS.USER_ID.`in`(rows.map { it.userId!! }),
+            ).execute()
+            chatId to rooms
+        }.toMap()
     }
 
     override fun cleanup(now: OffsetDateTime, limit: Int): ReadCleanup? = DatabaseObservation.query(DatabaseOperation.READ_CLEANUP) {

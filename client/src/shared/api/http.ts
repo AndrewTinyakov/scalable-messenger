@@ -79,12 +79,20 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    public retryAfter = 0,
   ) {
     super(message)
   }
 }
 
-async function request<T>(
+export function isWaitingFailure(cause: unknown): boolean {
+  return cause instanceof ApiError
+    ? cause.status === 429 || [500, 502, 503, 504].includes(cause.status)
+    : cause instanceof TypeError ||
+        (cause instanceof Error && cause.message === 'Request timed out. Try again.')
+}
+
+async function attempt<T>(
   path: string,
   decode: (value: unknown) => T,
   options: RequestInit = {},
@@ -97,7 +105,9 @@ async function request<T>(
   try {
     const response = await fetch(`${apiBase}${path}`, {
       ...options,
-      signal: controller.signal,
+      signal: options.signal
+        ? AbortSignal.any([options.signal, controller.signal])
+        : controller.signal,
       cache: 'no-store',
       credentials: 'include',
       redirect: 'error',
@@ -120,7 +130,13 @@ async function request<T>(
           if (typeof detail === 'string') message = detail
         }
       } catch {}
-      throw new ApiError(response.status, message)
+      const value = response.headers.get('Retry-After')
+      const retryAfter = value
+        ? /^\d+(\.\d+)?$/.test(value)
+          ? Number(value) * 1000
+          : Math.max(0, Date.parse(value) - Date.now()) || 0
+        : 0
+      throw new ApiError(response.status, message, retryAfter)
     }
     return decode(response.status === 204 ? undefined : ((await response.json()) as unknown))
   } catch (cause) {
@@ -128,6 +144,53 @@ async function request<T>(
     throw cause
   } finally {
     clearTimeout(timer)
+  }
+}
+
+async function request<T>(
+  path: string,
+  decode: (value: unknown) => T,
+  options: RequestInit = {},
+): Promise<T> {
+  const retryBudget =
+    !options.method || (options.method === 'POST' && /\/deletions$/.test(path)) ? 3 : 0
+  for (let failures = 0; ; failures++) {
+    options.signal?.throwIfAborted()
+    try {
+      return await attempt(path, decode, options)
+    } catch (cause) {
+      options.signal?.throwIfAborted()
+      const retryable =
+        cause instanceof ApiError
+          ? [429, 500, 502, 503, 504].includes(cause.status)
+          : cause instanceof TypeError ||
+            (cause instanceof Error && cause.message === 'Request timed out. Try again.')
+      if (
+        !retryable ||
+        failures >= (cause instanceof ApiError && cause.status === 429 ? 3 : retryBudget)
+      )
+        throw cause
+      const retryAfter =
+        cause instanceof ApiError && Number.isFinite(cause.retryAfter)
+          ? Math.max(0, cause.retryAfter)
+          : 0
+      const delay = Math.min(
+        30000,
+        Math.max(500 * 2 ** failures * (0.75 + Math.random() * 0.5), retryAfter),
+      )
+      await new Promise<void>((resolve, reject) => {
+        const abort = () => {
+          clearTimeout(timer)
+          reject(options.signal?.reason)
+        }
+        const timer = setTimeout(() => {
+          options.signal?.removeEventListener('abort', abort)
+          resolve()
+        }, delay)
+        options.signal?.addEventListener('abort', abort, { once: true })
+        if (options.signal?.aborted) abort()
+      })
+    }
   }
 }
 
@@ -166,8 +229,8 @@ export const api = {
       logout(): Promise<void> {
         return authenticated(endpoint(routes.logout), noContent, { method: 'POST' })
       },
-      wsTicket() {
-        return authenticated(endpoint(routes.wsTicket), decodeTicket, { method: 'POST' })
+      wsTicket(signal?: AbortSignal) {
+        return authenticated(endpoint(routes.wsTicket), decodeTicket, { method: 'POST', signal })
       },
       addGroupMembers(chatId: string, memberIds: string[]) {
         const body: components['schemas']['AddGroupMembersRequest'] = { memberIds }
@@ -354,11 +417,12 @@ export const api = {
       sendStatus(requestId: string) {
         return authenticated(endpoint(routes.sendStatus, { requestId }), decodeSendStatus)
       },
-      sendStatuses(requestIds: string[]) {
+      sendStatuses(requestIds: string[], signal?: AbortSignal) {
         const body: components['schemas']['SendStatusesRequest'] = { requestIds }
         return authenticated(endpoint(routes.sendStatuses), decodeSendStatuses, {
           method: 'POST',
           body: JSON.stringify(body),
+          signal,
         }).then((response) => response.results)
       },
     }

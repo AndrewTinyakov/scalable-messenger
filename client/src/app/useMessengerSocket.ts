@@ -11,6 +11,7 @@ import { reconnectDelay } from '../shared/lib/reconnect'
 
 interface MessengerSocketOptions {
   onFeatureEvent(event: SocketEvent): boolean
+  onSidebarEvent(event: SocketEvent): boolean
   sessionApi: ReturnType<typeof api.forSession>
   userId: string
   recovery: ChatRecovery
@@ -20,11 +21,15 @@ interface MessengerSocketOptions {
   focusFreshAtRef: MutableRefObject<number>
   focusRequestRef: MutableRefObject<Promise<void> | null>
   selectedRef: MutableRefObject<string | null>
+  setConnectionGeneration: Dispatch<SetStateAction<number>>
+  setNextRetryAt: Dispatch<SetStateAction<number | null>>
+  retryNowRef: MutableRefObject<() => void>
   setConnection: Dispatch<SetStateAction<ConnectionState>>
   onSessionRevoked(): void
   reconcilePending(retryUnknown?: boolean): Promise<void>
   refreshChats(full?: boolean, invalidated?: boolean): Promise<Chat[]>
   listChats(): Chat[]
+  refreshChatSummary(chatId: string): Promise<void>
   catchUp(chatId: string, fromStart?: boolean): Promise<void>
   selectResolvedDraft(saved: SavedSend): boolean
   removeChat(chatId: string): Chat[]
@@ -40,12 +45,8 @@ function websocketUrl(): string {
 
 function socketErrorMessage(code?: string): string {
   switch (code) {
-    case 'rate_limited':
-      return 'Sending too quickly. Wait a moment and try again.'
     case 'unauthorized':
       return 'You can no longer send to this chat.'
-    case 'room_limit':
-      return 'Too many active chats. Try again shortly.'
     case 'publish_unknown':
       return 'Queue confirmation was lost. Check status before retrying.'
     case 'dependency_unavailable':
@@ -59,6 +60,7 @@ function socketErrorMessage(code?: string): string {
 
 export function useMessengerSocket({
   onFeatureEvent,
+  onSidebarEvent,
   sessionApi,
   userId,
   recovery,
@@ -69,10 +71,14 @@ export function useMessengerSocket({
   focusRequestRef,
   selectedRef,
   setConnection,
+  setNextRetryAt,
+  setConnectionGeneration,
+  retryNowRef,
   onSessionRevoked,
   reconcilePending,
   refreshChats,
   listChats,
+  refreshChatSummary,
   catchUp,
   selectResolvedDraft,
   removeChat,
@@ -87,12 +93,43 @@ export function useMessengerSocket({
 
   useEffect(() => {
     let disposed = false
+    const summaryChats = new Set<string>()
+    let summaryTimer: ReturnType<typeof setTimeout> | undefined
+    let summaryRunning = false
+    const refreshSummaries = async () => {
+      summaryTimer = undefined
+      if (disposed || summaryRunning) return
+      summaryRunning = true
+      const batch = [...summaryChats].slice(0, 10)
+      for (const id of batch) summaryChats.delete(id)
+      await Promise.all(
+        batch.map(async (id) => {
+          try {
+            if (!disposed) await refreshChatSummary(id)
+          } catch {}
+        }),
+      )
+      summaryRunning = false
+      if (!disposed && summaryChats.size)
+        summaryTimer = setTimeout(() => void refreshSummaries(), 500 + Math.random() * 1500)
+    }
+    const invalidateSummary = (id: string, jitter = false) => {
+      if (summaryChats.size >= 100 && !summaryChats.has(id)) return
+      summaryChats.add(id)
+      if (summaryTimer === undefined && !summaryRunning)
+        summaryTimer = setTimeout(
+          () => void refreshSummaries(),
+          500 + (jitter ? Math.random() * 1500 : 0),
+        )
+    }
     const close = connectSocket({
       url: websocketUrl(),
-      ticket: () => sessionApi.wsTicket(),
+      ticket: (signal) => sessionApi.wsTicket(signal),
       onState: setConnection,
+      onRetryScheduled: setNextRetryAt,
       onSessionRevoked,
       onOpen: (socket) => {
+        setConnectionGeneration((value) => value + 1)
         socketGenerationRef.current += 1
         focusFreshAtRef.current = 0
         socketRef.current = socket
@@ -100,9 +137,17 @@ export function useMessengerSocket({
         void reconcilePending(true)
       },
       onEvent: (frame, socket) => {
+        if (
+          frame.type === EventType.MESSAGE_SAVED ||
+          frame.type === 'message_changed' ||
+          frame.type === 'history_changed' ||
+          frame.type === 'reads_changed' ||
+          frame.type === 'sidebar_activity'
+        )
+          invalidateSummary(frame.chatId, frame.type === 'sidebar_activity')
         if (frame.type === 'history_changed') void refreshChats(false, true)
         if (frame.type === 'message_changed') requests.revised(frame.messageId)
-        if (onFeatureEvent(frame)) return
+        if (onSidebarEvent(frame) || onFeatureEvent(frame)) return
         if (frame.type === EventType.SUBSCRIBED && frame.chatId === selectedRef.current) {
           window.clearTimeout(groupRetryRef.current)
           groupRetryRef.current = undefined
@@ -170,7 +215,14 @@ export function useMessengerSocket({
         } else if (frame.type === EventType.SEND_REJECTED) {
           requests.rejected(frame.requestId, frame.reason)
         } else if (frame.type === EventType.ERROR && frame.requestId) {
-          requests.retryable(frame.requestId, socketErrorMessage(frame.code))
+          if (
+            ['rate_limited', 'room_limit', 'dependency_unavailable', 'publish_failed'].includes(
+              frame.code ?? '',
+            )
+          )
+            requests.transient(frame.requestId)
+          else if (frame.code === 'publish_unknown') requests.unknown(frame.requestId)
+          else requests.retryable(frame.requestId, socketErrorMessage(frame.code))
         } else if (
           frame.type === EventType.ERROR &&
           !frame.requestId &&
@@ -215,18 +267,27 @@ export function useMessengerSocket({
         focusFreshAtRef.current = 0
         focusRequestRef.current = null
         createdChatRef.current = null
+        requests.disconnected()
         socketRef.current = null
         recovery.onSocketClosed()
         window.clearTimeout(groupRetryRef.current)
         groupRetryRef.current = undefined
       },
     })
+    retryNowRef.current = close.retryNow
     return () => {
+      retryNowRef.current = () => {}
       disposed = true
+      clearTimeout(summaryTimer)
+      summaryChats.clear()
       close()
     }
   }, [
     onFeatureEvent,
+    onSidebarEvent,
+    setNextRetryAt,
+    setConnectionGeneration,
+    retryNowRef,
     catchUp,
     onSessionRevoked,
     recovery,
@@ -237,6 +298,7 @@ export function useMessengerSocket({
     sessionApi,
     userId,
     listChats,
+    refreshChatSummary,
     removeChat,
     leaveHistory,
     closeChat,

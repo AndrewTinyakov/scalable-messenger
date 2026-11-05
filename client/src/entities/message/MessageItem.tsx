@@ -1,6 +1,9 @@
-import { Check, CheckCheck, CircleAlert, Clock3, CornerUpLeft } from 'lucide-react'
-import { useRef } from 'react'
+import { Check, CheckCheck, CircleAlert, Clock3 } from 'lucide-react'
+import { memo, useRef } from 'react'
+import { colorIndex } from '../../shared/lib/color'
 import { formatMessageTime } from '../../shared/lib/time'
+import { Avatar } from '../../shared/ui/Avatar'
+import type { MenuPoint } from '../../shared/ui/Menu'
 import type { Message, PendingSend } from './model'
 
 interface Props {
@@ -12,10 +15,11 @@ interface Props {
   connected: boolean
   onRetry: (requestId: string) => void
   read?: boolean
-  onActions?: (message: Message, anchor: HTMLElement, keyboard: boolean) => void
+  onActions?: (message: Message, anchor: HTMLElement, keyboard: boolean, point?: MenuPoint) => void
   onReply?: (message: Message) => void
   onQuote?: (messageId: string, keyboard: boolean) => void
   quoteSender?: string
+  quoteText?: string
   quoteLoading?: boolean
   highlighted?: boolean
   runStart?: boolean
@@ -24,13 +28,16 @@ interface Props {
   selected?: boolean
 }
 
+const EMOJI_ONLY =
+  /^(?:\p{Extended_Pictographic}(?:\uFE0F|\u200D\p{Extended_Pictographic}|\p{Emoji_Modifier})*\s*){1,3}$/u
+
 function SendStateIcon({ state, read }: { state: PendingSend['status']; read?: boolean }) {
-  if (state === 'rejected' || state === 'retryable') return <CircleAlert size={13} />
-  if (state === 'saved') return read ? <CheckCheck size={15} /> : <Check size={13} />
+  if (state === 'rejected' || state === 'retryable') return <CircleAlert size={14} />
+  if (state === 'saved') return read ? <CheckCheck size={16} /> : <Check size={16} />
   return <Clock3 size={13} />
 }
 
-export function MessageItem({
+export const MessageItem = memo(function MessageItem({
   message,
   send,
   mine,
@@ -43,6 +50,7 @@ export function MessageItem({
   onReply,
   onQuote,
   quoteSender,
+  quoteText,
   quoteLoading,
   highlighted,
   runStart = true,
@@ -51,7 +59,7 @@ export function MessageItem({
   selected = false,
 }: Props) {
   const bubbleRef = useRef<HTMLDivElement>(null)
-  const pointer = useRef({ x: 0, y: 0, moved: false })
+  const pointer = useRef({ x: 0, y: 0, moved: false, touch: false })
   const state = send?.status || (mine ? 'saved' : undefined)
   const timestamp = useRef(send?.createdAt ?? message?.createdAt ?? '')
   const statusLabel =
@@ -63,13 +71,19 @@ export function MessageItem({
         ? 'Not sent'
         : 'Pending'
   const deleted = Boolean(message?.deletedAt)
+  const senderId = message?.senderId ?? sender
+  const text = message ? (deleted ? 'Message deleted' : message.body) : (send?.body ?? '')
+  const emojiOnly = !deleted && !message?.replyToMessageId && EMOJI_ONLY.test(text.trim())
   const unavailableQuote = Boolean(
     message?.replyToMessageId &&
     (message.replyDeleted || message.replySenderId == null || message.replyBody == null),
   )
-  function openActions(keyboard: boolean) {
+  function onBubble(target: EventTarget) {
+    return Boolean(bubbleRef.current?.contains(target as Node))
+  }
+  function openActions(keyboard: boolean, point?: MenuPoint) {
     if (message && !deleted && !selectionMode && bubbleRef.current)
-      onActions?.(message, bubbleRef.current, keyboard)
+      onActions?.(message, bubbleRef.current, keyboard, point)
   }
   return (
     <div
@@ -83,7 +97,12 @@ export function MessageItem({
       aria-haspopup={!selectionMode && onActions && !deleted ? 'menu' : undefined}
       onPointerDown={(event) => {
         if (event.button === 0)
-          pointer.current = { x: event.clientX, y: event.clientY, moved: false }
+          pointer.current = {
+            x: event.clientX,
+            y: event.clientY,
+            moved: false,
+            touch: event.pointerType === 'touch',
+          }
       }}
       onPointerMove={(event) => {
         if (
@@ -93,17 +112,17 @@ export function MessageItem({
           pointer.current.moved = true
       }}
       onClick={(event) => {
-        if (event.button !== 0 || (event.target as HTMLElement).closest('button, a')) return
-        if (event.detail > 1 || pointer.current.moved) return
+        if (!pointer.current.touch || pointer.current.moved || !onBubble(event.target)) return
+        if ((event.target as HTMLElement).closest('button, a')) return
         openActions(false)
       }}
       onContextMenu={(event) => {
-        if (!message || deleted) return
         event.preventDefault()
-        openActions(false)
+        if (!message || deleted || !onBubble(event.target)) return
+        openActions(false, { x: event.clientX, y: event.clientY })
       }}
       onDoubleClick={(event) => {
-        if (selectionMode || !message || deleted) return
+        if (selectionMode || !message || deleted || !onBubble(event.target)) return
         if (pointer.current.moved || (event.target as HTMLElement).closest('button, a')) return
         onReply?.(message)
       }}
@@ -120,53 +139,60 @@ export function MessageItem({
     >
       {selectionMode && message && !deleted && (
         <span className="message-selection-mark" aria-hidden="true">
-          {selected && <Check size={14} />}
+          {selected && <Check size={14} strokeWidth={3} />}
         </span>
       )}
       {!mine && (
-        <span className={`message-avatar ${runEnd ? '' : 'avatar-spacer'}`} aria-hidden="true">
-          {sender[0]?.toUpperCase()}
+        <span className={`message-avatar ${runEnd ? '' : 'avatar-spacer'}`}>
+          {runEnd && <Avatar seed={senderId} name={sender} size={36} />}
         </span>
       )}
       <div className="message-stack">
-        {group && !mine && runStart && <span className="message-sender">{sender}</span>}
         <div
           ref={bubbleRef}
-          className={`message-bubble ${deleted ? 'message-deleted' : ''} ${send?.status === 'rejected' || send?.status === 'retryable' ? 'rejected' : ''}`}
+          className={`message-bubble ${deleted ? 'message-deleted' : ''} ${emojiOnly ? 'emoji-only' : ''} ${send?.status === 'rejected' || send?.status === 'retryable' ? 'rejected' : ''}`}
         >
+          {group && !mine && runStart && (
+            <span className={`message-sender peer-tone-${colorIndex(senderId)}`}>{sender}</span>
+          )}
+          {send && !message && send.replyToMessageId && (
+            <button
+              className={`message-quote peer-tone-${colorIndex(quoteSender ?? '')}`}
+              disabled
+              aria-label={`Replying to ${quoteSender ?? 'Member'}`}
+            >
+              <strong>{quoteSender ?? 'Member'}</strong>
+              <span>{quoteText ?? 'Original message'}</span>
+            </button>
+          )}
           {message?.replyToMessageId && !deleted && (
             <button
-              className="message-quote"
+              className={`message-quote peer-tone-${colorIndex(message.replySenderId ?? '')}`}
               disabled={quoteLoading || unavailableQuote}
               onClick={(event) => onQuote?.(message.replyToMessageId!, event.detail === 0)}
               aria-label={`Show original message from ${quoteSender ?? 'Member'}`}
             >
-              <strong>
-                <CornerUpLeft size={12} />
-                {quoteLoading ? 'Finding original…' : (quoteSender ?? 'Member')}
-              </strong>
+              <strong>{quoteLoading ? 'Finding original…' : (quoteSender ?? 'Member')}</strong>
               <span>{unavailableQuote ? 'Original message unavailable' : message.replyBody}</span>
             </button>
           )}
-          <span className="message-text">
-            {message ? (deleted ? 'Message deleted' : message.body) : send?.body}
+          <span className="message-text">{text}</span>
+          <span className="message-meta">
+            {message?.editedAt && !deleted && <span>edited</span>}
+            <time dateTime={timestamp.current} title={new Date(timestamp.current).toLocaleString()}>
+              {formatMessageTime(timestamp.current)}
+            </time>
+            {state && (
+              <span
+                className={`send-state ${state} ${read ? 'read' : ''}`}
+                role="img"
+                aria-label={statusLabel}
+                title={statusLabel}
+              >
+                <SendStateIcon state={state} read={read} />
+              </span>
+            )}
           </span>
-        </div>
-        <div className="message-meta">
-          <time dateTime={timestamp.current} title={new Date(timestamp.current).toLocaleString()}>
-            {formatMessageTime(timestamp.current)}
-          </time>
-          {message?.editedAt && !deleted && <span>edited</span>}
-          {state && (
-            <span
-              className={`send-state ${state}`}
-              role="img"
-              aria-label={statusLabel}
-              title={statusLabel}
-            >
-              <SendStateIcon state={state} read={read} />
-            </span>
-          )}
         </div>
         {send?.status === 'rejected' && (
           <div className="rejection-reason">
@@ -189,4 +215,4 @@ export function MessageItem({
       </div>
     </div>
   )
-}
+})

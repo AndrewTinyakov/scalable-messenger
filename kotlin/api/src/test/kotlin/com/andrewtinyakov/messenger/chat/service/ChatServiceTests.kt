@@ -42,6 +42,159 @@ class ChatServiceTests
         private val messageHistoryService: MessageHistoryService,
     ) : MessengerIntegrationTest() {
         @Test
+        fun `activity uses acceptance time rather than an earlier transaction start`() {
+            val owner = user("activity-clock-owner")
+            val peer = user("activity-clock-peer")
+            val chat = chatService.createGroup(UserId(owner), CreateGroupChatRequest("Clock", listOf(peer)))
+            tx.executeWithoutResult {
+                val began = db.queryForObject("SELECT transaction_timestamp()", java.time.OffsetDateTime::class.java)!!
+                db.execute("SELECT pg_sleep(0.03)")
+                chatRepository.allocateSequenceForMember(ChatId(chat.id), UserId(owner))
+                val activity = db.queryForObject(
+                    "SELECT last_activity_at FROM chats WHERE id=?",
+                    java.time.OffsetDateTime::class.java,
+                    chat.id,
+                )!!
+                assertTrue(activity.isAfter(began))
+            }
+        }
+
+        @Test
+        fun `a fully hidden candidate window does not scan backwards to an older visible message`() {
+            val owner = user("window-owner")
+            val peer = user("window-peer")
+            val chat = chatService.createGroup(UserId(owner), CreateGroupChatRequest("Hidden window", listOf(peer)))
+            db.update(
+                "INSERT INTO messages(id,chat_id,sequence,sender_id,body,created_at) SELECT left(?,20)||lpad(i::text,6,'0'),?,i,?,'body',now() FROM generate_series(1,300) i",
+                chat.id,
+                chat.id,
+                peer,
+            )
+            db.update("UPDATE chats SET next_sequence=301 WHERE id=?", chat.id)
+            db.update(
+                "INSERT INTO hidden_message_ranges(chat_id,user_id,after_sequence,through_sequence) VALUES (?,?,1,300)",
+                chat.id,
+                owner,
+            )
+            val result = chatService.get(ChatId(chat.id), UserId(owner))
+            assertEquals(null, result.lastMessage)
+            assertEquals(0, result.unreadCount)
+            assertEquals(true, result.unreadCountCapped)
+            assertEquals(1, db.queryForObject("SELECT count(*) FROM messages WHERE chat_id=? AND sequence=1", Int::class.java, chat.id))
+        }
+
+        @Test
+        fun `chat pages order by activity with deterministic ties and sends update activity transactionally`() {
+            val owner = user("activity-owner")
+            val peer = user("activity-peer")
+            val chats = (1..3).map { chatService.createGroup(UserId(owner), CreateGroupChatRequest("Activity $it", listOf(peer))) }
+            db.update("UPDATE chat_members SET joined_at='2026-01-01T00:00:00Z' WHERE user_id=?", owner)
+            db.update("UPDATE chats SET last_activity_at='2026-02-01T00:00:00Z' WHERE id IN (?,?)", chats[0].id, chats[1].id)
+            val first = chatService.list(UserId(owner), null, 1)
+            val second = chatService.list(UserId(owner), first.nextCursor, 1)
+            val third = chatService.list(UserId(owner), second.nextCursor, 1)
+            assertEquals(listOf(chats[1].id, chats[0].id, chats[2].id), (first.chats + second.chats + third.chats).map { it.id })
+            assertEquals(null, third.nextCursor)
+            messageSendService.process(command(peer, newId(), "Latest", chat = chats[2].id))
+            assertEquals(chats[2].id, chatService.list(UserId(owner), null, 1).chats.single().id)
+            assertTrue(chatService.get(ChatId(chats[2].id), UserId(owner)).activityAt != null)
+            val before = db.queryForObject(
+                "SELECT last_activity_at FROM chats WHERE id=?",
+                java.time.OffsetDateTime::class.java,
+                chats[0].id,
+            )
+            tx.executeWithoutResult { status ->
+                chatRepository.allocateSequenceForMember(ChatId(chats[0].id), UserId(owner))
+                status.setRollbackOnly()
+            }
+            assertEquals(
+                before,
+                db.queryForObject("SELECT last_activity_at FROM chats WHERE id=?", java.time.OffsetDateTime::class.java, chats[0].id),
+            )
+        }
+
+        @Test
+        fun `unread windows cap raw candidates before own and personal visibility filters`() {
+            val owner = user("unread-owner")
+            val peer = user("unread-peer")
+            val chat = chatService.createGroup(UserId(owner), CreateGroupChatRequest("Unread", listOf(peer)))
+
+            fun insert(after: Int, through: Int, sender: String) {
+                db.update(
+                    "INSERT INTO messages(id,chat_id,sequence,sender_id,body,created_at) SELECT left(?,20)||lpad(i::text,6,'0'),?,i,?,'body',now() FROM generate_series(?,?) i",
+                    chat.id,
+                    chat.id,
+                    sender,
+                    after,
+                    through,
+                )
+                db.update("UPDATE chats SET next_sequence=? WHERE id=?", through + 1, chat.id)
+            }
+
+            fun read() = chatService.get(ChatId(chat.id), UserId(owner))
+            insert(1, 255, peer)
+            assertEquals(255, read().unreadCount)
+            assertEquals(false, read().unreadCountCapped)
+            insert(256, 256, peer)
+            assertEquals(256, read().unreadCount)
+            assertEquals(true, read().unreadCountCapped)
+            insert(257, 257, owner)
+            assertEquals(255, read().unreadCount)
+            assertEquals(true, read().unreadCountCapped)
+            db.update("DELETE FROM messages WHERE chat_id=? AND sequence=250", chat.id)
+            assertEquals(255, read().unreadCount)
+            db.update(
+                "INSERT INTO hidden_message_ranges(chat_id,user_id,after_sequence,through_sequence) VALUES (?,?,100,257)",
+                chat.id,
+                owner,
+            )
+            assertEquals(100, read().unreadCount)
+            db.update("UPDATE chat_members SET cleared_through_sequence=100 WHERE chat_id=? AND user_id=?", chat.id, owner)
+            assertEquals(0, read().unreadCount)
+            assertEquals(null, read().lastMessage)
+            db.update(
+                "INSERT INTO chat_read_progress(chat_id,user_id,through_sequence,read_at) VALUES (?,?,257,now()) ON CONFLICT(chat_id,user_id) DO UPDATE SET through_sequence=257,read_at=now()",
+                chat.id,
+                owner,
+            )
+            assertEquals(false, read().unreadCountCapped)
+            val listed = chatService.list(UserId(owner), null, 100).chats.single { it.id == chat.id }
+            assertEquals(read().unreadCount, listed.unreadCount)
+        }
+
+        @Test
+        fun `chat summaries include sender names and obey viewer visibility across sequence gaps`() {
+            val owner = user("summary-owner")
+            val member = user("summary-member")
+            val chat = chatService.createGroup(UserId(owner), CreateGroupChatRequest("Summary", listOf(member)))
+            assertEquals(null, chat.lastMessage)
+            messageSendService.process(command(member, newId(), "Earlier", chat = chat.id))
+            messageSendService.process(command(owner, newId(), "x".repeat(180), chat = chat.id))
+            val listed = chatService.list(UserId(owner), null, 100).chats.single { it.id == chat.id }
+            assertEquals(emptyList<Any>(), listed.members)
+            assertEquals("summary-owner", listed.lastMessage!!.senderUsername)
+            assertEquals("2", listed.lastMessage.sequence)
+            assertEquals("x".repeat(160), listed.lastMessage.bodyPreview)
+            assertEquals(false, listed.lastMessage.deleted)
+            assertEquals(listed.lastMessage, chatService.get(ChatId(chat.id), UserId(owner)).lastMessage)
+            db.update("INSERT INTO hidden_message_ranges(chat_id,user_id,after_sequence,through_sequence) VALUES (?,?,1,2)", chat.id, owner)
+            assertEquals("1", chatService.get(ChatId(chat.id), UserId(owner)).lastMessage!!.sequence)
+            assertEquals("2", chatService.get(ChatId(chat.id), UserId(member)).lastMessage!!.sequence)
+            db.update("DELETE FROM messages WHERE chat_id=? AND sequence=1", chat.id)
+            assertEquals(null, chatService.get(ChatId(chat.id), UserId(owner)).lastMessage)
+            db.update("UPDATE chat_members SET cleared_through_sequence=2 WHERE chat_id=? AND user_id=?", chat.id, member)
+            assertEquals(null, chatService.get(ChatId(chat.id), UserId(member)).lastMessage)
+            db.update("UPDATE chat_members SET hidden_through_sequence=2 WHERE chat_id=? AND user_id=?", chat.id, owner)
+            assertEquals(null, chatService.get(ChatId(chat.id), UserId(owner)).lastMessage)
+            messageSendService.process(command(member, newId(), "Visible again", chat = chat.id))
+            assertEquals("3", chatService.get(ChatId(chat.id), UserId(owner)).lastMessage!!.sequence)
+            db.update("UPDATE chats SET cleared_through_sequence=3 WHERE id=?", chat.id)
+            assertEquals(null, chatService.get(ChatId(chat.id), UserId(owner)).lastMessage)
+            chatMembershipService.removeMember(ChatId(chat.id), UserId(owner), UserId(member))
+            assertThrows(ApiException::class.java) { chatService.get(ChatId(chat.id), UserId(member)) }
+        }
+
+        @Test
         fun `chat reads retain one authorized snapshot during member removal`() {
             val owner = user("snapshot-chat-owner")
             val member = user("snapshot-chat-member")

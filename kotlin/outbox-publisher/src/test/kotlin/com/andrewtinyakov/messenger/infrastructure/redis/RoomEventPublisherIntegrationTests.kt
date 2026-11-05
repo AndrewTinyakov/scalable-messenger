@@ -39,6 +39,40 @@ class RoomEventPublisherIntegrationTests {
     private val publishers = mutableListOf<RoomEventPublisher>()
 
     @Test
+    fun `group publication emits the shared bodyless sidebar activity fixture without retained content`() {
+        withRedis { factory ->
+            val mapper = JsonMapper.builder().build()
+            val expected = mapper.readTree(Path.of("../../contracts/fixtures/valid/sidebar-activity.json").readText())
+            val event = mapper.readTree(Path.of("../../contracts/fixtures/valid/message-saved.json").readText()) as ObjectNode
+            val chatId = expected.path("chatId").asText()
+            val room = "group:$chatId"
+            val eventId = newId()
+            event.put("room", room).put("eventId", eventId)
+            val replay = mapper.writeValueAsString(
+                mapOf(
+                    "type" to "history_changed",
+                    "version" to 1,
+                    "eventId" to eventId,
+                    "room" to room,
+                    "chatId" to chatId,
+                    "sequence" to expected.path("sequence").asText(),
+                    "mutationRevision" to "0",
+                    "visibilityRevision" to "0",
+                ),
+            )
+            withLiveMessages(factory, "activity:$chatId") { received ->
+                roomPublisher(
+                    ReactiveStringRedisTemplate(factory),
+                ).publish(OutboxMessage(EventId(eventId), room, mapper.writeValueAsString(event), replayPayload = replay))
+                val actual = received.poll(1, TimeUnit.SECONDS)
+                assertTrue(actual != null)
+                assertEquals(expected, mapper.readTree(actual!!))
+                assertEquals(false, StringRedisTemplate(factory).hasKey("messenger:{activity:$chatId}:stream"))
+            }
+        }
+    }
+
+    @Test
     fun `body-bearing replay is rejected before retained history changes`() {
         withRedis { factory ->
             val row = outboxEvent().let { it.copy(payload = it.payload.dropLast(1) + ",\"body\":\"content\"}") }

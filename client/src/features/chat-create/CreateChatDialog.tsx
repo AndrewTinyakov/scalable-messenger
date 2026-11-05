@@ -1,25 +1,42 @@
-import { ArrowLeft, Check, Search, Users, X } from 'lucide-react'
+import { Check, Search, Users, X } from 'lucide-react'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import type { Session, User } from '../../entities/session/model'
 import { api } from '../../shared/api/http'
+import { Avatar } from '../../shared/ui/Avatar'
 
 interface Props {
   session: Session
   currentUserId: string
+  initialMode?: 'direct' | 'group'
   onClose: () => void
   onDirect: (user: User) => Promise<unknown>
   onGroup: (name: string, memberIds: string[]) => Promise<unknown>
 }
 
-export function CreateChatDialog({ session, currentUserId, onClose, onDirect, onGroup }: Props) {
+export function CreateChatDialog({
+  session,
+  currentUserId,
+  initialMode = 'direct',
+  onClose,
+  onDirect,
+  onGroup,
+}: Props) {
   const sessionApi = useMemo(() => api.forSession(session), [session.user.id, session.deviceId])
-  const [mode, setMode] = useState<'direct' | 'group'>('direct')
+  const [mode, setMode] = useState(initialMode)
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<User[]>([])
   const [selected, setSelected] = useState<User[]>([])
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !busy) onClose()
+    }
+    window.addEventListener('keydown', escape)
+    return () => window.removeEventListener('keydown', escape)
+  }, [busy, onClose])
 
   useEffect(() => {
     let active = true
@@ -158,7 +175,7 @@ export function CreateChatDialog({ session, currentUserId, onClose, onDirect, on
         <div className="people-results">
           {!query.trim() && (
             <div className="people-hint">
-              <Users size={22} /> Type a name to find someone.
+              <Users size={26} /> Type a name to find someone.
             </div>
           )}
           {query.trim() && results.length === 0 && (
@@ -182,14 +199,12 @@ export function CreateChatDialog({ session, currentUserId, onClose, onDirect, on
                       )
                 }
               >
-                <span className="person-avatar">{user.username[0]?.toUpperCase()}</span>
+                <Avatar seed={user.id} name={user.username} size={42} />
                 <span>{user.username}</span>
-                {mode === 'group' ? (
+                {mode === 'group' && (
                   <span className={`person-check ${checked ? 'checked' : ''}`}>
-                    {checked && <Check size={14} />}
+                    {checked && <Check size={14} strokeWidth={3} />}
                   </span>
-                ) : (
-                  <ArrowLeft size={17} className="person-arrow" />
                 )}
               </button>
             )

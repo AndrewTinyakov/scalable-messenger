@@ -221,9 +221,20 @@ export class RecoveryState {
     return this.visibility.bounds(chatId)[direction]
   }
 
-  availability(chatId: string): { hasOlderMessages?: boolean; hasNewerMessages?: boolean } {
+  availability(
+    chatId: string,
+    readingHistory = true,
+  ): { hasOlderMessages?: boolean; hasNewerMessages?: boolean } {
     const bounds = this.visibility.bounds(chatId)
-    return { hasOlderMessages: bounds?.hasOlder, hasNewerMessages: bounds?.hasNewer }
+    return {
+      hasOlderMessages: bounds.hasOlder,
+      hasNewerMessages:
+        (readingHistory || this.isDetached(chatId)) &&
+        bounds.newer !== undefined &&
+        BigInt(this.latestSequence(chatId)) > BigInt(bounds.newer)
+          ? true
+          : bounds.hasNewer,
+    }
   }
 
   verifiedSnapshot(
@@ -407,6 +418,7 @@ export class RecoveryState {
   ): boolean {
     if (!incoming.length) return false
     this.observeSnapshot(chatId, {})
+    incoming = mergeMessages(this.historyBuffered[chatId] ?? [], incoming)
     const incomingIds = new Set(incoming.map((message) => message.id))
     incoming = mergeMessages(
       mergeMessages(this.window(chatId), this.pinned[chatId] ?? []),
@@ -419,6 +431,7 @@ export class RecoveryState {
     }
     const browsingOlder = selected && (this.isDetached(chatId) || readingHistory)
     let visible = this.window(chatId)
+    const previousFirst = visible[0]?.sequence
     const incorporated: Message[] = []
     for (const message of incoming) {
       const next = selected
@@ -442,6 +455,11 @@ export class RecoveryState {
     this.windows = { ...this.windows, [chatId]: visible }
     this.boundWindows()
     this.apply(chatId, incorporated, true)
+    const buffered = incoming.filter(
+      (message) => BigInt(message.sequence) > BigInt(this.baseline(chatId)),
+    )
+    if (buffered.length) this.historyBuffered[chatId] = buffered.slice(0, MAX_CATCH_UP_MESSAGES)
+    else delete this.historyBuffered[chatId]
     if (!browsingOlder) {
       const bounds = this.visibility.bounds(chatId)
       if (bounds)
@@ -449,6 +467,9 @@ export class RecoveryState {
           ...bounds,
           newer: visible.at(-1)?.sequence,
           hasNewer: false,
+          ...(previousFirst && visible[0] && BigInt(visible[0].sequence) > BigInt(previousFirst)
+            ? { older: visible[0].sequence, hasOlder: true }
+            : {}),
         })
     }
     return latestChanged

@@ -24,6 +24,27 @@ data class ChatResponse(
     val lastSequence: String,
     @field:Schema(requiredMode = Schema.RequiredMode.NOT_REQUIRED, nullable = true)
     val ownerId: String? = null,
+    @field:Schema(
+        requiredMode = Schema.RequiredMode.NOT_REQUIRED,
+        nullable = true,
+        description = "Latest visible message in the newest 256 rows; null can leave older visible history",
+    )
+    @field:JsonInclude(JsonInclude.Include.ALWAYS)
+    val lastMessage: ChatLastMessageResponse? = null,
+    @field:Schema(
+        requiredMode = Schema.RequiredMode.NOT_REQUIRED,
+        minimum = "0",
+        maximum = "256",
+        description = "Visible other-author unread messages in the newest 256 candidates; lower bound when capped",
+    )
+    val unreadCount: Int = 0,
+    @field:Schema(requiredMode = Schema.RequiredMode.NOT_REQUIRED, nullable = true)
+    val activityAt: java.time.OffsetDateTime? = null,
+    @field:Schema(
+        requiredMode = Schema.RequiredMode.NOT_REQUIRED,
+        description = "True for 256 raw unread candidates; real count may be higher even when unreadCount is zero",
+    )
+    val unreadCountCapped: Boolean = false,
 )
 
 data class DirectChatResponse(
@@ -72,4 +93,35 @@ fun Chat.toResponse(members: List<UserSummary>): ChatResponse = ChatResponse(
     memberCount = memberCount,
     lastSequence = lastSequence.toString(),
     ownerId = ownerId?.value,
+    unreadCount = unreadCount,
+    activityAt = activityAt,
+    unreadCountCapped = unreadCountCapped,
+    lastMessage = lastMessage?.let {
+        ChatLastMessageResponse(
+            it.id.value,
+            it.sequence.toString(),
+            it.senderId.value,
+            it.senderUsername,
+            it.createdAt,
+            it.bodyPreview,
+            it.deleted,
+        )
+    },
+)
+
+data class ChatLastMessageResponse(
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val id: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val sequence: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val senderId: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val senderUsername: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val createdAt: java.time.OffsetDateTime,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val bodyPreview: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val deleted: Boolean,
 )

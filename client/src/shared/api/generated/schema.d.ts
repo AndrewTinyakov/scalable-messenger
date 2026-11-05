@@ -495,6 +495,16 @@ export interface components {
             name: string;
             memberIds: string[];
         };
+        ChatLastMessageResponse: {
+            id: string;
+            sequence: string;
+            senderId: string;
+            senderUsername: string;
+            /** Format: date-time */
+            createdAt: string;
+            bodyPreview: string;
+            deleted: boolean;
+        };
         ChatResponse: {
             id: string;
             /** @enum {string} */
@@ -505,6 +515,17 @@ export interface components {
             memberCount: number;
             lastSequence: string;
             ownerId?: string | null;
+            /** @description Latest visible message in the newest 256 rows; null can leave older visible history */
+            lastMessage?: components["schemas"]["ChatLastMessageResponse"] | null;
+            /**
+             * Format: int32
+             * @description Visible other-author unread messages in the newest 256 candidates; lower bound when capped
+             */
+            unreadCount?: number;
+            /** Format: date-time */
+            activityAt?: string | null;
+            /** @description True for 256 raw unread candidates; real count may be higher even when unreadCount is zero */
+            unreadCountCapped?: boolean;
         };
         UserResponse: {
             id: string;

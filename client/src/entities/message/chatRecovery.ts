@@ -1,4 +1,5 @@
 import { ChatKind, FrameType } from '../../shared/api/generated/socket-vocabulary'
+import { isWaitingFailure } from '../../shared/api/http'
 import type { RecoveryFrame } from '../../shared/api/socket'
 import { reconnectDelay } from '../../shared/lib/reconnect'
 import { restoreAnchor } from './anchorRestoration'
@@ -11,6 +12,7 @@ import {
 } from './historySnapshot'
 import { HISTORY_PAGE_SIZE, MAX_CATCH_UP_MESSAGES } from './historyWindow'
 import type { Message } from './model'
+import { pagingFailure, resetPagingFailures } from './pagingFailures'
 import { ReadingLocations, type ReadingLocation } from './readingLocation'
 import { RecoveryBatch } from './recoveryBatch'
 import type { RecoveryRuntime } from './recoveryRuntime'
@@ -36,6 +38,30 @@ export class ChatRecovery {
     { promise: Promise<void>; socketGeneration: number; requiredSequence: string }
   >()
   private paging = new Set<string>()
+  private pageFailures = new Map<string, { context: string; attempts: number; until: number }>()
+
+  private pageContext(chatId: string, cursor: string): string {
+    return JSON.stringify([
+      cursor,
+      this.navigationRevision,
+      this.socketGeneration,
+      this.state.snapshotMetadata(chatId),
+    ])
+  }
+
+  private pageAllowed(key: string, context: string): boolean {
+    const failure = this.pageFailures.get(key)
+    return !failure || failure.context !== context || Date.now() >= failure.until
+  }
+
+  private pageFailed(key: string, context: string, cause: unknown): void {
+    const previous = this.pageFailures.get(key)
+    const attempts = previous?.context === context ? previous.attempts + 1 : 1
+    const separator = key.indexOf(':')
+    const direction = key.slice(0, separator) as 'older' | 'newer'
+    const until = pagingFailure(key.slice(separator + 1), direction, cause, attempts)
+    this.pageFailures.set(key, { context, attempts, until })
+  }
   private navigationRevision = 0
   private restoring = new Map<string, number>()
   private restoreWaits = new Map<
@@ -83,6 +109,8 @@ export class ChatRecovery {
     this.cancelRestoreWaits()
     this.navigationRevision += 1
     this.paging.clear()
+    for (const key of this.pageFailures.keys()) resetPagingFailures(key.slice(key.indexOf(':') + 1))
+    this.pageFailures.clear()
     this.disposed = false
     this.cancelRetryExcept(chatId)
     const runtime = this.runtime!
@@ -115,6 +143,7 @@ export class ChatRecovery {
   onSocketOpened(chatId: string | null): void {
     this.disposed = false
     this.socketGeneration += 1
+    for (const key of this.pageFailures.keys()) resetPagingFailures(key.slice(key.indexOf(':') + 1))
     this.flush(false)
     this.subscribedChatId = null
     if (chatId && !chatId.startsWith('draft:') && this.sendSubscription(chatId)) {
@@ -140,6 +169,8 @@ export class ChatRecovery {
     this.flush(false)
     this.catchingUp.clear()
     this.paging.clear()
+    for (const key of this.pageFailures.keys()) resetPagingFailures(key.slice(key.indexOf(':') + 1))
+    this.pageFailures.clear()
     this.historyRequests.cancel()
     this.synchronizing.clear()
     for (const queued of this.synchronizationQueue.values()) queued.resolve()
@@ -345,7 +376,8 @@ export class ChatRecovery {
       if (
         !this.disposed &&
         generation === this.lifecycleGeneration &&
-        revision === this.navigationRevision
+        revision === this.navigationRevision &&
+        !isWaitingFailure(cause)
       )
         this.runtime!.failed(
           cause instanceof Error ? cause.message : 'Could not restore reading position',
@@ -376,6 +408,9 @@ export class ChatRecovery {
       this.paging.has(chatId)
     )
       return
+    const key = `older:${chatId}`
+    const context = this.pageContext(chatId, cursor)
+    if (!this.pageAllowed(key, context)) return
     this.paging.add(chatId)
     try {
       await this.withHistorySnapshot(
@@ -395,6 +430,11 @@ export class ChatRecovery {
           runtime.changed()
         },
       )
+      this.pageFailures.delete(key)
+    } catch (cause) {
+      if (generation === this.lifecycleGeneration && navigation === this.navigationRevision)
+        this.pageFailed(key, context, cause)
+      throw cause
     } finally {
       if (generation === this.lifecycleGeneration && navigation === this.navigationRevision)
         this.paging.delete(chatId)
@@ -408,6 +448,9 @@ export class ChatRecovery {
     const last = this.state.window(chatId).at(-1)
     const cursor = this.state.pageCursor(chatId, 'newer') ?? last?.sequence
     if (!cursor || this.paging.has(chatId)) return
+    const key = `newer:${chatId}`
+    const context = this.pageContext(chatId, cursor)
+    if (!this.pageAllowed(key, context)) return
     this.paging.add(chatId)
     try {
       await this.withHistorySnapshot(
@@ -427,13 +470,23 @@ export class ChatRecovery {
           runtime.changed()
         },
       )
+      this.pageFailures.delete(key)
+    } catch (cause) {
+      if (generation === this.lifecycleGeneration && navigation === this.navigationRevision)
+        this.pageFailed(key, context, cause)
+      throw cause
     } finally {
       if (generation === this.lifecycleGeneration && navigation === this.navigationRevision)
         this.paging.delete(chatId)
     }
   }
 
-  catchUp(chatId: string, fromStart = false, requiredSequence = '0'): Promise<void> {
+  catchUp(
+    chatId: string,
+    fromStart = false,
+    requiredSequence = '0',
+    allowLiveArrival = false,
+  ): Promise<void> {
     if (this.disposed || chatId.startsWith('draft:')) return Promise.resolve()
     const current = this.catchingUp.get(chatId)
     if (current) {
@@ -443,7 +496,7 @@ export class ChatRecovery {
       const generation = this.lifecycleGeneration
       return current.promise.then(() => {
         if (!this.disposed && generation === this.lifecycleGeneration)
-          return this.catchUp(chatId, fromStart, requiredSequence)
+          return this.catchUp(chatId, fromStart, requiredSequence, allowLiveArrival)
       })
     }
     const request = {
@@ -456,6 +509,7 @@ export class ChatRecovery {
       chatId,
       fromStart,
       () => request.requiredSequence,
+      allowLiveArrival,
     ).finally(() => {
       if (this.catchingUp.get(chatId) === request) this.catchingUp.delete(chatId)
     })
@@ -466,11 +520,33 @@ export class ChatRecovery {
     chatId: string,
     fromStart: boolean,
     requiredSequence: () => string,
+    allowLiveArrival: boolean,
   ): Promise<void> {
     const runtime = this.runtime!
     const generation = this.lifecycleGeneration
     const socketGeneration = this.socketGeneration
     if (this.disposed) return
+    const capacity = this.historyRequests.waitForCapacity()
+    if (capacity) {
+      await capacity
+      if (this.disposed || generation !== this.lifecycleGeneration) return
+    }
+    const context = runtime.context(chatId)
+    if (
+      allowLiveArrival &&
+      this.state.window(chatId).length &&
+      BigInt(this.state.window(chatId)[0].sequence) <= BigInt(this.baseline(chatId)) &&
+      !fromStart &&
+      requiredSequence() !== '0' &&
+      context.selected &&
+      context.connected &&
+      !context.readingHistory &&
+      !this.state.isDetached(chatId)
+    ) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 1250))
+      if (this.disposed || generation !== this.lifecycleGeneration) return
+      if (BigInt(this.baseline(chatId)) >= BigInt(requiredSequence())) return
+    }
     const beforeCatchUp = this.baseline(chatId)
     let observedLatest = '0'
     const loadLatest = async (moveViewport = false, initialize = false) => {
@@ -562,7 +638,7 @@ export class ChatRecovery {
       if (this.disposed || generation !== this.lifecycleGeneration) return
       const message = cause instanceof Error ? cause.message : 'Could not load chat history'
       this.catchUpError = { chatId, message }
-      runtime.failed(message)
+      if (!isWaitingFailure(cause)) runtime.failed(message)
       const context = runtime.context(chatId)
       if (
         context.selected &&
@@ -612,7 +688,9 @@ export class ChatRecovery {
       if (runtime.context(chatId).removed || !canAcknowledge()) return null
       return this.state.acknowledgeLive(chatId, message.sequence, room, epoch, streamId)
     }
-    return decision.catchUp ? this.catchUp(chatId).then(acknowledge) : acknowledge()
+    return decision.catchUp
+      ? this.catchUp(chatId, false, message.sequence, true).then(acknowledge)
+      : acknowledge()
   }
 
   async onLive(
@@ -700,6 +778,8 @@ export class ChatRecovery {
   beginNavigation(): number {
     this.cancelRestoreWaits()
     this.paging.clear()
+    for (const key of this.pageFailures.keys()) resetPagingFailures(key.slice(key.indexOf(':') + 1))
+    this.pageFailures.clear()
     return ++this.navigationRevision
   }
   reveal(
@@ -774,6 +854,14 @@ export class ChatRecovery {
   }
 
   observe(chatId: string, snapshot: Partial<SnapshotMetadata>): void {
+    const previous = this.state.snapshotMetadata(chatId)
+    if (
+      (snapshot.mutationRevision !== undefined &&
+        snapshot.mutationRevision !== previous.mutationRevision) ||
+      (snapshot.visibilityRevision !== undefined &&
+        snapshot.visibilityRevision !== previous.visibilityRevision)
+    )
+      resetPagingFailures(chatId)
     this.historyRequests.observe(chatId, snapshot)
     this.state.observeSnapshot(chatId, snapshot)
     const location = this.locations.get(chatId)
@@ -829,14 +917,16 @@ export class ChatRecovery {
         const changed =
           BigInt(visibility.mutationRevision) > BigInt(previous?.mutationRevision ?? '0') ||
           BigInt(visibility.visibilityRevision) > BigInt(previous?.visibilityRevision ?? '0')
-        this.observe(chatId, visibility)
+        const { snapshotSequence, ...metadata } = visibility
+        this.observe(chatId, metadata)
+        this.recordLatest(chatId, snapshotSequence)
         if (visibility.hidden) {
           this.runtime!.hidden?.(chatId)
           return
         }
         if (!changed) {
           if (BigInt(visibility.snapshotSequence) > BigInt(this.baseline(chatId)))
-            await this.catchUp(chatId, false, visibility.snapshotSequence)
+            await this.catchUp(chatId, false, visibility.snapshotSequence, true)
           continue
         }
         const ids = this.state.retainedIds(chatId)
@@ -863,7 +953,7 @@ export class ChatRecovery {
       } while (request.again && valid())
     })()
       .catch((cause) => {
-        if (valid())
+        if (valid() && !isWaitingFailure(cause))
           this.runtime!.failed(
             cause instanceof Error ? cause.message : 'Could not refresh conversation',
           )
@@ -881,7 +971,7 @@ export class ChatRecovery {
   }
 
   availability(chatId: string): { hasOlderMessages?: boolean; hasNewerMessages?: boolean } {
-    return this.state.availability(chatId)
+    return this.state.availability(chatId, this.runtime?.context(chatId).readingHistory ?? true)
   }
 
   mutationRevision(chatId: string): string {
@@ -926,12 +1016,18 @@ export class ChatRecovery {
   ): boolean {
     this.historyRequests.observe(chatId, this.state.snapshotMetadata(chatId))
     if (!this.historyRequests.accepts(chatId, snapshot)) return false
-    this.observe(chatId, snapshot)
+    const previous = this.state.snapshotMetadata(chatId)
+    const changed =
+      BigInt(snapshot.mutationRevision ?? '0') > BigInt(previous.mutationRevision ?? '0') ||
+      BigInt(snapshot.visibilityRevision ?? '0') > BigInt(previous.visibilityRevision ?? '0')
+    const { snapshotSequence, ...metadata } = snapshot
+    this.observe(chatId, changes.length || changed ? snapshot : metadata)
+    if (snapshotSequence) this.recordLatest(chatId, snapshotSequence)
     const ids = changes.flatMap((change) =>
       change.messageId ? [change.messageId] : change.message ? [change.message.id] : [],
     )
     const messages = changes.flatMap((change) => (change.message ? [change.message] : []))
-    this.state.resolve(chatId, ids, { ...snapshot, messages })
+    if (ids.length) this.state.resolve(chatId, ids, { ...snapshot, messages })
     if (messages.length) this.patchAccepted(chatId, messages)
     this.runtime!.changed()
     return true

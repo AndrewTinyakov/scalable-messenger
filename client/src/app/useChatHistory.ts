@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import type { ChatRecovery } from '../entities/message/chatRecovery'
+import { isWaitingFailure } from '../shared/api/http'
 
 export function useChatHistory(recovery: ChatRecovery, setError: (message: string | null) => void) {
   const [loadingOlder, setLoadingOlder] = useState<string | null>(null)
@@ -12,6 +13,7 @@ export function useChatHistory(recovery: ChatRecovery, setError: (message: strin
         await recovery.showLatest(chatId)
         readingHistoryRef.current.delete(chatId)
       } catch (cause) {
+        if (isWaitingFailure(cause)) return
         setError(cause instanceof Error ? cause.message : 'Could not load chat history')
       }
     },
@@ -24,6 +26,7 @@ export function useChatHistory(recovery: ChatRecovery, setError: (message: strin
       try {
         await recovery.loadOlder(chatId)
       } catch (cause) {
+        if (isWaitingFailure(cause)) return
         setError(cause instanceof Error ? cause.message : 'Could not load older messages')
       } finally {
         setLoadingOlder(null)
@@ -38,6 +41,7 @@ export function useChatHistory(recovery: ChatRecovery, setError: (message: strin
       try {
         await recovery.loadNewer(chatId)
       } catch (cause) {
+        if (isWaitingFailure(cause)) return
         setError(cause instanceof Error ? cause.message : 'Could not load newer messages')
       } finally {
         setLoadingNewer(null)

@@ -112,6 +112,16 @@ func (c *Client) Subscribe(ctx context.Context, room string) (*Listener, error) 
 }
 
 func decodeLive(room, payload string) (Live, error) {
+	if roomname.IsActivity(room) {
+		event, err := protocol.DecodeSidebarEvent([]byte(payload))
+		if err != nil {
+			return Live{}, err
+		}
+		if event.Type != protocol.EventSidebarActivity || room != roomname.Activity(event.ChatID) {
+			return Live{}, errors.New("activity channel mismatch")
+		}
+		return Live{Event: event}, nil
+	}
 	envelope, err := messagecodec.Decode[struct {
 		Epoch            string          `json:"epoch"`
 		StreamID         string          `json:"streamId"`
@@ -219,7 +229,22 @@ func validRoom(room string) bool {
 	if strings.ContainsAny(room, "{} \n\r\t") {
 		return false
 	}
-	return roomname.IsUser(room) || roomname.IsGroup(room)
+	return roomname.IsUser(room) || roomname.IsGroup(room) || roomname.IsActivity(room)
 }
 
 func (c *Client) SetMetrics(metrics *monitoring.Metrics) { c.metrics = metrics }
+
+func (c *Client) RunActivity(ctx context.Context, chatID string, consume func(protocol.Event)) error {
+	listener, err := c.Subscribe(ctx, roomname.Activity(chatID))
+	if err != nil {
+		return err
+	}
+	defer listener.Close()
+	for {
+		live, err := listener.Receive(ctx)
+		if err != nil {
+			return err
+		}
+		consume(live.Event)
+	}
+}

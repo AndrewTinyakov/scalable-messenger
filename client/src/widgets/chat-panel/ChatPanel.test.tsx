@@ -66,7 +66,6 @@ async function render(pending: PendingSend[], messages: Message[] = [], selected
         onSend={() => true}
         onRetry={() => {}}
         onBack={() => {}}
-        onNew={() => {}}
         lookupUser={lookupUser}
         hasOlder={false}
         hasNewer={false}

@@ -1,5 +1,6 @@
-import { ArrowDown, MessageSquare, Trash2, X } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useHotkey } from '@tanstack/react-hotkeys'
+import { ChevronDown, Trash2, X } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Chat } from '../../entities/chat/model'
 import type { DeleteScope } from '../../entities/message/historySnapshot'
 import { MessageItem } from '../../entities/message/MessageItem'
@@ -14,7 +15,10 @@ import { MessageActionMenu } from '../../features/conversation/MessageActionMenu
 import type { useConversationFeatures } from '../../features/conversation/useConversationFeatures'
 import { MessageComposer } from '../../features/message-send/MessageComposer'
 import { ChatKind } from '../../shared/api/generated/socket-vocabulary'
+import { formatDayLabel } from '../../shared/lib/time'
+import type { MenuPoint } from '../../shared/ui/Menu'
 import { ChatHeader } from './ChatHeader'
+import { groupByDay } from './messageDays'
 import { messageEntries } from './messageEntries'
 import { sameMessageRun } from './messageGrouping'
 import { useMessageSelection } from './useMessageSelection'
@@ -32,7 +36,6 @@ interface Props {
   detached?: boolean
   onRetry: (requestId: string) => void
   onBack: () => void
-  onNew: () => void
   onMembers?: () => void
   lookupUser?: (id: string) => Promise<User>
   hasOlder: boolean
@@ -61,7 +64,6 @@ export function ChatPanel({
   onSend,
   onRetry,
   onBack,
-  onNew,
   onMembers,
   lookupUser,
   hasOlder,
@@ -85,10 +87,12 @@ export function ChatPanel({
   const [popup, setPopup] = useState<{
     messageId: string
     anchor: HTMLElement
+    point?: MenuPoint
     keyboard: boolean
   } | null>(null)
   const [busy, setBusy] = useState(false)
   const busyRef = useRef(false)
+  const drafts = useRef(new Map<string, string>())
   const actionGeneration = useRef(0)
   const [actionError, setActionError] = useState<string | null>(null)
   const [announcement, setAnnouncement] = useState('')
@@ -153,11 +157,11 @@ export function ChatPanel({
     }
   }, [reply?.id, edit?.id, features?.revisionKey, features?.resolveTarget])
 
-  const { scrollRef, highlight, rememberAnchor, handleScroll } = useMessageViewport({
+  const { scrollRef, highlight, handleScroll, stickToLatest } = useMessageViewport({
     chatId: chat?.id,
     userId: currentUser.id,
     messages,
-    pendingCount: pending.length,
+    pendingState: pending.map((send) => send.status).join(),
     throughSequence: features?.summary.throughSequence,
     onRead: features?.readThrough,
     reveal: features?.reveal,
@@ -175,7 +179,49 @@ export function ChatPanel({
     onLocationChange,
   })
 
+  function sendFromComposer(chatId: string, body: string, replyToMessageId?: string) {
+    const sent = onSend(chatId, body, replyToMessageId)
+    if (sent) {
+      stickToLatest()
+      if (detached || hasNewer) onJumpToLatest()
+    }
+    return sent
+  }
+
   const selection = useMessageSelection(scrollRef, messages, chat?.id)
+  const composerRegion = useRef<HTMLDivElement>(null)
+
+  useHotkey(
+    'Escape',
+    () => {
+      if (document.querySelector('[role="dialog"]')) return
+      if (selection.enabled) selection.clear()
+      else if (reply || edit) {
+        setReply(undefined)
+        setEdit(undefined)
+      } else onBack()
+    },
+    { enabled: Boolean(chat), ignoreInputs: false, stopPropagation: false, preventDefault: false },
+  )
+
+  useEffect(() => {
+    const redirect = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement
+      if (event.key.length !== 1 || event.metaKey || event.ctrlKey || event.altKey) return
+      if (target.closest('input, textarea, button, [role="dialog"], .menu')) return
+      if (selection.enabled) return
+      composerRegion.current?.querySelector('textarea')?.focus()
+    }
+    window.addEventListener('keydown', redirect)
+    return () => window.removeEventListener('keydown', redirect)
+  }, [selection.enabled])
+
+  function editLastMessage() {
+    const last = [...messages]
+      .reverse()
+      .find((message) => message.senderId === currentUser.id && !message.deletedAt)
+    if (last) setEdit(last)
+  }
   useEffect(() => {
     if (selection.enabled) setPopup(null)
   }, [selection.enabled])
@@ -183,11 +229,36 @@ export function ChatPanel({
     ? messages.find((message) => message.id === popup.messageId && !message.deletedAt)
     : undefined
 
-  function beginReply(target: Message) {
+  const callbacks = useRef({ onRetry, jump: features?.jumpToMessage })
+  callbacks.current = { onRetry, jump: features?.jumpToMessage }
+  const retry = useCallback((requestId: string) => callbacks.current.onRetry(requestId), [])
+  const jumpToQuote = useCallback(
+    (messageId: string, keyboard: boolean) => callbacks.current.jump?.(messageId, keyboard),
+    [],
+  )
+  const openActions = useCallback(
+    (target: Message, anchor: HTMLElement, keyboard: boolean, point?: MenuPoint) =>
+      setPopup({ messageId: target.id, anchor, keyboard, point }),
+    [],
+  )
+  const beginReply = useCallback((target: Message) => {
     setPopup(null)
     setEdit(undefined)
     setReply(target)
+  }, [])
+  function quoteAuthor(senderId: string | null | undefined) {
+    return senderId === currentUser.id ? currentUser.username : senderNames.get(senderId ?? '')
   }
+  function pendingTarget(send: PendingSend | undefined) {
+    return send?.replyToMessageId
+      ? messages.find((message) => message.id === send.replyToMessageId)
+      : undefined
+  }
+  const entries = useMemo(
+    () => (chat ? messageEntries(chat.id, recipient, messages, pending, hasNewer) : []),
+    [chat?.id, recipient, messages, pending, hasNewer],
+  )
+  const days = useMemo(() => groupByDay(entries), [entries])
 
   async function confirmDelete(scope: DeleteScope) {
     if (!confirm || !chat || busyRef.current) return
@@ -220,22 +291,15 @@ export function ChatPanel({
   if (!chat)
     return (
       <section className="chat-panel empty-panel">
-        <MessageSquare size={38} strokeWidth={1.2} aria-hidden="true" />
-        <h2>No chat selected</h2>
-        <button className="button button-primary" onClick={onNew}>
-          New chat
-        </button>
+        <p className="chat-hint">Select a chat to start messaging</p>
       </section>
     )
-
-  const entries = messageEntries(chat.id, recipient, messages, pending, hasNewer)
 
   return (
     <section className="chat-panel">
       <ChatHeader
         chat={chat}
         currentUser={currentUser}
-        connection={connection}
         presence={features?.presence}
         onBack={onBack}
         onMembers={onMembers}
@@ -268,90 +332,64 @@ export function ChatPanel({
         {...selection.handlers}
       >
         <div className="chat-body-inner">
-          {hasOlder && (
-            <button
-              className="history-page-button"
-              onClick={() => {
-                rememberAnchor('older')
-                onLoadOlder()
-              }}
-              disabled={loadingOlder}
-            >
-              {loadingOlder ? 'Loading…' : 'Load earlier messages'}
-            </button>
+          {loadingOlder && <span className="history-spinner" role="status" aria-label="Loading" />}
+          {days.map((day) => (
+            <section className="message-day" key={day.key}>
+              <div className="message-day-label">
+                <span>{formatDayLabel(day.timestamp)}</span>
+              </div>
+              {day.entries.map(({ entry: { key, message, send }, index }) => {
+                const mine = Boolean(send || message?.senderId === currentUser.id)
+                const sender = send
+                  ? currentUser.username
+                  : senderNames.get(message?.senderId || '') || 'Member'
+                return (
+                  <MessageItem
+                    key={key}
+                    message={message}
+                    send={send}
+                    mine={mine}
+                    sender={sender}
+                    group={chat.kind === ChatKind.GROUP}
+                    connected={connection === 'connected'}
+                    onRetry={retry}
+                    read={Boolean(
+                      message &&
+                      BigInt(message.sequence) <=
+                        BigInt(features?.summary.maxOtherReadSequence ?? '0'),
+                    )}
+                    onActions={features ? openActions : undefined}
+                    onReply={features ? beginReply : undefined}
+                    runStart={!sameMessageRun(entries[index - 1], entries[index], currentUser.id)}
+                    runEnd={!sameMessageRun(entries[index], entries[index + 1], currentUser.id)}
+                    selectionMode={selection.enabled}
+                    selected={Boolean(message && selection.selected.has(message.id))}
+                    onQuote={features ? jumpToQuote : undefined}
+                    quoteSender={quoteAuthor(
+                      message?.replySenderId ?? pendingTarget(send)?.senderId,
+                    )}
+                    quoteText={pendingTarget(send)?.body}
+                    quoteLoading={Boolean(
+                      message?.replyToMessageId &&
+                      features?.jumpLoading === message.replyToMessageId,
+                    )}
+                    highlighted={message?.id === highlight}
+                  />
+                )
+              })}
+            </section>
+          ))}
+          {entries.length === 0 && chat.lastSequence === '0' && (
+            <p className="chat-hint chat-hint-center">No messages here yet</p>
           )}
-          {entries.map(({ key, message, send }, index) => {
-            const mine = Boolean(send || message?.senderId === currentUser.id)
-            const sender = send
-              ? currentUser.username
-              : senderNames.get(message?.senderId || '') || 'Member'
-            return (
-              <MessageItem
-                key={key}
-                message={message}
-                send={send}
-                mine={mine}
-                sender={sender}
-                group={chat.kind === ChatKind.GROUP}
-                connected={connection === 'connected'}
-                onRetry={onRetry}
-                read={Boolean(
-                  message &&
-                  BigInt(message.sequence) <= BigInt(features?.summary.maxOtherReadSequence ?? '0'),
-                )}
-                onActions={
-                  features && !selection.enabled
-                    ? (target, anchor, keyboard) =>
-                        setPopup({ messageId: target.id, anchor, keyboard })
-                    : undefined
-                }
-                onReply={features ? beginReply : undefined}
-                runStart={!sameMessageRun(entries[index - 1], entries[index], currentUser.id)}
-                runEnd={!sameMessageRun(entries[index], entries[index + 1], currentUser.id)}
-                selectionMode={selection.enabled}
-                selected={Boolean(message && selection.selected.has(message.id))}
-                onQuote={features?.jumpToMessage}
-                quoteSender={
-                  message?.replySenderId === currentUser.id
-                    ? currentUser.username
-                    : senderNames.get(message?.replySenderId ?? '')
-                }
-                quoteLoading={Boolean(
-                  message?.replyToMessageId && features?.jumpLoading === message.replyToMessageId,
-                )}
-                highlighted={message?.id === highlight}
-              />
-            )
-          })}
-          {(hasNewer || hasUnresolvedGap) && (
-            <div className="history-newer-controls">
-              {hasNewer && (
-                <button
-                  className="history-page-button"
-                  onClick={() => {
-                    rememberAnchor('newer')
-                    onLoadNewer()
-                  }}
-                  disabled={loadingNewer}
-                >
-                  {loadingNewer ? 'Loading…' : 'Load newer messages'}
-                </button>
-              )}
-              <button className="history-jump-button" onClick={onJumpToLatest}>
-                {hasNewer ? 'Jump to latest' : 'Continue from here'}
-              </button>
-            </div>
-          )}
+          {loadingNewer && <span className="history-spinner" role="status" aria-label="Loading" />}
         </div>
       </div>
 
-      {(detached || hasNewer) && (
-        <div className="fixed-latest-wrap">
-          <button className="fixed-latest" onClick={onJumpToLatest}>
-            <ArrowDown size={15} />
-            Back to latest
-          </button>
-        </div>
+      {(detached || hasNewer || hasUnresolvedGap) && (
+        <button className="fixed-latest" onClick={onJumpToLatest} aria-label="Back to latest">
+          <ChevronDown size={24} />
+        </button>
       )}
       <span className="visually-hidden" role="status" aria-live="polite">
         {announcement}
@@ -363,10 +401,10 @@ export function ChatPanel({
             aria-label="Cancel selection"
             onClick={() => selection.clear()}
           >
-            <X size={19} />
+            <X size={21} />
           </button>
           <span role="status">
-            {selection.selected.size} selected <small>of 100 maximum</small>
+            {selection.selected.size} {selection.selected.size === 1 ? 'message' : 'messages'}
           </span>
           <button
             className="button button-danger"
@@ -376,17 +414,20 @@ export function ChatPanel({
               setActionError(null)
             }}
           >
-            <Trash2 size={15} />
+            <Trash2 size={17} />
             Delete
           </button>
         </div>
       )}
-      <div className="chat-composer-region" hidden={selection.enabled}>
+      <div className="chat-composer-region" ref={composerRegion} hidden={selection.enabled}>
         <MessageComposer
           key={modeKey}
+          initialDraft={drafts.current.get(modeKey ?? '')}
+          onDraftChange={(draft) => drafts.current.set(modeKey ?? '', draft)}
+          onEditLast={features ? editLastMessage : undefined}
           chatId={chat.id}
           connected={connection === 'connected'}
-          onSend={onSend}
+          onSend={sendFromComposer}
           reply={
             reply
               ? {
@@ -426,6 +467,7 @@ export function ChatPanel({
         <MessageActionMenu
           message={popupMessage}
           anchor={popup.anchor}
+          point={popup.point}
           keyboard={popup.keyboard}
           mine={popupMessage.senderId === currentUser.id}
           readers={features.readers}

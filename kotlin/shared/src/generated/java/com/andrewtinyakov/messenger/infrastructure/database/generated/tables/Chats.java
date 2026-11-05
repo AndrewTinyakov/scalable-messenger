@@ -15,6 +15,7 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Hid
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.HistoryPurgeJobs.HistoryPurgeJobsPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.MessageChanges.MessageChangesPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Messages.MessagesPath;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.PendingReadNotifications.PendingReadNotificationsPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Users.UsersPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.VisibilityCleanupJobs.VisibilityCleanupJobsPath;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.ChatsRecord;
@@ -143,6 +144,11 @@ public class Chats extends TableImpl<ChatsRecord> {
      * The column <code>public.chats.purged_rows</code>.
      */
     public final TableField<ChatsRecord, Long> PURGED_ROWS = createField(DSL.name("purged_rows"), SQLDataType.BIGINT.nullable(false).defaultValue(DSL.field(DSL.raw("0"), SQLDataType.BIGINT)), this, "");
+
+    /**
+     * The column <code>public.chats.last_activity_at</code>.
+     */
+    public final TableField<ChatsRecord, OffsetDateTime> LAST_ACTIVITY_AT = createField(DSL.name("last_activity_at"), SQLDataType.TIMESTAMPWITHTIMEZONE(6), this, "");
 
     private Chats(Name alias, Table<ChatsRecord> aliased) {
         this(alias, aliased, (Field<?>[]) null, null);
@@ -356,6 +362,19 @@ public class Chats extends TableImpl<ChatsRecord> {
         return _messages;
     }
 
+    private transient PendingReadNotificationsPath _pendingReadNotifications;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.pending_read_notifications</code> table
+     */
+    public PendingReadNotificationsPath pendingReadNotifications() {
+        if (_pendingReadNotifications == null)
+            _pendingReadNotifications = new PendingReadNotificationsPath(this, null, Keys.PENDING_READ_NOTIFICATIONS__PENDING_READ_NOTIFICATIONS_CHAT_ID_FKEY.getInverseKey());
+
+        return _pendingReadNotifications;
+    }
+
     private transient VisibilityCleanupJobsPath _visibilityCleanupJobs;
 
     /**
@@ -383,6 +402,14 @@ public class Chats extends TableImpl<ChatsRecord> {
      */
     public UsersPath chatReadProgressUserIdFkey() {
         return chatReadProgress().users();
+    }
+
+    /**
+     * Get the implicit many-to-many join path to the <code>public.users</code>
+     * table, via the <code>pending_read_notifications_user_id_fkey</code> key
+     */
+    public UsersPath pendingReadNotificationsUserIdFkey() {
+        return pendingReadNotifications().users();
     }
 
     /**

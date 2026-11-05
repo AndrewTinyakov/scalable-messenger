@@ -8,11 +8,16 @@ export function chatTitle(chat: Chat, myId: string): string {
   return chat.members.find((member) => member.id !== myId)?.username || 'Your notes'
 }
 
-export function chatInitials(chat: Chat, myId: string): string {
-  return chatTitle(chat, myId)
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0].toUpperCase())
-    .join('')
+export function chatPeer(chat: Chat, myId: string): string | undefined {
+  if (chat.kind === ChatKind.GROUP) return undefined
+  return chat.members.find((member) => member.id !== myId)?.id
+}
+
+export function hasUnread(chat: Chat): boolean {
+  return (chat.unreadCount ?? 0) > 0
+}
+
+export function formatUnread(count: number, capped = false): string {
+  if (count > 99) return '99+'
+  return capped ? `${count}+` : String(count)
 }

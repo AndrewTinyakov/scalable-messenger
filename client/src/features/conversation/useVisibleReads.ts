@@ -1,4 +1,4 @@
-import { useEffect, useRef, type RefObject } from 'react'
+import { useEffect, useLayoutEffect, useRef, type RefObject } from 'react'
 import type { Message } from '../../entities/message/model'
 
 export function isReadVisible(row: DOMRect, viewport: DOMRect): boolean {
@@ -90,12 +90,14 @@ export function useVisibleReads(
     observer?.observe(viewport)
     rescan.current = scan
     scan()
+    viewport.addEventListener('reading-settled', scan)
     viewport.addEventListener('scroll', scan, { passive: true })
     window.addEventListener('focus', scan)
     window.addEventListener('blur', scan)
     window.addEventListener('resize', scan)
     document.addEventListener('visibilitychange', scan)
     return () => {
+      viewport.removeEventListener('reading-settled', scan)
       rescan.current = undefined
       for (const timer of timers.values()) clearTimeout(timer)
       observer?.disconnect()
@@ -106,5 +108,5 @@ export function useVisibleReads(
       document.removeEventListener('visibilitychange', scan)
     }
   }, [scroller, userId, chatId, enabled])
-  useEffect(() => rescan.current?.(), [messages, through, onRead])
+  useLayoutEffect(() => rescan.current?.())
 }

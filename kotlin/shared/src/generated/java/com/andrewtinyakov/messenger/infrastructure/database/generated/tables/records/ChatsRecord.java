@@ -231,6 +231,20 @@ public class ChatsRecord extends UpdatableRecordImpl<ChatsRecord> {
         return (Long) get(14);
     }
 
+    /**
+     * Setter for <code>public.chats.last_activity_at</code>.
+     */
+    public void setLastActivityAt(OffsetDateTime value) {
+        set(15, value);
+    }
+
+    /**
+     * Getter for <code>public.chats.last_activity_at</code>.
+     */
+    public OffsetDateTime getLastActivityAt() {
+        return (OffsetDateTime) get(15);
+    }
+
     // -------------------------------------------------------------------------
     // Primary key information
     // -------------------------------------------------------------------------
@@ -254,7 +268,7 @@ public class ChatsRecord extends UpdatableRecordImpl<ChatsRecord> {
     /**
      * Create a detached, initialised ChatsRecord
      */
-    public ChatsRecord(String id, ChatKind kind, String name, String directPairKey, Long nextSequence, Integer memberCount, OffsetDateTime createdAt, String ownerId, OffsetDateTime deletedAt, String deletedBy, Long mutationRevision, Long mutationFloor, Long clearedThroughSequence, Long purgedThroughSequence, Long purgedRows) {
+    public ChatsRecord(String id, ChatKind kind, String name, String directPairKey, Long nextSequence, Integer memberCount, OffsetDateTime createdAt, String ownerId, OffsetDateTime deletedAt, String deletedBy, Long mutationRevision, Long mutationFloor, Long clearedThroughSequence, Long purgedThroughSequence, Long purgedRows, OffsetDateTime lastActivityAt) {
         super(Chats.CHATS);
 
         setId(id);
@@ -272,6 +286,7 @@ public class ChatsRecord extends UpdatableRecordImpl<ChatsRecord> {
         setClearedThroughSequence(clearedThroughSequence);
         setPurgedThroughSequence(purgedThroughSequence);
         setPurgedRows(purgedRows);
+        setLastActivityAt(lastActivityAt);
         resetTouchedOnNotNull();
     }
 }

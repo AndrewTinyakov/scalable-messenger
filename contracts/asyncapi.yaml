@@ -13,6 +13,12 @@ channels:
     $ref: ./channels/dead-letters.yaml#/deadLetteredSend
   roomEvents:
     $ref: ./channels/events.yaml#/roomEvents
+  sidebarActivity:
+    address: 'messenger:{activity:<chatId>}:live'
+    description: Ephemeral bodyless viewport hints without retained history or recovery ACKs.
+    messages:
+      SidebarActivityEventV1:
+        $ref: ./messages.yaml#/messages/SidebarActivityEventV1
   socketFrames:
     $ref: ./channels/websocket.yaml#/socketFrames
 operations:
@@ -46,3 +52,8 @@ operations:
     channel:
       $ref: '#/channels/socketFrames'
     summary: Confirmed queue status, durable results, subscription state, and recovery errors.
+  publishSidebarActivity:
+    action: send
+    channel:
+      $ref: '#/channels/sidebarActivity'
+    summary: Invalidate watched group summaries without per-member publications or message bodies.

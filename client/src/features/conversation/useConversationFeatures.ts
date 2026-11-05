@@ -17,6 +17,10 @@ interface Options {
   send(frame: OutgoingSocketFrame): void
   remove(chatId: string): void
   hide?(chatId: string): void
+  refreshChats?(): Promise<unknown>
+  onReadPending?(chatId: string, through: string): void
+  onReadCommitted?(chatId: string, through: string): void
+  onReadFailed?(chatId: string): void
   fail(message: string): void
 }
 
@@ -41,6 +45,7 @@ export function useConversationFeatures(options: Options) {
   const readTimer = useRef<ReturnType<typeof setTimeout>>()
   const readRunning = useRef(false)
   const readRefreshing = useRef(false)
+  const readRefreshPending = useRef(false)
   const mutationBusy = useRef(new Set<string>())
   const reconcileRef = useRef<MutationRecovery | null>(null)
   if (!reconcileRef.current)
@@ -62,7 +67,12 @@ export function useConversationFeatures(options: Options) {
     const current = optionsRef.current
     const id = current.chat?.id
     const generation = scope.current
-    if (!id || id.startsWith('draft:') || readRefreshing.current) return
+    if (!id || id.startsWith('draft:')) return
+    if (readRefreshing.current) {
+      readRefreshPending.current = true
+      return
+    }
+    readRefreshPending.current = false
     readRefreshing.current = true
     try {
       const result = await current.sessionApi.reads(id)
@@ -76,7 +86,10 @@ export function useConversationFeatures(options: Options) {
       }))
     } catch {
     } finally {
-      if (generation === scope.current) readRefreshing.current = false
+      if (generation === scope.current) {
+        readRefreshing.current = false
+        if (readRefreshPending.current) void refreshReads()
+      }
     }
   }, [])
   const flushRead = useCallback(async () => {
@@ -100,6 +113,7 @@ export function useConversationFeatures(options: Options) {
         const through = readPending.current
         readNextAt.current = Date.now() + 1000
         const result = await current.sessionApi.advanceRead(id, through)
+        current.onReadCommitted?.(id, result.throughSequence)
         if (generation !== scope.current) return
         if (BigInt(readPending.current) <= BigInt(result.throughSequence)) readPending.current = '0'
         setSummary((previous) => ({
@@ -111,12 +125,15 @@ export function useConversationFeatures(options: Options) {
         }))
       }
     } catch {
+      current.onReadFailed?.(id)
     } finally {
       if (generation === scope.current) readRunning.current = false
     }
   }, [])
   const readThrough = useCallback(
     (through: string) => {
+      const id = optionsRef.current.chat?.id
+      if (id && !id.startsWith('draft:')) optionsRef.current.onReadPending?.(id, through)
       if (BigInt(through) > BigInt(readPending.current)) readPending.current = through
       void flushRead()
     },
@@ -140,6 +157,7 @@ export function useConversationFeatures(options: Options) {
     readTimer.current = undefined
     readRunning.current = false
     readRefreshing.current = false
+    readRefreshPending.current = false
     setWatchTargets(null)
     presenceAt.current = 0
     clearTimeout(presenceExpiry.current)
@@ -321,9 +339,9 @@ export function useConversationFeatures(options: Options) {
   }, [])
   const deletionRequests = useRef(new Map<string, string>())
   const deletion = useCallback(
-    async (target: DeleteTarget, scope: DeleteScope, messages?: Message[]) => {
+    async (target: DeleteTarget, scope: DeleteScope, messages?: Message[], chatId?: string) => {
       const current = optionsRef.current
-      const id = current.chat?.id
+      const id = chatId ?? current.chat?.id
       if (!id || id.startsWith('draft:')) throw new Error('Choose a saved chat')
       const ids = messages ? [...new Set(messages.map((message) => message.id))].sort() : undefined
       if (
@@ -347,8 +365,9 @@ export function useConversationFeatures(options: Options) {
       })
       if (target === 'CHAT' && scope === 'EVERYONE') current.remove(id)
       else {
-        await current.recovery.synchronize(id)
+        if (id === optionsRef.current.chat?.id) await current.recovery.synchronize(id)
         if (target === 'CHAT') current.hide?.(id)
+        else await current.refreshChats?.()
       }
     },
     [],
@@ -373,6 +392,14 @@ export function useConversationFeatures(options: Options) {
       return message
     }, []),
     deleteChat,
+    deleteChatById: useCallback(
+      (id: string, scope: DeleteScope) => deletion('CHAT', scope, undefined, id),
+      [deletion],
+    ),
+    clearChatHistory: useCallback(
+      (id: string, scope: DeleteScope) => deletion('HISTORY', scope, undefined, id),
+      [deletion],
+    ),
     clearHistory,
     deleteMessages,
     presence: options.connected ? presence : {},

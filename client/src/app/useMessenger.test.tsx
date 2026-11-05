@@ -2,6 +2,7 @@ import { JSDOM } from 'jsdom'
 import { act, useEffect } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Chat } from '../entities/chat/model'
 import type { Message } from '../entities/message/model'
 import type { Session } from '../entities/session/model'
 import { ChatKind, FrameType } from '../shared/api/generated/socket-vocabulary'
@@ -50,10 +51,16 @@ let historyMessages: Message[]
 let groupMemberCount: number
 let groupMembers: Session['user'][]
 let renderPanel: boolean
+let fakeUnread: number
+let holdReadRequests: boolean
+let readRequests: ((value: Response) => void)[]
 let readCalls: string[]
 let visibilityRevision: string
 let clearedThrough: string
+let lastSummary: Chat['lastMessage']
 let hidden: boolean
+let deletionCalls: { chatId: string; requestId: string; scope: string; target: string }[]
+let failDeletion: boolean
 
 function snapshotFor(id: string) {
   return {
@@ -84,7 +91,6 @@ function Harness() {
         onSend={current.sendMessage}
         onRetry={current.retryMessage}
         onBack={current.closeChat}
-        onNew={() => {}}
         hasOlder={current.hasOlderMessages}
         hasNewer={current.hasNewerMessages}
         hasUnresolvedGap={current.hasUnresolvedGap}
@@ -152,10 +158,16 @@ beforeEach(() => {
   groupMemberCount = group.memberCount
   groupMembers = [session.user]
   renderPanel = false
+  fakeUnread = 0
+  holdReadRequests = false
+  readRequests = []
   readCalls = []
   visibilityRevision = '0'
   clearedThrough = '0'
   hidden = false
+  lastSummary = null
+  deletionCalls = []
+  failDeletion = false
   vi.stubGlobal(
     'WebSocket',
     class extends TestSocket {
@@ -170,6 +182,21 @@ beforeEach(() => {
     paths.push(path)
     const requestedChat = path.split('/chats/')[1]?.split('/')[0] ?? chatId
     const metadata = snapshotFor(requestedChat)
+    if (path.endsWith('/deletions')) {
+      const body = JSON.parse(String(options?.body))
+      deletionCalls.push({ chatId: requestedChat, ...body })
+      if (failDeletion) return Response.json({ message: 'Unavailable' }, { status: 403 })
+      return Response.json({
+        operationId: body.requestId,
+        scope: body.scope,
+        target: body.target,
+        clearedThroughSequence: '0',
+        mutationRevision: '0',
+        visibilityRevision: '1',
+        state: 'COMPLETED',
+        deletedRows: '0',
+      })
+    }
     if (path.endsWith('/visibility')) return Response.json({ ...metadata, hidden })
     if (path.endsWith('/changes'))
       return Response.json({
@@ -194,6 +221,7 @@ beforeEach(() => {
       if (options?.method === 'POST') {
         const { throughSequence } = JSON.parse(String(options.body)) as { throughSequence: string }
         readCalls.push(throughSequence)
+        if (holdReadRequests) return new Promise<Response>((resolve) => readRequests.push(resolve))
         return Response.json({
           throughSequence,
           readAt: new Date().toISOString(),
@@ -226,7 +254,7 @@ beforeEach(() => {
     if (path.endsWith('/messages')) {
       if (failHistoryRequest) {
         failHistoryRequest = false
-        return Response.json({ message: 'Unavailable' }, { status: 503 })
+        return Response.json({ message: 'Unavailable' }, { status: 403 })
       }
       const after = new URL(input, 'http://localhost').searchParams.get('afterSeq')
       const before = new URL(input, 'http://localhost').searchParams.get('beforeSeq')
@@ -261,11 +289,17 @@ beforeEach(() => {
       })
     }
     if (path.endsWith(`/chats/${chatId}`))
-      return Response.json({ ...group, memberCount: groupMemberCount, members: groupMembers })
+      return Response.json({
+        ...group,
+        lastMessage: lastSummary,
+        unreadCount: fakeUnread,
+        memberCount: groupMemberCount,
+        members: groupMembers,
+      })
     if (path.endsWith('/chats')) {
       if (failChatRequest) {
         failChatRequest = false
-        return Response.json({ message: 'Unavailable' }, { status: 503 })
+        return Response.json({ message: 'Unavailable' }, { status: 403 })
       }
       if (holdChatRequests)
         return new Promise<Response>((resolve) => {
@@ -277,6 +311,7 @@ beforeEach(() => {
           : [
               {
                 ...group,
+                unreadCount: fakeUnread,
                 memberCount: groupMemberCount,
                 lastSequence: snapshotFor(chatId).snapshotSequence,
               },
@@ -301,6 +336,297 @@ afterEach(async () => {
 })
 
 describe('messenger request coordination', () => {
+  it.each(['quote navigation', 'location restore'] as const)(
+    'keeps the latest window when an accepted send supersedes delayed %s',
+    async (navigation) => {
+      historyMessages = Array.from({ length: 100 }, (_, index) => ({
+        id: String(index + 1).padStart(26, '0'),
+        chatId,
+        senderId: recipient.id,
+        sequence: String(index + 1),
+        body: `Message ${index + 1}`,
+        createdAt: '2026-11-04T10:00:00Z',
+      }))
+      window.history.replaceState(null, '', `/groups/${chatId}`)
+      await renderMessenger()
+      await act(async () => sockets[0].open())
+      const latest = messenger.messages[chatId]
+      expect(latest[0].sequence).toBe('51')
+      const fetch = globalThis.fetch
+      let release!: (response: Response) => void
+      const around = new Promise<Response>((resolve) => {
+        release = resolve
+      })
+      const requests: string[] = []
+      vi.stubGlobal('fetch', (input: string, options?: RequestInit) => {
+        requests.push(input)
+        return input.includes('/messages/around') ? around : fetch(input, options)
+      })
+      let jump: Promise<void> | undefined
+      if (navigation === 'quote navigation') {
+        await act(async () => {
+          jump = messenger.features.jumpToMessage(historyMessages[0].id, false)
+        })
+      } else {
+        await act(async () => messenger.closeChat())
+        messenger.rememberLocation(chatId, {
+          messageId: historyMessages[0].id,
+          sequence: '1',
+          offsetPx: -17,
+          atLatest: false,
+        })
+        await act(async () => messenger.selectChat(chatId))
+      }
+      expect(requests.filter((path) => path.includes('/messages/around'))).toHaveLength(1)
+      expect(messenger.detached).toBe(false)
+      expect(messenger.hasNewerMessages).toBe(false)
+      const revision = messenger.locationRevision
+      const windowBeforeSend = messenger.messages[chatId]
+      requests.length = 0
+      await act(async () => {
+        expect(messenger.sendMessage(chatId, 'Stay at latest')).toBe(true)
+      })
+      expect(requests).toEqual([])
+      await act(async () => {
+        release(
+          Response.json({
+            ...snapshotFor(chatId),
+            messages: historyMessages.slice(0, 50),
+            anchorMessageId: historyMessages[0].id,
+            hasOlder: false,
+            hasNewer: true,
+            coverageAfterSequence: '0',
+            coverageThroughSequence: '50',
+          }),
+        )
+        await jump
+      })
+      expect(messenger.messages[chatId]).toEqual(windowBeforeSend)
+      expect(messenger.detached).toBe(false)
+      expect(messenger.hasNewerMessages).toBe(false)
+      expect(messenger.locationRevision).toBe(revision)
+      expect(messenger.features.reveal).toBeNull()
+      expect(messenger.pending).toEqual([
+        expect.objectContaining({ chatId, body: 'Stay at latest', status: 'sending' }),
+      ])
+      expect(messenger.error).toBeNull()
+      expect(readCalls).toEqual([])
+    },
+  )
+
+  it('clears the selected badge immediately while a read request waits and resists a stale summary', async () => {
+    vi.useFakeTimers()
+    fakeUnread = 4
+    window.history.replaceState(null, '', `/groups/${chatId}`)
+    await renderMessenger()
+    await act(async () => sockets[0].open())
+    expect(messenger.chats.find((chat) => chat.id === chatId)?.unreadCount).toBe(4)
+    holdReadRequests = true
+    await act(async () => messenger.features.readThrough('1'))
+    expect(readRequests).toHaveLength(1)
+    expect(messenger.chats.find((chat) => chat.id === chatId)?.unreadCount).toBe(0)
+    await act(async () => {
+      sockets[0].event({
+        type: 'reads_changed',
+        version: 1,
+        eventId: recipient.id,
+        room: `user:${userId}`,
+        epoch: 'epoch',
+        streamId: '1-0',
+        chatId,
+      })
+      await vi.advanceTimersByTimeAsync(500)
+    })
+    expect(messenger.chats.find((chat) => chat.id === chatId)?.unreadCount).toBe(0)
+    fakeUnread = 0
+    holdReadRequests = false
+    await act(async () =>
+      readRequests[0](
+        Response.json({
+          throughSequence: '1',
+          readAt: new Date().toISOString(),
+          serverTime: new Date().toISOString(),
+        }),
+      ),
+    )
+    expect(messenger.chats.find((chat) => chat.id === chatId)?.unreadCount).toBe(0)
+  })
+
+  it('clears an unopened group badge on another device read hint through the account room', async () => {
+    vi.useFakeTimers()
+    fakeUnread = 9
+    await renderMessenger()
+    await act(async () => {
+      sockets[0].open()
+      messenger.closeChat()
+    })
+    fakeUnread = 0
+    paths = []
+    await act(async () => {
+      sockets[0].event({
+        type: 'reads_changed',
+        version: 1,
+        eventId: recipient.id,
+        room: `user:${userId}`,
+        epoch: 'epoch',
+        streamId: '1-0',
+        chatId,
+      })
+      await vi.advanceTimersByTimeAsync(500)
+    })
+    expect(messenger.chats.find((chat) => chat.id === chatId)?.unreadCount).toBe(0)
+    expect(paths.some((path) => path.endsWith('/messages'))).toBe(false)
+  })
+
+  it.each(['rate_limited', 'room_limit', 'dependency_unavailable', 'publish_failed'])(
+    'silently retries %s sends with their original request ID',
+    async (code) => {
+      vi.useFakeTimers()
+      await renderMessenger()
+      await act(async () => {
+        sockets[0].open()
+        messenger.sendMessage(chatId, 'Keep waiting')
+      })
+      const sends = () =>
+        sockets[0].sent.map((raw) => JSON.parse(raw)).filter((frame) => frame.type === 'send')
+      const requestId = sends()[0].requestId
+      await act(async () => sockets[0].event({ type: 'error', version: 1, requestId, code }))
+      expect(messenger.pending[0].status).toBe('sending')
+      expect(messenger.error).toBeNull()
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1500)
+      })
+      expect(sends().map((send) => send.requestId)).toEqual([requestId, requestId])
+      expect(messenger.error).toBeNull()
+    },
+  )
+
+  it('debounces sidebar targets, expires presence to unknown and restores the watch after reconnect', async () => {
+    vi.useFakeTimers()
+    window.history.replaceState(null, '', `/groups/${chatId}`)
+    await renderMessenger()
+    await act(async () => {
+      sockets[0].open()
+      messenger.updateChat({ ...direct, kind: ChatKind.DIRECT })
+      messenger.watchSidebarPeers([direct.id, chatId, chatId])
+      messenger.watchSidebarPeers([chatId, direct.id])
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1750)
+    })
+    const watches = () =>
+      sockets[0].sent
+        .map((raw) => JSON.parse(raw))
+        .filter((frame) => frame.type === 'watch_sidebar')
+    expect(watches()).toEqual([
+      { type: 'watch_sidebar', version: 1, chatIds: [chatId, direct.id].sort() },
+    ])
+    expect(sockets[0].sent.some((raw) => JSON.parse(raw).type === 'watch_presence')).toBe(true)
+    await act(async () =>
+      sockets[0].event({
+        type: 'sidebar_presence',
+        version: 1,
+        observedAt: new Date().toISOString(),
+        validForMs: 15000,
+        statuses: [{ userId: recipient.id, state: 'online' }],
+      }),
+    )
+    expect(messenger.sidebarPresence[recipient.id]).toBe('online')
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15000)
+    })
+    expect(messenger.sidebarPresence[recipient.id]).toBe('unknown')
+    await act(async () => {
+      sockets[0].close()
+      await vi.advanceTimersByTimeAsync(1000)
+      sockets[1].open()
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1750)
+    })
+    expect(
+      sockets[1].sent
+        .map((raw) => JSON.parse(raw))
+        .filter((frame) => frame.type === 'watch_sidebar'),
+    ).toEqual(watches())
+    await act(async () => {
+      messenger.watchSidebarPeers([])
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1750)
+    })
+    expect(messenger.sidebarPresence).toEqual({})
+  })
+
+  it('coalesces received live hints into a fresh summary with the group sender username', async () => {
+    vi.useFakeTimers()
+    await renderMessenger()
+    await act(async () => {
+      sockets[0].open()
+      messenger.closeChat()
+    })
+    lastSummary = {
+      id: recipient.id,
+      sequence: '7',
+      senderId: recipient.id,
+      senderUsername: 'katya',
+      createdAt: '2026-11-04T10:00:00Z',
+      bodyPreview: 'Хорошо',
+      deleted: false,
+    }
+    paths = []
+    await act(async () => {
+      for (let index = 1; index <= 3; index++)
+        sockets[0].event({
+          type: 'sidebar_activity',
+          version: 1,
+          sequence: String(index),
+          chatId,
+        })
+      await vi.advanceTimersByTimeAsync(2000)
+    })
+    expect(messenger.chats.find((chat) => chat.id === chatId)?.lastMessage).toEqual(lastSummary)
+    expect(paths.filter((path) => path.endsWith(`/chats/${chatId}`))).toHaveLength(1)
+    expect(messenger.selectedId).toBeNull()
+  })
+
+  it('deletes a never-opened chat without changing selection or loading its history', async () => {
+    await renderMessenger()
+    const selected = messenger.selectedId
+    paths = []
+    await act(async () => {
+      await messenger.deleteChatById(direct.id, 'SELF')
+    })
+    expect(deletionCalls).toEqual([
+      { chatId: direct.id, requestId: expect.any(String), scope: 'SELF', target: 'CHAT' },
+    ])
+    expect(messenger.selectedId).toBe(selected)
+    expect(paths.some((path) => path.includes(`/chats/${direct.id}/messages`))).toBe(false)
+  })
+
+  it('retains an arbitrary-chat deletion request ID after failure and uses a fresh one after success', async () => {
+    await renderMessenger()
+    failDeletion = true
+    await act(async () => {
+      await expect(messenger.clearChatHistory(direct.id, 'EVERYONE')).rejects.toThrow('Unavailable')
+    })
+    failDeletion = false
+    await act(async () => {
+      await messenger.clearChatHistory(direct.id, 'EVERYONE')
+    })
+    expect(deletionCalls[0]).toEqual(deletionCalls[1])
+    expect(deletionCalls[1]).toMatchObject({
+      chatId: direct.id,
+      scope: 'EVERYONE',
+      target: 'HISTORY',
+    })
+    await act(async () => {
+      await messenger.clearChatHistory(direct.id, 'EVERYONE')
+    })
+    expect(deletionCalls[2].requestId).not.toBe(deletionCalls[1].requestId)
+    expect(paths.some((path) => path.includes(`/chats/${direct.id}/messages`))).toBe(false)
+  })
+
   it('pauses directory and pending-send polling for the whole offline interval', async () => {
     vi.useFakeTimers()
     let online = true
@@ -343,7 +669,7 @@ describe('messenger request coordination', () => {
     await act(async () => {
       online = false
       window.dispatchEvent(new dom.window.Event('offline'))
-      chatRequests[0](Response.json({ message: 'Failed to fetch' }, { status: 503 }))
+      chatRequests[0](Response.json({ message: 'Failed to fetch' }, { status: 403 }))
       await refresh
     })
     expect(messenger.chats).toEqual(chats)
@@ -643,6 +969,9 @@ describe('messenger request coordination', () => {
     })
     expect(messenger.draftChat?.members).toEqual([session.user, recipient])
     expect(messenger.selectedId).toBe(`draft:${recipient.id}`)
+    await act(async () => {
+      expect(messenger.sendMessage(`draft:${recipient.id}`, 'First message')).toBe(true)
+    })
     expect(paths.some((path) => path.includes('/chats/draft'))).toBe(false)
     expect(window.location.pathname).toBe(`/users/${recipient.id}`)
   })
@@ -710,6 +1039,10 @@ describe('messenger request coordination', () => {
     await act(async () => {
       chatRequests[1](Response.json({ chats: [group], nextCursor: null }))
     })
+    expect(messenger.selectedId).toBeNull()
+    await act(async () => {
+      messenger.selectChat(chatId)
+    })
 
     expect(sockets).toHaveLength(1)
     expect(messenger.selectedId).toBe(chatId)
@@ -759,7 +1092,7 @@ describe('messenger request coordination', () => {
       window.dispatchEvent(new dom.window.Event('focus'))
     })
     expect(container.querySelector('.workspace')).toBe(workspace)
-    expect(container.textContent).toContain("You're offline")
+    expect(container.textContent).toContain('Waiting for network')
     expect(container.querySelector('.toast')).toBeNull()
     expect(paths).toEqual([])
     expect(sessionRequests).toHaveLength(1)
@@ -771,7 +1104,7 @@ describe('messenger request coordination', () => {
     await act(async () => {
       sessionRequests[1](Response.json({ message: 'Unauthorized' }, { status: 401 }))
     })
-    expect(container.querySelector('h1')?.textContent).toBe('Sign in')
+    expect(container.querySelector('h1')?.textContent).toBe('Welcome back')
   })
 
   it('waits offline on startup and restores automatically without showing the sign-in form', async () => {
@@ -831,9 +1164,13 @@ describe('messenger request coordination', () => {
     await act(async () => {
       sessionRequests[0](Response.json({ userId, username: 'alice', deviceId: 'device' }))
     })
-    const signOut = container.querySelector<HTMLButtonElement>('button[aria-label="Sign out"]')!
     await act(async () => {
-      signOut.click()
+      container.querySelector<HTMLButtonElement>('button[aria-label="Main menu"]')!.click()
+    })
+    await act(async () => {
+      ;[...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+        .find((item) => item.textContent === 'Sign out')!
+        .click()
     })
     expect(logoutRequests).toHaveLength(1)
     await act(async () => {
@@ -848,12 +1185,12 @@ describe('messenger request coordination', () => {
     await act(async () => {
       sessionRequests[2](Response.json({ message: 'Unauthorized' }, { status: 401 }))
     })
-    expect(container.querySelector('h1')?.textContent).toBe('Sign in')
+    expect(container.querySelector('h1')?.textContent).toBe('Welcome back')
 
     await act(async () => {
       sessionRequests[1](Response.json({ userId, username: 'alice', deviceId: 'device' }))
     })
-    expect(container.querySelector('h1')?.textContent).toBe('Sign in')
+    expect(container.querySelector('h1')?.textContent).toBe('Welcome back')
   })
 
   it('shares an in-flight chat refresh and follows an event burst with one fresh read', async () => {
@@ -881,6 +1218,7 @@ describe('messenger request coordination', () => {
   })
 
   it('renews the selected group once after coalesced chat-created events', async () => {
+    window.history.replaceState(null, '', `/groups/${chatId}`)
     await renderMessenger()
     await act(async () => {
       sockets[0].open()
@@ -905,6 +1243,7 @@ describe('messenger request coordination', () => {
 
   it('does not renew a replacement socket when an older socket refresh completes', async () => {
     vi.useFakeTimers()
+    window.history.replaceState(null, '', `/groups/${chatId}`)
     await renderMessenger()
     await act(async () => {
       sockets[0].open()
@@ -929,6 +1268,7 @@ describe('messenger request coordination', () => {
 
   it('coalesces repeated focus work while the selected group is current', async () => {
     vi.useFakeTimers()
+    window.history.replaceState(null, '', `/groups/${chatId}`)
     await renderMessenger()
     await act(async () => {
       sockets[0].open()
@@ -968,6 +1308,7 @@ describe('messenger request coordination', () => {
 
   it('retries failed history on focus even while chat metadata is current', async () => {
     vi.useFakeTimers()
+    window.history.replaceState(null, '', `/groups/${chatId}`)
     await renderMessenger()
     await act(async () => {
       sockets[0].open()
@@ -987,6 +1328,7 @@ describe('messenger request coordination', () => {
 
   it('runs required history recovery after reconnect despite fresh focus data', async () => {
     vi.useFakeTimers()
+    window.history.replaceState(null, '', `/groups/${chatId}`)
     await renderMessenger()
     await act(async () => {
       sockets[0].open()
@@ -1012,6 +1354,7 @@ describe('messenger request coordination', () => {
 
   it('flushes applied progress when the page is hidden', async () => {
     vi.useFakeTimers()
+    window.history.replaceState(null, '', `/groups/${chatId}`)
     await renderMessenger()
     await act(async () => {
       sockets[0].open()

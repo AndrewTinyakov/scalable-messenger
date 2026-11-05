@@ -15,6 +15,7 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.His
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.MessageChanges;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Messages;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.MessengerOutboxEvents;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.PendingReadNotifications;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.SendRequests;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Sessions;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Users;
@@ -98,6 +99,11 @@ public class Public extends SchemaImpl {
     public final MessengerOutboxEvents MESSENGER_OUTBOX_EVENTS = MessengerOutboxEvents.MESSENGER_OUTBOX_EVENTS;
 
     /**
+     * The table <code>public.pending_read_notifications</code>.
+     */
+    public final PendingReadNotifications PENDING_READ_NOTIFICATIONS = PendingReadNotifications.PENDING_READ_NOTIFICATIONS;
+
+    /**
      * The table <code>public.send_requests</code>.
      */
     public final SendRequests SEND_REQUESTS = SendRequests.SEND_REQUESTS;
@@ -144,6 +150,7 @@ public class Public extends SchemaImpl {
             MessageChanges.MESSAGE_CHANGES,
             Messages.MESSAGES,
             MessengerOutboxEvents.MESSENGER_OUTBOX_EVENTS,
+            PendingReadNotifications.PENDING_READ_NOTIFICATIONS,
             SendRequests.SEND_REQUESTS,
             Sessions.SESSIONS,
             Users.USERS,

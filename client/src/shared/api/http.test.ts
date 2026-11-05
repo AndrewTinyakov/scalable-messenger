@@ -13,6 +13,46 @@ afterEach(() => {
 })
 
 describe('HTTP transport', () => {
+  it('decodes bounded chat summaries with sender usernames and rejects malformed previews', async () => {
+    const id = session.user.id
+    const message = {
+      id,
+      sequence: '7',
+      senderId: id,
+      senderUsername: 'katya',
+      createdAt: '2026-11-04T10:00:00Z',
+      bodyPreview: 'Хорошо',
+      deleted: false,
+    }
+    const chat = {
+      id,
+      kind: 'GROUP',
+      members: [],
+      memberCount: 2,
+      lastSequence: '7',
+      lastMessage: message,
+    }
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json(chat))
+    vi.stubGlobal('fetch', fetch)
+    await expect(authenticated.chat(id)).resolves.toEqual({
+      unreadCount: 0,
+      unreadCountCapped: false,
+      ...chat,
+    })
+    for (const lastMessage of [
+      { ...message, senderUsername: undefined },
+      { ...message, bodyPreview: 'x'.repeat(161) },
+      { ...message, deleted: true },
+      { ...message, sequence: 7 },
+      { ...message, extra: true },
+    ]) {
+      fetch.mockResolvedValueOnce(Response.json({ ...chat, lastMessage }))
+      await expect(authenticated.chat(id)).rejects.toThrow('Invalid response from server')
+    }
+    fetch.mockResolvedValueOnce(Response.json({ ...chat, lastMessage: null }))
+    await expect(authenticated.chat(id)).resolves.toMatchObject({ lastMessage: null })
+  })
+
   it('accepts certified sparse and empty history while rejecting inconsistent coverage', async () => {
     const id = session.user.id
     const row = {
@@ -189,9 +229,15 @@ describe('HTTP transport', () => {
         }),
     )
     vi.stubGlobal('fetch', fetch)
-    const failed = expect(authenticated.chats()).rejects.toThrow('Request timed out. Try again.')
+    const stalled = fetch.getMockImplementation()!
+    fetch
+      .mockImplementationOnce(stalled)
+      .mockResolvedValue(Response.json({ chats: [], nextCursor: null }))
+    const failed = authenticated.chats()
     await vi.advanceTimersByTimeAsync(15000)
-    await failed
+    await vi.advanceTimersByTimeAsync(1000)
+    await expect(failed).resolves.toMatchObject({ chats: [] })
+    expect(fetch).toHaveBeenCalledTimes(2)
     expect(fetch.mock.calls[0][1]?.signal?.aborted).toBe(true)
     expect(vi.getTimerCount()).toBe(0)
   })
@@ -379,7 +425,11 @@ describe('HTTP transport', () => {
         vi.fn(async () => Response.json(chat)),
       )
       if (kind === 'DIRECT' || kind === 'GROUP') {
-        await expect(authenticated.chat(id)).resolves.toEqual(chat)
+        await expect(authenticated.chat(id)).resolves.toEqual({
+          unreadCount: 0,
+          unreadCountCapped: false,
+          ...chat,
+        })
       } else {
         await expect(authenticated.chat(id)).rejects.toThrow('Invalid response from server')
       }
@@ -423,4 +473,127 @@ describe('HTTP transport', () => {
       await expect(authenticated.sendStatus(id)).rejects.toThrow('Invalid response from server')
     }
   })
+})
+
+describe('silent HTTP recovery', () => {
+  it('waits for Retry-After on history and summary 429s and retries network and 503 errors', async () => {
+    vi.useFakeTimers()
+    try {
+      const fetch = vi
+        .fn<typeof globalThis.fetch>()
+        .mockResolvedValueOnce(new Response(null, { status: 429, headers: { 'Retry-After': '2' } }))
+        .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+        .mockResolvedValueOnce(new Response(null, { status: 503 }))
+        .mockResolvedValueOnce(Response.json({ chats: [], nextCursor: null }))
+      vi.stubGlobal('fetch', fetch)
+      const result = authenticated.chats()
+      await vi.advanceTimersByTimeAsync(1999)
+      expect(fetch).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(10000)
+      await expect(result).resolves.toMatchObject({ chats: [] })
+      expect(fetch).toHaveBeenCalledTimes(4)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('bounds rate-limit retries', async () => {
+    vi.useFakeTimers()
+    try {
+      const fetch = vi.fn<typeof globalThis.fetch>()
+      for (let i = 0; i < 6; i++) fetch.mockResolvedValueOnce(new Response(null, { status: 429 }))
+      fetch.mockResolvedValueOnce(new Response(null, { status: 403 }))
+      vi.stubGlobal('fetch', fetch)
+      const outcome = authenticated.chats().catch((error: unknown) => error)
+      await vi.advanceTimersByTimeAsync(120000)
+      expect(await outcome).toMatchObject({ status: 429 })
+      expect(fetch).toHaveBeenCalledTimes(4)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not replay a failed explicit mutation', async () => {
+    vi.useFakeTimers()
+    try {
+      const fetch = vi.fn<typeof globalThis.fetch>(async () => new Response(null, { status: 503 }))
+      vi.stubGlobal('fetch', fetch)
+      const outcome = authenticated.deleteChat(session.user.id).catch((error: unknown) => error)
+      await vi.advanceTimersByTimeAsync(20000)
+      expect(await outcome).toMatchObject({ status: 503 })
+      expect(fetch).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+it('does not replay a group creation whose server outcome is uncertain', async () => {
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => new Response(null, { status: 503 }))
+  vi.stubGlobal('fetch', fetch)
+  await expect(authenticated.createGroup('test', [])).rejects.toMatchObject({ status: 503 })
+  expect(fetch).toHaveBeenCalledTimes(1)
+})
+
+it('cancels a ticket fetch with its owner signal', async () => {
+  const controller = new AbortController()
+  const fetch = vi.fn<typeof globalThis.fetch>(
+    (_url, init) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(init.signal?.reason))
+      }),
+  )
+  vi.stubGlobal('fetch', fetch)
+  const outcome = authenticated.wsTicket(controller.signal).catch((error: unknown) => error)
+  controller.abort(new Error('owner closed'))
+  expect(await outcome).toMatchObject({ message: 'owner closed' })
+  expect(fetch).toHaveBeenCalledTimes(1)
+})
+
+it('caps a huge Retry-After and cancels the retry wait', async () => {
+  vi.useFakeTimers()
+  try {
+    const fetch = vi.fn<typeof globalThis.fetch>(
+      async () => new Response(null, { status: 429, headers: { 'Retry-After': '999999999999' } }),
+    )
+    vi.stubGlobal('fetch', fetch)
+    const outcome = authenticated.chats().catch((error: unknown) => error)
+    await vi.advanceTimersByTimeAsync(29999)
+    expect(fetch).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(fetch).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(60000)
+    expect(await outcome).toMatchObject({ status: 429 })
+    expect(fetch).toHaveBeenCalledTimes(4)
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+it('cancels a ticket rate-limit wait before another attempt', async () => {
+  vi.useFakeTimers()
+  const controller = new AbortController()
+  try {
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => new Response(null, { status: 429 }))
+    vi.stubGlobal('fetch', fetch)
+    const outcome = authenticated.wsTicket(controller.signal).catch((error: unknown) => error)
+    await vi.advanceTimersByTimeAsync(0)
+    controller.abort(new Error('connection closed'))
+    await vi.advanceTimersByTimeAsync(60000)
+    expect(await outcome).toMatchObject({ message: 'connection closed' })
+    expect(fetch).toHaveBeenCalledTimes(1)
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+it('never replays member removal after losing its response', async () => {
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => {
+    throw new TypeError('response lost')
+  })
+  vi.stubGlobal('fetch', fetch)
+  await expect(authenticated.removeGroupMember(session.user.id, session.user.id)).rejects.toThrow(
+    'response lost',
+  )
+  expect(fetch).toHaveBeenCalledTimes(1)
 })

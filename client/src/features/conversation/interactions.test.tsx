@@ -8,11 +8,11 @@ import type { Message } from '../../entities/message/model'
 import type { ReaderPage } from '../../shared/api/featureDecode'
 import { ChatKind } from '../../shared/api/generated/socket-vocabulary'
 import { Dialog } from '../../shared/ui/Dialog'
-import { ChatHeader } from '../../widgets/chat-panel/ChatHeader'
 import { MessageComposer } from '../message-send/MessageComposer'
 import { InlineReaders } from './InlineReaders'
 
 let MessageActionMenu: typeof import('./MessageActionMenu').MessageActionMenu
+let ChatHeader: typeof import('../../widgets/chat-panel/ChatHeader').ChatHeader
 
 let dom: JSDOM
 let root: Root
@@ -27,6 +27,7 @@ beforeEach(async () => {
   document.body.append(container)
   const { createRoot } = await import('react-dom/client')
   MessageActionMenu = (await import('./MessageActionMenu')).MessageActionMenu
+  ChatHeader = (await import('../../widgets/chat-panel/ChatHeader')).ChatHeader
   root = createRoot(container)
 })
 afterEach(async () => {
@@ -154,7 +155,7 @@ describe('conversation interactions', () => {
         />,
       ),
     )
-    expect(container.querySelector('.message-bubble')?.textContent).toBe('Message deleted')
+    expect(container.querySelector('.message-text')?.textContent).toBe('Message deleted')
     expect(container.textContent).not.toContain('Must stay deleted')
     expect(container.querySelector('[aria-label="Actions for your message"]')).toBeNull()
     expect(container.querySelector('.read-receipt')).toBeNull()
@@ -226,7 +227,6 @@ describe('conversation interactions', () => {
                   lastSequence: '1',
                 }}
                 currentUser={user}
-                connection="connected"
                 onBack={() => {}}
                 onDelete={() => setOpen(true)}
               />
@@ -262,7 +262,7 @@ describe('conversation interactions', () => {
           )
         else trigger.click()
       })
-      const remove = document.querySelector<HTMLButtonElement>('.message-action-menu .danger-text')!
+      const remove = document.querySelector<HTMLButtonElement>('.menu .danger-text')!
       remove.focus()
       await act(async () => remove.click())
       expect(container.querySelector('[role="dialog"]')).not.toBeNull()

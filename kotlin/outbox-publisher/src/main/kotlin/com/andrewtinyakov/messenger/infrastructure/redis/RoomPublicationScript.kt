@@ -1,5 +1,6 @@
 package com.andrewtinyakov.messenger.infrastructure.redis
 
+import com.andrewtinyakov.messenger.generated.messaging.event.SidebarActivityEventV1
 import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxMessage
 import org.springframework.core.io.ClassPathResource
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate
@@ -17,6 +18,7 @@ internal class RoomPublicationScript(
         setLocation(ClassPathResource("redis/publish-room-event.lua"))
         resultType = String::class.java
     }
+    private val activityScript = DefaultRedisScript<Long>("return redis.call('SPUBLISH',KEYS[1],ARGV[1])", Long::class.java)
     private val streamIdPattern = Regex("[0-9]+-[0-9]+")
 
     fun publish(message: OutboxMessage): Mono<String> {
@@ -37,7 +39,16 @@ internal class RoomPublicationScript(
             script,
             listOf("$prefix:stream", "$prefix:epoch", "$prefix:live", "$prefix:history-bytes"),
             listOf(message.payload, mapper.writeValueAsString(options), message.replayPayload ?: message.payload),
-        ).single().doOnNext { check(streamIdPattern.matches(it)) { "Redis returned an invalid stream ID" } }
+        ).single().doOnNext { check(streamIdPattern.matches(it)) { "Redis returned an invalid stream ID" } }.flatMap { streamId ->
+            val event = mapper.readTree(message.payload)
+            if (message.room.startsWith("group:") && event.path("type").asText() == "message_saved") {
+                val chatId = event.path("chatId").asText()
+                val hint = mapper.writeValueAsString(SidebarActivityEventV1.create(chatId, event.path("sequence").asText()))
+                redis.execute(activityScript, listOf("messenger:{activity:$chatId}:live"), listOf(hint)).single().thenReturn(streamId)
+            } else {
+                Mono.just(streamId)
+            }
+        }
     }
 }
 

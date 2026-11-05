@@ -53,17 +53,21 @@ export function useMessagePins(
           if (current !== generation.current) return
           const ids = page.pinnedMessageIds.join()
           const pins = [...page.pins]
-          while (page.nextBeforeSequence && pins.length < wanted.current && !again.current) {
+          let consistent = true
+          while (consistent && page.nextBeforeSequence && pins.length < wanted.current) {
             page = await sessionApi.pinnedMessages(id, page.nextBeforeSequence)
             if (current !== generation.current) return
-            if (page.pinnedMessageIds.join() !== ids) again.current = true
+            consistent = page.pinnedMessageIds.join() === ids
             pins.push(
               ...page.pins.filter(
                 (pin) => !pins.some((item) => item.message.id === pin.message.id),
               ),
             )
           }
-          if (again.current) continue
+          if (!consistent) {
+            again.current = true
+            continue
+          }
           setState({
             chatId: id,
             pins,

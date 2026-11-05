@@ -150,4 +150,28 @@ describe('useMessagePins', () => {
     expect(latest.pinnedIds.size).toBe(0)
     expect(latest.hasOlder).toBe(false)
   })
+  it('publishes a consistent pass while further refreshes keep queuing', async () => {
+    await act(async () => latest.loadOlder())
+    holding = true
+    let refreshing!: Promise<void>
+    act(() => {
+      refreshing = latest.refresh()
+    })
+    await releaseNext()
+    act(() => {
+      void latest.refresh()
+    })
+    bodies.set(5, 'EDITED')
+    await releaseNext()
+    await act(async () => {
+      while (!held.length) await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+
+    expect(latest.pins).toHaveLength(60)
+    expect(latest.pins.find((pin) => pin.message.id === 'm5')?.message.body).toBe('EDITED')
+
+    holding = false
+    await releaseNext()
+    await act(async () => refreshing)
+  })
 })

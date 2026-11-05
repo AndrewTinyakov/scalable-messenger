@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Chat } from '../../entities/chat/model'
 import type { ChatRecovery } from '../../entities/message/chatRecovery'
 import type { DeleteScope, DeleteTarget } from '../../entities/message/historySnapshot'
+import { isContiguous } from '../../entities/message/historyWindow'
 import { type Message } from '../../entities/message/model'
 import type { api } from '../../shared/api/http'
 import type { OutgoingSocketFrame, PresenceStatus, SocketEvent } from '../../shared/api/socket'
@@ -287,6 +288,7 @@ export function useConversationFeatures(options: Options) {
     }
     if (
       pinned.some((message) => message.id === messageId) &&
+      isContiguous(pinned) &&
       current.recovery.reveal(id, pinned, revision)
     ) {
       setReveal({ messageId, revision, focus })

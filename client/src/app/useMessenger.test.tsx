@@ -360,6 +360,47 @@ afterEach(async () => {
 })
 
 describe('messenger request coordination', () => {
+  it('jumps into a cached latest window that skips a hidden sequence', async () => {
+    historyMessages = Array.from({ length: 100 }, (_, index) => ({
+      id: String(index + 1).padStart(26, '0'),
+      chatId,
+      senderId: recipient.id,
+      sequence: String(index + 1),
+      body: `Message ${index + 1}`,
+      createdAt: '2026-11-04T10:00:00Z',
+    })).filter((message) => message.sequence !== '90')
+    window.history.replaceState(null, '', `/groups/${chatId}`)
+    await renderMessenger()
+    await act(async () => sockets[0].open())
+    const fetch = globalThis.fetch
+    const around: string[] = []
+    vi.stubGlobal('fetch', (input: string, options?: RequestInit) => {
+      if (!input.includes('/messages/around')) return fetch(input, options)
+      const anchor = new URL(input, 'http://localhost').searchParams.get('messageId')!
+      around.push(anchor)
+      const index = historyMessages.findIndex((message) => message.id === anchor)
+      const messages = index < 50 ? historyMessages.slice(0, 50) : historyMessages.slice(-50)
+      return Promise.resolve(
+        Response.json({
+          ...snapshotFor(chatId),
+          messages,
+          anchorMessageId: anchor,
+          hasOlder: index >= 50,
+          hasNewer: index < 50,
+          coverageAfterSequence: (BigInt(messages[0].sequence) - 1n).toString(),
+          coverageThroughSequence: messages.at(-1)!.sequence,
+        }),
+      )
+    })
+    await act(async () => messenger.features.jumpToMessage(historyMessages[0].id, false))
+    expect(messenger.detached).toBe(true)
+    const target = historyMessages.find((message) => message.sequence === '95')!
+    await act(async () => messenger.features.jumpToMessage(target.id, false))
+    expect(messenger.messages[chatId].some((message) => message.id === target.id)).toBe(true)
+    expect(messenger.features.reveal?.messageId).toBe(target.id)
+    expect(messenger.error).toBeNull()
+  })
+
   it.each(['quote navigation', 'location restore'] as const)(
     'keeps the latest window when an accepted send supersedes delayed %s',
     async (navigation) => {

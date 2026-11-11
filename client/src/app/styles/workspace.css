@@ -237,7 +237,6 @@
 .chat-item.selected {
   --avatar-ring: var(--selected);
   background: var(--selected);
-  box-shadow: inset 2px 0 0 var(--accent);
 }
 .chat-item-copy {
   display: flex;

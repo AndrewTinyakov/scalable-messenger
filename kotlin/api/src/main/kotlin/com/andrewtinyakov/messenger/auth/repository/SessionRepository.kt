@@ -1,9 +1,9 @@
 package com.andrewtinyakov.messenger.auth.repository
 
 import com.andrewtinyakov.messenger.auth.model.AuthenticatedSession
-import com.andrewtinyakov.messenger.shared.id.DeviceId
-import com.andrewtinyakov.messenger.shared.id.SessionId
-import com.andrewtinyakov.messenger.shared.id.UserId
+import com.andrewtinyakov.messenger.auth.model.DeviceId
+import com.andrewtinyakov.messenger.auth.model.SessionId
+import com.andrewtinyakov.messenger.auth.model.UserId
 import java.time.OffsetDateTime
 
 interface SessionRepository {

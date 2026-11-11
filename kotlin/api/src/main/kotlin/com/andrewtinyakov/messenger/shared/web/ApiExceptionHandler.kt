@@ -14,7 +14,7 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 
 @RestControllerAdvice
 class ApiExceptionHandler : ResponseEntityExceptionHandler() {
-    private val log = LoggerFactory.getLogger(javaClass)
+    private val logger = LoggerFactory.getLogger(javaClass)
 
     @ExceptionHandler(ApiException::class)
     fun handle(exception: ApiException): ProblemDetail =
@@ -30,7 +30,7 @@ class ApiExceptionHandler : ResponseEntityExceptionHandler() {
 
     @ExceptionHandler(DependencyUnavailableException::class)
     fun handle(exception: DependencyUnavailableException): ProblemDetail {
-        log.error("Dependency unavailable: {}", exception.dependency, exception)
+        logger.error("Dependency unavailable: {}", exception.dependency, exception)
         return ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE, "A required service is temporarily unavailable").apply {
             setProperty("code", ApiErrorCode.SERVICE_UNAVAILABLE.value)
         }
@@ -38,7 +38,7 @@ class ApiExceptionHandler : ResponseEntityExceptionHandler() {
 
     @ExceptionHandler(Exception::class)
     fun handleUnexpected(exception: Exception): ProblemDetail {
-        log.error("Unhandled exception", exception)
+        logger.error("Unhandled exception", exception)
         return ProblemDetail.forStatusAndDetail(HttpStatus.INTERNAL_SERVER_ERROR, "An unexpected error occurred").apply {
             setProperty("code", ApiErrorCode.INTERNAL_SERVER_ERROR.value)
         }
@@ -53,7 +53,7 @@ class ApiExceptionHandler : ResponseEntityExceptionHandler() {
     ): ResponseEntity<Any>? {
         val code = when {
             statusCode.is5xxServerError -> ApiErrorCode.INTERNAL_SERVER_ERROR
-            statusCode.value() == 404 -> ApiErrorCode.NOT_FOUND
+            statusCode.value() == HttpStatus.NOT_FOUND.value() -> ApiErrorCode.NOT_FOUND
             else -> ApiErrorCode.INVALID_REQUEST
         }
         val detail = when (code) {
@@ -61,7 +61,7 @@ class ApiExceptionHandler : ResponseEntityExceptionHandler() {
             ApiErrorCode.NOT_FOUND -> "The requested resource was not found"
             else -> "Invalid request"
         }
-        if (statusCode.is5xxServerError) log.error("Framework request processing failed", exception)
+        if (statusCode.is5xxServerError) logger.error("Framework request processing failed", exception)
         val problem = ProblemDetail.forStatusAndDetail(statusCode, detail).apply { setProperty("code", code.value) }
         return super.handleExceptionInternal(exception, problem, headers, statusCode, request)
     }

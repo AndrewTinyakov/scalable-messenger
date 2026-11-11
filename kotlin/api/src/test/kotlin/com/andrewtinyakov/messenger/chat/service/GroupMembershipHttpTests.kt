@@ -1,12 +1,12 @@
 package com.andrewtinyakov.messenger.chat.service
 
 import com.andrewtinyakov.messenger.ApiApplication
+import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.auth.service.AuthenticationService
 import com.andrewtinyakov.messenger.auth.web.payload.AuthRequest
 import com.andrewtinyakov.messenger.chat.web.payload.CreateGroupChatRequest
 import com.andrewtinyakov.messenger.message.service.MessageSendService
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
-import com.andrewtinyakov.messenger.shared.id.UserId
 import com.andrewtinyakov.messenger.shared.id.newId
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -85,7 +85,7 @@ class GroupMembershipHttpTests
         fun `pagination visits more than fifty members once in increasing user ID order`() {
             val owner = account()
             val members = (1..120).map { user("page_${newId()}") }
-            val chat = chatService.createGroup(UserId(owner.first), CreateGroupChatRequest("Paged", members))
+            val chat = chatService.createGroup(UserId(owner.first), "Paged", members.map(::UserId))
             val expected = (members + owner.first).sorted()
             val first = page(chat.id, owner.second)
             assertEquals(expected.take(50), ids(first))
@@ -110,7 +110,7 @@ class GroupMembershipHttpTests
         fun `member listing validates IDs and limits and requires authentication`() {
             val owner = account()
             val member = user("validation_${newId()}")
-            val chat = chatService.createGroup(UserId(owner.first), CreateGroupChatRequest("Validation", listOf(member)))
+            val chat = chatService.createGroup(UserId(owner.first), "Validation", listOf(member).map(::UserId))
             assertEquals(401, request("/${chat.id}/members").statusCode())
             for ((suffix, code) in listOf(
                 "?limit=0" to "INVALID_LIMIT",

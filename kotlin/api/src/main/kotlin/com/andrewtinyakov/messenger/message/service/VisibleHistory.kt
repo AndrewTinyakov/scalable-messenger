@@ -1,13 +1,16 @@
 package com.andrewtinyakov.messenger.message.service
 
+import com.andrewtinyakov.messenger.auth.model.UserId
+import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.message.model.Message
+import com.andrewtinyakov.messenger.message.monitoring.HistoryDirection
+import com.andrewtinyakov.messenger.message.monitoring.MessageMetrics
 import com.andrewtinyakov.messenger.message.repository.MessageRepository
-import com.andrewtinyakov.messenger.message.visibility.VisibilityRepository
-import com.andrewtinyakov.messenger.message.visibility.VisibilitySnapshot
-import com.andrewtinyakov.messenger.shared.id.ChatId
-import com.andrewtinyakov.messenger.shared.id.UserId
-import io.micrometer.core.instrument.MeterRegistry
+import com.andrewtinyakov.messenger.message.visibility.model.VisibilitySnapshot
+import com.andrewtinyakov.messenger.message.visibility.repository.VisibilityRepository
 import org.springframework.stereotype.Component
+
+private const val SPAN_BUDGET = 16
 
 data class VisiblePage(
     val messages: List<Message>,
@@ -19,9 +22,9 @@ data class VisiblePage(
 
 @Component
 class VisibleHistory(
-    private val messages: MessageRepository,
-    private val visibility: VisibilityRepository,
-    private val metrics: MeterRegistry,
+    private val messageRepository: MessageRepository,
+    private val visibilityRepository: VisibilityRepository,
+    private val metrics: MessageMetrics,
 ) {
     fun page(chatId: ChatId, userId: UserId, state: VisibilitySnapshot, cursor: Long?, ascending: Boolean, limit: Int): VisiblePage =
         if (ascending) {
@@ -37,49 +40,45 @@ class VisibleHistory(
         }
 
     private fun after(chatId: ChatId, userId: UserId, state: VisibilitySnapshot, after: Long, limit: Int): VisiblePage {
-        val high = state.snapshotSequence
-        val start = minOf(after, high)
+        val snapshotSequence = state.snapshotSequence
+        val start = minOf(after, snapshotSequence)
         var cursor = maxOf(start, state.floor)
         val rows = mutableListOf<Message>()
-        repeat(16) {
-            if (cursor >= high || rows.size >= limit) return@repeat
-            val hidden = visibility.containing(chatId, userId, cursor + 1)
+        repeat(SPAN_BUDGET) {
+            if (cursor >= snapshotSequence || rows.size >= limit) return@repeat
+            val hidden = visibilityRepository.containing(chatId, userId, cursor + 1)
             if (hidden != null) {
-                cursor = minOf(hidden.through, high)
+                cursor = minOf(hidden.through, snapshotSequence)
             } else {
-                val end = minOf(visibility.next(chatId, userId, cursor)?.after ?: high, high)
+                val end = minOf(visibilityRepository.next(chatId, userId, cursor)?.after ?: snapshotSequence, snapshotSequence)
                 val remaining = limit - rows.size
-                val fetched = messages.findMessagesInSpan(chatId, userId, cursor, end, true, remaining + 1)
+                val fetched = messageRepository.findMessagesInSpan(chatId, userId, cursor, end, true, remaining + 1)
                 rows.addAll(fetched.take(remaining))
                 cursor = if (fetched.size > remaining) rows.last().sequence else end
             }
         }
-        if (cursor < high && rows.size < limit) metrics.counter("messenger.history.span.budget.exhausted", "direction", "after").increment()
-        return VisiblePage(rows, cursor, cursor < high, start, cursor)
+        if (cursor < snapshotSequence && rows.size < limit) metrics.spanBudgetExhausted(HistoryDirection.AFTER)
+        return VisiblePage(rows, cursor, cursor < snapshotSequence, start, cursor)
     }
 
     private fun before(chatId: ChatId, userId: UserId, state: VisibilitySnapshot, before: Long, limit: Int): VisiblePage {
-        val high = minOf(before - 1, state.snapshotSequence)
-        var cursor = high
+        val through = minOf(before - 1, state.snapshotSequence)
+        var cursor = through
         val rows = mutableListOf<Message>()
-        repeat(16) {
+        repeat(SPAN_BUDGET) {
             if (cursor <= state.floor || rows.size >= limit) return@repeat
-            val hidden = visibility.containing(chatId, userId, cursor)
+            val hidden = visibilityRepository.containing(chatId, userId, cursor)
             if (hidden != null) {
                 cursor = maxOf(hidden.after, state.floor)
             } else {
-                val end = maxOf(visibility.previous(chatId, userId, cursor + 1)?.through ?: state.floor, state.floor)
+                val end = maxOf(visibilityRepository.previous(chatId, userId, cursor + 1)?.through ?: state.floor, state.floor)
                 val remaining = limit - rows.size
-                val fetched = messages.findMessagesInSpan(chatId, userId, end, cursor, false, remaining + 1)
+                val fetched = messageRepository.findMessagesInSpan(chatId, userId, end, cursor, false, remaining + 1)
                 rows.addAll(fetched.take(remaining))
                 cursor = if (fetched.size > remaining) rows.last().sequence - 1 else end
             }
         }
-        if (cursor > state.floor &&
-            rows.size < limit
-        ) {
-            metrics.counter("messenger.history.span.budget.exhausted", "direction", "before").increment()
-        }
-        return VisiblePage(rows.asReversed(), cursor + 1, cursor > state.floor, cursor, high)
+        if (cursor > state.floor && rows.size < limit) metrics.spanBudgetExhausted(HistoryDirection.BEFORE)
+        return VisiblePage(rows.asReversed(), cursor + 1, cursor > state.floor, cursor, through)
     }
 }

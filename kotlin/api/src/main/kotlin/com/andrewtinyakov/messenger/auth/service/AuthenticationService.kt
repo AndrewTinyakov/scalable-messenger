@@ -1,9 +1,13 @@
 package com.andrewtinyakov.messenger.auth.service
 
 import com.andrewtinyakov.messenger.auth.model.AuthenticatedSession
+import com.andrewtinyakov.messenger.auth.model.DeviceId
 import com.andrewtinyakov.messenger.auth.model.ExpectedSessionIdentity
 import com.andrewtinyakov.messenger.auth.model.SessionCredentials
+import com.andrewtinyakov.messenger.auth.model.SessionId
+import com.andrewtinyakov.messenger.auth.model.SessionToken
 import com.andrewtinyakov.messenger.auth.model.User
+import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.auth.model.UserSummary
 import com.andrewtinyakov.messenger.auth.repository.SessionRepository
 import com.andrewtinyakov.messenger.auth.repository.UserRepository
@@ -12,21 +16,16 @@ import com.andrewtinyakov.messenger.generated.messaging.event.SessionRevokedEven
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseTransaction
 import com.andrewtinyakov.messenger.infrastructure.database.observability.observedExecute
 import com.andrewtinyakov.messenger.infrastructure.database.observability.observedExecuteWithoutResult
-import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxRepository
+import com.andrewtinyakov.messenger.infrastructure.outbox.model.toOutboxMessage
+import com.andrewtinyakov.messenger.infrastructure.outbox.repository.OutboxRepository
 import com.andrewtinyakov.messenger.infrastructure.redis.RoomAddress
 import com.andrewtinyakov.messenger.shared.crypto.sha256
-import com.andrewtinyakov.messenger.shared.id.DeviceId
-import com.andrewtinyakov.messenger.shared.id.EventId
-import com.andrewtinyakov.messenger.shared.id.SessionId
-import com.andrewtinyakov.messenger.shared.id.SessionToken
-import com.andrewtinyakov.messenger.shared.id.UserId
 import com.andrewtinyakov.messenger.shared.id.newId
 import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
-import com.andrewtinyakov.messenger.shared.web.ApiException
 import com.andrewtinyakov.messenger.shared.web.badRequest
 import com.andrewtinyakov.messenger.shared.web.conflict
+import com.andrewtinyakov.messenger.shared.web.unauthorized
 import org.springframework.dao.DuplicateKeyException
-import org.springframework.http.HttpStatus
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
@@ -37,8 +36,9 @@ import java.time.OffsetDateTime
 import java.util.Base64
 import java.util.UUID
 
-private val usernamePattern = Regex("[a-z0-9_]{3,40}")
+private val usernamePattern = Regex("[a-z0-9_]{${User.MIN_USERNAME_LENGTH},${User.MAX_USERNAME_LENGTH}}")
 private const val SESSION_LIFETIME_DAYS = 30L
+private const val SESSION_TOKEN_BYTES = 32
 
 private fun SessionToken.sessionId() = SessionId(sha256(value))
 
@@ -46,14 +46,14 @@ private fun SessionToken.sessionId() = SessionId(sha256(value))
 class AuthenticationService(
     private val userRepository: UserRepository,
     private val sessionRepository: SessionRepository,
-    private val encoder: PasswordEncoder,
+    private val passwordEncoder: PasswordEncoder,
     private val clock: Clock,
     private val tx: TransactionTemplate,
     private val outboxRepository: OutboxRepository,
     private val mapper: ObjectMapper,
 ) {
     private val random = SecureRandom()
-    private val rejectedPasswordHash = requireNotNull(encoder.encode(UUID.randomUUID().toString()))
+    private val rejectedPasswordHash = requireNotNull(passwordEncoder.encode(UUID.randomUUID().toString()))
 
     fun register(input: AuthRequest): SessionCredentials {
         validateInput(input)
@@ -64,7 +64,7 @@ class AuthenticationService(
         val user = User(
             id = UserId(newId()),
             username = username,
-            passwordHash = requireNotNull(encoder.encode(input.password)),
+            passwordHash = requireNotNull(passwordEncoder.encode(input.password)),
         )
         try {
             return tx.observedExecute(DatabaseTransaction.AUTH_REGISTER) {
@@ -80,15 +80,15 @@ class AuthenticationService(
         validateInput(input)
         val username = input.username.trim().lowercase()
         val user = userRepository.findUserByUsername(username = username)
-        val matches = encoder.matches(input.password, user?.passwordHash ?: rejectedPasswordHash)
+        val matches = passwordEncoder.matches(input.password, user?.passwordHash ?: rejectedPasswordHash)
         if (user == null || !matches) {
-            throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.INVALID_CREDENTIALS, "Invalid username or password")
+            unauthorized(ApiErrorCode.INVALID_CREDENTIALS, "Invalid username or password")
         }
         return issue(user = user, requestedDeviceId = input.deviceId?.let(::DeviceId))
     }
 
     fun authenticatedSession(token: SessionToken?): AuthenticatedSession =
-        sessionIfActive(token) ?: throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.UNAUTHORIZED, "Session expired or invalid")
+        sessionIfActive(token) ?: unauthorized(ApiErrorCode.UNAUTHORIZED, "Session expired or invalid")
 
     fun sessionIfActive(token: SessionToken?): AuthenticatedSession? =
         token?.let { sessionRepository.findSession(sessionId = it.sessionId(), now = OffsetDateTime.now(clock)) }
@@ -104,13 +104,19 @@ class AuthenticationService(
                 room = RoomAddress.user(session.userId),
                 sessionId = sessionId.value,
             )
-            outboxRepository.enqueue(eventId = EventId(event.eventId), room = event.room, payload = mapper.writeValueAsString(event))
+            outboxRepository.enqueue(event.toOutboxMessage(mapper))
+        }
+    }
+
+    fun requireExpectedIdentity(expectedIdentity: ExpectedSessionIdentity, session: AuthenticatedSession) {
+        if (!expectedIdentity.matches(session)) {
+            unauthorized(ApiErrorCode.UNAUTHORIZED, "Session identity changed")
         }
     }
 
     private fun issue(user: User, requestedDeviceId: DeviceId?): SessionCredentials {
         val deviceId = requestedDeviceId ?: DeviceId(UUID.randomUUID().toString())
-        val bytes = ByteArray(32).also(random::nextBytes)
+        val bytes = ByteArray(SESSION_TOKEN_BYTES).also(random::nextBytes)
         val token = SessionToken(Base64.getUrlEncoder().withoutPadding().encodeToString(bytes))
         val expiresAt = OffsetDateTime.now(clock).plusDays(SESSION_LIFETIME_DAYS)
         val sessionId = token.sessionId()
@@ -134,11 +140,5 @@ class AuthenticationService(
         if (input.deviceId != null && (input.deviceId.isBlank() || input.deviceId.length !in 1..64)) {
             badRequest(ApiErrorCode.INVALID_DEVICE_ID, "deviceId must be 1 to 64 characters")
         }
-    }
-}
-
-fun requireExpectedIdentity(expectedIdentity: ExpectedSessionIdentity, session: AuthenticatedSession) {
-    if (!expectedIdentity.matches(session)) {
-        throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.UNAUTHORIZED, "Session identity changed")
     }
 }

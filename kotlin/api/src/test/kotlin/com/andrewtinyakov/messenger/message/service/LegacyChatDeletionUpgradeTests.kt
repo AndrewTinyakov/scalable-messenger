@@ -1,25 +1,29 @@
 package com.andrewtinyakov.messenger.message.service
 
+import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.auth.repository.JooqUserRepository
-import com.andrewtinyakov.messenger.chat.deletion.DeletionRequest
-import com.andrewtinyakov.messenger.chat.deletion.DeletionScope
-import com.andrewtinyakov.messenger.chat.deletion.DeletionService
-import com.andrewtinyakov.messenger.chat.deletion.DeletionState
-import com.andrewtinyakov.messenger.chat.deletion.DeletionTarget
-import com.andrewtinyakov.messenger.chat.deletion.HistoryPurge
-import com.andrewtinyakov.messenger.chat.deletion.JooqDeletionRepository
-import com.andrewtinyakov.messenger.chat.deletion.JooqHistoryPurgeRepository
+import com.andrewtinyakov.messenger.chat.deletion.config.HistoryPurgeProperties
+import com.andrewtinyakov.messenger.chat.deletion.model.DeletionCommand
+import com.andrewtinyakov.messenger.chat.deletion.model.DeletionScope
+import com.andrewtinyakov.messenger.chat.deletion.model.DeletionState
+import com.andrewtinyakov.messenger.chat.deletion.model.DeletionTarget
+import com.andrewtinyakov.messenger.chat.deletion.monitoring.DeletionMetrics
+import com.andrewtinyakov.messenger.chat.deletion.repository.JooqDeletionRepository
+import com.andrewtinyakov.messenger.chat.deletion.repository.JooqHistoryPurgeRepository
+import com.andrewtinyakov.messenger.chat.deletion.service.DeletionService
+import com.andrewtinyakov.messenger.chat.deletion.service.HistoryPurgeService
+import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.repository.JooqChatRepository
+import com.andrewtinyakov.messenger.chat.service.ChatEventAudience
 import com.andrewtinyakov.messenger.chat.service.DirectChatService
-import com.andrewtinyakov.messenger.infrastructure.outbox.JooqOutboxRepository
+import com.andrewtinyakov.messenger.infrastructure.outbox.repository.JooqOutboxRepository
 import com.andrewtinyakov.messenger.message.model.CommandResult
+import com.andrewtinyakov.messenger.message.model.MessageId
+import com.andrewtinyakov.messenger.message.model.RequestId
+import com.andrewtinyakov.messenger.message.monitoring.MessageSendMetrics
 import com.andrewtinyakov.messenger.message.repository.JooqMessageRepository
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
 import com.andrewtinyakov.messenger.shared.crypto.sha256
-import com.andrewtinyakov.messenger.shared.id.ChatId
-import com.andrewtinyakov.messenger.shared.id.MessageId
-import com.andrewtinyakov.messenger.shared.id.RequestId
-import com.andrewtinyakov.messenger.shared.id.UserId
 import com.andrewtinyakov.messenger.shared.id.newId
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.flywaydb.core.Flyway
@@ -128,13 +132,13 @@ class LegacyChatDeletionUpgradeTests
                 assertEquals(0, sql.queryForObject("SELECT count(*) FROM history_purge_jobs", Int::class.java))
                 sql.update("UPDATE chats SET cleared_through_sequence=500 WHERE id=?", closedGroup)
                 sql.update("INSERT INTO history_purge_jobs(chat_id,through_sequence) VALUES (?,500)", closedGroup)
-                val repeated = DeletionRequest(newId(), DeletionScope.EVERYONE, DeletionTarget.CHAT)
+                val repeated = DeletionCommand(RequestId(newId()), DeletionScope.EVERYONE, DeletionTarget.CHAT)
                 sql.update(
                     "INSERT INTO deletion_operations(actor_id,request_id,chat_id,fingerprint," +
                         "scope,target,through_sequence,mutation_revision,visibility_revision) " +
                         "VALUES (?,?,?,?,'EVERYONE','CHAT',1001,0,0)",
                     owner,
-                    repeated.requestId,
+                    repeated.requestId.value,
                     closedGroup,
                     sha256("$closedGroup|EVERYONE|CHAT|"),
                 )
@@ -171,10 +175,12 @@ class LegacyChatDeletionUpgradeTests
                         tx,
                         mapper,
                         clock,
-                        metrics,
+                        MessageSendMetrics(metrics),
                     )
-                val deletions = DeletionService(JooqDeletionRepository(jooq, clock), chats, outbox, mapper, tx, metrics)
-                val worker = HistoryPurge(JooqHistoryPurgeRepository(jooq, clock), tx, metrics, clock)
+                val deletionMetrics = DeletionMetrics(metrics, clock)
+                val deletions =
+                    DeletionService(JooqDeletionRepository(jooq, clock), ChatEventAudience(chats), outbox, mapper, tx, deletionMetrics)
+                val worker = HistoryPurgeService(JooqHistoryPurgeRepository(jooq, clock), HistoryPurgeProperties(), tx, deletionMetrics)
                 assertNull(
                     messages.findMessage(ChatId(closedGroup), UserId(owner), MessageId(messageId)),
                 )

@@ -20,6 +20,7 @@ dependencies {
     implementation("tools.jackson.module:jackson-module-kotlin")
     runtimeOnly("io.micrometer:micrometer-registry-prometheus")
     testImplementation("org.springframework.boot:spring-boot-starter-test")
+    testImplementation("io.micrometer:micrometer-registry-prometheus")
     testImplementation("org.testcontainers:postgresql:1.21.3")
     testImplementation("org.testcontainers:junit-jupiter:1.21.3")
 }

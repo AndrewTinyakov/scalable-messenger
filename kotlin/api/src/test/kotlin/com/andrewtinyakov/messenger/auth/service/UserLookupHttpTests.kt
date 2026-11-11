@@ -1,13 +1,12 @@
 package com.andrewtinyakov.messenger.auth.service
 
 import com.andrewtinyakov.messenger.ApiApplication
+import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.auth.web.payload.AuthRequest
+import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.service.ChatMembershipService
 import com.andrewtinyakov.messenger.chat.service.ChatService
-import com.andrewtinyakov.messenger.chat.web.payload.CreateGroupChatRequest
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
-import com.andrewtinyakov.messenger.shared.id.ChatId
-import com.andrewtinyakov.messenger.shared.id.UserId
 import com.andrewtinyakov.messenger.shared.id.newId
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
@@ -52,7 +51,7 @@ class UserLookupHttpTests
             val owner = account()
             val username = "removed_${newId()}"
             val member = user(username)
-            val chat = chatService.createGroup(UserId(owner.first), CreateGroupChatRequest("Lookup", listOf(member)))
+            val chat = chatService.createGroup(UserId(owner.first), "Lookup", listOf(member).map(::UserId))
 
             membershipService.removeMember(ChatId(chat.id), UserId(owner.first), UserId(member))
 

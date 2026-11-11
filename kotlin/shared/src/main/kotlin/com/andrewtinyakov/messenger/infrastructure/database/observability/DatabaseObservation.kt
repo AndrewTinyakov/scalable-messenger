@@ -4,7 +4,7 @@ import org.springframework.transaction.TransactionStatus
 import org.springframework.transaction.support.TransactionTemplate
 
 enum class DatabaseTransaction(
-    val label: String,
+    val metricValue: String,
 ) {
     AUTH_REGISTER("auth.register"),
     AUTH_LOGOUT("auth.logout"),

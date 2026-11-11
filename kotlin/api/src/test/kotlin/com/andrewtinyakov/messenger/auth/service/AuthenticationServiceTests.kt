@@ -2,10 +2,10 @@ package com.andrewtinyakov.messenger.auth.service
 
 import com.andrewtinyakov.messenger.ApiApplication
 import com.andrewtinyakov.messenger.auth.model.ExpectedSessionIdentity
+import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.auth.web.payload.AuthRequest
-import com.andrewtinyakov.messenger.chat.grpc.ChatAuthorizationGrpcService
+import com.andrewtinyakov.messenger.chat.grpc.service.ChatAuthorizationGrpcService
 import com.andrewtinyakov.messenger.chat.service.ChatService
-import com.andrewtinyakov.messenger.chat.web.payload.CreateGroupChatRequest
 import com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupRequest
 import com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupResponse
 import com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupsRequest
@@ -177,11 +177,13 @@ class AuthenticationServiceTests
             val other = authenticationService.register(AuthRequest("other_$suffix", "long-demo-password", "other-device"))
             val joined = chatService.createGroup(
                 owner.session.userId,
-                CreateGroupChatRequest("Joined", listOf(member.session.userId.value)),
+                "Joined",
+                listOf(member.session.userId.value).map(::UserId),
             )
             val unjoined = chatService.createGroup(
                 owner.session.userId,
-                CreateGroupChatRequest("Unjoined", listOf(other.session.userId.value)),
+                "Unjoined",
+                listOf(other.session.userId.value).map(::UserId),
             )
             val bearer = member.token
             val request = AuthorizeGroupsRequest.newBuilder().setSessionId(member.session.sessionId.value)

@@ -1,8 +1,7 @@
 package com.andrewtinyakov.messenger.message.model
 
-import com.andrewtinyakov.messenger.shared.id.ChatId
-import com.andrewtinyakov.messenger.shared.id.MessageId
-import com.andrewtinyakov.messenger.shared.id.UserId
+import com.andrewtinyakov.messenger.auth.model.UserId
+import com.andrewtinyakov.messenger.chat.model.ChatId
 import java.time.OffsetDateTime
 
 data class Message(
@@ -22,9 +21,17 @@ data class Message(
     init {
         require(sequence > 0) { "Message sequence must be positive" }
         require(messageVersion > 0) { "Message version must be positive" }
-        require(if (deletedAt != null) body.isEmpty() else body.isNotBlank() && body.codePointCount(0, body.length) in 1..4000) {
-            "Message body must contain 1 to 4000 characters and cannot be blank"
+        require(
+            if (deletedAt != null) body.isEmpty() else body.isNotBlank() && body.codePointCount(0, body.length) in 1..MAX_BODY_LENGTH,
+        ) {
+            "Message body must contain 1 to $MAX_BODY_LENGTH characters and cannot be blank"
         }
+    }
+
+    companion object {
+        const val MAX_BODY_LENGTH = 4000
+        const val PREVIEW_LENGTH = 160
+        const val MAX_LOOKUP_IDS = 100
     }
 }
 
@@ -39,7 +46,7 @@ data class MessageReply(
 fun Message.asReply(): MessageReply = MessageReply(
     messageId = id,
     senderId = senderId,
-    body = body.substring(0, body.offsetByCodePoints(0, minOf(160, body.codePointCount(0, body.length)))),
+    body = body.substring(0, body.offsetByCodePoints(0, minOf(Message.PREVIEW_LENGTH, body.codePointCount(0, body.length)))),
     deleted = deletedAt != null,
     version = messageVersion,
 )

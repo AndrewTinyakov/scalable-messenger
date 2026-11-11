@@ -3,7 +3,10 @@ package com.andrewtinyakov.messenger.infrastructure.config
 import com.andrewtinyakov.messenger.auth.config.AuthProperties
 import com.andrewtinyakov.messenger.auth.config.PasswordConfig
 import com.andrewtinyakov.messenger.auth.config.PasswordProperties
-import com.andrewtinyakov.messenger.chat.grpc.GrpcProperties
+import com.andrewtinyakov.messenger.chat.deletion.config.HistoryPurgeProperties
+import com.andrewtinyakov.messenger.chat.grpc.config.GrpcProperties
+import com.andrewtinyakov.messenger.message.change.config.MessageChangeRetentionProperties
+import com.andrewtinyakov.messenger.read.config.ReadProperties
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.boot.context.properties.EnableConfigurationProperties
@@ -14,6 +17,7 @@ import org.springframework.boot.webmvc.autoconfigure.WebMvcProperties
 import org.springframework.context.annotation.Configuration
 import org.springframework.context.annotation.Import
 import org.springframework.security.crypto.password.PasswordEncoder
+import java.time.Duration
 
 class ConfigurationPropertiesTests {
     private val runner = ApplicationContextRunner()
@@ -34,6 +38,58 @@ class ConfigurationPropertiesTests {
             assertThat(encoder.matches("example-password", encoded)).isTrue()
             assertThat(context.getBean(WebMvcProperties::class.java).servlet.path).isEqualTo("/api")
             assertThat(context.getBean(SecurityProperties::class.java).user.name).isEqualTo("metrics")
+        }
+    }
+
+    @Test
+    fun `operational settings keep their defaults and accept overrides`() {
+        runner.run { context ->
+            assertThat(context).hasNotFailed()
+            assertThat(context.getBean(HistoryPurgeProperties::class.java)).isEqualTo(HistoryPurgeProperties(500, 4, 500, 2))
+            assertThat(context.getBean(ReadProperties::class.java)).isEqualTo(ReadProperties(500, 500))
+            assertThat(context.getBean(MessageChangeRetentionProperties::class.java))
+                .isEqualTo(MessageChangeRetentionProperties(Duration.ofDays(7), 1000))
+            assertThat(context.getBean(AuthProperties::class.java).sessionCleanupBatchSize).isEqualTo(500)
+        }
+        runner.withPropertyValues(
+            "messenger.deletion.purge.batch-size=100",
+            "messenger.deletion.purge.max-batches-per-run=8",
+            "messenger.deletion.purge.personal-cleanup-batch-size=50",
+            "messenger.deletion.purge.personal-cleanup-batches-per-run=3",
+            "messenger.read.cleanup-batch-size=200",
+            "messenger.read.notification-batch-size=300",
+            "messenger.message-changes.retention=3d",
+            "messenger.message-changes.prune-batch-size=250",
+            "messenger.auth.session-cleanup-batch-size=50",
+        ).run { context ->
+            assertThat(context).hasNotFailed()
+            assertThat(context.getBean(HistoryPurgeProperties::class.java)).isEqualTo(HistoryPurgeProperties(100, 8, 50, 3))
+            assertThat(context.getBean(ReadProperties::class.java)).isEqualTo(ReadProperties(200, 300))
+            assertThat(context.getBean(MessageChangeRetentionProperties::class.java))
+                .isEqualTo(MessageChangeRetentionProperties(Duration.ofDays(3), 250))
+            assertThat(context.getBean(AuthProperties::class.java).sessionCleanupBatchSize).isEqualTo(50)
+        }
+    }
+
+    @Test
+    fun `invalid operational settings fail binding`() {
+        for (property in listOf(
+            "messenger.deletion.purge.batch-size=0",
+            "messenger.deletion.purge.batch-size=1001",
+            "messenger.deletion.purge.max-batches-per-run=0",
+            "messenger.deletion.purge.personal-cleanup-batch-size=1001",
+            "messenger.deletion.purge.personal-cleanup-batches-per-run=0",
+            "messenger.read.cleanup-batch-size=0",
+            "messenger.read.notification-batch-size=1001",
+            "messenger.message-changes.retention=0s",
+            "messenger.message-changes.prune-batch-size=1001",
+            "messenger.auth.session-cleanup-batch-size=0",
+            "messenger.grpc.max-inbound-message-bytes=0",
+            "messenger.grpc.shutdown-timeout=0s",
+        )) {
+            runner.withPropertyValues(property).run { context ->
+                assertThat(context).hasFailed()
+            }
         }
     }
 
@@ -91,6 +147,9 @@ class ConfigurationPropertiesTests {
         AuthProperties::class,
         PasswordProperties::class,
         GrpcProperties::class,
+        HistoryPurgeProperties::class,
+        ReadProperties::class,
+        MessageChangeRetentionProperties::class,
         WebProperties::class,
         SecurityProperties::class,
         WebMvcProperties::class,

@@ -1,15 +1,14 @@
 package com.andrewtinyakov.messenger.message.service
 
+import com.andrewtinyakov.messenger.auth.model.UserId
+import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.service.ChatService
-import com.andrewtinyakov.messenger.chat.web.payload.CreateGroupChatRequest
 import com.andrewtinyakov.messenger.generated.messaging.event.SendRejectionReason
-import com.andrewtinyakov.messenger.message.change.MessageMutationService
+import com.andrewtinyakov.messenger.message.change.service.MessageMutationService
 import com.andrewtinyakov.messenger.message.model.CommandResult
+import com.andrewtinyakov.messenger.message.model.MessageId
+import com.andrewtinyakov.messenger.message.model.RequestId
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
-import com.andrewtinyakov.messenger.shared.id.ChatId
-import com.andrewtinyakov.messenger.shared.id.MessageId
-import com.andrewtinyakov.messenger.shared.id.RequestId
-import com.andrewtinyakov.messenger.shared.id.UserId
 import com.andrewtinyakov.messenger.shared.id.newId
 import com.andrewtinyakov.messenger.shared.web.ApiException
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -24,6 +23,7 @@ class MessageForwardTests
         private val sends: MessageSendService,
         private val batches: MessageSendBatchService,
         private val history: MessageHistoryService,
+        private val sendStatusService: SendStatusService,
         private val mutations: MessageMutationService,
         private val chats: ChatService,
     ) : MessengerIntegrationTest() {
@@ -35,7 +35,7 @@ class MessageForwardTests
             val source = group(author, relay)
             val target = group(relay, reader)
             val original = send(author, source, "original body")
-            mutations.edit(ChatId(source), UserId(author), MessageId(original), "edited body", "1")
+            mutations.edit(ChatId(source), UserId(author), MessageId(original), "edited body", 1L)
             assertEquals(
                 CommandResult.SAVED,
                 sends.process(forward(relay, target, source, original, "stale client copy")),
@@ -49,7 +49,7 @@ class MessageForwardTests
             assertEquals(CommandResult.SAVED, sends.process(forward(reader, again, target, copied.id, copied.body)))
             assertEquals(author, history.messages(ChatId(again), UserId(author), null, null, 10).messages.single().forwardedFromUserId)
             val error = assertThrows(ApiException::class.java) {
-                mutations.edit(ChatId(target), UserId(relay), MessageId(copied.id), "rewrite", copied.messageVersion)
+                mutations.edit(ChatId(target), UserId(relay), MessageId(copied.id), "rewrite", copied.messageVersion.toLong())
             }
             assertEquals(HttpStatus.FORBIDDEN, error.status)
         }
@@ -64,7 +64,10 @@ class MessageForwardTests
             val hidden = send(author, secret, "not for outsiders")
             val single = forward(outsider, target, secret, hidden, "guess")
             assertEquals(CommandResult.REJECTED, sends.process(single))
-            assertEquals(SendRejectionReason.INVALID_FORWARD_SOURCE, history.status(UserId(outsider), RequestId(single.requestId)).reason)
+            assertEquals(
+                SendRejectionReason.INVALID_FORWARD_SOURCE,
+                sendStatusService.status(UserId(outsider), RequestId(single.requestId)).reason,
+            )
 
             val visible = send(friend, target, "visible")
             val batch = listOf(
@@ -78,7 +81,7 @@ class MessageForwardTests
             assertEquals(listOf(author, friend), saved.map { it.forwardedFromUserId })
             assertEquals(
                 SendRejectionReason.INVALID_FORWARD_SOURCE,
-                history.status(UserId(outsider), RequestId(batch[1].requestId)).reason,
+                sendStatusService.status(UserId(outsider), RequestId(batch[1].requestId)).reason,
             )
             assertEquals(CommandResult.DUPLICATE, sends.process(batch[0]))
         }
@@ -87,7 +90,7 @@ class MessageForwardTests
             command(sender, newId(), body, chat = chat).copy(forwardFromChatId = sourceChat, forwardFromMessageId = sourceMessage)
 
         private fun group(owner: String, member: String): String =
-            chats.createGroup(UserId(owner), CreateGroupChatRequest("Forward ${newId()}", listOf(member))).id
+            chats.createGroup(UserId(owner), "Forward ${newId()}", listOf(member).map(::UserId)).id
 
         private fun send(sender: String, chat: String, body: String): String {
             assertEquals(CommandResult.SAVED, sends.process(command(sender, newId(), body, chat = chat)))

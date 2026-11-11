@@ -1,9 +1,9 @@
 package com.andrewtinyakov.messenger.chat.service
 
+import com.andrewtinyakov.messenger.auth.model.UserId
+import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.model.ChatKind
-import com.andrewtinyakov.messenger.chat.repository.JooqChatRepository
-import com.andrewtinyakov.messenger.shared.id.ChatId
-import com.andrewtinyakov.messenger.shared.id.UserId
+import com.andrewtinyakov.messenger.chat.repository.JooqChatDirectoryRepository
 import org.jooq.ExecuteContext
 import org.jooq.ExecuteListener
 import org.jooq.SQLDialect
@@ -34,7 +34,7 @@ class SidebarPageEvidenceTests {
                     }
                 }
             val db = DSL.using(connection, SQLDialect.POSTGRES)
-            val repository = JooqChatRepository(DSL.using(db.configuration().derive(listener)))
+            val repository = JooqChatDirectoryRepository(DSL.using(db.configuration().derive(listener)))
             val viewer = UserId("00000000000000000000000001")
 
             fun page() {

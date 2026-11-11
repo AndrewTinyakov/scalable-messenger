@@ -1,14 +1,16 @@
 package com.andrewtinyakov.messenger.auth.repository
 
 import com.andrewtinyakov.messenger.auth.model.User
+import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.auth.model.UserSummary
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.USERS
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseObservation
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseOperation
-import com.andrewtinyakov.messenger.shared.id.UserId
 import org.jooq.DSLContext
 import org.jooq.Record2
 import org.springframework.stereotype.Repository
+
+private const val SEARCH_RESULT_LIMIT = 30
 
 @Repository
 class JooqUserRepository(
@@ -42,10 +44,6 @@ class JooqUserRepository(
         db.fetchExists(db.selectOne().from(USERS).where(USERS.ID.eq(userId.value)))
     }
 
-    override fun countExisting(userIds: List<UserId>): Int = DatabaseObservation.query(DatabaseOperation.USER_COUNT_EXISTING) {
-        db.selectCount().from(USERS).where(USERS.ID.`in`(userIds.map(UserId::value))).fetchOne(0, Int::class.java)!!
-    }
-
     override fun search(query: String): List<UserSummary> = DatabaseObservation.query(DatabaseOperation.USER_SEARCH) {
         db.select(USERS.ID, USERS.USERNAME)
             .from(USERS)
@@ -53,7 +51,7 @@ class JooqUserRepository(
                 USERS.USERNAME.like("%${query.lowercase().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")}%", '\\'),
             )
             .orderBy(USERS.USERNAME)
-            .limit(30)
+            .limit(SEARCH_RESULT_LIMIT)
             .fetch { it.toUserSummary() }
     }
 }

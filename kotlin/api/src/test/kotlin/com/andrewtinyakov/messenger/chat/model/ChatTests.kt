@@ -1,7 +1,6 @@
 package com.andrewtinyakov.messenger.chat.model
 
-import com.andrewtinyakov.messenger.shared.id.ChatId
-import com.andrewtinyakov.messenger.shared.id.UserId
+import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.shared.id.newId
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows

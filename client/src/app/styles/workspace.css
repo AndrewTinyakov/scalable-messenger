@@ -104,7 +104,7 @@
   padding: 0 5px;
   place-items: center;
   border-radius: 9px;
-  background: #2a2d34;
+  background: oklch(0.3 0.01 75);
   box-shadow: 0 0 0 2.5px var(--bg-rail);
   color: var(--text);
   font-size: 10.5px;
@@ -147,7 +147,7 @@
     color 180ms;
 }
 .sidebar-search:hover {
-  background: #16181d;
+  background: oklch(0.215 0.007 75);
 }
 .sidebar-search:focus-within {
   border-color: var(--line-focus);

@@ -13,7 +13,7 @@ export function useSenderNames(
   const cache = useRef(new Map<string, string>())
   const requested = useRef(new Set<string>())
   const queue = useRef<string[]>([])
-  const running = useRef(false)
+  const running = useRef(0)
   const active = useRef(true)
   const [names, setNames] = useState(new Map<string, string>())
   const group = chat?.kind === ChatKind.GROUP
@@ -58,26 +58,28 @@ export function useSenderNames(
       requested.current.add(id)
       queue.current.push(id)
     }
-    if (running.current) return
-    running.current = true
-    void (async () => {
-      try {
-        while (active.current && queue.current.length) {
-          const id = queue.current.shift()!
-          try {
-            const user = await lookup(id)
-            if (!active.current) return
-            if (cache.current.size >= 400) cache.current.delete(cache.current.keys().next().value!)
-            cache.current.set(id, user.username)
-            setNames(new Map(cache.current))
-          } catch {
-            requested.current.delete(id)
+    while (running.current < 4 && queue.current.length) {
+      running.current += 1
+      void (async () => {
+        try {
+          while (active.current && queue.current.length) {
+            const id = queue.current.shift()!
+            try {
+              const user = await lookup(id)
+              if (!active.current) return
+              if (cache.current.size >= 400)
+                cache.current.delete(cache.current.keys().next().value!)
+              cache.current.set(id, user.username)
+              setNames(new Map(cache.current))
+            } catch {
+              requested.current.delete(id)
+            }
           }
+        } finally {
+          running.current -= 1
         }
-      } finally {
-        running.current = false
-      }
-    })()
+      })()
+    }
   }, [chat?.members, lookup, senderIds])
 
   return new Map([

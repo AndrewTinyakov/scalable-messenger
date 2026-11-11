@@ -18,13 +18,19 @@ type sidebarTestDependencies struct {
 	feeds     map[string]chan protocol.Event
 	started   chan string
 	stopped   chan string
+	authorize func(context.Context, string, []string) ([]grpcauth.SidebarChat, error)
 }
 
-func (d *sidebarTestDependencies) AuthorizeSidebar(context.Context, string, []string) ([]grpcauth.SidebarChat, error) {
+func (d *sidebarTestDependencies) AuthorizeSidebar(ctx context.Context, session string, ids []string) ([]grpcauth.SidebarChat, error) {
 	d.sidebarMu.Lock()
-	defer d.sidebarMu.Unlock()
 	d.calls++
-	return append([]grpcauth.SidebarChat(nil), d.chats...), nil
+	action := d.authorize
+	chats := append([]grpcauth.SidebarChat(nil), d.chats...)
+	d.sidebarMu.Unlock()
+	if action != nil {
+		return action(ctx, session, ids)
+	}
+	return chats, nil
 }
 func (d *sidebarTestDependencies) RunActivity(ctx context.Context, id string, consume func(protocol.Event)) error {
 	d.sidebarMu.Lock()
@@ -149,5 +155,88 @@ func TestSidebarPresenceUnknownExpiryAndRateLimit(t *testing.T) {
 	d.mu.Unlock()
 	if err := c.watchSidebar(context.Background(), []string{direct}); err != errRateLimited {
 		t.Fatalf("rate limit = %v", err)
+	}
+}
+
+func TestSidebarRenewsAuthorizationWhilePresenceIsPending(t *testing.T) {
+	s, d := newSidebarTestServer(t)
+	s.config.APITimeout = 5 * time.Second
+	peer, direct := presencePeer(1), presencePeer(2)
+	d.chats = []grpcauth.SidebarChat{{ChatID: direct, PeerID: peer}}
+	c := presenceTestConnection(t, s)
+	if err := c.watchSidebar(context.Background(), []string{direct}); err != nil {
+		t.Fatal(err)
+	}
+	s.sidebar.mu.Lock()
+	watch := s.sidebar.watches[c]
+	watch.nextAuth = time.Time{}
+	s.sidebar.mu.Unlock()
+	presenceStarted := make(chan struct{})
+	presenceReleased := make(chan struct{})
+	var releaseOnce sync.Once
+	releasePresence := func() { releaseOnce.Do(func() { close(presenceReleased) }) }
+	authorizationStarted := make(chan struct{})
+	d.source = func(ctx context.Context, _ []string) (map[string]bool, error) {
+		close(presenceStarted)
+		select {
+		case <-presenceReleased:
+			return map[string]bool{peer: true}, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	d.authorize = func(context.Context, string, []string) ([]grpcauth.SidebarChat, error) {
+		close(authorizationStarted)
+		return []grpcauth.SidebarChat{{ChatID: direct, PeerID: peer}}, nil
+	}
+	done := make(chan struct{})
+	go func() {
+		s.sidebar.sweep()
+		close(done)
+	}()
+	t.Cleanup(func() {
+		releasePresence()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Error("sidebar sweep did not join its workers")
+		}
+	})
+	select {
+	case <-presenceStarted:
+	case <-time.After(time.Second):
+		t.Fatal("presence snapshot did not start")
+	}
+	select {
+	case <-authorizationStarted:
+	case <-time.After(time.Second):
+		t.Fatal("presence snapshot blocked authorization renewal")
+	}
+	s.sidebar.mu.Lock()
+	current := s.sidebar.watches[c]
+	s.sidebar.mu.Unlock()
+	if current != watch {
+		t.Fatal("authorization was installed before the pending presence snapshot")
+	}
+	releasePresence()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("sidebar sweep did not complete")
+	}
+	select {
+	case item := <-c.out:
+		event := item.frame.Event()
+		if item.sidebarWatch != watch || len(event.Statuses) != 1 || event.Statuses[0].State != "online" {
+			t.Fatal("pending watch did not receive its presence snapshot before renewal")
+		}
+	default:
+		t.Fatal("presence snapshot missing before renewal")
+	}
+	s.sidebar.mu.Lock()
+	current = s.sidebar.watches[c]
+	s.sidebar.mu.Unlock()
+	if current == watch {
+		t.Fatal("authorization renewal was not installed")
 	}
 }

@@ -12,6 +12,20 @@ import (
 	"messenger/ws/internal/redisroom"
 )
 
+type registryState uint8
+
+const (
+	registryOpen registryState = iota
+	registryClosed
+)
+
+type localRoomState uint8
+
+const (
+	roomActive localRoomState = iota
+	roomRetired
+)
+
 type localRoom struct {
 	name           string
 	mu             sync.Mutex
@@ -19,7 +33,7 @@ type localRoom struct {
 	ready          chan struct{}
 	err            error
 	cancel         context.CancelFunc
-	retired        bool
+	state          localRoomState
 	members        map[Recipient]*roomMember
 	epoch          string
 	lastID         string
@@ -34,7 +48,7 @@ type Rooms struct {
 	membershipCount int
 	maxRooms        int
 	maxMemberships  int
-	closed          bool
+	state           registryState
 	redis           roomStore
 	logger          *slog.Logger
 	replayLimit     int64
@@ -112,7 +126,7 @@ func (r *Rooms) Join(ctx context.Context, connection Recipient, name, chatID, ep
 	}
 	entry.mu.Lock()
 	feedErr := entry.err
-	left := entry.retired || entry.members[connection] != member || member.left.Load()
+	left := entry.state == roomRetired || entry.members[connection] != member || member.hasLeft()
 	entry.mu.Unlock()
 	if left {
 		return errMembershipLeft
@@ -127,7 +141,7 @@ func (r *Rooms) Join(ctx context.Context, connection Recipient, name, chatID, ep
 		if err != nil {
 			result = "fallback"
 		}
-		if member.left.Load() {
+		if member.hasLeft() {
 			return errMembershipLeft
 		}
 		if err != nil {
@@ -138,7 +152,7 @@ func (r *Rooms) Join(ctx context.Context, connection Recipient, name, chatID, ep
 		}
 		r.metrics.RecordReplay(monitoring.ReplayComplete)
 		for _, item := range items {
-			if member.left.Load() {
+			if member.hasLeft() {
 				return errMembershipLeft
 			}
 			frame, err := protocol.NewEventFrame(item.Event)
@@ -155,7 +169,7 @@ func (r *Rooms) Join(ctx context.Context, connection Recipient, name, chatID, ep
 		r.failMember(connection, name, chatID)
 	}
 	r.finishMember(connection, entry, member, replayEvents)
-	if member.left.Load() {
+	if member.hasLeft() {
 		return errMembershipLeft
 	}
 	return nil
@@ -164,7 +178,7 @@ func (r *Rooms) Join(ctx context.Context, connection Recipient, name, chatID, ep
 func (r *Rooms) beginJoin(connection Recipient, name, chatID string) (*localRoom, *roomMember, error) {
 	for {
 		r.mu.Lock()
-		if r.closed {
+		if r.state == registryClosed {
 			r.mu.Unlock()
 			return nil, nil, errors.New("room registry closed")
 		}
@@ -203,13 +217,13 @@ func (r *Rooms) beginJoin(connection Recipient, name, chatID string) (*localRoom
 			r.mu.Unlock()
 			member.joinMu.Lock()
 			r.mu.Lock()
-			if r.closed || r.rooms[name] != entry {
+			if r.state == registryClosed || r.rooms[name] != entry {
 				r.mu.Unlock()
 				member.joinMu.Unlock()
 				continue
 			}
 			entry.mu.Lock()
-			if entry.members[connection] != member || member.left.Load() {
+			if entry.members[connection] != member || member.hasLeft() {
 				entry.mu.Unlock()
 				r.mu.Unlock()
 				member.joinMu.Unlock()
@@ -217,7 +231,7 @@ func (r *Rooms) beginJoin(connection Recipient, name, chatID string) (*localRoom
 			}
 		}
 		member.chatIDs[chatID] = true
-		member.catching.Store(true)
+		member.beginCatchup()
 		entry.mu.Unlock()
 		r.mu.Unlock()
 		return entry, member, nil
@@ -291,7 +305,7 @@ func (r *Rooms) removeMemberLocked(c Recipient, entry *localRoom, member *roomMe
 	if member == nil {
 		return
 	}
-	member.left.Store(true)
+	member.leave()
 	delete(entry.members, c)
 	if memberships := r.memberships[c]; memberships != nil {
 		if memberships[entry.name] == entry {
@@ -305,7 +319,7 @@ func (r *Rooms) removeMemberLocked(c Recipient, entry *localRoom, member *roomMe
 	}
 	if len(entry.members) == 0 {
 		delete(r.rooms, entry.name)
-		entry.retired = true
+		entry.state = roomRetired
 		r.metrics.RoomSubscriptions.Dec()
 		if entry.cancel != nil {
 			entry.cancel()
@@ -327,12 +341,12 @@ func (r *Rooms) LeaveAll(c Recipient) {
 
 func (r *Rooms) Close() {
 	r.mu.Lock()
-	r.closed = true
+	r.state = registryClosed
 	for _, entry := range r.rooms {
 		entry.mu.Lock()
-		entry.retired = true
+		entry.state = roomRetired
 		for _, member := range entry.members {
-			member.left.Store(true)
+			member.leave()
 		}
 		if entry.cancel != nil {
 			entry.cancel()

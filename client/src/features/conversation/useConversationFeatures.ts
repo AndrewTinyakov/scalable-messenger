@@ -25,6 +25,9 @@ interface Options {
   fail(message: string): void
 }
 
+type ReadWrite =
+  { phase: 'idle' | 'sending' } | { phase: 'waiting'; timer: ReturnType<typeof setTimeout> }
+
 export function useConversationFeatures(options: Options) {
   const optionsRef = useRef(options)
   optionsRef.current = options
@@ -43,10 +46,8 @@ export function useConversationFeatures(options: Options) {
   const jumpRequest = useRef(0)
   const readPending = useRef('0')
   const readNextAt = useRef(0)
-  const readTimer = useRef<ReturnType<typeof setTimeout>>()
-  const readRunning = useRef(false)
-  const readRefreshing = useRef(false)
-  const readRefreshPending = useRef(false)
+  const readWrite = useRef<ReadWrite>({ phase: 'idle' })
+  const readRefresh = useRef<'idle' | 'refreshing' | 'invalidated'>('idle')
   const mutationBusy = useRef(new Set<string>())
   const reconcileRef = useRef<MutationRecovery | null>(null)
   if (!reconcileRef.current)
@@ -69,12 +70,12 @@ export function useConversationFeatures(options: Options) {
     const id = current.chat?.id
     const generation = scope.current
     if (!id || id.startsWith('draft:')) return
-    if (readRefreshing.current) {
-      readRefreshPending.current = true
+    if (readRefresh.current !== 'idle') {
+      readRefresh.current = 'invalidated'
       return
     }
-    readRefreshPending.current = false
-    readRefreshing.current = true
+    readRefresh.current = 'refreshing'
+    const invalidated = () => readRefresh.current === 'invalidated'
     try {
       const result = await current.sessionApi.reads(id)
       if (generation !== scope.current) return
@@ -88,27 +89,32 @@ export function useConversationFeatures(options: Options) {
     } catch {
     } finally {
       if (generation === scope.current) {
-        readRefreshing.current = false
-        if (readRefreshPending.current) void refreshReads()
+        const pending = invalidated()
+        readRefresh.current = 'idle'
+        if (pending) void refreshReads()
       }
     }
   }, [])
   const flushRead = useCallback(async () => {
-    if (readRunning.current || !optionsRef.current.connected) return
+    if (readWrite.current.phase !== 'idle' || !optionsRef.current.connected) return
     const current = optionsRef.current
     const id = current.chat?.id
     const generation = scope.current
     if (!id || id.startsWith('draft:')) return
-    readRunning.current = true
+    const sending: ReadWrite = { phase: 'sending' }
+    readWrite.current = sending
     try {
       while (readPending.current !== '0' && generation === scope.current) {
         const wait = readNextAt.current - Date.now()
         if (wait > 0) {
-          if (readTimer.current === undefined)
-            readTimer.current = setTimeout(() => {
-              readTimer.current = undefined
-              if (generation === scope.current) void flushRead()
-            }, wait)
+          readWrite.current = {
+            phase: 'waiting',
+            timer: setTimeout(() => {
+              if (generation !== scope.current) return
+              readWrite.current = { phase: 'idle' }
+              void flushRead()
+            }, wait),
+          }
           return
         }
         const through = readPending.current
@@ -128,7 +134,8 @@ export function useConversationFeatures(options: Options) {
     } catch {
       current.onReadFailed?.(id)
     } finally {
-      if (generation === scope.current) readRunning.current = false
+      if (generation === scope.current && readWrite.current === sending)
+        readWrite.current = { phase: 'idle' }
     }
   }, [])
   const readThrough = useCallback(
@@ -154,11 +161,9 @@ export function useConversationFeatures(options: Options) {
     scope.current += 1
     readPending.current = '0'
     readNextAt.current = 0
-    clearTimeout(readTimer.current)
-    readTimer.current = undefined
-    readRunning.current = false
-    readRefreshing.current = false
-    readRefreshPending.current = false
+    if (readWrite.current.phase === 'waiting') clearTimeout(readWrite.current.timer)
+    readWrite.current = { phase: 'idle' }
+    readRefresh.current = 'idle'
     setWatchTargets(null)
     presenceAt.current = 0
     clearTimeout(presenceExpiry.current)
@@ -169,8 +174,8 @@ export function useConversationFeatures(options: Options) {
     setJumpLoading(null)
     reconcileRef.current!.select(chatId ?? null)
     return () => {
-      clearTimeout(readTimer.current)
-      readTimer.current = undefined
+      if (readWrite.current.phase === 'waiting') clearTimeout(readWrite.current.timer)
+      readWrite.current = { phase: 'idle' }
       clearTimeout(presenceExpiry.current)
       scope.current += 1
     }

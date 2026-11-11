@@ -16,46 +16,52 @@ interface Adapters {
   ): boolean | void
 }
 
+type MutationRecoveryState =
+  | { phase: 'unselected' }
+  | { phase: 'awaiting-snapshot'; chatId: string }
+  | { phase: 'ready'; chatId: string; revision: string }
+  | { phase: 'refreshing'; chatId: string; revision: string; promise: Promise<void> }
+
 export class MutationRecovery {
-  private chatId: string | null = null
-  private revision: string | undefined
-  private generation = 0
-  private running: Promise<void> | null = null
+  private state: MutationRecoveryState = { phase: 'unselected' }
 
   constructor(private readonly adapters: Adapters) {}
 
   select(chatId: string | null): void {
-    if (this.chatId === chatId) return
-    this.chatId = chatId
-    this.revision = undefined
-    this.generation += 1
-    this.running = null
+    if (chatId === ('chatId' in this.state ? this.state.chatId : null)) return
+    this.state = chatId ? { phase: 'awaiting-snapshot', chatId } : { phase: 'unselected' }
   }
 
   snapshot(chatId: string, revision: string): void {
-    if (chatId === this.chatId && this.revision === undefined) this.revision = revision
+    if (this.state.phase === 'awaiting-snapshot' && chatId === this.state.chatId)
+      this.state = { phase: 'ready', chatId, revision }
   }
 
   refresh(): Promise<void> {
-    if (this.running) return this.running
-    const chatId = this.chatId
-    const generation = this.generation
-    if (!chatId || this.revision === undefined) return Promise.resolve()
-    const valid = () => generation === this.generation && chatId === this.chatId
+    if (this.state.phase === 'refreshing') return this.state.promise
+    if (this.state.phase !== 'ready') return Promise.resolve()
+    const operation: Extract<MutationRecoveryState, { phase: 'refreshing' }> = {
+      ...this.state,
+      phase: 'refreshing',
+      promise: Promise.resolve(),
+    }
+    this.state = operation
+    const chatId = operation.chatId
+    const valid = () => this.state === operation
     const run = async () => {
       for (let page = 0; page < 10 && valid(); page += 1) {
-        const changes = await this.adapters.changes(chatId, this.revision!)
+        const changes = await this.adapters.changes(chatId, operation.revision)
         if (!valid()) return
         if (!changes) continue
         if (changes.resetRequired) {
           const revision = await this.adapters.reset(chatId)
-          if (valid()) this.revision = revision
+          if (valid()) operation.revision = revision
           return
         }
-        if (BigInt(changes.nextRevision) < BigInt(this.revision!))
+        if (BigInt(changes.nextRevision) < BigInt(operation.revision))
           throw new Error('Message changes cursor moved backwards')
         if (
-          changes.nextRevision === this.revision &&
+          changes.nextRevision === operation.revision &&
           BigInt(changes.lastRevision) > BigInt(changes.nextRevision)
         )
           throw new Error('Message changes cursor did not advance')
@@ -72,17 +78,16 @@ export class MutationRecovery {
           )
         if (page === 9) {
           const revision = await this.adapters.reset(chatId)
-          if (valid()) this.revision = revision
+          if (valid()) operation.revision = revision
           return
         }
-        this.revision = changes.nextRevision
-        if (BigInt(this.revision) >= BigInt(changes.lastRevision)) return
+        operation.revision = changes.nextRevision
+        if (BigInt(operation.revision) >= BigInt(changes.lastRevision)) return
       }
     }
-    const promise = run().finally(() => {
-      if (this.running === promise) this.running = null
+    operation.promise = run().finally(() => {
+      if (valid()) this.state = { phase: 'ready', chatId, revision: operation.revision }
     })
-    this.running = promise
-    return promise
+    return operation.promise
   }
 }

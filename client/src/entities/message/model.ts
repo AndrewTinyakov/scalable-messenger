@@ -29,12 +29,12 @@ export interface PendingSend {
   sequence?: string
 }
 
-const statusOrder: Record<SendState, number> = {
-  sending: 0,
-  retryable: 0,
-  queued: 1,
-  saved: 2,
-  rejected: 2,
+const sendTransitions: Record<SendState, readonly SendState[]> = {
+  sending: ['sending', 'retryable', 'queued', 'saved', 'rejected'],
+  retryable: ['sending', 'retryable', 'queued', 'saved', 'rejected'],
+  queued: ['queued', 'saved', 'rejected'],
+  saved: ['saved'],
+  rejected: ['rejected'],
 }
 
 export function advanceSend(
@@ -42,13 +42,7 @@ export function advanceSend(
   status: SendState,
   extra: Partial<PendingSend> = {},
 ): PendingSend {
-  if (statusOrder[status] < statusOrder[send.status]) return send
-  if (
-    statusOrder[status] === statusOrder[send.status] &&
-    status !== send.status &&
-    statusOrder[status] === 2
-  )
-    return send
+  if (!sendTransitions[send.status].includes(status)) return send
   return { ...send, ...extra, status }
 }
 

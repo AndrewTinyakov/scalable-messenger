@@ -24,11 +24,43 @@ type chatSubscriptions struct {
 	leaseSerial      uint64
 }
 
+type groupGrantState uint8
+
+const (
+	groupAuthorizing groupGrantState = iota
+	groupAuthorizingMissed
+	groupAuthorized
+	groupAuthorizedMissed
+)
+
+func (grant *groupGrant) authorized() bool {
+	return grant.state == groupAuthorized || grant.state == groupAuthorizedMissed
+}
+
+func (grant *groupGrant) missed() bool {
+	return grant.state == groupAuthorizingMissed || grant.state == groupAuthorizedMissed
+}
+
+func (grant *groupGrant) authorize() {
+	if grant.missed() {
+		grant.state = groupAuthorizedMissed
+	} else {
+		grant.state = groupAuthorized
+	}
+}
+
+func (grant *groupGrant) miss() {
+	if grant.authorized() {
+		grant.state = groupAuthorizedMissed
+	} else {
+		grant.state = groupAuthorizingMissed
+	}
+}
+
 type groupGrant struct {
 	connection *Connection
 	chatID     string
-	authorized bool
-	missed     bool
+	state      groupGrantState
 }
 
 type groupLease struct {
@@ -48,7 +80,7 @@ func newChatSubscriptions(connection *Connection) *chatSubscriptions {
 
 func (subscriptions *chatSubscriptions) groupGrantLocked(chatID string) *groupGrant {
 	grant := subscriptions.groups[chatID]
-	if grant == nil || !grant.authorized || subscriptions.connection.admissionError() != nil {
+	if grant == nil || !grant.authorized() || subscriptions.connection.admissionError() != nil {
 		return nil
 	}
 	return grant
@@ -112,7 +144,7 @@ func (subscriptions *chatSubscriptions) allowGroupJoin(chatID string, grant *gro
 	connection := subscriptions.connection
 	connection.mu.Lock()
 	defer connection.mu.Unlock()
-	if grant == nil || subscriptions.groups[chatID] != grant || connection.closed || connection.admissionError() != nil {
+	if grant == nil || subscriptions.groups[chatID] != grant || connection.state == lifecycleClosed || connection.admissionError() != nil {
 		return false
 	}
 	return true
@@ -122,10 +154,10 @@ func (subscriptions *chatSubscriptions) commitGroupJoin(chatID, room string, gra
 	connection := subscriptions.connection
 	connection.mu.Lock()
 	defer connection.mu.Unlock()
-	if grant == nil || subscriptions.groups[chatID] != grant || connection.closed || connection.admissionError() != nil {
+	if grant == nil || subscriptions.groups[chatID] != grant || connection.state == lifecycleClosed || connection.admissionError() != nil {
 		return false
 	}
-	grant.authorized = true
+	grant.authorize()
 	subscriptions.rooms[chatID] = room
 	subscriptions.renewGroupLocked(chatID)
 	return true
@@ -135,14 +167,14 @@ func (subscriptions *chatSubscriptions) groupJoinMissed(chatID string, grant *gr
 	connection := subscriptions.connection
 	connection.mu.Lock()
 	defer connection.mu.Unlock()
-	return subscriptions.groups[chatID] == grant && grant.missed
+	return subscriptions.groups[chatID] == grant && grant.missed()
 }
 
 func (subscriptions *chatSubscriptions) setDirectRoom(chatID, room string) bool {
 	connection := subscriptions.connection
 	connection.mu.Lock()
 	defer connection.mu.Unlock()
-	if connection.closed {
+	if connection.state == lifecycleClosed {
 		return false
 	}
 	subscriptions.rooms[chatID] = room
@@ -203,7 +235,7 @@ func (subscriptions *chatSubscriptions) expireGroup(chatID string, serial uint64
 	connection := subscriptions.connection
 	connection.mu.Lock()
 	lease, ok := subscriptions.leases[chatID]
-	if !ok || lease.serial != serial || connection.closed {
+	if !ok || lease.serial != serial || connection.state == lifecycleClosed {
 		connection.mu.Unlock()
 		return
 	}
@@ -238,11 +270,11 @@ func (grant *groupGrant) EnqueueFrame(frame *protocol.EventFrame) bool {
 func (grant *groupGrant) Close() {
 	connection := grant.connection
 	connection.mu.Lock()
-	if connection.closed || connection.subscriptions.groups[grant.chatID] != grant {
+	if connection.state == lifecycleClosed || connection.subscriptions.groups[grant.chatID] != grant {
 		connection.mu.Unlock()
 		return
 	}
-	connection.closed = true
+	connection.state = lifecycleClosed
 	connection.mu.Unlock()
 	connection.Close()
 }

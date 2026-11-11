@@ -306,7 +306,7 @@ func TestLastListenerRejoinWaitsForClosedGroupToDrop(t *testing.T) {
 	group.mu.Lock()
 	delete(group.listeners, Channel(room))
 	first.stop(errSubscriptionClosed)
-	group.closed = true
+	group.state = subscriptionClosed
 	group.mu.Unlock()
 	// Model the interval after the last listener marks the group closed but
 	// before its PubSub close removes it from the hub.

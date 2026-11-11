@@ -8,7 +8,7 @@ import (
 
 func (s *Server) ready(w http.ResponseWriter, _ *http.Request) {
 	s.mu.Lock()
-	ready := !s.closing && !s.draining && (s.config.MaxConnections <= 0 || len(s.connections)+s.pendingUpgrades < s.config.MaxConnections)
+	ready := s.state == serverAccepting && (s.config.MaxConnections <= 0 || len(s.connections)+s.pendingUpgrades < s.config.MaxConnections)
 	s.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
 	if !ready {
@@ -21,7 +21,9 @@ func (s *Server) ready(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) Drain(ctx context.Context) {
 	s.mu.Lock()
-	s.draining = true
+	if s.state == serverAccepting {
+		s.state = serverDraining
+	}
 	s.metrics.Draining.Set(1)
 	connections := make([]*Connection, 0, len(s.connections))
 	for connection := range s.connections {

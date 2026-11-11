@@ -25,6 +25,7 @@ import com.andrewtinyakov.messenger.shared.id.newId
 import com.andrewtinyakov.messenger.shared.web.ApiException
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -314,21 +315,19 @@ class MessageFeatureTests
                 { mutations.delete(ChatId(chat), UserId(owner), MessageId(target.id), 1L) },
             )
             val results = attempts.map { action ->
-                concurrently {
-                    try {
-                        action()
-                        "saved"
-                    } catch (error: ApiException) {
-                        assertEquals(HttpStatus.CONFLICT, error.status)
-                        "conflict"
-                    }
-                }
-            }.map { it.get(10, TimeUnit.SECONDS) }.sorted()
-            assertEquals(listOf("conflict", "saved"), results)
-            val current = history.messages(ChatId(chat), UserId(member), null, null, 10).messages.single()
-            assertEquals("2", current.messageVersion)
-            assertEquals("1", current.sequence)
-            assertEquals(if (current.deletedAt == null) "edited" else "", current.body)
+                concurrently { runCatching(action) }
+            }.map { it.get(10, TimeUnit.SECONDS) }
+            val saved = results.filter { it.isSuccess }.single().getOrThrow()
+            val rejected = assertInstanceOf(ApiException::class.java, results.filter { it.isFailure }.single().exceptionOrNull())
+            val deleted = saved.deletedAt != null
+            assertEquals(if (deleted) HttpStatus.NOT_FOUND else HttpStatus.CONFLICT, rejected.status)
+            assertEquals("2", saved.messageVersion)
+            assertEquals("1", saved.sequence)
+            assertEquals(if (deleted) "" else "edited", saved.body)
+            assertEquals(
+                if (deleted) emptyList<MessageResponse>() else listOf(saved),
+                history.messages(ChatId(chat), UserId(member), null, null, 10).messages,
+            )
             assertEquals("1", history.changes(ChatId(chat), UserId(member), 0L, 10).lastRevision)
         }
 

@@ -20,10 +20,17 @@ func enqueueFrame(sink Recipient, frame *protocol.EventFrame) bool {
 	return sink.Enqueue(frame.Event())
 }
 
+type memberState uint32
+
+const (
+	memberCatchingUp memberState = iota
+	memberLive
+	memberLeft
+)
+
 type roomMember struct {
 	chatIDs     map[string]bool
-	catching    atomic.Bool
-	left        atomic.Bool
+	state       atomic.Uint32
 	joinMu      sync.Mutex
 	deliveryMu  sync.Mutex
 	buffer      []*protocol.EventFrame
@@ -32,7 +39,6 @@ type roomMember struct {
 
 func newRoomMember() *roomMember {
 	m := &roomMember{chatIDs: make(map[string]bool)}
-	m.catching.Store(true)
 	return m
 }
 
@@ -47,14 +53,14 @@ func (m *roomMember) deliver(sink Recipient, event protocol.Event, limit, byteLi
 func (m *roomMember) deliverFrame(sink Recipient, frame *protocol.EventFrame, limit, byteLimit int) bool {
 	m.deliveryMu.Lock()
 	defer m.deliveryMu.Unlock()
-	if m.left.Load() {
+	if m.hasLeft() {
 		return false
 	}
-	if m.catching.Load() {
+	if m.isCatchingUp() {
 		if len(m.buffer) >= limit || m.bufferBytes+frame.Size() > byteLimit {
 			m.buffer = nil
 			m.bufferBytes = 0
-			m.catching.Store(false)
+			m.finishCatchup()
 			return true
 		}
 		m.buffer = append(m.buffer, frame)
@@ -68,7 +74,7 @@ func (m *roomMember) deliverFrame(sink Recipient, frame *protocol.EventFrame, li
 func (m *roomMember) finish(sink Recipient, room string, ids []string, replay []protocol.Event) {
 	m.deliveryMu.Lock()
 	defer m.deliveryMu.Unlock()
-	if m.left.Load() {
+	if m.hasLeft() {
 		return
 	}
 	seen := make(map[string]bool, len(replay))
@@ -78,7 +84,7 @@ func (m *roomMember) finish(sink Recipient, room string, ids []string, replay []
 		}
 	}
 	for _, frame := range m.buffer {
-		if m.left.Load() {
+		if m.hasLeft() {
 			break
 		}
 		event := frame.Event()
@@ -89,10 +95,30 @@ func (m *roomMember) finish(sink Recipient, room string, ids []string, replay []
 	m.buffer = nil
 	m.bufferBytes = 0
 	for _, id := range ids {
-		if m.left.Load() {
+		if m.hasLeft() {
 			break
 		}
 		sink.Enqueue(protocol.Event{Type: protocol.EventSubscribed, Version: 1, Room: room, ChatID: id})
 	}
-	m.catching.Store(false)
+	m.finishCatchup()
+}
+
+func (m *roomMember) hasLeft() bool {
+	return memberState(m.state.Load()) == memberLeft
+}
+
+func (m *roomMember) isCatchingUp() bool {
+	return memberState(m.state.Load()) == memberCatchingUp
+}
+
+func (m *roomMember) beginCatchup() {
+	m.state.CompareAndSwap(uint32(memberLive), uint32(memberCatchingUp))
+}
+
+func (m *roomMember) finishCatchup() {
+	m.state.CompareAndSwap(uint32(memberCatchingUp), uint32(memberLive))
+}
+
+func (m *roomMember) leave() {
+	m.state.Store(uint32(memberLeft))
 }

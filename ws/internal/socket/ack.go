@@ -18,7 +18,7 @@ var errInvalidACK = errors.New("invalid message acknowledgement")
 // A received_message frame clears only that live notification. Applied frames
 // record device application, and dismissed frames resolve a skipped interval.
 type ackTracker struct {
-	closed        bool
+	state         lifecycleState
 	metrics       *monitoring.Metrics
 	mu            sync.Mutex
 	deadline      time.Duration
@@ -50,7 +50,7 @@ func (tracker *ackTracker) markSent(event protocol.Event, now time.Time) error {
 	if sequence <= tracker.applied[event.ChatID] || sequence <= tracker.dismissed[event.ChatID] {
 		return nil
 	}
-	if tracker.closed {
+	if tracker.state == lifecycleClosed {
 		return errInvalidACK
 	}
 	positions := tracker.pending[event.ChatID]
@@ -247,7 +247,7 @@ func (tracker *ackTracker) close() {
 	if tracker.metrics != nil {
 		tracker.metrics.PendingACKs.Sub(float64(tracker.count))
 	}
-	tracker.closed = true
+	tracker.state = lifecycleClosed
 	tracker.count = 0
 	clear(tracker.pending)
 	tracker.deadlines = nil

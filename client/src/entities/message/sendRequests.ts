@@ -109,11 +109,32 @@ function readStored(storage: Pick<Storage, 'getItem'>, key: string): PendingSend
   }
 }
 
+type SendDispatch =
+  | { phase: 'idle' }
+  | { phase: 'throttled'; timer: ReturnType<typeof setTimeout> }
+  | { phase: 'awaiting-result'; requestId: string }
+
+type Reconciliation =
+  | { phase: 'ready' | 'polling'; failures: number }
+  | { phase: 'backoff'; failures: number; until: number }
+
 export class SendRequests {
   private sends: PendingSend[]
   private outbound: string[] = []
-  private active?: string
-  private timer?: ReturnType<typeof setTimeout>
+  private dispatch: SendDispatch = { phase: 'idle' }
+
+  private get active(): string | undefined {
+    return this.dispatch.phase === 'awaiting-result' ? this.dispatch.requestId : undefined
+  }
+
+  private get timer(): ReturnType<typeof setTimeout> | undefined {
+    return this.dispatch.phase === 'throttled' ? this.dispatch.timer : undefined
+  }
+  private awaitResult(requestId: string): void {
+    clearTimeout(this.timer)
+    this.dispatch = { phase: 'awaiting-result', requestId }
+  }
+
   private confirmation?: ReturnType<typeof setTimeout>
   private confirmationAt = 0
   private confirmationDeadline = new Map<string, number>()
@@ -154,9 +175,8 @@ export class SendRequests {
   disconnected(): void {
     clearTimeout(this.confirmation)
     clearTimeout(this.timer)
-    this.timer = undefined
+    this.dispatch = { phase: 'idle' }
     this.outbound = []
-    this.active = undefined
   }
 
   private enqueue(requestId: string): void {
@@ -169,10 +189,13 @@ export class SendRequests {
     if (this.active || this.timer || !this.adapters.isConnected()) return
     const delay = this.nextSendAt - this.adapters.now()
     if (delay > 0) {
-      this.timer = setTimeout(() => {
-        this.timer = undefined
-        this.drain()
-      }, delay)
+      this.dispatch = {
+        phase: 'throttled',
+        timer: setTimeout(() => {
+          this.dispatch = { phase: 'idle' }
+          this.drain()
+        }, delay),
+      }
       return
     }
     const requestId = this.outbound.shift()
@@ -182,7 +205,7 @@ export class SendRequests {
       this.drain()
       return
     }
-    this.active = requestId
+    this.awaitResult(requestId)
     this.watch(requestId)
     this.nextSendAt = this.adapters.now() + 75
     try {
@@ -196,14 +219,16 @@ export class SendRequests {
   transient(requestId: string): void {
     if (!this.sends.some((send) => send.requestId === requestId && send.status === 'sending'))
       return
-    if (this.active === requestId) this.active = undefined
+    if (this.active === requestId) this.dispatch = { phase: 'idle' }
     this.outbound = this.outbound.filter((id) => id !== requestId)
     this.outbound.unshift(requestId)
     this.backoff = Math.min(this.backoff + 1, 6)
     this.nextSendAt =
       this.adapters.now() + Math.min(500 * 2 ** this.backoff, 30000) + Math.random() * 250
-    clearTimeout(this.timer)
-    this.timer = undefined
+    if (this.dispatch.phase === 'throttled') {
+      clearTimeout(this.dispatch.timer)
+      this.dispatch = { phase: 'idle' }
+    }
     this.drain()
   }
 
@@ -212,16 +237,14 @@ export class SendRequests {
     this.confirmationDeadline.delete(requestId)
     if (this.active === requestId) {
       clearTimeout(this.confirmation)
-      this.active = undefined
+      this.dispatch = { phase: 'idle' }
       this.backoff = 0
     }
     this.outbound = this.outbound.filter((id) => id !== requestId)
     this.drain()
   }
 
-  private reconciling = false
-  private pollFailures = 0
-  private nextPollAt = 0
+  private reconciliation: Reconciliation = { phase: 'ready', failures: 0 }
   private retryUnknownIntent = 0
   private handledRetryUnknownIntent = 0
   private readonly key: string
@@ -298,7 +321,7 @@ export class SendRequests {
   unknown(requestId: string): void {
     if (!this.sends.some((send) => send.requestId === requestId && this.unresolved(send))) return
     if (this.active && this.active !== requestId) return
-    if (!this.active) this.active = requestId
+    if (!this.active) this.awaitResult(requestId)
     this.watch(requestId)
   }
 
@@ -309,8 +332,13 @@ export class SendRequests {
 
   async reconcile(retryUnknown = false): Promise<SavedSend[]> {
     if (retryUnknown) this.retryUnknownIntent += 1
-    if (this.reconciling || this.adapters.now() < this.nextPollAt) return []
-    this.reconciling = true
+    const previous = this.reconciliation
+    if (
+      previous.phase === 'polling' ||
+      (previous.phase === 'backoff' && this.adapters.now() < previous.until)
+    )
+      return []
+    this.reconciliation = { phase: 'polling', failures: previous.failures }
     const retryIntent = this.retryUnknownIntent
     const shouldRetryUnknown = retryIntent > this.handledRetryUnknownIntent
     let retryHandled = this.adapters.isConnected()
@@ -318,8 +346,8 @@ export class SendRequests {
     try {
       const unresolved = this.sends.filter((send) => this.unresolved(send))
       if (shouldRetryUnknown && !this.active && unresolved.length && this.adapters.isConnected()) {
-        this.active = unresolved[0].requestId
-        this.watch(this.active)
+        this.awaitResult(unresolved[0].requestId)
+        this.watch(unresolved[0].requestId)
       }
       for (let offset = 0; offset < unresolved.length; offset += SEND_STATUS_BATCH_SIZE) {
         const batch = unresolved.slice(offset, offset + SEND_STATUS_BATCH_SIZE)
@@ -345,7 +373,7 @@ export class SendRequests {
             const latest = this.sends.find((item) => item.requestId === send.requestId)
             if (!latest || !this.unresolved(latest)) continue
             if (!this.active && send.status === 'queued' && !shouldRetryUnknown) {
-              this.active = send.requestId
+              this.awaitResult(send.requestId)
               this.watch(send.requestId)
             }
             const overdue =
@@ -365,7 +393,7 @@ export class SendRequests {
                 this.confirmationAttempts.set(send.requestId, attempts + 1)
                 this.advance(send.requestId, 'sending', { reason: undefined })
                 if (this.active === send.requestId || send.status === 'queued') {
-                  this.active = send.requestId
+                  this.awaitResult(send.requestId)
                   this.watch(send.requestId)
                   this.adapters.send(this.sends.find((item) => item.requestId === send.requestId)!)
                 } else resends.push(send)
@@ -395,13 +423,14 @@ export class SendRequests {
       }
       if (shouldRetryUnknown && retryHandled && this.adapters.isConnected())
         this.handledRetryUnknownIntent = retryIntent
-      this.pollFailures = 0
-      this.nextPollAt = 0
+      this.reconciliation = { phase: 'ready', failures: 0 }
     } catch {
-      this.pollFailures += 1
-      this.nextPollAt = this.adapters.now() + Math.min(30000 * 2 ** (this.pollFailures - 1), 120000)
-    } finally {
-      this.reconciling = false
+      const failures = previous.failures + 1
+      this.reconciliation = {
+        phase: 'backoff',
+        failures,
+        until: this.adapters.now() + Math.min(30000 * 2 ** (failures - 1), 120000),
+      }
     }
     return saved
   }
@@ -424,7 +453,7 @@ export class SendRequests {
     this.confirmationAttempts.delete(requestId)
     this.confirmationDeadline.delete(requestId)
     if (this.active === requestId) {
-      this.active = undefined
+      this.dispatch = { phase: 'idle' }
       this.outbound = this.outbound.filter((id) => id !== requestId)
       this.outbound.unshift(requestId)
     }

@@ -38,6 +38,13 @@ type publishRequest struct {
 	queuedAt  time.Time
 }
 
+type publisherState uint8
+
+const (
+	publisherOpen publisherState = iota
+	publisherClosed
+)
+
 type Publisher struct {
 	metrics        atomic.Pointer[monitoring.Metrics]
 	urls           []string
@@ -47,7 +54,7 @@ type Publisher struct {
 	itemLimit      int
 	byteLimit      int
 	mu             sync.Mutex
-	closed         bool
+	state          publisherState
 	pendingItems   int
 	pendingBytes   int
 	capacity       chan struct{}
@@ -83,7 +90,7 @@ func New(urls []string, concurrency int, confirmTimeout time.Duration) (*Publish
 	for i := range min(3, concurrency) {
 		worker := &publishWorker{publisher: p, jobs: make(chan *publishRequest, concurrency)}
 		if i == 0 {
-			worker.slot = slot
+			worker.connect(slot)
 		}
 		p.workers = append(p.workers, worker)
 	}
@@ -96,7 +103,7 @@ func New(urls []string, concurrency int, confirmTimeout time.Duration) (*Publish
 
 func (p *Publisher) Publish(ctx context.Context, command protocol.SendCommand) error {
 	p.mu.Lock()
-	if p.closed {
+	if p.state == publisherClosed {
 		p.mu.Unlock()
 		return ErrClosed
 	}
@@ -140,7 +147,7 @@ func (p *Publisher) Publish(ctx context.Context, command protocol.SendCommand) e
 	request.bytes = len(body)
 	close(p.capacity)
 	p.capacity = make(chan struct{})
-	if p.closed {
+	if p.state == publisherClosed {
 		p.mu.Unlock()
 		p.finish(request, ErrClosed)
 		return ErrClosed
@@ -168,7 +175,7 @@ func (p *Publisher) Publish(ctx context.Context, command protocol.SendCommand) e
 func (p *Publisher) reserve(request *publishRequest) error {
 	for {
 		p.mu.Lock()
-		if p.closed {
+		if p.state == publisherClosed {
 			p.mu.Unlock()
 			return ErrClosed
 		}
@@ -207,7 +214,7 @@ func (p *Publisher) finish(request *publishRequest, err error) {
 func (p *Publisher) Close() error {
 	p.closeOnce.Do(func() {
 		p.mu.Lock()
-		p.closed = true
+		p.state = publisherClosed
 		p.cancel()
 		p.mu.Unlock()
 		p.owned.Wait()

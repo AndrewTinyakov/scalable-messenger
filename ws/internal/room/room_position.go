@@ -71,7 +71,7 @@ func (r *Rooms) checkAll(ctx context.Context) {
 			if entry.lastLiveAt.After(positionAt) {
 				positionAt = entry.lastLiveAt
 			}
-			retired := entry.retired
+			retired := entry.state == roomRetired
 			entry.mu.Unlock()
 			if !retired {
 				oldest = max(oldest, time.Since(positionAt).Seconds())
@@ -126,7 +126,7 @@ func (r *Rooms) quietPosition(entry *localRoom) (positionCandidate, bool) {
 	}
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
-	if entry.retired || entry.err != nil || (r.checkInterval > 0 && time.Since(entry.lastLiveAt) < r.checkInterval) {
+	if entry.state == roomRetired || entry.err != nil || (r.checkInterval > 0 && time.Since(entry.lastLiveAt) < r.checkInterval) {
 		return positionCandidate{}, false
 	}
 	return positionCandidate{entry: entry, epoch: entry.epoch, last: entry.lastID, lastLiveAt: entry.lastLiveAt}, true
@@ -170,7 +170,7 @@ func (r *Rooms) applyPosition(ctx context.Context, candidate positionCandidate, 
 	entry.positionMu.Lock()
 	defer entry.positionMu.Unlock()
 	entry.mu.Lock()
-	if entry.retired || entry.epoch != candidate.epoch || entry.lastID != candidate.last || !entry.lastLiveAt.Equal(candidate.lastLiveAt) {
+	if entry.state == roomRetired || entry.epoch != candidate.epoch || entry.lastID != candidate.last || !entry.lastLiveAt.Equal(candidate.lastLiveAt) {
 		entry.mu.Unlock()
 		return
 	}
@@ -192,7 +192,7 @@ func (r *Rooms) roomPosition(name string) (*localRoom, string, string) {
 	}
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
-	if entry.retired {
+	if entry.state == roomRetired {
 		return nil, "", ""
 	}
 	return entry, entry.epoch, entry.lastID
@@ -213,7 +213,7 @@ func (r *Rooms) handleLiveRoom(ctx context.Context, entry *localRoom, live redis
 	entry.positionMu.Lock()
 	defer entry.positionMu.Unlock()
 	entry.mu.Lock()
-	oldEpoch, oldLast, retired := entry.epoch, entry.lastID, entry.retired
+	oldEpoch, oldLast, retired := entry.epoch, entry.lastID, entry.state == roomRetired
 	entry.mu.Unlock()
 	if retired {
 		return
@@ -293,7 +293,7 @@ func (r *Rooms) replay(ctx context.Context, name, epoch, after, through, trigger
 
 func (r *Rooms) setRoomPosition(entry *localRoom, epoch, last string) {
 	entry.mu.Lock()
-	if !entry.retired {
+	if entry.state != roomRetired {
 		entry.epoch, entry.lastID = epoch, last
 	}
 	entry.mu.Unlock()

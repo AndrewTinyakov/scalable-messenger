@@ -397,6 +397,24 @@ describe('direct chat presentation', () => {
   })
 })
 
+describe('message entrance', () => {
+  const entering = () =>
+    [...container.querySelectorAll<HTMLElement>('.message-enter')].map(
+      (row) => row.dataset.messageId,
+    )
+
+  it('animates a message that arrives in the open chat but not opened or paged history', async () => {
+    await render(rows(10))
+    expect(entering()).toEqual([])
+    await render(rows(11))
+    expect(entering()).toEqual(['chat-a-11'])
+    await render(rows(5, group.id), group)
+    expect(entering()).toEqual([])
+    await render(rows(30, group.id), group)
+    expect(entering()).toEqual([])
+  })
+})
+
 describe('sending while reading history', () => {
   async function submit(text: string) {
     const input = container.querySelector('textarea')!

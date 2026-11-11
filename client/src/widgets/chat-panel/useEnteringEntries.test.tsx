@@ -49,6 +49,12 @@ describe('entering message entries', () => {
     expect(await show('a', ['0', '1', '2', '3'])).toEqual([])
   })
 
+  it('does not animate older history prepended to a short chat', async () => {
+    await show('a', ['2', '3'])
+    expect(await show('a', ['1', '2', '3'])).toEqual([])
+    expect(await show('a', ['1', '2', '3', '4'])).toEqual(['4'])
+  })
+
   it('does not animate a chat switch or a page of history', async () => {
     await show('a', ['1'])
     expect(await show('b', ['x', 'y'])).toEqual([])

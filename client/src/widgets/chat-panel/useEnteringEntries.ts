@@ -6,6 +6,7 @@ const NONE: ReadonlySet<string> = new Set()
 interface Rendered {
   chatId?: string
   keys: ReadonlySet<string>
+  last?: string
   settled: boolean
 }
 
@@ -16,12 +17,17 @@ export function useEnteringEntries(
 ): ReadonlySet<string> {
   const rendered = useRef<Rendered>({ keys: NONE, settled: false })
   useEffect(() => {
-    rendered.current = { chatId, keys: new Set(keys), settled: keys.length > 0 || knownEmpty }
+    rendered.current = {
+      chatId,
+      keys: new Set(keys),
+      last: keys.at(-1),
+      settled: keys.length > 0 || knownEmpty,
+    }
   })
   const previous = rendered.current
   if (previous.chatId !== chatId || !previous.settled) return NONE
-  const added = keys.filter((key) => !previous.keys.has(key))
-  if (added.length === 0 || added.length > MAX_ANIMATED) return NONE
-  const tail = new Set(keys.slice(-MAX_ANIMATED))
-  return new Set(added.filter((key) => tail.has(key)))
+  const after = previous.last === undefined ? 0 : keys.indexOf(previous.last) + 1
+  if (after === 0 && previous.last !== undefined) return NONE
+  const added = keys.slice(after).filter((key) => !previous.keys.has(key))
+  return added.length > 0 && added.length <= MAX_ANIMATED ? new Set(added) : NONE
 }

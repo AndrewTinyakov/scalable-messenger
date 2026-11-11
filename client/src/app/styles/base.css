@@ -17,7 +17,6 @@
   --bg-rail: #0d131c;
   --bg-sidebar: #111823;
   --bg-panel: #0e141d;
-  --bg-header: #121a25;
   --bg-raised: #19222f;
   --bg-field: #18212d;
   --bg-hover: #18212d;
@@ -39,8 +38,6 @@
   --accent-strong: #3a76f2;
   --accent-soft: rgb(79 142 255 / 14%);
   --accent-text: #8db6ff;
-  --primary: var(--accent);
-  --primary-text: #fff;
   --selected: linear-gradient(135deg, #3a6fe0, #2d5dca);
   --online: #4ade80;
   --danger: #ff6b6b;
@@ -52,7 +49,6 @@
   --shadow-float: 0 10px 30px -8px rgb(0 0 0 / 65%);
   --radius-s: 10px;
   --radius-m: 12px;
-  --radius-l: 18px;
   --radius-xl: 22px;
   --ease: cubic-bezier(0.22, 0.9, 0.3, 1);
   --spring: cubic-bezier(0.34, 1.4, 0.5, 1);

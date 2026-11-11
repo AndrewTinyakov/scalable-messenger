@@ -1,4 +1,4 @@
-import { useLayoutEffect, type RefObject } from 'react'
+import { useLayoutEffect, useRef, type RefObject } from 'react'
 
 export type ExitAnimation = (ghost: HTMLElement) => Animation
 
@@ -27,12 +27,15 @@ export const fadeOutDialog: ExitAnimation = (ghost) => {
 }
 
 export function useExitAnimation(ref: RefObject<HTMLElement>, exit: ExitAnimation) {
+  const frame = useRef<number>()
   useLayoutEffect(() => {
+    if (frame.current !== undefined) cancelAnimationFrame(frame.current)
     const node = ref.current
     return () => {
       if (!node || typeof node.animate !== 'function' || document.hidden) return
       if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
-      requestAnimationFrame(() => {
+      frame.current = requestAnimationFrame(() => {
+        frame.current = undefined
         if (node.isConnected) return
         const ghost = node.cloneNode(true) as HTMLElement
         ghost.classList.add('exit-ghost')

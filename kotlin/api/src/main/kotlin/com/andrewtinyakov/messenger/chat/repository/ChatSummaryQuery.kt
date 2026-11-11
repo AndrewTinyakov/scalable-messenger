@@ -10,6 +10,8 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.HID
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSAGES
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.USERS
 import com.andrewtinyakov.messenger.message.model.MessageId
+import org.jooq.CommonTableExpression
+import org.jooq.Condition
 import org.jooq.Field
 import org.jooq.impl.DSL
 import java.time.OffsetDateTime
@@ -32,19 +34,36 @@ internal fun Chat.withSummary(summary: ChatSummary, activityAt: OffsetDateTime?)
     )
 
 internal fun chatSummary(userId: UserId): Field<ChatSummary> {
-    val candidates = DSL.name("summary_candidates").asMaterialized(
-        DSL.select(MESSAGES.ID, MESSAGES.SEQUENCE, MESSAGES.SENDER_ID, MESSAGES.CREATED_AT, MESSAGES.BODY, MESSAGES.DELETED_AT)
-            .from(MESSAGES).where(MESSAGES.CHAT_ID.eq(CHATS.ID))
-            .orderBy(MESSAGES.SEQUENCE.desc()).limit(SUMMARY_CANDIDATES),
-    )
+    val candidates = summaryCandidates()
     val sequence = candidates.field(MESSAGES.SEQUENCE)!!
     val sender = candidates.field(MESSAGES.SENDER_ID)!!
-    val readThrough = DSL.coalesce(
-        DSL.select(CHAT_READ_PROGRESS.THROUGH_SEQUENCE).from(CHAT_READ_PROGRESS)
-            .where(CHAT_READ_PROGRESS.CHAT_ID.eq(CHATS.ID), CHAT_READ_PROGRESS.USER_ID.eq(userId.value)).asField<Long>(),
-        DSL.inline(0L),
-    )
-    val visible = candidates.field(MESSAGES.DELETED_AT)!!.isNull.and(
+    val readThrough = readThrough(userId)
+    val visible = visibleCandidate(candidates, userId)
+    val last = lastVisibleMessage(candidates, visible)
+    return DSL.multiset(
+        DSL.with(candidates).select(
+            DSL.count().filterWhere(visible.and(sender.ne(userId.value)).and(sequence.gt(readThrough))),
+            DSL.count().filterWhere(sequence.gt(readThrough)).eq(SUMMARY_CANDIDATES),
+            last,
+        ).from(candidates),
+    ).convertFrom { rows -> rows.single().let { ChatSummary(it.value1(), it.value2(), it.value3()) } }
+}
+
+private fun summaryCandidates(): CommonTableExpression<*> = DSL.name("summary_candidates").asMaterialized(
+    DSL.select(MESSAGES.ID, MESSAGES.SEQUENCE, MESSAGES.SENDER_ID, MESSAGES.CREATED_AT, MESSAGES.BODY, MESSAGES.DELETED_AT)
+        .from(MESSAGES).where(MESSAGES.CHAT_ID.eq(CHATS.ID))
+        .orderBy(MESSAGES.SEQUENCE.desc()).limit(SUMMARY_CANDIDATES),
+)
+
+private fun readThrough(userId: UserId): Field<Long> = DSL.coalesce(
+    DSL.select(CHAT_READ_PROGRESS.THROUGH_SEQUENCE).from(CHAT_READ_PROGRESS)
+        .where(CHAT_READ_PROGRESS.CHAT_ID.eq(CHATS.ID), CHAT_READ_PROGRESS.USER_ID.eq(userId.value)).asField<Long>(),
+    DSL.inline(0L),
+)
+
+private fun visibleCandidate(candidates: CommonTableExpression<*>, userId: UserId): Condition {
+    val sequence = candidates.field(MESSAGES.SEQUENCE)!!
+    return candidates.field(MESSAGES.DELETED_AT)!!.isNull.and(
         DSL.exists(
             DSL.selectOne().from(CHAT_MEMBERS).where(
                 CHAT_MEMBERS.CHAT_ID.eq(CHATS.ID),
@@ -68,7 +87,12 @@ internal fun chatSummary(userId: UserId): Field<ChatSummary> {
             ),
         ),
     )
-    val last = DSL.multiset(
+}
+
+private fun lastVisibleMessage(candidates: CommonTableExpression<*>, visible: Condition): Field<ChatLastMessage?> {
+    val sequence = candidates.field(MESSAGES.SEQUENCE)!!
+    val sender = candidates.field(MESSAGES.SENDER_ID)!!
+    return DSL.multiset(
         DSL.select(
             candidates.field(MESSAGES.ID),
             sequence,
@@ -91,11 +115,4 @@ internal fun chatSummary(userId: UserId): Field<ChatSummary> {
             )
         }
     }
-    return DSL.multiset(
-        DSL.with(candidates).select(
-            DSL.count().filterWhere(visible.and(sender.ne(userId.value)).and(sequence.gt(readThrough))),
-            DSL.count().filterWhere(sequence.gt(readThrough)).eq(SUMMARY_CANDIDATES),
-            last,
-        ).from(candidates),
-    ).convertFrom { rows -> rows.single().let { ChatSummary(it.value1(), it.value2(), it.value3()) } }
 }

@@ -9,6 +9,8 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.VIS
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseObservation
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseOperation
 import org.jooq.DSLContext
+import org.jooq.Record2
+import org.jooq.Result
 import org.jooq.impl.DSL
 import org.springframework.stereotype.Repository
 import java.time.Clock
@@ -21,29 +23,48 @@ class JooqHistoryPurgeRepository(
 ) : HistoryPurgeRepository {
     override fun purge(limit: Int): Int? = DatabaseObservation.query(DatabaseOperation.DELETION_PURGE_BATCH) {
         require(limit in 1..1000)
-        val chatId = db.select(CHATS.ID).from(CHATS).join(HISTORY_PURGE_JOBS).on(HISTORY_PURGE_JOBS.CHAT_ID.eq(CHATS.ID))
+        val chatId = lockNextPurgeChat() ?: return@query null
+        val through = purgeThrough(chatId)
+        val candidates = purgeCandidates(chatId = chatId, through = through, limit = limit)
+        val removed = removeCandidates(chatId, candidates)
+        val obsolete = removeObsoleteHiddenRanges(chatId = chatId, through = through, limit = limit)
+        if (candidates.size < limit) raisePurgedThrough(chatId, through)
+        completeOrDeferPurgeJob(chatId, complete = candidates.size < limit && obsolete < limit)
+        return@query removed
+    }
+
+    private fun lockNextPurgeChat(): String? =
+        db.select(CHATS.ID).from(CHATS).join(HISTORY_PURGE_JOBS).on(HISTORY_PURGE_JOBS.CHAT_ID.eq(CHATS.ID))
             .orderBy(HISTORY_PURGE_JOBS.UPDATED_AT, CHATS.ID).limit(1).forNoKeyUpdate().of(CHATS).skipLocked().fetchOne(CHATS.ID)
-            ?: return@query null
-        val through = db.select(
-            HISTORY_PURGE_JOBS.THROUGH_SEQUENCE,
-        ).from(HISTORY_PURGE_JOBS).where(HISTORY_PURGE_JOBS.CHAT_ID.eq(chatId)).fetchOne(HISTORY_PURGE_JOBS.THROUGH_SEQUENCE)!!
-        val candidates = db.select(
-            MESSAGES.ID,
-            MESSAGES.SEQUENCE,
-        ).from(MESSAGES).where(MESSAGES.CHAT_ID.eq(chatId), MESSAGES.SEQUENCE.le(through))
-            .orderBy(MESSAGES.SEQUENCE).limit(limit).fetch()
+
+    private fun purgeThrough(chatId: String): Long = db.select(
+        HISTORY_PURGE_JOBS.THROUGH_SEQUENCE,
+    ).from(HISTORY_PURGE_JOBS).where(HISTORY_PURGE_JOBS.CHAT_ID.eq(chatId)).fetchOne(HISTORY_PURGE_JOBS.THROUGH_SEQUENCE)!!
+
+    private fun purgeCandidates(chatId: String, through: Long, limit: Int): Result<Record2<String, Long>> = db.select(
+        MESSAGES.ID,
+        MESSAGES.SEQUENCE,
+    ).from(MESSAGES).where(MESSAGES.CHAT_ID.eq(chatId), MESSAGES.SEQUENCE.le(through))
+        .orderBy(MESSAGES.SEQUENCE).limit(limit).fetch()
+
+    private fun removeCandidates(chatId: String, candidates: Result<Record2<String, Long>>): Int {
         val ids = candidates.map { it.value1()!! }
-        val progress = candidates.lastOrNull()?.value2()
-        if (progress != null) {
-            db.update(
-                CHATS,
-            ).set(
-                CHATS.PURGED_THROUGH_SEQUENCE,
-                DSL.greatest(CHATS.PURGED_THROUGH_SEQUENCE, DSL.`val`(progress)),
-            ).where(CHATS.ID.eq(chatId)).execute()
-        }
+        candidates.lastOrNull()?.value2()?.let { progress -> raisePurgedThrough(chatId, progress) }
         val removed = if (ids.isEmpty()) 0 else db.deleteFrom(MESSAGES).where(MESSAGES.ID.`in`(ids)).execute()
         db.update(CHATS).set(CHATS.PURGED_ROWS, CHATS.PURGED_ROWS.plus(removed.toLong())).where(CHATS.ID.eq(chatId)).execute()
+        return removed
+    }
+
+    private fun raisePurgedThrough(chatId: String, sequence: Long) {
+        db.update(
+            CHATS,
+        ).set(
+            CHATS.PURGED_THROUGH_SEQUENCE,
+            DSL.greatest(CHATS.PURGED_THROUGH_SEQUENCE, DSL.`val`(sequence)),
+        ).where(CHATS.ID.eq(chatId)).execute()
+    }
+
+    private fun removeObsoleteHiddenRanges(chatId: String, through: Long, limit: Int): Int {
         val obsolete = db.select(HIDDEN_MESSAGE_RANGES.USER_ID, HIDDEN_MESSAGE_RANGES.AFTER_SEQUENCE).from(HIDDEN_MESSAGE_RANGES)
             .where(HIDDEN_MESSAGE_RANGES.CHAT_ID.eq(chatId), HIDDEN_MESSAGE_RANGES.THROUGH_SEQUENCE.le(through))
             .orderBy(
@@ -57,21 +78,16 @@ class JooqHistoryPurgeRepository(
                 DSL.row(HIDDEN_MESSAGE_RANGES.USER_ID, HIDDEN_MESSAGE_RANGES.AFTER_SEQUENCE).`in`(obsolete),
             ).execute()
         }
-        if (ids.size < limit) {
-            db.update(
-                CHATS,
-            ).set(
-                CHATS.PURGED_THROUGH_SEQUENCE,
-                DSL.greatest(CHATS.PURGED_THROUGH_SEQUENCE, DSL.`val`(through)),
-            ).where(CHATS.ID.eq(chatId)).execute()
-        }
-        if (ids.size < limit && obsolete.size < limit) {
+        return obsolete.size
+    }
+
+    private fun completeOrDeferPurgeJob(chatId: String, complete: Boolean) {
+        if (complete) {
             db.deleteFrom(HISTORY_PURGE_JOBS).where(HISTORY_PURGE_JOBS.CHAT_ID.eq(chatId)).execute()
         } else {
             db.update(HISTORY_PURGE_JOBS).set(HISTORY_PURGE_JOBS.UPDATED_AT, OffsetDateTime.now(clock))
                 .where(HISTORY_PURGE_JOBS.CHAT_ID.eq(chatId)).execute()
         }
-        return@query removed
     }
 
     override fun cleanupPersonal(limit: Int): Int? = DatabaseObservation.query(DatabaseOperation.DELETION_PERSONAL_CLEANUP) {

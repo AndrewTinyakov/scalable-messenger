@@ -142,37 +142,52 @@ class ChatService(
     ) {
         val requested = memberIds.distinct()
         tx.observedExecuteWithoutResult(DatabaseTransaction.CHAT_ADD_MEMBERS) {
-            val chat = repository.findByIdForUpdate(chatId = chatId)
-                ?.takeIf { it.kind == ChatKind.GROUP } ?: notFound()
-            if (chat.ownerId != actorId) forbidden("Only the group owner can add members")
+            val chat = lockOwnedGroup(chatId, actorId)
             requireUsersAndLock(requested)
-            val existing = repository.existingMemberIds(
-                chatId = chatId,
-                userIds = requested,
-            )
-            val additions = requested.filterNot(existing::contains)
-            if (chat.memberCount + additions.size > 100_000) {
-                badRequest(ApiErrorCode.INVALID_MEMBERS, "Group cannot exceed 100000 members")
-            }
-            if (additions.isNotEmpty()) {
-                requireGroupCapacity(additions)
-                memberships.insertMembersAndIncrementCount(
-                    chatId = chatId,
-                    userIds = additions,
-                )
-                val membershipChanged = MembershipChangedEventV1.create(
-                    eventId = newId(),
-                    room = RoomAddress.group(chatId),
-                    chatId = chatId.value,
-                )
-                outboxRepository.enqueue(
-                    messages = createdEvents(
-                        chatId = chatId,
-                        members = additions,
-                    ) + membershipChanged.toOutboxMessage(mapper),
-                )
-            }
+            val additions = newMembers(chatId, requested)
+            requireMemberLimit(chat, additions)
+            if (additions.isNotEmpty()) addAndAnnounceMembers(chatId, additions)
         }
+    }
+
+    private fun lockOwnedGroup(chatId: ChatId, actorId: UserId): Chat {
+        val chat = repository.findByIdForUpdate(chatId = chatId)
+            ?.takeIf { it.kind == ChatKind.GROUP } ?: notFound()
+        if (chat.ownerId != actorId) forbidden("Only the group owner can add members")
+        return chat
+    }
+
+    private fun newMembers(chatId: ChatId, requested: List<UserId>): List<UserId> {
+        val existing = repository.existingMemberIds(
+            chatId = chatId,
+            userIds = requested,
+        )
+        return requested.filterNot(existing::contains)
+    }
+
+    private fun requireMemberLimit(chat: Chat, additions: List<UserId>) {
+        if (chat.memberCount + additions.size > 100_000) {
+            badRequest(ApiErrorCode.INVALID_MEMBERS, "Group cannot exceed 100000 members")
+        }
+    }
+
+    private fun addAndAnnounceMembers(chatId: ChatId, additions: List<UserId>) {
+        requireGroupCapacity(additions)
+        memberships.insertMembersAndIncrementCount(
+            chatId = chatId,
+            userIds = additions,
+        )
+        val membershipChanged = MembershipChangedEventV1.create(
+            eventId = newId(),
+            room = RoomAddress.group(chatId),
+            chatId = chatId.value,
+        )
+        outboxRepository.enqueue(
+            messages = createdEvents(
+                chatId = chatId,
+                members = additions,
+            ) + membershipChanged.toOutboxMessage(mapper),
+        )
     }
 
     private fun requireUsersAndLock(userIds: List<UserId>) {

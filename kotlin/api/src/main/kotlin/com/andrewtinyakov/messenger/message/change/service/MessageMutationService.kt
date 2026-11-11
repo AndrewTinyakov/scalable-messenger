@@ -5,6 +5,7 @@ import com.andrewtinyakov.messenger.chat.deletion.model.DeletionCommand
 import com.andrewtinyakov.messenger.chat.deletion.model.DeletionScope
 import com.andrewtinyakov.messenger.chat.deletion.model.DeletionTarget
 import com.andrewtinyakov.messenger.chat.deletion.service.DeletionService
+import com.andrewtinyakov.messenger.chat.model.Chat
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.repository.ChatRepository
 import com.andrewtinyakov.messenger.chat.service.ChatEventAudience
@@ -84,41 +85,63 @@ class MessageMutationService(
         val response = try {
             tx.observedExecute(DatabaseTransaction.MESSAGE_MUTATE) {
                 val chat = chats.findByIdForUpdate(chatId) ?: notFound()
-                val message = messages.findMessage(chatId, userId, messageId) ?: notFound()
-                if (message.senderId != userId) forbidden("Only the author can change a message")
-                if (message.forwardedFromUserId != null) forbidden("Forwarded messages cannot be edited")
-                if (message.deletedAt != null || expectedVersion != message.messageVersion) versionChanged()
-                if (body.isBlank() || body.codePointCount(0, body.length) !in 1..4000) {
-                    badRequest(ApiErrorCode.INVALID_REQUEST, "body must contain 1 to 4000 characters and cannot be blank")
-                }
+                requireEditableMessage(
+                    chatId = chatId,
+                    userId = userId,
+                    messageId = messageId,
+                    expectedVersion = expectedVersion,
+                )
+                requireValidBody(body)
                 val revision = changes.mutate(chatId, messageId, body, OffsetDateTime.now(clock))
                 val updated = checkNotNull(messages.findMessage(chatId, userId, messageId))
-                outbox.enqueue(
-                    audience.rooms(chatId, chat.kind).map { room ->
-                        HistoryChangedEventV1.create(
-                            eventId = newId(),
-                            room = room,
-                            chatId = chatId.value,
-                            sequence = chat.lastSequence.toString(),
-                            mutationRevision = revision.toString(),
-                            visibilityRevision = "0",
-                        ).toOutboxMessage(mapper)
-                    },
-                )
+                enqueueHistoryChanged(chat, revision)
                 updated.toResponse()
             }
         } catch (failure: Exception) {
-            metrics.editFailed(
-                when ((failure as? ApiException)?.status) {
-                    HttpStatus.FORBIDDEN -> MessageEditFailure.FORBIDDEN
-                    HttpStatus.CONFLICT -> MessageEditFailure.CONFLICT
-                    else -> MessageEditFailure.ERROR
-                },
-            )
+            metrics.editFailed(editFailure(failure))
             throw failure
         }
         metrics.edited()
         return response
+    }
+
+    private fun requireEditableMessage(
+        chatId: ChatId,
+        userId: UserId,
+        messageId: MessageId,
+        expectedVersion: Long,
+    ) {
+        val message = messages.findMessage(chatId, userId, messageId) ?: notFound()
+        if (message.senderId != userId) forbidden("Only the author can change a message")
+        if (message.forwardedFromUserId != null) forbidden("Forwarded messages cannot be edited")
+        if (message.deletedAt != null || expectedVersion != message.messageVersion) versionChanged()
+    }
+
+    private fun requireValidBody(body: String) {
+        if (body.isBlank() || body.codePointCount(0, body.length) !in 1..4000) {
+            badRequest(ApiErrorCode.INVALID_REQUEST, "body must contain 1 to 4000 characters and cannot be blank")
+        }
+    }
+
+    private fun enqueueHistoryChanged(chat: Chat, revision: Long) {
+        outbox.enqueue(
+            audience.rooms(chat.id, chat.kind).map { room ->
+                HistoryChangedEventV1.create(
+                    eventId = newId(),
+                    room = room,
+                    chatId = chat.id.value,
+                    sequence = chat.lastSequence.toString(),
+                    mutationRevision = revision.toString(),
+                    visibilityRevision = "0",
+                ).toOutboxMessage(mapper)
+            },
+        )
+    }
+
+    private fun editFailure(failure: Exception): MessageEditFailure = when ((failure as? ApiException)?.status) {
+        HttpStatus.FORBIDDEN -> MessageEditFailure.FORBIDDEN
+        HttpStatus.CONFLICT -> MessageEditFailure.CONFLICT
+        else -> MessageEditFailure.ERROR
     }
 
     private fun versionChanged(): Nothing = conflict(ApiErrorCode.INVALID_REQUEST, "Message version changed")

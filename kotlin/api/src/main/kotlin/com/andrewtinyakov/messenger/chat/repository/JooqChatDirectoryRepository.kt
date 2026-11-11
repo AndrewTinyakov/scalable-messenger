@@ -12,7 +12,12 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHA
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.USERS
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseObservation
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseOperation
+import org.jooq.Condition
 import org.jooq.DSLContext
+import org.jooq.Field
+import org.jooq.Record
+import org.jooq.SortField
+import org.jooq.Table
 import org.jooq.impl.DSL
 import org.springframework.stereotype.Repository
 import java.time.OffsetDateTime
@@ -48,42 +53,55 @@ class JooqChatDirectoryRepository(
             .on(CHATS.ID.eq(CHAT_MEMBERS.CHAT_ID))
             .where(CHAT_MEMBERS.USER_ID.eq(userId.value), CHATS.DELETED_AT.isNull)
             .and(notHidden(CHAT_MEMBERS))
-            .and(if (pinned) CHAT_MEMBERS.PINNED_RANK.isNotNull else CHAT_MEMBERS.PINNED_RANK.isNull)
-            .and(
-                if (!pinned && beforeActivityAt != null && beforeChatId != null) {
-                    activityAt.lt(beforeActivityAt)
-                        .or(
-                            activityAt.eq(beforeActivityAt)
-                                .and(CHAT_MEMBERS.CHAT_ID.lt(beforeChatId.value)),
-                        )
-                } else {
-                    DSL.trueCondition()
-                },
-            )
-            .orderBy(
-                if (pinned) {
-                    listOf(CHAT_MEMBERS.PINNED_RANK.asc(), CHAT_MEMBERS.CHAT_ID.desc())
-                } else {
-                    listOf(activityAt.desc(), CHAT_MEMBERS.CHAT_ID.desc())
-                },
-            )
+            .and(pinState(pinned))
+            .and(activityBefore(activityAt, beforeActivityAt, beforeChatId, pinned))
+            .orderBy(directoryOrder(activityAt, pinned))
             .limit(limit)
-            .fetch { row ->
-                MemberChat(
-                    chat = Chat(
-                        id = ChatId(row.get(CHATS.ID)!!),
-                        kind = ChatKind.valueOf(row.get(CHATS.KIND)!!.name),
-                        name = row.get(CHATS.NAME),
-                        lastSequence = row.get(CHATS.NEXT_SEQUENCE)!! - 1,
-                        ownerId = row.get(CHATS.OWNER_ID)
-                            ?.let(::UserId),
-                        memberCount = row.get(CHATS.MEMBER_COUNT)!!,
-                        preferences = preferences.read(row),
-                    ).withSummary(row.get(summary), row.get(activityAt)),
-                    activityAt = row.get(activityAt)!!,
-                )
-            }
+            .fetch { row -> row.toMemberChat(summary, activityAt, preferences) }
     }
+
+    private fun pinState(pinned: Boolean): Condition =
+        if (pinned) CHAT_MEMBERS.PINNED_RANK.isNotNull else CHAT_MEMBERS.PINNED_RANK.isNull
+
+    private fun activityBefore(
+        activityAt: Field<OffsetDateTime>,
+        beforeActivityAt: OffsetDateTime?,
+        beforeChatId: ChatId?,
+        pinned: Boolean,
+    ): Condition = if (!pinned && beforeActivityAt != null && beforeChatId != null) {
+        activityAt.lt(beforeActivityAt)
+            .or(
+                activityAt.eq(beforeActivityAt)
+                    .and(CHAT_MEMBERS.CHAT_ID.lt(beforeChatId.value)),
+            )
+    } else {
+        DSL.trueCondition()
+    }
+
+    private fun directoryOrder(activityAt: Field<OffsetDateTime>, pinned: Boolean): List<SortField<*>> =
+        if (pinned) {
+            listOf(CHAT_MEMBERS.PINNED_RANK.asc(), CHAT_MEMBERS.CHAT_ID.desc())
+        } else {
+            listOf(activityAt.desc(), CHAT_MEMBERS.CHAT_ID.desc())
+        }
+
+    private fun Record.toMemberChat(
+        summary: Field<ChatSummary>,
+        activityAt: Field<OffsetDateTime>,
+        preferences: ChatPreferenceFields,
+    ): MemberChat = MemberChat(
+        chat = Chat(
+            id = ChatId(get(CHATS.ID)!!),
+            kind = ChatKind.valueOf(get(CHATS.KIND)!!.name),
+            name = get(CHATS.NAME),
+            lastSequence = get(CHATS.NEXT_SEQUENCE)!! - 1,
+            ownerId = get(CHATS.OWNER_ID)
+                ?.let(::UserId),
+            memberCount = get(CHATS.MEMBER_COUNT)!!,
+            preferences = preferences.read(this),
+        ).withSummary(get(summary), get(activityAt)),
+        activityAt = get(activityAt)!!,
+    )
 
     override fun findMembersByChatIds(chatIds: List<ChatId>): Map<ChatId, List<UserSummary>> = DatabaseObservation.query(
         DatabaseOperation.CHAT_FIND_MEMBERS_BY_CHAT_IDS,
@@ -94,17 +112,7 @@ class JooqChatDirectoryRepository(
             .partitionBy(CHAT_MEMBERS.CHAT_ID)
             .orderBy(USERS.USERNAME)
             .`as`("rank")
-        val ranked = db.select(
-            CHAT_MEMBERS.CHAT_ID,
-            USERS.ID,
-            USERS.USERNAME,
-            rank,
-        )
-            .from(CHAT_MEMBERS)
-            .join(USERS)
-            .on(USERS.ID.eq(CHAT_MEMBERS.USER_ID))
-            .where(CHAT_MEMBERS.CHAT_ID.`in`(chatIds.map(ChatId::value)))
-            .asTable("ranked")
+        val ranked = rankedMembers(chatIds, rank)
         val chatId = ranked.field(CHAT_MEMBERS.CHAT_ID)!!
         val userId = ranked.field(USERS.ID)!!
         val username = ranked.field(USERS.USERNAME)!!
@@ -134,6 +142,18 @@ class JooqChatDirectoryRepository(
             )
     }
 
+    private fun rankedMembers(chatIds: List<ChatId>, rank: Field<Int>): Table<*> = db.select(
+        CHAT_MEMBERS.CHAT_ID,
+        USERS.ID,
+        USERS.USERNAME,
+        rank,
+    )
+        .from(CHAT_MEMBERS)
+        .join(USERS)
+        .on(USERS.ID.eq(CHAT_MEMBERS.USER_ID))
+        .where(CHAT_MEMBERS.CHAT_ID.`in`(chatIds.map(ChatId::value)))
+        .asTable("ranked")
+
     override fun findById(chatId: ChatId): Chat? = DatabaseObservation.query(DatabaseOperation.CHAT_FIND_BY_ID) {
         db.selectFrom(CHATS)
             .where(CHATS.ID.eq(chatId.value), CHATS.DELETED_AT.isNull)
@@ -145,26 +165,7 @@ class JooqChatDirectoryRepository(
         chatId: ChatId,
         userId: UserId,
     ): MemberChatDetails? = DatabaseObservation.query(DatabaseOperation.CHAT_FIND_MEMBER_DETAILS) {
-        val members = DSL.multiset(
-            DSL.select(
-                USERS.ID,
-                USERS.USERNAME,
-            )
-                .from(CHAT_MEMBERS)
-                .join(USERS)
-                .on(USERS.ID.eq(CHAT_MEMBERS.USER_ID))
-                .where(CHAT_MEMBERS.CHAT_ID.eq(CHATS.ID))
-                .orderBy(CHAT_MEMBERS.USER_ID)
-                .limit(50),
-        )
-            .convertFrom { rows ->
-                rows.map {
-                    UserSummary(
-                        id = UserId(it.value1()!!),
-                        username = it.value2()!!,
-                    )
-                }
-            }
+        val members = memberPreview()
         val summary = chatSummary(userId)
         val viewer = CHAT_MEMBERS.`as`("viewer")
         val preferences = ChatPreferenceFields(viewer)
@@ -189,6 +190,27 @@ class JooqChatDirectoryRepository(
                 )
             }
     }
+
+    private fun memberPreview(): Field<List<UserSummary>> = DSL.multiset(
+        DSL.select(
+            USERS.ID,
+            USERS.USERNAME,
+        )
+            .from(CHAT_MEMBERS)
+            .join(USERS)
+            .on(USERS.ID.eq(CHAT_MEMBERS.USER_ID))
+            .where(CHAT_MEMBERS.CHAT_ID.eq(CHATS.ID))
+            .orderBy(CHAT_MEMBERS.USER_ID)
+            .limit(50),
+    )
+        .convertFrom { rows ->
+            rows.map {
+                UserSummary(
+                    id = UserId(it.value1()!!),
+                    username = it.value2()!!,
+                )
+            }
+        }
 
     override fun findMembers(chatId: ChatId): List<UserSummary> = DatabaseObservation.query(DatabaseOperation.CHAT_FIND_MEMBERS) {
         val preview = db.select(CHAT_MEMBERS.USER_ID)

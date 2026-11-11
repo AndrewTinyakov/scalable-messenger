@@ -20,6 +20,7 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MES
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSAGE_CHANGES
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.VISIBILITY_CLEANUP_JOBS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.DeletionOperationsRecord
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.HiddenMessageRangesRecord
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.HistoryPurgeJobsRecord
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseObservation
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseOperation
@@ -103,36 +104,53 @@ class JooqDeletionRepository(
     override fun hideMessages(chatId: ChatId, actorId: UserId, messages: List<DeletionMessage>): Long = DatabaseObservation.query(
         DatabaseOperation.DELETION_PERSONAL_MESSAGES,
     ) {
+        lockMembership(chatId, actorId)
+        for (message in messages.sortedBy { it.sequence }) hideMessage(chatId, actorId, message.sequence)
+        return@query advanceVisibility(chatId, actorId)
+    }
+
+    private fun lockMembership(chatId: ChatId, actorId: UserId) {
         db.selectFrom(
             CHAT_MEMBERS,
         ).where(CHAT_MEMBERS.CHAT_ID.eq(chatId.value), CHAT_MEMBERS.USER_ID.eq(actorId.value)).forUpdate().fetchOne()!!
-        for (message in messages.sortedBy { it.sequence }) {
-            var after = message.sequence - 1
-            var through = message.sequence
-            val base = HIDDEN_MESSAGE_RANGES.CHAT_ID.eq(chatId.value).and(HIDDEN_MESSAGE_RANGES.USER_ID.eq(actorId.value))
-            val left = db.selectFrom(HIDDEN_MESSAGE_RANGES).where(base, HIDDEN_MESSAGE_RANGES.AFTER_SEQUENCE.le(after))
-                .orderBy(HIDDEN_MESSAGE_RANGES.AFTER_SEQUENCE.desc()).limit(1).fetchOne()?.takeIf { it.throughSequence!! >= after }
-            val right = db.selectFrom(HIDDEN_MESSAGE_RANGES).where(base, HIDDEN_MESSAGE_RANGES.AFTER_SEQUENCE.eq(through)).fetchOne()
-            val touching = listOfNotNull(left, right).distinctBy { it.afterSequence }
-            if (touching.isNotEmpty()) {
-                after = minOf(after, touching.minOf { it.afterSequence!! })
-                through = maxOf(through, touching.maxOf { it.throughSequence!! })
-                db.deleteFrom(HIDDEN_MESSAGE_RANGES).where(
-                    HIDDEN_MESSAGE_RANGES.CHAT_ID.eq(chatId.value),
-                    HIDDEN_MESSAGE_RANGES.USER_ID.eq(actorId.value),
-                    HIDDEN_MESSAGE_RANGES.AFTER_SEQUENCE.`in`(
-                        touching.map {
-                            it.afterSequence
-                        },
-                    ),
-                ).execute()
-            }
-            db.insertInto(
-                HIDDEN_MESSAGE_RANGES,
-            ).set(HIDDEN_MESSAGE_RANGES.CHAT_ID, chatId.value).set(HIDDEN_MESSAGE_RANGES.USER_ID, actorId.value)
-                .set(HIDDEN_MESSAGE_RANGES.AFTER_SEQUENCE, after).set(HIDDEN_MESSAGE_RANGES.THROUGH_SEQUENCE, through).execute()
-        }
-        return@query advanceVisibility(chatId, actorId)
+    }
+
+    private fun hideMessage(chatId: ChatId, actorId: UserId, sequence: Long) {
+        val touching = touchingHiddenRanges(chatId = chatId, actorId = actorId, after = sequence - 1, through = sequence)
+        if (touching.isNotEmpty()) deleteHiddenRanges(chatId, actorId, touching)
+        insertHiddenRange(
+            chatId = chatId,
+            actorId = actorId,
+            after = (touching.map { it.afterSequence!! } + (sequence - 1)).min(),
+            through = (touching.map { it.throughSequence!! } + sequence).max(),
+        )
+    }
+
+    private fun touchingHiddenRanges(chatId: ChatId, actorId: UserId, after: Long, through: Long): List<HiddenMessageRangesRecord> {
+        val base = HIDDEN_MESSAGE_RANGES.CHAT_ID.eq(chatId.value).and(HIDDEN_MESSAGE_RANGES.USER_ID.eq(actorId.value))
+        val left = db.selectFrom(HIDDEN_MESSAGE_RANGES).where(base, HIDDEN_MESSAGE_RANGES.AFTER_SEQUENCE.le(after))
+            .orderBy(HIDDEN_MESSAGE_RANGES.AFTER_SEQUENCE.desc()).limit(1).fetchOne()?.takeIf { it.throughSequence!! >= after }
+        val right = db.selectFrom(HIDDEN_MESSAGE_RANGES).where(base, HIDDEN_MESSAGE_RANGES.AFTER_SEQUENCE.eq(through)).fetchOne()
+        return listOfNotNull(left, right).distinctBy { it.afterSequence }
+    }
+
+    private fun deleteHiddenRanges(chatId: ChatId, actorId: UserId, ranges: List<HiddenMessageRangesRecord>) {
+        db.deleteFrom(HIDDEN_MESSAGE_RANGES).where(
+            HIDDEN_MESSAGE_RANGES.CHAT_ID.eq(chatId.value),
+            HIDDEN_MESSAGE_RANGES.USER_ID.eq(actorId.value),
+            HIDDEN_MESSAGE_RANGES.AFTER_SEQUENCE.`in`(
+                ranges.map {
+                    it.afterSequence
+                },
+            ),
+        ).execute()
+    }
+
+    private fun insertHiddenRange(chatId: ChatId, actorId: UserId, after: Long, through: Long) {
+        db.insertInto(
+            HIDDEN_MESSAGE_RANGES,
+        ).set(HIDDEN_MESSAGE_RANGES.CHAT_ID, chatId.value).set(HIDDEN_MESSAGE_RANGES.USER_ID, actorId.value)
+            .set(HIDDEN_MESSAGE_RANGES.AFTER_SEQUENCE, after).set(HIDDEN_MESSAGE_RANGES.THROUGH_SEQUENCE, through).execute()
     }
 
     override fun clearPersonal(chatId: ChatId, actorId: UserId, through: Long, hide: Boolean): Long = DatabaseObservation.query(

@@ -217,9 +217,17 @@ class JooqReadRepository(
 
     override fun cleanup(now: OffsetDateTime, limit: Int): ReadCleanup? = DatabaseObservation.query(DatabaseOperation.READ_CLEANUP) {
         require(limit in 1..1000)
-        if (db.select(DSL.field("pg_try_advisory_xact_lock(7612910046)", Boolean::class.java)).fetchOne(0, Boolean::class.java) != true) {
-            return@query null
-        }
+        if (!tryCleanupLock()) return@query null
+        val deletedRanges = deleteExpiredRanges(now, limit)
+        val deletedNotifications = deleteExpiredNotifications(now, limit)
+        val backlog = expiredRangeBacklog(now)
+        ReadCleanup(deletedRanges, deletedNotifications, backlog.size, backlog.firstOrNull())
+    }
+
+    private fun tryCleanupLock(): Boolean =
+        db.select(DSL.field("pg_try_advisory_xact_lock(7612910046)", Boolean::class.java)).fetchOne(0, Boolean::class.java) == true
+
+    private fun deleteExpiredRanges(now: OffsetDateTime, limit: Int): Int {
         val ranges = db.select(
             CHAT_READ_RANGES.CHAT_ID,
             CHAT_READ_RANGES.USER_ID,
@@ -235,33 +243,30 @@ class JooqReadRepository(
                 CHAT_READ_RANGES.THROUGH_SEQUENCE,
             )
             .limit(limit).forUpdate().skipLocked().fetch()
-        val deletedRanges = if (ranges.isEmpty()) {
-            0
-        } else {
-            db.deleteFrom(CHAT_READ_RANGES).where(
-                DSL.row(
-                    CHAT_READ_RANGES.CHAT_ID,
-                    CHAT_READ_RANGES.USER_ID,
-                    CHAT_READ_RANGES.CREATION_DAY,
-                    CHAT_READ_RANGES.THROUGH_SEQUENCE,
-                ).`in`(ranges),
-            ).execute()
-        }
+        if (ranges.isEmpty()) return 0
+        return db.deleteFrom(CHAT_READ_RANGES).where(
+            DSL.row(
+                CHAT_READ_RANGES.CHAT_ID,
+                CHAT_READ_RANGES.USER_ID,
+                CHAT_READ_RANGES.CREATION_DAY,
+                CHAT_READ_RANGES.THROUGH_SEQUENCE,
+            ).`in`(ranges),
+        ).execute()
+    }
+
+    private fun deleteExpiredNotifications(now: OffsetDateTime, limit: Int): Int {
         val notifications = db.select(CHAT_READ_NOTIFICATIONS.CHAT_ID, CHAT_READ_NOTIFICATIONS.BUCKET)
             .from(CHAT_READ_NOTIFICATIONS).where(CHAT_READ_NOTIFICATIONS.EXPIRES_AT.le(now))
             .orderBy(CHAT_READ_NOTIFICATIONS.EXPIRES_AT, CHAT_READ_NOTIFICATIONS.CHAT_ID, CHAT_READ_NOTIFICATIONS.BUCKET)
             .limit(limit).forUpdate().skipLocked().fetch()
-        val deletedNotifications = if (notifications.isEmpty()) {
-            0
-        } else {
-            db.deleteFrom(CHAT_READ_NOTIFICATIONS).where(
-                DSL.row(CHAT_READ_NOTIFICATIONS.CHAT_ID, CHAT_READ_NOTIFICATIONS.BUCKET).`in`(notifications),
-            ).execute()
-        }
-        val backlog = DatabaseObservation.query(DatabaseOperation.READ_BACKLOG) {
-            db.select(CHAT_READ_RANGES.EXPIRES_AT).from(CHAT_READ_RANGES).where(CHAT_READ_RANGES.EXPIRES_AT.le(now))
-                .orderBy(CHAT_READ_RANGES.EXPIRES_AT).limit(10001).fetch(CHAT_READ_RANGES.EXPIRES_AT)
-        }
-        ReadCleanup(deletedRanges, deletedNotifications, backlog.size, backlog.firstOrNull())
+        if (notifications.isEmpty()) return 0
+        return db.deleteFrom(CHAT_READ_NOTIFICATIONS).where(
+            DSL.row(CHAT_READ_NOTIFICATIONS.CHAT_ID, CHAT_READ_NOTIFICATIONS.BUCKET).`in`(notifications),
+        ).execute()
+    }
+
+    private fun expiredRangeBacklog(now: OffsetDateTime): List<OffsetDateTime> = DatabaseObservation.query(DatabaseOperation.READ_BACKLOG) {
+        db.select(CHAT_READ_RANGES.EXPIRES_AT).from(CHAT_READ_RANGES).where(CHAT_READ_RANGES.EXPIRES_AT.le(now))
+            .orderBy(CHAT_READ_RANGES.EXPIRES_AT).limit(10001).fetch(CHAT_READ_RANGES.EXPIRES_AT)
     }
 }

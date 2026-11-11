@@ -336,7 +336,11 @@ export function ChatPanel({
   const knownEmpty = !chat || chat.lastSequence === '0'
   const entering = useEnteringEntries(
     modeKey,
-    entries.map((entry) => ({ key: entry.key, sequence: entry.message?.sequence })),
+    entries.map((entry) => ({
+      key: entry.key,
+      sequence: entry.message?.sequence,
+      mine: Boolean(entry.send) || entry.message?.senderId === currentUser.id,
+    })),
     { knownEmpty, latest: !hasNewer },
   )
   const fadedFor = useRef<string | undefined>()

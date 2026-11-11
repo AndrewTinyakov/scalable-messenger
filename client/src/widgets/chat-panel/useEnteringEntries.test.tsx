@@ -17,7 +17,11 @@ function Probe({ chatId, keys, view }: { chatId: string; keys: string[]; view: V
   seen.push([
     ...useEnteringEntries(
       chatId,
-      keys.map((key) => ({ key, sequence: key.startsWith('pending') ? undefined : key })),
+      keys.map((key) => {
+        const pending = key.startsWith('pending')
+        const sequence = pending ? undefined : key.replace(/^mine-/, '')
+        return { key, sequence, mine: pending || key.startsWith('mine-') }
+      }),
       { knownEmpty: view.empty ?? false, latest: view.latest ?? true },
     ),
   ])
@@ -67,6 +71,19 @@ describe('entering message entries', () => {
     expect(await show('a', ['1', 'pending-a'])).toEqual(['pending-a'])
     expect(await show('a', ['1', '2', 'pending-a'])).toEqual(['2'])
     expect(await show('a', ['1', '2', '3'])).toEqual(['3'])
+  })
+
+  it('does not animate an own pending send again when its saved row replaces it', async () => {
+    await show('draft', [], { empty: true })
+    expect(await show('draft', ['pending-a'], { empty: true })).toEqual(['pending-a'])
+    expect(await show('draft', ['mine-1'])).toEqual([])
+    await show('real', [], { empty: true })
+    await show('real', ['pending-b'], { empty: true })
+    expect(await show('real', [])).toEqual([])
+    expect(await show('real', ['mine-1'])).toEqual([])
+    expect(await show('real', ['mine-1', 'mine-2'])).toEqual(['mine-2'])
+    await show('a', ['1', 'pending-a'])
+    expect(await show('a', ['1', 'mine-2', '3'])).toEqual(['3'])
   })
 
   it('animates an arrival that lands with the deletion of the newest saved message', async () => {

@@ -586,7 +586,7 @@
   margin-bottom: 18px;
   padding: 0 8px;
   width: min(calc(100% - 40px), 780px);
-  height: 54px;
+  height: 56px;
   align-items: center;
   gap: 6px;
   border: 1px solid var(--line-strong);

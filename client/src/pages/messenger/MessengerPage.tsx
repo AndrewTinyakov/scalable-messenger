@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { useMessenger } from '../../app/useMessenger'
 import { hasUnread } from '../../entities/chat/model'
+import type { Message } from '../../entities/message/model'
 import type { Session } from '../../entities/session/model'
 import { ChatActions, type ChatMenuTarget } from '../../features/chat-actions/ChatActions'
 import { CreateChatDialog } from '../../features/chat-create/CreateChatDialog'
@@ -16,6 +17,8 @@ import { ConnectionStatus } from '../../widgets/chat-list/ConnectionStatus'
 import { FolderRail, type ChatFolder } from '../../widgets/chat-list/FolderRail'
 import { ChatPanel } from '../../widgets/chat-panel/ChatPanel'
 import { liveChatId, type ChatViewport } from './liveChat'
+
+const NO_MESSAGES: Message[] = []
 
 interface Props {
   session: Session
@@ -138,7 +141,7 @@ export function MessengerPage({ session, onSignOut, onSessionRevoked }: Props) {
           onMute={messenger.muteChat}
           onUnmute={messenger.unmuteChat}
           currentUser={session.user}
-          messages={selected ? messenger.messages[selected.id] || [] : []}
+          messages={(selected && messenger.messages[selected.id]) || NO_MESSAGES}
           pending={messenger.pending}
           connection={messenger.connection}
           onSend={messenger.sendMessage}

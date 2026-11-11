@@ -163,7 +163,7 @@
 }
 .message-enter .message-bubble {
   transform-origin: bottom left;
-  animation: bubble-in 360ms var(--spring) backwards;
+  animation: bubble-in 300ms var(--ease) backwards;
 }
 .message-row.mine.message-enter .message-bubble {
   transform-origin: bottom right;

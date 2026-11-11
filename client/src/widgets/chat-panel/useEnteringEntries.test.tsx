@@ -73,17 +73,19 @@ describe('entering message entries', () => {
     expect(await show('a', ['1', '2', '3'])).toEqual(['3'])
   })
 
-  it('does not animate an own pending send again when its saved row replaces it', async () => {
+  it('animates own messages only as pending sends, never again when they are saved', async () => {
     await show('draft', [], { empty: true })
     expect(await show('draft', ['pending-a'], { empty: true })).toEqual(['pending-a'])
+    expect(await show('draft', [])).toEqual([])
     expect(await show('draft', ['mine-1'])).toEqual([])
-    await show('real', [], { empty: true })
-    await show('real', ['pending-b'], { empty: true })
-    expect(await show('real', [])).toEqual([])
-    expect(await show('real', ['mine-1'])).toEqual([])
-    expect(await show('real', ['mine-1', 'mine-2'])).toEqual(['mine-2'])
-    await show('a', ['1', 'pending-a'])
-    expect(await show('a', ['1', 'mine-2', '3'])).toEqual(['3'])
+    expect(await show('draft', ['mine-1', 'mine-2'])).toEqual([])
+    expect(await show('draft', ['mine-1', 'mine-2', '3'])).toEqual(['3'])
+
+    await show('a', ['5', 'pending-a'])
+    await show('a', ['5'])
+    await show('a', ['mine-4', '5'])
+    expect(await show('a', ['mine-4', '5', 'pending-b'])).toEqual(['pending-b'])
+    expect(await show('a', ['mine-4', '5', 'pending-b', '7'])).toEqual(['7'])
   })
 
   it('animates an arrival that lands with the deletion of the newest saved message', async () => {

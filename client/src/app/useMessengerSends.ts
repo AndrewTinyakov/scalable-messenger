@@ -34,7 +34,11 @@ export function useMessengerSends({
   const applySaved = useCallback(
     async (saved: SavedSend[]) => {
       if (saved.map(selectResolvedDraft).some(Boolean)) await refreshChats(false, true)
-      for (const chatId of new Set(saved.map((result) => result.chatId))) await catchUp(chatId)
+      const chatIds = [...new Set(saved.map((result) => result.chatId))]
+      const recover = async () => {
+        while (chatIds.length) await catchUp(chatIds.shift()!)
+      }
+      await Promise.all(Array.from({ length: Math.min(4, chatIds.length) }, recover))
     },
     [catchUp, refreshChats, selectResolvedDraft],
   )

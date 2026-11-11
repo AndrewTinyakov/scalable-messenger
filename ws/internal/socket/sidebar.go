@@ -273,6 +273,17 @@ func (p *sidebarCoordinator) sweep() {
 	for id := range peers {
 		ids = append(ids, id)
 	}
+	presenceDelivered := make(chan struct{})
+	var renewals sync.WaitGroup
+	renewals.Add(1)
+	go func() {
+		defer renewals.Done()
+		p.renew(ctx, due, presenceDelivered)
+	}()
+	defer func() {
+		close(presenceDelivered)
+		renewals.Wait()
+	}()
 	states := p.server.presence.snapshot(ctx, ids)
 	observed := time.Now().UTC().Format(time.RFC3339Nano)
 	for c, w := range watches {
@@ -286,6 +297,9 @@ func (p *sidebarCoordinator) sweep() {
 		}
 		p.deliver(c, w, protocol.Event{Type: protocol.EventSidebarPresence, Version: 1, ObservedAt: observed, ValidForMS: min(15000, int(time.Until(w.expires).Milliseconds())), Statuses: statuses})
 	}
+}
+
+func (p *sidebarCoordinator) renew(ctx context.Context, due map[*Connection]*sidebarWatch, presenceDelivered <-chan struct{}) {
 	jobs := make(chan struct {
 		c *Connection
 		w *sidebarWatch
@@ -298,6 +312,7 @@ func (p *sidebarCoordinator) sweep() {
 			for job := range jobs {
 				w, err := p.authorize(ctx, job.c, job.w.chatIDs, job.w.generation)
 				if err == nil {
+					<-presenceDelivered
 					_ = p.install(job.c, job.w, w)
 				}
 			}

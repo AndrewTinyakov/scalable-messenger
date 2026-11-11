@@ -245,3 +245,30 @@ it.each(['remove', 'summary', 'refresh'] as const)(
     expect(directory.hasMoreChats).toBe(false)
   },
 )
+
+it('starts the first-page refresh while the next page is still pending', async () => {
+  chats.mockResolvedValueOnce({
+    chats: Array.from({ length: 100 }, (_, index) => ({
+      ...older,
+      id: index ? `loaded-${index}` : older.id,
+    })),
+    nextCursor: 'more',
+  })
+  await act(async () => directory.refreshChats(true))
+  const page = deferred<{ chats: Chat[]; nextCursor: null }>()
+  const firstPage = deferred<{ chats: Chat[]; nextCursor: null }>()
+  chats.mockClear().mockReturnValueOnce(page.promise).mockReturnValueOnce(firstPage.promise)
+  let loading!: Promise<void>
+  await act(async () => {
+    loading = directory.loadMoreChats()
+  })
+  const started = chats.mock.calls.map(([cursor]) => cursor)
+  await act(async () => {
+    firstPage.resolve({ chats: [newer], nextCursor: null })
+    page.resolve({ chats: [{ ...older, id: 'next' }], nextCursor: null })
+    await loading
+  })
+  expect(started).toEqual(['more', undefined])
+  expect(directory.chats.find((chat) => chat.id === older.id)).toEqual(newer)
+  expect(directory.chats.some((chat) => chat.id === 'next')).toBe(true)
+})

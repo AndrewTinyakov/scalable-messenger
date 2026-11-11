@@ -1,5 +1,6 @@
 package com.andrewtinyakov.messenger.infrastructure.messaging
 
+import com.andrewtinyakov.messenger.infrastructure.messaging.config.CommandTopology
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 

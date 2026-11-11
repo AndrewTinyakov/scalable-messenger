@@ -1,13 +1,13 @@
 package com.andrewtinyakov.messenger.message.service
 
+import com.andrewtinyakov.messenger.auth.model.UserId
+import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.message.model.Message
 import com.andrewtinyakov.messenger.message.monitoring.HistoryDirection
 import com.andrewtinyakov.messenger.message.monitoring.MessageMetrics
 import com.andrewtinyakov.messenger.message.repository.MessageRepository
-import com.andrewtinyakov.messenger.message.visibility.VisibilityRepository
-import com.andrewtinyakov.messenger.message.visibility.VisibilitySnapshot
-import com.andrewtinyakov.messenger.shared.id.ChatId
-import com.andrewtinyakov.messenger.shared.id.UserId
+import com.andrewtinyakov.messenger.message.visibility.model.VisibilitySnapshot
+import com.andrewtinyakov.messenger.message.visibility.repository.VisibilityRepository
 import org.springframework.stereotype.Component
 
 data class VisiblePage(

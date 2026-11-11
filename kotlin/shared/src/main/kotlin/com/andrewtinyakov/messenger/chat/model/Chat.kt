@@ -1,8 +1,8 @@
 package com.andrewtinyakov.messenger.chat.model
 
-import com.andrewtinyakov.messenger.shared.id.ChatId
-import com.andrewtinyakov.messenger.shared.id.MessageId
-import com.andrewtinyakov.messenger.shared.id.UserId
+import com.andrewtinyakov.messenger.auth.model.UserId
+import com.andrewtinyakov.messenger.message.model.MessageId
+import java.time.OffsetDateTime
 
 data class Chat(
     val id: ChatId,
@@ -12,7 +12,7 @@ data class Chat(
     val ownerId: UserId?,
     val memberCount: Int,
     val lastMessage: ChatLastMessage? = null,
-    val activityAt: java.time.OffsetDateTime? = null,
+    val activityAt: OffsetDateTime? = null,
     val unreadCount: Int = 0,
     val unreadCountCapped: Boolean = false,
     val preferences: ChatPreferences = ChatPreferences(),
@@ -38,7 +38,7 @@ data class Chat(
 
 data class ChatPreferences(
     val pinnedRank: Int? = null,
-    val mutedUntil: java.time.OffsetDateTime? = null,
+    val mutedUntil: OffsetDateTime? = null,
     val mutedForever: Boolean = false,
     val markedUnread: Boolean = false,
 ) {
@@ -57,7 +57,7 @@ data class ChatLastMessage(
     val sequence: Long,
     val senderId: UserId,
     val senderUsername: String,
-    val createdAt: java.time.OffsetDateTime,
+    val createdAt: OffsetDateTime,
     val bodyPreview: String,
     val deleted: Boolean,
 )

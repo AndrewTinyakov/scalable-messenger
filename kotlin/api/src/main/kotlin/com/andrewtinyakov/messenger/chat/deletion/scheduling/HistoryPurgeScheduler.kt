@@ -1,6 +1,6 @@
 package com.andrewtinyakov.messenger.chat.deletion.scheduling
 
-import com.andrewtinyakov.messenger.chat.deletion.HistoryPurgeService
+import com.andrewtinyakov.messenger.chat.deletion.service.HistoryPurgeService
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 

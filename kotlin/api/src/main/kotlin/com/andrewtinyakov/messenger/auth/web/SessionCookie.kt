@@ -2,8 +2,8 @@ package com.andrewtinyakov.messenger.auth.web
 
 import com.andrewtinyakov.messenger.auth.config.AuthProperties
 import com.andrewtinyakov.messenger.auth.model.SessionCredentials
-import com.andrewtinyakov.messenger.shared.id.SessionToken
-import com.andrewtinyakov.messenger.shared.id.isValidSessionToken
+import com.andrewtinyakov.messenger.auth.model.SessionToken
+import com.andrewtinyakov.messenger.auth.model.isValidSessionToken
 import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
 import com.andrewtinyakov.messenger.shared.web.ApiException
 import jakarta.servlet.http.HttpServletRequest

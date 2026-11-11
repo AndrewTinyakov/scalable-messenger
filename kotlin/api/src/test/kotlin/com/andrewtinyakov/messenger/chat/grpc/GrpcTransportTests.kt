@@ -2,6 +2,10 @@ package com.andrewtinyakov.messenger.chat.grpc
 
 import com.andrewtinyakov.messenger.auth.service.AuthenticationService
 import com.andrewtinyakov.messenger.auth.web.payload.AuthRequest
+import com.andrewtinyakov.messenger.chat.grpc.config.GrpcProperties
+import com.andrewtinyakov.messenger.chat.grpc.config.GrpcServerLifecycle
+import com.andrewtinyakov.messenger.chat.grpc.service.ChatAuthorizationGrpcService
+import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.service.ChatMembershipService
 import com.andrewtinyakov.messenger.chat.service.ChatService
 import com.andrewtinyakov.messenger.chat.web.payload.AddGroupMembersRequest
@@ -11,7 +15,6 @@ import com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupsRequest
 import com.andrewtinyakov.messenger.generated.grpc.ChatAuthorizationGrpc
 import com.andrewtinyakov.messenger.generated.grpc.ValidateSessionRequest
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
-import com.andrewtinyakov.messenger.shared.id.ChatId
 import com.andrewtinyakov.messenger.shared.id.newId
 import io.grpc.Status
 import io.grpc.StatusRuntimeException

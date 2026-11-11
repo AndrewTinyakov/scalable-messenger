@@ -1,7 +1,7 @@
 package com.andrewtinyakov.messenger.chat.deletion.monitoring
 
-import com.andrewtinyakov.messenger.chat.deletion.DeletionScope
-import com.andrewtinyakov.messenger.chat.deletion.DeletionTarget
+import com.andrewtinyakov.messenger.chat.deletion.web.payload.DeletionScope
+import com.andrewtinyakov.messenger.chat.deletion.web.payload.DeletionTarget
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry

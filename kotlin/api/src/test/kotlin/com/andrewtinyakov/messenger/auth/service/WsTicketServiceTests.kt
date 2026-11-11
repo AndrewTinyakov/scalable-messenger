@@ -2,9 +2,9 @@ package com.andrewtinyakov.messenger.auth.service
 
 import com.andrewtinyakov.messenger.auth.config.AuthProperties
 import com.andrewtinyakov.messenger.auth.model.AuthenticatedSession
-import com.andrewtinyakov.messenger.shared.id.DeviceId
-import com.andrewtinyakov.messenger.shared.id.SessionId
-import com.andrewtinyakov.messenger.shared.id.UserId
+import com.andrewtinyakov.messenger.auth.model.DeviceId
+import com.andrewtinyakov.messenger.auth.model.SessionId
+import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.shared.id.newId
 import com.andrewtinyakov.messenger.shared.web.ApiException
 import org.junit.jupiter.api.Assertions.assertEquals

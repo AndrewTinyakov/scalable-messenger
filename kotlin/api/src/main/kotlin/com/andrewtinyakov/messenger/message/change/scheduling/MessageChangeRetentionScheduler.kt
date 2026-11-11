@@ -1,6 +1,6 @@
 package com.andrewtinyakov.messenger.message.change.scheduling
 
-import com.andrewtinyakov.messenger.message.change.MessageChangeRetentionService
+import com.andrewtinyakov.messenger.message.change.service.MessageChangeRetentionService
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 

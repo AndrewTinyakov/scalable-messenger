@@ -1,7 +1,12 @@
 package com.andrewtinyakov.messenger.chat.web.controller
 
 import com.andrewtinyakov.messenger.auth.model.AuthenticatedSession
-import com.andrewtinyakov.messenger.chat.service.ChatDeletionService
+import com.andrewtinyakov.messenger.auth.model.UserId
+import com.andrewtinyakov.messenger.chat.deletion.service.DeletionService
+import com.andrewtinyakov.messenger.chat.deletion.web.payload.DeletionRequest
+import com.andrewtinyakov.messenger.chat.deletion.web.payload.DeletionScope
+import com.andrewtinyakov.messenger.chat.deletion.web.payload.DeletionTarget
+import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.service.ChatMembershipService
 import com.andrewtinyakov.messenger.chat.service.ChatService
 import com.andrewtinyakov.messenger.chat.service.DirectChatLookupService
@@ -11,8 +16,6 @@ import com.andrewtinyakov.messenger.chat.web.payload.ChatResponse
 import com.andrewtinyakov.messenger.chat.web.payload.CreateGroupChatRequest
 import com.andrewtinyakov.messenger.chat.web.payload.DirectChatResponse
 import com.andrewtinyakov.messenger.chat.web.payload.GroupMemberPageResponse
-import com.andrewtinyakov.messenger.shared.id.ChatId
-import com.andrewtinyakov.messenger.shared.id.UserId
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.DeleteMapping
@@ -29,7 +32,7 @@ import org.springframework.web.bind.annotation.RestController
 @RequestMapping("/v1/chats")
 class ChatController(
     private val chatService: ChatService,
-    private val chatDeletionService: ChatDeletionService,
+    private val deletionService: DeletionService,
     private val chatMembershipService: ChatMembershipService,
     private val directChatLookupService: DirectChatLookupService,
 ) {
@@ -39,7 +42,8 @@ class ChatController(
         session: AuthenticatedSession,
         @PathVariable id: String,
     ) {
-        chatDeletionService.delete(ChatId.parse(id), session.userId)
+        val chatId = ChatId.parse(id)
+        deletionService.delete(chatId, session.userId, DeletionRequest(chatId.value, DeletionScope.EVERYONE, DeletionTarget.CHAT))
     }
 
     @GetMapping

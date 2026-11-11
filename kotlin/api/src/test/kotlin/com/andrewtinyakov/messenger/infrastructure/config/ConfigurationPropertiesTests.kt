@@ -3,7 +3,7 @@ package com.andrewtinyakov.messenger.infrastructure.config
 import com.andrewtinyakov.messenger.auth.config.AuthProperties
 import com.andrewtinyakov.messenger.auth.config.PasswordConfig
 import com.andrewtinyakov.messenger.auth.config.PasswordProperties
-import com.andrewtinyakov.messenger.chat.grpc.GrpcProperties
+import com.andrewtinyakov.messenger.chat.grpc.config.GrpcProperties
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.boot.context.properties.EnableConfigurationProperties

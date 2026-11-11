@@ -1,8 +1,7 @@
 package com.andrewtinyakov.messenger.message.model
 
-import com.andrewtinyakov.messenger.shared.id.ChatId
-import com.andrewtinyakov.messenger.shared.id.MessageId
-import com.andrewtinyakov.messenger.shared.id.UserId
+import com.andrewtinyakov.messenger.auth.model.UserId
+import com.andrewtinyakov.messenger.chat.model.ChatId
 import java.time.OffsetDateTime
 
 data class Message(

@@ -1,8 +1,8 @@
 package com.andrewtinyakov.messenger
 
-import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxBacklog
-import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxPublicationService
-import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxRepository
+import com.andrewtinyakov.messenger.infrastructure.outbox.model.OutboxBacklog
+import com.andrewtinyakov.messenger.infrastructure.outbox.repository.OutboxClaimRepository
+import com.andrewtinyakov.messenger.infrastructure.outbox.service.OutboxPublicationService
 import com.andrewtinyakov.messenger.message.repository.MessageRepository
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
@@ -23,7 +23,7 @@ class PublisherApplicationTests {
 
     @Autowired private lateinit var messages: MessageRepository
 
-    @Autowired private lateinit var outbox: OutboxRepository
+    @Autowired private lateinit var outbox: OutboxClaimRepository
 
     @Test
     fun `publisher starts with its real hydration persistence adapter`() {

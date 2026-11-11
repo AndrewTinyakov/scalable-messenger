@@ -1,6 +1,6 @@
 package com.andrewtinyakov.messenger.infrastructure.outbox.scheduling
 
-import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxBacklogService
+import com.andrewtinyakov.messenger.infrastructure.outbox.service.OutboxBacklogService
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 

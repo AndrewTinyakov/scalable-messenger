@@ -1,8 +1,8 @@
 package com.andrewtinyakov.messenger.auth.web.controller
 
 import com.andrewtinyakov.messenger.auth.model.AuthenticatedSession
-import com.andrewtinyakov.messenger.auth.repository.UserRepository
 import com.andrewtinyakov.messenger.auth.service.AuthenticationService
+import com.andrewtinyakov.messenger.auth.service.UserLookupService
 import com.andrewtinyakov.messenger.auth.service.WsTicketService
 import com.andrewtinyakov.messenger.auth.web.SessionCookie
 import com.andrewtinyakov.messenger.auth.web.expectedSessionIdentity
@@ -26,7 +26,7 @@ import org.springframework.web.bind.annotation.RestController
 @RequestMapping("/v1/auth")
 class AuthController(
     private val authenticationService: AuthenticationService,
-    private val userRepository: UserRepository,
+    private val userLookupService: UserLookupService,
     private val wsTicketService: WsTicketService,
     private val cookies: SessionCookie,
 ) {
@@ -55,7 +55,7 @@ class AuthController(
     fun session(
         session: AuthenticatedSession,
     ): SessionResponse {
-        val user = requireNotNull(userRepository.findSummary(userId = session.userId))
+        val user = userLookupService.get(session.userId)
         return SessionResponse(userId = user.id.value, username = user.username, deviceId = session.deviceId.value)
     }
 

@@ -1,8 +1,8 @@
 package com.andrewtinyakov.messenger.auth.service
 
+import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.auth.model.UserSummary
 import com.andrewtinyakov.messenger.auth.repository.UserRepository
-import com.andrewtinyakov.messenger.shared.id.UserId
 import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
 import com.andrewtinyakov.messenger.shared.web.ApiException
 import org.springframework.http.HttpStatus

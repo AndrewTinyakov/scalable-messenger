@@ -9,6 +9,7 @@ import com.fasterxml.jackson.annotation.JsonInclude
 import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.Size
+import java.time.OffsetDateTime
 
 data class ChatResponse(
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
@@ -39,7 +40,7 @@ data class ChatResponse(
     )
     val unreadCount: Int = 0,
     @field:Schema(requiredMode = Schema.RequiredMode.NOT_REQUIRED, nullable = true)
-    val activityAt: java.time.OffsetDateTime? = null,
+    val activityAt: OffsetDateTime? = null,
     @field:Schema(
         requiredMode = Schema.RequiredMode.NOT_REQUIRED,
         description = "True for 256 raw unread candidates; real count may be higher even when unreadCount is zero",
@@ -54,7 +55,7 @@ data class ChatResponse(
     )
     val pinnedRank: Int? = null,
     @field:Schema(requiredMode = Schema.RequiredMode.NOT_REQUIRED, nullable = true, description = "End of a timed mute")
-    val mutedUntil: java.time.OffsetDateTime? = null,
+    val mutedUntil: OffsetDateTime? = null,
     @field:Schema(requiredMode = Schema.RequiredMode.NOT_REQUIRED)
     val mutedForever: Boolean = false,
     @field:Schema(requiredMode = Schema.RequiredMode.NOT_REQUIRED, description = "Viewer marked this chat to read later")
@@ -137,7 +138,7 @@ data class ChatLastMessageResponse(
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val senderUsername: String,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
-    val createdAt: java.time.OffsetDateTime,
+    val createdAt: OffsetDateTime,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val bodyPreview: String,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)

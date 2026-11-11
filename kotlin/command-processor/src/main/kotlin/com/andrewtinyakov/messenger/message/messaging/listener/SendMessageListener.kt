@@ -1,9 +1,9 @@
 package com.andrewtinyakov.messenger.message.messaging.listener
 
 import com.andrewtinyakov.messenger.generated.messaging.command.SendMessageCommandV1
-import com.andrewtinyakov.messenger.infrastructure.messaging.CommandKind
-import com.andrewtinyakov.messenger.infrastructure.messaging.CommandTopology
-import com.andrewtinyakov.messenger.infrastructure.messaging.consumeMessage
+import com.andrewtinyakov.messenger.infrastructure.messaging.config.CommandTopology
+import com.andrewtinyakov.messenger.infrastructure.messaging.listener.consumeMessage
+import com.andrewtinyakov.messenger.infrastructure.messaging.model.CommandKind
 import com.andrewtinyakov.messenger.infrastructure.messaging.monitoring.CommandMetrics
 import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStage
 import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStageRecorder
@@ -30,7 +30,7 @@ class SendMessageListener(
     private val logger = LoggerFactory.getLogger(javaClass)
 
     @RabbitListener(
-        queues = ["messenger.send.0", "messenger.send.1", "messenger.send.2", "messenger.send.3"],
+        queues = ["#{@sendQueueNames}"],
         containerFactory = "sendBatchListenerContainerFactory",
     )
     fun onSendCommand(messages: List<Message>, channel: Channel) {

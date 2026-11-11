@@ -2,14 +2,18 @@ package com.andrewtinyakov.messenger.chat.grpc
 
 import com.andrewtinyakov.messenger.auth.service.AuthenticationService
 import com.andrewtinyakov.messenger.auth.web.payload.AuthRequest
-import com.andrewtinyakov.messenger.chat.service.ChatDeletionService
+import com.andrewtinyakov.messenger.chat.deletion.service.DeletionService
+import com.andrewtinyakov.messenger.chat.deletion.web.payload.DeletionRequest
+import com.andrewtinyakov.messenger.chat.deletion.web.payload.DeletionScope
+import com.andrewtinyakov.messenger.chat.deletion.web.payload.DeletionTarget
+import com.andrewtinyakov.messenger.chat.grpc.service.ChatAuthorizationGrpcService
+import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.service.ChatMembershipService
 import com.andrewtinyakov.messenger.chat.service.ChatService
 import com.andrewtinyakov.messenger.chat.web.payload.CreateGroupChatRequest
 import com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest
 import com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceResponse
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
-import com.andrewtinyakov.messenger.shared.id.ChatId
 import com.andrewtinyakov.messenger.shared.id.newId
 import io.grpc.Status
 import io.grpc.stub.StreamObserver
@@ -28,7 +32,7 @@ class PresenceAuthorizationTests
         private val authentication: AuthenticationService,
         private val chats: ChatService,
         private val memberships: ChatMembershipService,
-        private val deletion: ChatDeletionService,
+        private val deletion: DeletionService,
     ) : MessengerIntegrationTest() {
         @Test
         fun `presence returns only requested current members in request order`() {
@@ -103,7 +107,7 @@ class PresenceAuthorizationTests
             )
             val groupRequest = request(member.session.sessionId.value, group.id, listOf(owner.session.userId.value))
             assertEquals(listOf(owner.session.userId.value), call(groupRequest).value?.authorizedUserIdsList)
-            deletion.delete(ChatId(group.id), owner.session.userId)
+            deletion.delete(ChatId(group.id), owner.session.userId, DeletionRequest(group.id, DeletionScope.EVERYONE, DeletionTarget.CHAT))
             assertDenied(groupRequest)
             val direct = newId()
             db.update("INSERT INTO chats(id,kind,direct_pair_key) VALUES (?,'DIRECT',?)", direct, "presence_$direct")
@@ -116,7 +120,7 @@ class PresenceAuthorizationTests
             )
             val directRequest = request(member.session.sessionId.value, direct, listOf(owner.session.userId.value))
             assertEquals(listOf(owner.session.userId.value), call(directRequest).value?.authorizedUserIdsList)
-            deletion.delete(ChatId(direct), member.session.userId)
+            deletion.delete(ChatId(direct), member.session.userId, DeletionRequest(direct, DeletionScope.EVERYONE, DeletionTarget.CHAT))
             assertDenied(directRequest)
         }
 

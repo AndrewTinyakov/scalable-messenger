@@ -1,14 +1,13 @@
 package com.andrewtinyakov.messenger.chat.service
 
+import com.andrewtinyakov.messenger.auth.model.UserId
+import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.repository.ChatRepository
 import com.andrewtinyakov.messenger.generated.messaging.event.ChatCreatedEventV1
-import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxMessage
-import com.andrewtinyakov.messenger.infrastructure.outbox.RoomEventType
+import com.andrewtinyakov.messenger.infrastructure.outbox.model.EventId
+import com.andrewtinyakov.messenger.infrastructure.outbox.model.OutboxMessage
 import com.andrewtinyakov.messenger.infrastructure.redis.RoomAddress
-import com.andrewtinyakov.messenger.shared.id.ChatId
-import com.andrewtinyakov.messenger.shared.id.EventId
-import com.andrewtinyakov.messenger.shared.id.RequestId
-import com.andrewtinyakov.messenger.shared.id.UserId
+import com.andrewtinyakov.messenger.message.model.RequestId
 import com.andrewtinyakov.messenger.shared.id.newId
 import org.springframework.stereotype.Service
 import tools.jackson.databind.ObjectMapper
@@ -28,9 +27,7 @@ class DirectChatService(
         repository.findByDirectKey(key = key)?.let { return it }
         val id = ChatId(newId())
         val events = members.map { userId ->
-            val event = ChatCreatedEventV1(
-                type = RoomEventType.CHAT_CREATED.value,
-                version = 1,
+            val event = ChatCreatedEventV1.create(
                 eventId = newId(),
                 room = RoomAddress.user(userId = userId),
                 chatId = id.value,

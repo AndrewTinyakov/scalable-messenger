@@ -1,9 +1,13 @@
 package com.andrewtinyakov.messenger.auth.service
 
 import com.andrewtinyakov.messenger.auth.model.AuthenticatedSession
+import com.andrewtinyakov.messenger.auth.model.DeviceId
 import com.andrewtinyakov.messenger.auth.model.ExpectedSessionIdentity
 import com.andrewtinyakov.messenger.auth.model.SessionCredentials
+import com.andrewtinyakov.messenger.auth.model.SessionId
+import com.andrewtinyakov.messenger.auth.model.SessionToken
 import com.andrewtinyakov.messenger.auth.model.User
+import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.auth.model.UserSummary
 import com.andrewtinyakov.messenger.auth.repository.SessionRepository
 import com.andrewtinyakov.messenger.auth.repository.UserRepository
@@ -12,14 +16,10 @@ import com.andrewtinyakov.messenger.generated.messaging.event.SessionRevokedEven
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseTransaction
 import com.andrewtinyakov.messenger.infrastructure.database.observability.observedExecute
 import com.andrewtinyakov.messenger.infrastructure.database.observability.observedExecuteWithoutResult
-import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxRepository
+import com.andrewtinyakov.messenger.infrastructure.outbox.model.EventId
+import com.andrewtinyakov.messenger.infrastructure.outbox.repository.OutboxRepository
 import com.andrewtinyakov.messenger.infrastructure.redis.RoomAddress
 import com.andrewtinyakov.messenger.shared.crypto.sha256
-import com.andrewtinyakov.messenger.shared.id.DeviceId
-import com.andrewtinyakov.messenger.shared.id.EventId
-import com.andrewtinyakov.messenger.shared.id.SessionId
-import com.andrewtinyakov.messenger.shared.id.SessionToken
-import com.andrewtinyakov.messenger.shared.id.UserId
 import com.andrewtinyakov.messenger.shared.id.newId
 import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
 import com.andrewtinyakov.messenger.shared.web.ApiException
@@ -108,6 +108,12 @@ class AuthenticationService(
         }
     }
 
+    fun requireExpectedIdentity(expectedIdentity: ExpectedSessionIdentity, session: AuthenticatedSession) {
+        if (!expectedIdentity.matches(session)) {
+            throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.UNAUTHORIZED, "Session identity changed")
+        }
+    }
+
     private fun issue(user: User, requestedDeviceId: DeviceId?): SessionCredentials {
         val deviceId = requestedDeviceId ?: DeviceId(UUID.randomUUID().toString())
         val bytes = ByteArray(32).also(random::nextBytes)
@@ -134,11 +140,5 @@ class AuthenticationService(
         if (input.deviceId != null && (input.deviceId.isBlank() || input.deviceId.length !in 1..64)) {
             badRequest(ApiErrorCode.INVALID_DEVICE_ID, "deviceId must be 1 to 64 characters")
         }
-    }
-}
-
-fun requireExpectedIdentity(expectedIdentity: ExpectedSessionIdentity, session: AuthenticatedSession) {
-    if (!expectedIdentity.matches(session)) {
-        throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.UNAUTHORIZED, "Session identity changed")
     }
 }

@@ -1,6 +1,6 @@
 package com.andrewtinyakov.messenger.chat.service
 
-import com.andrewtinyakov.messenger.shared.id.ChatId
+import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
 import com.andrewtinyakov.messenger.shared.web.badRequest
 import java.nio.charset.StandardCharsets

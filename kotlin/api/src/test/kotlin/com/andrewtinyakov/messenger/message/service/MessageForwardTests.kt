@@ -1,15 +1,15 @@
 package com.andrewtinyakov.messenger.message.service
 
+import com.andrewtinyakov.messenger.auth.model.UserId
+import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.service.ChatService
 import com.andrewtinyakov.messenger.chat.web.payload.CreateGroupChatRequest
 import com.andrewtinyakov.messenger.generated.messaging.event.SendRejectionReason
-import com.andrewtinyakov.messenger.message.change.MessageMutationService
+import com.andrewtinyakov.messenger.message.change.service.MessageMutationService
 import com.andrewtinyakov.messenger.message.model.CommandResult
+import com.andrewtinyakov.messenger.message.model.MessageId
+import com.andrewtinyakov.messenger.message.model.RequestId
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
-import com.andrewtinyakov.messenger.shared.id.ChatId
-import com.andrewtinyakov.messenger.shared.id.MessageId
-import com.andrewtinyakov.messenger.shared.id.RequestId
-import com.andrewtinyakov.messenger.shared.id.UserId
 import com.andrewtinyakov.messenger.shared.id.newId
 import com.andrewtinyakov.messenger.shared.web.ApiException
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -24,6 +24,7 @@ class MessageForwardTests
         private val sends: MessageSendService,
         private val batches: MessageSendBatchService,
         private val history: MessageHistoryService,
+        private val sendStatusService: SendStatusService,
         private val mutations: MessageMutationService,
         private val chats: ChatService,
     ) : MessengerIntegrationTest() {
@@ -64,7 +65,10 @@ class MessageForwardTests
             val hidden = send(author, secret, "not for outsiders")
             val single = forward(outsider, target, secret, hidden, "guess")
             assertEquals(CommandResult.REJECTED, sends.process(single))
-            assertEquals(SendRejectionReason.INVALID_FORWARD_SOURCE, history.status(UserId(outsider), RequestId(single.requestId)).reason)
+            assertEquals(
+                SendRejectionReason.INVALID_FORWARD_SOURCE,
+                sendStatusService.status(UserId(outsider), RequestId(single.requestId)).reason,
+            )
 
             val visible = send(friend, target, "visible")
             val batch = listOf(
@@ -78,7 +82,7 @@ class MessageForwardTests
             assertEquals(listOf(author, friend), saved.map { it.forwardedFromUserId })
             assertEquals(
                 SendRejectionReason.INVALID_FORWARD_SOURCE,
-                history.status(UserId(outsider), RequestId(batch[1].requestId)).reason,
+                sendStatusService.status(UserId(outsider), RequestId(batch[1].requestId)).reason,
             )
             assertEquals(CommandResult.DUPLICATE, sends.process(batch[0]))
         }

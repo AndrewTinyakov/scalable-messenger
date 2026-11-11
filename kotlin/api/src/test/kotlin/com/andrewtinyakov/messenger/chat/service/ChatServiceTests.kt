@@ -1,20 +1,22 @@
 package com.andrewtinyakov.messenger.chat.service
 
+import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.Chat
+import com.andrewtinyakov.messenger.chat.model.ChatId
+import com.andrewtinyakov.messenger.chat.model.MemberChatDetails
+import com.andrewtinyakov.messenger.chat.repository.ChatDirectoryRepository
 import com.andrewtinyakov.messenger.chat.repository.ChatRepository
-import com.andrewtinyakov.messenger.chat.repository.MemberChatDetails
+import com.andrewtinyakov.messenger.chat.repository.GroupMembershipRepository
 import com.andrewtinyakov.messenger.chat.web.payload.AddGroupMembersRequest
 import com.andrewtinyakov.messenger.chat.web.payload.CreateGroupChatRequest
 import com.andrewtinyakov.messenger.generated.messaging.event.SendRejectionReason
-import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxMessage
-import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxRepository
+import com.andrewtinyakov.messenger.infrastructure.outbox.model.OutboxMessage
+import com.andrewtinyakov.messenger.infrastructure.outbox.repository.OutboxRepository
 import com.andrewtinyakov.messenger.message.model.CommandResult
-import com.andrewtinyakov.messenger.message.service.MessageHistoryService
+import com.andrewtinyakov.messenger.message.model.RequestId
 import com.andrewtinyakov.messenger.message.service.MessageSendService
+import com.andrewtinyakov.messenger.message.service.SendStatusService
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
-import com.andrewtinyakov.messenger.shared.id.ChatId
-import com.andrewtinyakov.messenger.shared.id.RequestId
-import com.andrewtinyakov.messenger.shared.id.UserId
 import com.andrewtinyakov.messenger.shared.id.newId
 import com.andrewtinyakov.messenger.shared.web.ApiException
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -34,12 +36,14 @@ class ChatServiceTests
     constructor(
         private val chatService: ChatService,
         private val chatRepository: ChatRepository,
+        private val chatDirectoryRepository: ChatDirectoryRepository,
+        private val groupMembershipRepository: GroupMembershipRepository,
         private val chatMembershipService: ChatMembershipService,
         private val outboxRepository: OutboxRepository,
         private val mapper: ObjectMapper,
         private val tx: TransactionTemplate,
         private val messageSendService: MessageSendService,
-        private val messageHistoryService: MessageHistoryService,
+        private val sendStatusService: SendStatusService,
     ) : MessengerIntegrationTest() {
         @Test
         fun `activity uses acceptance time rather than an earlier transaction start`() {
@@ -199,15 +203,17 @@ class ChatServiceTests
             val owner = user("snapshot-chat-owner")
             val member = user("snapshot-chat-member")
             val chat = chatService.createGroup(UserId(owner), CreateGroupChatRequest("Snapshot", listOf(member)))
-            val removingRepository = object : ChatRepository by chatRepository {
+            val removingRepository = object : ChatDirectoryRepository by chatDirectoryRepository {
                 override fun findMemberDetails(chatId: ChatId, userId: UserId): MemberChatDetails? {
-                    val snapshot = chatRepository.findMemberDetails(chatId = chatId, userId = userId)
+                    val snapshot = chatDirectoryRepository.findMemberDetails(chatId = chatId, userId = userId)
                     concurrently { chatMembershipService.removeMember(chatId, UserId(owner), UserId(member)) }.join()
                     return snapshot
                 }
             }
             val concurrentReads = ChatService(
-                repository = removingRepository,
+                repository = chatRepository,
+                directory = removingRepository,
+                memberships = groupMembershipRepository,
                 outboxRepository = outboxRepository,
                 mapper = mapper,
                 tx = tx,
@@ -243,14 +249,21 @@ class ChatServiceTests
                     )
                 }
             }
-            val failing = ChatService(repository = invalidEvents, outboxRepository = outboxRepository, mapper = mapper, tx = tx)
+            val failing = ChatService(
+                repository = invalidEvents,
+                directory = chatDirectoryRepository,
+                memberships = groupMembershipRepository,
+                outboxRepository = outboxRepository,
+                mapper = mapper,
+                tx = tx,
+            )
 
             assertThrows(RuntimeException::class.java) {
                 failing.createGroup(UserId(owner), CreateGroupChatRequest("Rollback", listOf(member)))
             }
 
             val chatId = requireNotNull(attempted)
-            assertEquals(null, chatRepository.findById(chatId))
+            assertEquals(null, chatDirectoryRepository.findById(chatId))
             assertEquals(emptyList<Any>(), chatRepository.findMemberIds(chatId))
             assertEquals(
                 0,
@@ -316,7 +329,13 @@ class ChatServiceTests
                     outboxRepository.enqueue(messages.map { it.copy(id = messages.first().id) })
                 }
             }
-            val failing = ChatMembershipService(repository = chatRepository, tx = tx, outboxRepository = failingOutbox, mapper = mapper)
+            val failing = ChatMembershipService(
+                repository = chatRepository,
+                memberships = groupMembershipRepository,
+                tx = tx,
+                outboxRepository = failingOutbox,
+                mapper = mapper,
+            )
 
             assertThrows(RuntimeException::class.java) { failing.removeMember(ChatId(chat.id), UserId(owner), UserId(member)) }
 
@@ -339,16 +358,22 @@ class ChatServiceTests
             val chat = chatService.createGroup(UserId(owner), CreateGroupChatRequest("Concurrent", listOf(member)))
             val removed = CountDownLatch(1)
             val release = CountDownLatch(1)
-            val pausedRepository = object : ChatRepository by chatRepository {
+            val pausedRepository = object : GroupMembershipRepository by groupMembershipRepository {
                 override fun deleteMemberAndDecrementCount(chatId: ChatId, userId: UserId): Boolean {
-                    val result = chatRepository.deleteMemberAndDecrementCount(chatId = chatId, userId = userId)
+                    val result = groupMembershipRepository.deleteMemberAndDecrementCount(chatId = chatId, userId = userId)
                     removed.countDown()
                     check(release.await(10, TimeUnit.SECONDS))
                     return result
                 }
             }
             val removing =
-                ChatMembershipService(repository = pausedRepository, tx = tx, outboxRepository = outboxRepository, mapper = mapper)
+                ChatMembershipService(
+                    repository = chatRepository,
+                    memberships = pausedRepository,
+                    tx = tx,
+                    outboxRepository = outboxRepository,
+                    mapper = mapper,
+                )
             val removal = concurrently { removing.removeMember(ChatId(chat.id), UserId(owner), UserId(member)) }
             try {
                 assertTrue(removed.await(10, TimeUnit.SECONDS))
@@ -360,7 +385,14 @@ class ChatServiceTests
                     }
                 }
                 val addingService =
-                    ChatService(repository = addingRepository, outboxRepository = outboxRepository, mapper = mapper, tx = tx)
+                    ChatService(
+                        repository = addingRepository,
+                        directory = chatDirectoryRepository,
+                        memberships = groupMembershipRepository,
+                        outboxRepository = outboxRepository,
+                        mapper = mapper,
+                        tx = tx,
+                    )
                 val adding = concurrently {
                     addingService.addMembers(ChatId(chat.id), UserId(owner), AddGroupMembersRequest(listOf(addition)))
                 }
@@ -381,16 +413,13 @@ class ChatServiceTests
             val owner = user("concurrent-remove-owner")
             val member = user("concurrent-remove-member")
             val chat = chatService.createGroup(UserId(owner), CreateGroupChatRequest("Concurrent removal", listOf(member)))
-            val readers = CountDownLatch(2)
-            val simultaneous = object : ChatRepository by chatRepository {
-                override fun findById(chatId: ChatId): Chat? {
-                    val found = chatRepository.findById(chatId = chatId)
-                    readers.countDown()
-                    check(readers.await(10, TimeUnit.SECONDS))
-                    return found
-                }
-            }
-            val removing = ChatMembershipService(repository = simultaneous, tx = tx, outboxRepository = outboxRepository, mapper = mapper)
+            val removing = ChatMembershipService(
+                repository = chatRepository,
+                memberships = groupMembershipRepository,
+                tx = tx,
+                outboxRepository = outboxRepository,
+                mapper = mapper,
+            )
             val removals = (1..2).map {
                 concurrently {
                     runCatching { removing.removeMember(ChatId(chat.id), UserId(owner), UserId(member)) }
@@ -419,16 +448,22 @@ class ChatServiceTests
             val deleted = CountDownLatch(1)
             val release = CountDownLatch(1)
             val removalBackend = CompletableFuture<Int>()
-            val paused = object : ChatRepository by chatRepository {
+            val paused = object : GroupMembershipRepository by groupMembershipRepository {
                 override fun deleteMemberAndDecrementCount(chatId: ChatId, userId: UserId): Boolean {
-                    val result = chatRepository.deleteMemberAndDecrementCount(chatId = chatId, userId = userId)
+                    val result = groupMembershipRepository.deleteMemberAndDecrementCount(chatId = chatId, userId = userId)
                     removalBackend.complete(db.queryForObject("SELECT pg_backend_pid()", Int::class.java)!!)
                     deleted.countDown()
                     check(release.await(10, TimeUnit.SECONDS))
                     return result
                 }
             }
-            val removing = ChatMembershipService(repository = paused, tx = tx, outboxRepository = outboxRepository, mapper = mapper)
+            val removing = ChatMembershipService(
+                repository = chatRepository,
+                memberships = paused,
+                tx = tx,
+                outboxRepository = outboxRepository,
+                mapper = mapper,
+            )
             val removal = concurrently { removing.removeMember(ChatId(chat.id), UserId(owner), UserId(member)) }
             try {
                 assertTrue(deleted.await(10, TimeUnit.SECONDS))
@@ -453,8 +488,8 @@ class ChatServiceTests
                 release.countDown()
             }
 
-            assertEquals(SendRejectionReason.NOT_A_MEMBER, messageHistoryService.status(UserId(member), RequestId(request)).reason)
-            assertEquals(0L, chatRepository.findById(ChatId(chat.id))!!.lastSequence)
+            assertEquals(SendRejectionReason.NOT_A_MEMBER, sendStatusService.status(UserId(member), RequestId(request)).reason)
+            assertEquals(0L, chatDirectoryRepository.findById(ChatId(chat.id))!!.lastSequence)
         }
 
         @Test
@@ -480,7 +515,13 @@ class ChatServiceTests
                     return chatRepository.findByIdForUpdate(chatId = chatId)
                 }
             }
-            val removing = ChatMembershipService(repository = observing, tx = tx, outboxRepository = outboxRepository, mapper = mapper)
+            val removing = ChatMembershipService(
+                repository = observing,
+                memberships = groupMembershipRepository,
+                tx = tx,
+                outboxRepository = outboxRepository,
+                mapper = mapper,
+            )
             try {
                 assertTrue(locked.await(10, TimeUnit.SECONDS))
                 val removal = concurrently { removing.removeMember(ChatId(chat.id), UserId(owner), UserId(member)) }
@@ -492,7 +533,7 @@ class ChatServiceTests
                 release.countDown()
             }
 
-            assertEquals(1L, chatRepository.findById(ChatId(chat.id))!!.lastSequence)
+            assertEquals(1L, chatDirectoryRepository.findById(ChatId(chat.id))!!.lastSequence)
             assertEquals(
                 listOf("message_saved", "member_removed"),
                 db.queryForList(
@@ -507,7 +548,7 @@ class ChatServiceTests
         fun `capacity locks allow concurrent session foreign key checks`() {
             val member = user("capacity-lock-session-member")
             tx.executeWithoutResult {
-                assertEquals(setOf(UserId(member)), chatRepository.lockUsers(userIds = listOf(UserId(member))))
+                assertEquals(setOf(UserId(member)), groupMembershipRepository.lockUsers(userIds = listOf(UserId(member))))
                 val inserted = concurrently {
                     db.update(
                         "INSERT INTO sessions(token_hash,user_id,device_id,expires_at) VALUES (?,?,'capacity-lock-device',now()+interval '1 hour')",
@@ -545,7 +586,7 @@ class ChatServiceTests
             assertEquals(1, attempts.count { it.exceptionOrNull() is ApiException })
             assertEquals(
                 mapOf(UserId(owner) to 200, UserId(member) to 200),
-                chatRepository.groupCountsByUser(userIds = listOf(UserId(owner), UserId(member))),
+                groupMembershipRepository.groupCountsByUser(userIds = listOf(UserId(owner), UserId(member))),
             )
         }
 
@@ -558,7 +599,7 @@ class ChatServiceTests
             val excluded = chatService.createGroup(UserId(owner), CreateGroupChatRequest("Excluded", listOf(other)))
             assertEquals(
                 setOf(ChatId(included.id)),
-                chatRepository.groupMemberships(listOf(included.id, excluded.id).map(::ChatId), UserId(member)),
+                groupMembershipRepository.groupMemberships(listOf(included.id, excluded.id).map(::ChatId), UserId(member)),
             )
         }
 
@@ -629,7 +670,7 @@ class ChatServiceTests
 
             assertEquals(3, chatService.get(ChatId(chat.id), UserId(owner)).memberCount)
             assertEquals(3, chatService.get(ChatId(chat.id), UserId(second)).memberCount)
-            assertEquals(0L, chatRepository.findById(ChatId(chat.id))!!.lastSequence)
+            assertEquals(0L, chatDirectoryRepository.findById(ChatId(chat.id))!!.lastSequence)
             val payload = db.queryForObject(
                 "SELECT payload::text FROM messenger_outbox_events WHERE room=? AND payload->>'type'='membership_changed'",
                 String::class.java,
@@ -673,7 +714,14 @@ class ChatServiceTests
                     outboxRepository.enqueue(messages.map { it.copy(id = messages.first().id) })
                 }
             }
-            val failing = ChatService(repository = chatRepository, outboxRepository = failingOutbox, mapper = mapper, tx = tx)
+            val failing = ChatService(
+                repository = chatRepository,
+                directory = chatDirectoryRepository,
+                memberships = groupMembershipRepository,
+                outboxRepository = failingOutbox,
+                mapper = mapper,
+                tx = tx,
+            )
 
             assertThrows(RuntimeException::class.java) {
                 failing.addMembers(ChatId(chat.id), UserId(owner), AddGroupMembersRequest(listOf(addition)))

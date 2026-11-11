@@ -1,26 +1,31 @@
 package com.andrewtinyakov.messenger.message.service
 
-import com.andrewtinyakov.messenger.chat.grpc.GroupAuthorizationRepository
-import com.andrewtinyakov.messenger.chat.service.ChatDeletionService
+import com.andrewtinyakov.messenger.auth.model.SessionId
+import com.andrewtinyakov.messenger.auth.model.UserId
+import com.andrewtinyakov.messenger.chat.deletion.service.DeletionService
+import com.andrewtinyakov.messenger.chat.deletion.web.payload.DeletionRequest
+import com.andrewtinyakov.messenger.chat.deletion.web.payload.DeletionScope
+import com.andrewtinyakov.messenger.chat.deletion.web.payload.DeletionTarget
+import com.andrewtinyakov.messenger.chat.grpc.repository.GroupAuthorizationRepository
+import com.andrewtinyakov.messenger.chat.model.ChatId
+import com.andrewtinyakov.messenger.chat.repository.ChatRepository
 import com.andrewtinyakov.messenger.chat.service.ChatMembershipService
 import com.andrewtinyakov.messenger.chat.service.ChatService
 import com.andrewtinyakov.messenger.chat.web.payload.CreateGroupChatRequest
 import com.andrewtinyakov.messenger.generated.messaging.event.SendRejectionReason
-import com.andrewtinyakov.messenger.message.change.MessageChangeRetentionService
-import com.andrewtinyakov.messenger.message.change.MessageMutationService
+import com.andrewtinyakov.messenger.message.change.service.MessageChangeRetentionService
+import com.andrewtinyakov.messenger.message.change.service.MessageMutationService
 import com.andrewtinyakov.messenger.message.model.CommandResult
+import com.andrewtinyakov.messenger.message.model.MessageId
+import com.andrewtinyakov.messenger.message.model.RequestId
 import com.andrewtinyakov.messenger.message.web.payload.MessageResponse
 import com.andrewtinyakov.messenger.message.web.payload.SendLookupStatus
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
 import com.andrewtinyakov.messenger.shared.crypto.sha256
-import com.andrewtinyakov.messenger.shared.id.ChatId
-import com.andrewtinyakov.messenger.shared.id.MessageId
-import com.andrewtinyakov.messenger.shared.id.RequestId
-import com.andrewtinyakov.messenger.shared.id.SessionId
-import com.andrewtinyakov.messenger.shared.id.UserId
 import com.andrewtinyakov.messenger.shared.id.newId
 import com.andrewtinyakov.messenger.shared.web.ApiException
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -36,9 +41,11 @@ class MessageFeatureTests
         private val sends: MessageSendService,
         private val batches: MessageSendBatchService,
         private val history: MessageHistoryService,
+        private val sendStatusService: SendStatusService,
         private val mutations: MessageMutationService,
-        private val deletion: ChatDeletionService,
+        private val deletion: DeletionService,
         private val chats: ChatService,
+        private val chatRepository: ChatRepository,
         private val membership: ChatMembershipService,
         private val retention: MessageChangeRetentionService,
         private val authorizations: GroupAuthorizationRepository,
@@ -155,7 +162,7 @@ class MessageFeatureTests
             )
             val invalid = newId()
             sends.process(command(member, invalid, "late reply", chat = chat).copy(replyToMessageId = target.id))
-            assertEquals(SendRejectionReason.INVALID_REPLY_TARGET, history.status(UserId(member), RequestId(invalid)).reason)
+            assertEquals(SendRejectionReason.INVALID_REPLY_TARGET, sendStatusService.status(UserId(member), RequestId(invalid)).reason)
         }
 
         @Test
@@ -201,7 +208,10 @@ class MessageFeatureTests
             val bad = command(member, newId(), "foreign", chat = chat).copy(replyToMessageId = foreign.id)
             val good = command(member, newId(), "batch reply", chat = chat).copy(replyToMessageId = target.id)
             assertEquals(listOf(CommandResult.REJECTED, CommandResult.SAVED), batches.process(listOf(bad, good)))
-            assertEquals(SendRejectionReason.INVALID_REPLY_TARGET, history.status(UserId(member), RequestId(bad.requestId)).reason)
+            assertEquals(
+                SendRejectionReason.INVALID_REPLY_TARGET,
+                sendStatusService.status(UserId(member), RequestId(bad.requestId)).reason,
+            )
             assertEquals(listOf("1", "2", "3"), history.messages(ChatId(chat), UserId(member), null, null, 10).messages.map { it.sequence })
             assertEquals(target.id, history.messages(ChatId(chat), UserId(member), null, null, 10).messages.last().replyToMessageId)
             db.update("UPDATE messages SET reply_to_message_id=? WHERE id=?", foreign.id, target.id)
@@ -214,7 +224,10 @@ class MessageFeatureTests
             val recipient = user("draft-reply-recipient")
             val request = command(sender, newId(), "reply", recipient = recipient).copy(replyToMessageId = newId())
             assertEquals(CommandResult.REJECTED, sends.process(request))
-            assertEquals(SendRejectionReason.INVALID_REPLY_TARGET, history.status(UserId(sender), RequestId(request.requestId)).reason)
+            assertEquals(
+                SendRejectionReason.INVALID_REPLY_TARGET,
+                sendStatusService.status(UserId(sender), RequestId(request.requestId)).reason,
+            )
             assertEquals(0, db.queryForObject("SELECT count(*) FROM chat_members WHERE user_id=?", Int::class.java, sender))
         }
 
@@ -225,25 +238,25 @@ class MessageFeatureTests
             val outsider = user("around-outsider")
             val chat = group(owner, member)
             val rows = (1..7).map { send(owner, chat, "message $it") }
-            val center = history.around(ChatId(chat), UserId(member), MessageId(rows[3].id), 5)
+            val center = history.around(ChatId(chat), UserId(member), MessageId(rows[3].id), null, 5)
             assertEquals(listOf("2", "3", "4", "5", "6"), center.messages.map { it.sequence })
             assertEquals(true, center.hasOlder)
             assertEquals(true, center.hasNewer)
-            val first = history.around(ChatId(chat), UserId(member), MessageId(rows.first().id), 5)
+            val first = history.around(ChatId(chat), UserId(member), MessageId(rows.first().id), null, 5)
             assertEquals(listOf("1", "2", "3", "4", "5"), first.messages.map { it.sequence })
             assertEquals(false, first.hasOlder)
-            val last = history.around(ChatId(chat), UserId(member), MessageId(rows.last().id), 5)
+            val last = history.around(ChatId(chat), UserId(member), MessageId(rows.last().id), null, 5)
             assertEquals(listOf("3", "4", "5", "6", "7"), last.messages.map { it.sequence })
             assertEquals(false, last.hasNewer)
             assertEquals(listOf("6", "7"), history.messages(ChatId(chat), UserId(member), "5", null, 10).messages.map { it.sequence })
             assertEquals(
                 HttpStatus.NOT_FOUND,
                 assertThrows(ApiException::class.java) {
-                    history.around(ChatId(chat), UserId(outsider), MessageId(rows[3].id), 0)
+                    history.around(ChatId(chat), UserId(outsider), MessageId(rows[3].id), null, 0)
                 }.status,
             )
             val other = group(owner, member)
-            assertThrows(ApiException::class.java) { history.around(ChatId(other), UserId(member), MessageId(rows[3].id), 5) }
+            assertThrows(ApiException::class.java) { history.around(ChatId(other), UserId(member), MessageId(rows[3].id), null, 5) }
             listOf("01", "+1", "-1", "9223372036854775808").forEach { invalid ->
                 assertThrows(ApiException::class.java) { history.changes(ChatId(chat), UserId(member), invalid, 10) }
             }
@@ -332,13 +345,15 @@ class MessageFeatureTests
                     "CHECK (payload->>'type' <> 'chat_deleted' OR payload->>'chatId' <> '$chat')",
             )
             try {
-                assertThrows(RuntimeException::class.java) { deletion.delete(ChatId(chat), UserId(owner)) }
+                assertThrows(RuntimeException::class.java) {
+                    deletion.delete(ChatId(chat), UserId(owner), DeletionRequest(chat, DeletionScope.EVERYONE, DeletionTarget.CHAT))
+                }
                 assertEquals("kept", history.messages(ChatId(chat), UserId(member), null, null, 10).messages.single().body)
                 assertEquals(chat, chats.get(ChatId(chat), UserId(member)).id)
             } finally {
                 db.execute("ALTER TABLE messenger_outbox_events DROP CONSTRAINT \"$constraint\"")
             }
-            deletion.delete(ChatId(chat), UserId(owner))
+            deletion.delete(ChatId(chat), UserId(owner), DeletionRequest(chat, DeletionScope.EVERYONE, DeletionTarget.CHAT))
             assertThrows(ApiException::class.java) { chats.get(ChatId(chat), UserId(member)) }
         }
 
@@ -348,20 +363,20 @@ class MessageFeatureTests
             val recipient = user("delete-direct-recipient")
             val first = command(sender, newId(), "old conversation", recipient = recipient)
             sends.process(first)
-            val old = history.status(UserId(sender), RequestId(first.requestId)).chatId!!
-            deletion.delete(ChatId(old), UserId(recipient))
-            deletion.delete(ChatId(old), UserId(sender))
+            val old = sendStatusService.status(UserId(sender), RequestId(first.requestId)).chatId!!
+            deletion.delete(ChatId(old), UserId(recipient), DeletionRequest(old, DeletionScope.EVERYONE, DeletionTarget.CHAT))
+            deletion.delete(ChatId(old), UserId(sender), DeletionRequest(old, DeletionScope.EVERYONE, DeletionTarget.CHAT))
             assertThrows(ApiException::class.java) { history.messages(ChatId(old), UserId(sender), null, null, 10) }
             assertEquals(CommandResult.DUPLICATE, sends.process(first))
-            assertEquals(old, history.status(UserId(sender), RequestId(first.requestId)).chatId)
+            assertEquals(old, sendStatusService.status(UserId(sender), RequestId(first.requestId)).chatId)
             val second = command(sender, newId(), "new conversation", recipient = recipient)
             assertEquals(CommandResult.SAVED, sends.process(second))
-            val fresh = history.status(UserId(sender), RequestId(second.requestId))
+            val fresh = sendStatusService.status(UserId(sender), RequestId(second.requestId))
             assertNotEquals(old, fresh.chatId)
             assertEquals("1", fresh.sequence)
             val rejected = command(sender, newId(), "stale send", chat = old)
             sends.process(rejected)
-            assertEquals(SendLookupStatus.REJECTED, history.status(UserId(sender), RequestId(rejected.requestId)).status)
+            assertEquals(SendLookupStatus.REJECTED, sendStatusService.status(UserId(sender), RequestId(rejected.requestId)).status)
             assertEquals(
                 2,
                 db.queryForObject(
@@ -381,7 +396,7 @@ class MessageFeatureTests
             assertEquals(
                 HttpStatus.FORBIDDEN,
                 assertThrows(ApiException::class.java) {
-                    deletion.delete(ChatId(chat), UserId(member))
+                    deletion.delete(ChatId(chat), UserId(member), DeletionRequest(chat, DeletionScope.EVERYONE, DeletionTarget.CHAT))
                 }.status,
             )
             val session = sha256(owner)
@@ -395,13 +410,13 @@ class MessageFeatureTests
                 setOf(ChatId(chat)),
                 authorizations.findAuthorization(SessionId(session), OffsetDateTime.now(), listOf(ChatId(chat)))!!.authorizedChatIds,
             )
-            deletion.delete(ChatId(chat), UserId(owner))
+            deletion.delete(ChatId(chat), UserId(owner), DeletionRequest(chat, DeletionScope.EVERYONE, DeletionTarget.CHAT))
             assertEquals(
                 emptySet<ChatId>(),
                 authorizations.findAuthorization(SessionId(session), OffsetDateTime.now(), listOf(ChatId(chat)))!!.authorizedChatIds,
             )
             assertEquals(emptyList<Any>(), chats.list(UserId(member), null, 100).chats)
-            assertThrows(ApiException::class.java) { membership.requireMember(ChatId(chat), UserId(member)) }
+            assertFalse(chatRepository.isMember(ChatId(chat), UserId(member)))
             assertThrows(ApiException::class.java) { mutations.delete(ChatId(chat), UserId(member), MessageId(target.id), "1") }
             assertThrows(ApiException::class.java) { chats.get(ChatId(chat), UserId(member)) }
             assertEquals(
@@ -420,7 +435,7 @@ class MessageFeatureTests
         private fun send(owner: String, chat: String, body: String): MessageResponse {
             val request = newId()
             sends.process(command(owner, request, body, chat = chat))
-            val id = history.status(UserId(owner), RequestId(request)).messageId!!
-            return history.around(ChatId(chat), UserId(owner), MessageId(id), 1).messages.single()
+            val id = sendStatusService.status(UserId(owner), RequestId(request)).messageId!!
+            return history.around(ChatId(chat), UserId(owner), MessageId(id), null, 1).messages.single()
         }
     }

@@ -1,24 +1,17 @@
 package com.andrewtinyakov.messenger.chat.repository
 
-import com.andrewtinyakov.messenger.auth.model.UserSummary
+import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.Chat
+import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.model.ChatKind
-import com.andrewtinyakov.messenger.chat.model.ChatLastMessage
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Routines
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHATS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHAT_MEMBERS
-import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHAT_READ_PROGRESS
-import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.HIDDEN_MESSAGE_RANGES
-import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSAGES
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSENGER_OUTBOX_EVENTS
-import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.USERS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.ChatsRecord
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseObservation
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseOperation
-import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxMessage
-import com.andrewtinyakov.messenger.shared.id.ChatId
-import com.andrewtinyakov.messenger.shared.id.MessageId
-import com.andrewtinyakov.messenger.shared.id.UserId
+import com.andrewtinyakov.messenger.infrastructure.outbox.model.OutboxMessage
 import org.jooq.DSLContext
 import org.jooq.JSONB
 import org.jooq.Query
@@ -31,119 +24,6 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.enums.Chat
 class JooqChatRepository(
     private val db: DSLContext,
 ) : ChatRepository {
-    override fun findByMember(
-        userId: UserId,
-        beforeActivityAt: OffsetDateTime?,
-        beforeChatId: ChatId?,
-        limit: Int,
-        pinned: Boolean,
-    ): List<MemberChat> = DatabaseObservation.query(DatabaseOperation.CHAT_FIND_BY_MEMBER) {
-        val summary = chatSummary(userId)
-        val activityAt = DSL.coalesce(CHATS.LAST_ACTIVITY_AT, CHAT_MEMBERS.JOINED_AT)
-        val preferences = ChatPreferenceFields(CHAT_MEMBERS)
-        db.select(
-            listOf(
-                activityAt,
-                summary,
-                CHATS.ID,
-                CHATS.KIND,
-                CHATS.NAME,
-                CHATS.NEXT_SEQUENCE,
-                CHATS.MEMBER_COUNT,
-                CHATS.OWNER_ID,
-            ) + preferences.all,
-        )
-            .from(CHAT_MEMBERS)
-            .join(CHATS)
-            .on(CHATS.ID.eq(CHAT_MEMBERS.CHAT_ID))
-            .where(CHAT_MEMBERS.USER_ID.eq(userId.value), CHATS.DELETED_AT.isNull)
-            .and(CHAT_MEMBERS.HIDDEN_THROUGH_SEQUENCE.isNull.or(CHATS.NEXT_SEQUENCE.minus(1L).gt(CHAT_MEMBERS.HIDDEN_THROUGH_SEQUENCE)))
-            .and(if (pinned) CHAT_MEMBERS.PINNED_RANK.isNotNull else CHAT_MEMBERS.PINNED_RANK.isNull)
-            .and(
-                if (!pinned && beforeActivityAt != null && beforeChatId != null) {
-                    activityAt.lt(beforeActivityAt)
-                        .or(
-                            activityAt.eq(beforeActivityAt)
-                                .and(CHAT_MEMBERS.CHAT_ID.lt(beforeChatId.value)),
-                        )
-                } else {
-                    DSL.trueCondition()
-                },
-            )
-            .orderBy(
-                if (pinned) {
-                    listOf(CHAT_MEMBERS.PINNED_RANK.asc(), CHAT_MEMBERS.CHAT_ID.desc())
-                } else {
-                    listOf(activityAt.desc(), CHAT_MEMBERS.CHAT_ID.desc())
-                },
-            )
-            .limit(limit)
-            .fetch { row ->
-                MemberChat(
-                    chat = Chat(
-                        id = ChatId(row.get(CHATS.ID)!!),
-                        kind = ChatKind.valueOf(row.get(CHATS.KIND)!!.name),
-                        name = row.get(CHATS.NAME),
-                        lastSequence = row.get(CHATS.NEXT_SEQUENCE)!! - 1,
-                        ownerId = row.get(CHATS.OWNER_ID)
-                            ?.let(::UserId),
-                        memberCount = row.get(CHATS.MEMBER_COUNT)!!,
-                        preferences = preferences.read(row),
-                    ).withSummary(row.get(summary), row.get(activityAt)),
-                    activityAt = row.get(activityAt)!!,
-                )
-            }
-    }
-
-    override fun findMembersByChatIds(chatIds: List<ChatId>): Map<ChatId, List<UserSummary>> = DatabaseObservation.query(
-        DatabaseOperation.CHAT_FIND_MEMBERS_BY_CHAT_IDS,
-    ) {
-        if (chatIds.isEmpty()) return emptyMap()
-        val rank = DSL.rowNumber()
-            .over()
-            .partitionBy(CHAT_MEMBERS.CHAT_ID)
-            .orderBy(USERS.USERNAME)
-            .`as`("rank")
-        val ranked = db.select(
-            CHAT_MEMBERS.CHAT_ID,
-            USERS.ID,
-            USERS.USERNAME,
-            rank,
-        )
-            .from(CHAT_MEMBERS)
-            .join(USERS)
-            .on(USERS.ID.eq(CHAT_MEMBERS.USER_ID))
-            .where(CHAT_MEMBERS.CHAT_ID.`in`(chatIds.map(ChatId::value)))
-            .asTable("ranked")
-        val chatId = ranked.field(CHAT_MEMBERS.CHAT_ID)!!
-        val userId = ranked.field(USERS.ID)!!
-        val username = ranked.field(USERS.USERNAME)!!
-        return db.select(
-            chatId,
-            userId,
-            username,
-        )
-            .from(ranked)
-            .where(
-                ranked.field(rank)!!
-                    .le(50),
-            )
-            .orderBy(
-                chatId,
-                username,
-            )
-            .fetch()
-            .groupBy(
-                keySelector = { ChatId(it.get(chatId)!!) },
-                valueTransform = {
-                    UserSummary(
-                        id = UserId(it.get(userId)!!),
-                        username = it.get(username)!!,
-                    )
-                },
-            )
-    }
-
     override fun existingMemberIds(
         chatId: ChatId,
         userIds: List<UserId>,
@@ -160,40 +40,6 @@ class JooqChatRepository(
             .filterNotNull()
             .map(::UserId)
             .toSet()
-    }
-
-    override fun lockUsers(userIds: List<UserId>): Set<UserId> = DatabaseObservation.query(DatabaseOperation.CHAT_LOCK_USERS) {
-        db.select(USERS.ID)
-            .from(USERS)
-            .where(USERS.ID.`in`(userIds.map(UserId::value)))
-            .orderBy(USERS.ID)
-            .forNoKeyUpdate()
-            .fetch(USERS.ID)
-            .map { UserId(requireNotNull(it)) }
-            .toSet()
-    }
-
-    override fun groupCountsByUser(userIds: List<UserId>): Map<UserId, Int> = DatabaseObservation.query(
-        DatabaseOperation.CHAT_GROUP_COUNTS_BY_USER,
-    ) {
-        db.select(
-            CHAT_MEMBERS.USER_ID,
-            DSL.count(),
-        )
-            .from(CHAT_MEMBERS)
-            .join(CHATS)
-            .on(CHATS.ID.eq(CHAT_MEMBERS.CHAT_ID))
-            .where(
-                CHAT_MEMBERS.USER_ID.`in`(userIds.map(UserId::value)),
-                CHATS.KIND.eq(DbChatKind.GROUP),
-                CHATS.DELETED_AT.isNull,
-            )
-            .groupBy(CHAT_MEMBERS.USER_ID)
-            .fetchMap(
-                CHAT_MEMBERS.USER_ID,
-                DSL.count(),
-            )
-            .mapKeys { (userId, _) -> UserId(userId!!) }
     }
 
     override fun findByDirectKey(key: String): ChatId? = DatabaseObservation.query(DatabaseOperation.CHAT_FIND_BY_DIRECT_KEY) {
@@ -334,150 +180,6 @@ class JooqChatRepository(
         check(actualCounts.toList() == expectedCounts) { "Chat creation affected unexpected row counts: ${actualCounts.toList()}" }
     }
 
-    override fun insertMembersAndIncrementCount(
-        chatId: ChatId,
-        userIds: List<UserId>,
-    ) = DatabaseObservation.query(DatabaseOperation.CHAT_INSERT_MEMBERS_AND_INCREMENT_COUNT) {
-        if (userIds.isEmpty()) return@query
-        userIds.chunked(500)
-            .forEach { chunk ->
-                val insert = db.insertInto(
-                    CHAT_MEMBERS,
-                    CHAT_MEMBERS.CHAT_ID,
-                    CHAT_MEMBERS.USER_ID,
-                )
-                chunk.forEach {
-                    insert.values(
-                        chatId.value,
-                        it.value,
-                    )
-                }
-                check(insert.execute() == chunk.size)
-            }
-        val updated = db.update(CHATS)
-            .set(
-                CHATS.MEMBER_COUNT,
-                CHATS.MEMBER_COUNT.plus(userIds.size),
-            )
-            .where(CHATS.ID.eq(chatId.value), CHATS.DELETED_AT.isNull)
-            .execute()
-        check(updated == 1)
-    }
-
-    override fun findById(chatId: ChatId): Chat? = DatabaseObservation.query(DatabaseOperation.CHAT_FIND_BY_ID) {
-        db.selectFrom(CHATS)
-            .where(CHATS.ID.eq(chatId.value), CHATS.DELETED_AT.isNull)
-            .fetchOne()
-            ?.toModel()
-    }
-
-    override fun findMemberDetails(
-        chatId: ChatId,
-        userId: UserId,
-    ): MemberChatDetails? = DatabaseObservation.query(DatabaseOperation.CHAT_FIND_MEMBER_DETAILS) {
-        val members = DSL.multiset(
-            DSL.select(
-                USERS.ID,
-                USERS.USERNAME,
-            )
-                .from(CHAT_MEMBERS)
-                .join(USERS)
-                .on(USERS.ID.eq(CHAT_MEMBERS.USER_ID))
-                .where(CHAT_MEMBERS.CHAT_ID.eq(CHATS.ID))
-                .orderBy(CHAT_MEMBERS.USER_ID)
-                .limit(50),
-        )
-            .convertFrom { rows ->
-                rows.map {
-                    UserSummary(
-                        id = UserId(it.value1()!!),
-                        username = it.value2()!!,
-                    )
-                }
-            }
-        val summary = chatSummary(userId)
-        val viewer = CHAT_MEMBERS.`as`("viewer")
-        val preferences = ChatPreferenceFields(viewer)
-        val activityAt = DSL.coalesce(CHATS.LAST_ACTIVITY_AT, viewer.JOINED_AT)
-        return db.select(
-            listOf(
-                activityAt,
-                CHATS.asterisk(),
-                members,
-                summary,
-            ) + preferences.all,
-        )
-            .from(CHATS)
-            .join(viewer)
-            .on(viewer.CHAT_ID.eq(CHATS.ID), viewer.USER_ID.eq(userId.value))
-            .where(CHATS.ID.eq(chatId.value), CHATS.DELETED_AT.isNull)
-            .fetchOne { row ->
-                MemberChatDetails(
-                    chat = row.into(CHATS).toModel().copy(preferences = preferences.read(row))
-                        .withSummary(row.get(summary), row.get(activityAt)),
-                    members = row.get(members),
-                )
-            }
-    }
-
-    override fun findGroupMemberPage(
-        chatId: ChatId,
-        viewerId: UserId,
-        afterUserId: UserId?,
-        limit: Int,
-    ): List<UserSummary>? = DatabaseObservation.query(DatabaseOperation.CHAT_FIND_GROUP_MEMBER_PAGE) {
-        val members = DSL.multiset(
-            DSL.select(USERS.ID, USERS.USERNAME)
-                .from(CHAT_MEMBERS)
-                .join(USERS)
-                .on(USERS.ID.eq(CHAT_MEMBERS.USER_ID))
-                .where(CHAT_MEMBERS.CHAT_ID.eq(CHATS.ID))
-                .and(afterUserId?.let { CHAT_MEMBERS.USER_ID.gt(it.value) } ?: DSL.trueCondition())
-                .orderBy(CHAT_MEMBERS.USER_ID)
-                .limit(limit),
-        ).convertFrom { rows ->
-            rows.map { UserSummary(id = UserId(it.value1()!!), username = it.value2()!!) }
-        }
-        return db.select(members)
-            .from(CHATS)
-            .where(CHATS.ID.eq(chatId.value), CHATS.KIND.eq(DbChatKind.GROUP), CHATS.DELETED_AT.isNull)
-            .and(
-                DSL.exists(
-                    DSL.selectOne()
-                        .from(CHAT_MEMBERS)
-                        .where(
-                            CHAT_MEMBERS.CHAT_ID.eq(CHATS.ID),
-                            CHAT_MEMBERS.USER_ID.eq(viewerId.value),
-                        ),
-                ),
-            )
-            .fetchOne { it.get(members) }
-    }
-
-    override fun findMembers(chatId: ChatId): List<UserSummary> = DatabaseObservation.query(DatabaseOperation.CHAT_FIND_MEMBERS) {
-        val preview = db.select(CHAT_MEMBERS.USER_ID)
-            .from(CHAT_MEMBERS)
-            .where(CHAT_MEMBERS.CHAT_ID.eq(chatId.value))
-            .orderBy(CHAT_MEMBERS.USER_ID)
-            .limit(50)
-            .asTable("preview")
-        val previewUserId = preview.field(CHAT_MEMBERS.USER_ID)!!
-        return db.select(
-            USERS.ID,
-            USERS.USERNAME,
-        )
-            .from(preview)
-            .join(USERS)
-            .on(USERS.ID.eq(previewUserId))
-            .orderBy(previewUserId)
-            .fetch {
-                UserSummary(
-                    id = UserId(it.get(USERS.ID)!!),
-                    username = it.get(USERS.USERNAME)!!,
-                )
-            }
-    }
-
     override fun isMember(
         chatId: ChatId,
         userId: UserId,
@@ -492,45 +194,6 @@ class JooqChatRepository(
                     CHATS.DELETED_AT.isNull,
                 ),
         )
-    }
-
-    override fun isGroupMember(
-        chatId: ChatId,
-        userId: UserId,
-    ): Boolean = DatabaseObservation.query(DatabaseOperation.CHAT_IS_GROUP_MEMBER) {
-        db.fetchExists(
-            db.selectOne()
-                .from(CHAT_MEMBERS)
-                .join(CHATS)
-                .on(CHATS.ID.eq(CHAT_MEMBERS.CHAT_ID))
-                .where(
-                    CHAT_MEMBERS.CHAT_ID.eq(chatId.value),
-                    CHAT_MEMBERS.USER_ID.eq(userId.value),
-                    CHATS.KIND.eq(DbChatKind.GROUP),
-                    CHATS.DELETED_AT.isNull,
-                ),
-        )
-    }
-
-    override fun groupMemberships(
-        chatIds: List<ChatId>,
-        userId: UserId,
-    ): Set<ChatId> = DatabaseObservation.query(DatabaseOperation.CHAT_GROUP_MEMBERSHIPS) {
-        if (chatIds.isEmpty()) return emptySet()
-        return db.select(CHAT_MEMBERS.CHAT_ID)
-            .from(CHAT_MEMBERS)
-            .join(CHATS)
-            .on(CHATS.ID.eq(CHAT_MEMBERS.CHAT_ID))
-            .where(
-                CHAT_MEMBERS.USER_ID.eq(userId.value),
-                CHAT_MEMBERS.CHAT_ID.`in`(chatIds.map(ChatId::value)),
-                CHATS.KIND.eq(DbChatKind.GROUP),
-                CHATS.DELETED_AT.isNull,
-            )
-            .fetch(CHAT_MEMBERS.CHAT_ID)
-            .filterNotNull()
-            .map(::ChatId)
-            .toSet()
     }
 
     override fun allocateSequenceForMember(
@@ -578,37 +241,9 @@ class JooqChatRepository(
             .filterNotNull()
             .map(::UserId)
     }
-
-    override fun deleteMemberAndDecrementCount(
-        chatId: ChatId,
-        userId: UserId,
-    ): Boolean = DatabaseObservation.query(DatabaseOperation.CHAT_DELETE_MEMBER_AND_DECREMENT_COUNT) {
-        val removed = DSL.name("removed")
-            .`as`(
-                db.deleteFrom(CHAT_MEMBERS)
-                    .where(
-                        CHAT_MEMBERS.CHAT_ID.eq(chatId.value),
-                        CHAT_MEMBERS.USER_ID.eq(userId.value),
-                    )
-                    .returningResult(CHAT_MEMBERS.CHAT_ID),
-            )
-        val removedChatId = removed.field(CHAT_MEMBERS.CHAT_ID)!!
-        val updated = db.with(removed)
-            .update(CHATS)
-            .set(
-                CHATS.MEMBER_COUNT,
-                CHATS.MEMBER_COUNT.minus(1),
-            )
-            .from(removed)
-            .where(CHATS.ID.eq(removedChatId))
-            .returning(CHATS.ID)
-            .fetch()
-        check(updated.size <= 1)
-        return updated.isNotEmpty()
-    }
 }
 
-private fun ChatsRecord.toModel(): Chat =
+fun ChatsRecord.toModel(): Chat =
     Chat(
         id = ChatId(id!!),
         kind = ChatKind.valueOf(kind!!.name),

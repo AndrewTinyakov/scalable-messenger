@@ -1,7 +1,9 @@
 package com.andrewtinyakov.messenger.message.web.controller
 
 import com.andrewtinyakov.messenger.auth.model.AuthenticatedSession
-import com.andrewtinyakov.messenger.message.change.MessageMutationService
+import com.andrewtinyakov.messenger.chat.model.ChatId
+import com.andrewtinyakov.messenger.message.change.service.MessageMutationService
+import com.andrewtinyakov.messenger.message.model.MessageId
 import com.andrewtinyakov.messenger.message.service.MessageHistoryService
 import com.andrewtinyakov.messenger.message.web.payload.EditMessageRequest
 import com.andrewtinyakov.messenger.message.web.payload.MessageAroundResponse
@@ -10,8 +12,6 @@ import com.andrewtinyakov.messenger.message.web.payload.MessageHistoryResponse
 import com.andrewtinyakov.messenger.message.web.payload.MessageResolveRequest
 import com.andrewtinyakov.messenger.message.web.payload.MessageResolveResponse
 import com.andrewtinyakov.messenger.message.web.payload.MessageResponse
-import com.andrewtinyakov.messenger.shared.id.ChatId
-import com.andrewtinyakov.messenger.shared.id.MessageId
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PatchMapping

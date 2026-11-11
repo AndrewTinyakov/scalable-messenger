@@ -1,10 +1,10 @@
 package com.andrewtinyakov.messenger.infrastructure.messaging.monitoring
 
-import com.andrewtinyakov.messenger.infrastructure.messaging.CommandAcknowledgementOperation
-import com.andrewtinyakov.messenger.infrastructure.messaging.CommandAcknowledgementResult
-import com.andrewtinyakov.messenger.infrastructure.messaging.CommandConsumptionOutcome
-import com.andrewtinyakov.messenger.infrastructure.messaging.CommandKind
-import com.andrewtinyakov.messenger.infrastructure.messaging.CommandProcessingOutcome
+import com.andrewtinyakov.messenger.infrastructure.messaging.model.CommandAcknowledgementOperation
+import com.andrewtinyakov.messenger.infrastructure.messaging.model.CommandAcknowledgementResult
+import com.andrewtinyakov.messenger.infrastructure.messaging.model.CommandConsumptionOutcome
+import com.andrewtinyakov.messenger.infrastructure.messaging.model.CommandKind
+import com.andrewtinyakov.messenger.infrastructure.messaging.model.CommandProcessingOutcome
 import io.micrometer.core.instrument.Meter
 import io.micrometer.core.instrument.config.MeterFilter
 import io.micrometer.core.instrument.distribution.DistributionStatisticConfig

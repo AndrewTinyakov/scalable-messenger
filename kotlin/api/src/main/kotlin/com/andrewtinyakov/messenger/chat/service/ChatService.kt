@@ -1,9 +1,13 @@
 package com.andrewtinyakov.messenger.chat.service
 
+import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.Chat
+import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.model.ChatKind
 import com.andrewtinyakov.messenger.chat.model.ChatPreferences
+import com.andrewtinyakov.messenger.chat.repository.ChatDirectoryRepository
 import com.andrewtinyakov.messenger.chat.repository.ChatRepository
+import com.andrewtinyakov.messenger.chat.repository.GroupMembershipRepository
 import com.andrewtinyakov.messenger.chat.web.payload.AddGroupMembersRequest
 import com.andrewtinyakov.messenger.chat.web.payload.ChatPageResponse
 import com.andrewtinyakov.messenger.chat.web.payload.ChatResponse
@@ -14,14 +18,11 @@ import com.andrewtinyakov.messenger.generated.messaging.event.MembershipChangedE
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseTransaction
 import com.andrewtinyakov.messenger.infrastructure.database.observability.observedExecute
 import com.andrewtinyakov.messenger.infrastructure.database.observability.observedExecuteWithoutResult
-import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxMessage
-import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxRepository
+import com.andrewtinyakov.messenger.infrastructure.outbox.model.EventId
+import com.andrewtinyakov.messenger.infrastructure.outbox.model.OutboxMessage
+import com.andrewtinyakov.messenger.infrastructure.outbox.repository.OutboxRepository
 import com.andrewtinyakov.messenger.infrastructure.redis.RoomAddress
-import com.andrewtinyakov.messenger.shared.id.ChatId
-import com.andrewtinyakov.messenger.shared.id.EventId
-import com.andrewtinyakov.messenger.shared.id.UserId
 import com.andrewtinyakov.messenger.shared.id.newId
-import com.andrewtinyakov.messenger.shared.id.requireId
 import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
 import com.andrewtinyakov.messenger.shared.web.ApiException
 import com.andrewtinyakov.messenger.shared.web.badRequest
@@ -31,11 +32,12 @@ import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
 import tools.jackson.databind.ObjectMapper
-import java.time.OffsetDateTime
 
 @Service
 class ChatService(
     private val repository: ChatRepository,
+    private val directory: ChatDirectoryRepository,
+    private val memberships: GroupMembershipRepository,
     private val outboxRepository: OutboxRepository,
     private val mapper: ObjectMapper,
     private val tx: TransactionTemplate,
@@ -47,14 +49,14 @@ class ChatService(
     ): ChatPageResponse {
         requirePageLimit(limit)
         val position = cursor?.let(ChatCursor::decode)
-        val fetched = repository.findByMember(
+        val fetched = directory.findByMember(
             userId = userId,
             beforeActivityAt = position?.activityAt,
             beforeChatId = position?.chatId,
             limit = limit + 1,
         )
         val pinned = if (position == null) {
-            repository.findByMember(userId, null, null, ChatPreferences.MAX_PINNED_CHATS, pinned = true)
+            directory.findByMember(userId, null, null, ChatPreferences.MAX_PINNED_CHATS, pinned = true)
         } else {
             emptyList()
         }
@@ -67,7 +69,7 @@ class ChatService(
             )
         }
         val chats = page.map { it.chat }
-        val members = repository.findMembersByChatIds(
+        val members = directory.findMembersByChatIds(
             chats.filter { it.kind == ChatKind.DIRECT }
                 .map { it.id },
         )
@@ -121,7 +123,7 @@ class ChatService(
         chatId: ChatId,
         userId: UserId,
     ): ChatResponse {
-        val details = repository.findMemberDetails(
+        val details = directory.findMemberDetails(
             chatId = chatId,
             userId = userId,
         ) ?: notFound()
@@ -156,7 +158,7 @@ class ChatService(
             }
             if (additions.isNotEmpty()) {
                 requireGroupCapacity(additions)
-                repository.insertMembersAndIncrementCount(
+                memberships.insertMembersAndIncrementCount(
                     chatId = chatId,
                     userIds = additions,
                 )
@@ -180,7 +182,7 @@ class ChatService(
     }
 
     private fun requireUsersAndLock(userIds: List<UserId>) {
-        if (repository.lockUsers(userIds = userIds).size != userIds.size) {
+        if (memberships.lockUsers(userIds = userIds).size != userIds.size) {
             throw ApiException(
                 HttpStatus.NOT_FOUND,
                 ApiErrorCode.USER_NOT_FOUND,
@@ -190,7 +192,7 @@ class ChatService(
     }
 
     private fun requireGroupCapacity(userIds: List<UserId>) {
-        if (repository.groupCountsByUser(userIds = userIds).values.any { it >= 200 }) {
+        if (memberships.groupCountsByUser(userIds = userIds).values.any { it >= 200 }) {
             badRequest(ApiErrorCode.INVALID_MEMBERS, "A member cannot join more than 200 groups")
         }
     }

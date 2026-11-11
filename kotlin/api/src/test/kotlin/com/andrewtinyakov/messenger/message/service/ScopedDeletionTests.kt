@@ -1,24 +1,24 @@
 package com.andrewtinyakov.messenger.message.service
 
-import com.andrewtinyakov.messenger.chat.deletion.DeletionRequest
-import com.andrewtinyakov.messenger.chat.deletion.DeletionScope
-import com.andrewtinyakov.messenger.chat.deletion.DeletionService
-import com.andrewtinyakov.messenger.chat.deletion.DeletionState
-import com.andrewtinyakov.messenger.chat.deletion.DeletionTarget
-import com.andrewtinyakov.messenger.chat.deletion.HistoryPurgeService
+import com.andrewtinyakov.messenger.auth.model.UserId
+import com.andrewtinyakov.messenger.chat.deletion.service.DeletionService
+import com.andrewtinyakov.messenger.chat.deletion.service.HistoryPurgeService
+import com.andrewtinyakov.messenger.chat.deletion.web.payload.DeletionRequest
+import com.andrewtinyakov.messenger.chat.deletion.web.payload.DeletionScope
+import com.andrewtinyakov.messenger.chat.deletion.web.payload.DeletionState
+import com.andrewtinyakov.messenger.chat.deletion.web.payload.DeletionTarget
+import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.service.ChatService
 import com.andrewtinyakov.messenger.chat.web.payload.CreateGroupChatRequest
-import com.andrewtinyakov.messenger.message.change.MessageMutationService
+import com.andrewtinyakov.messenger.message.change.service.MessageMutationService
 import com.andrewtinyakov.messenger.message.model.CommandResult
+import com.andrewtinyakov.messenger.message.model.MessageId
+import com.andrewtinyakov.messenger.message.model.RequestId
 import com.andrewtinyakov.messenger.message.repository.MessageRepository
 import com.andrewtinyakov.messenger.message.web.payload.MessageChangeKind
 import com.andrewtinyakov.messenger.message.web.payload.MessageResponse
 import com.andrewtinyakov.messenger.read.service.ReadService
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
-import com.andrewtinyakov.messenger.shared.id.ChatId
-import com.andrewtinyakov.messenger.shared.id.MessageId
-import com.andrewtinyakov.messenger.shared.id.RequestId
-import com.andrewtinyakov.messenger.shared.id.UserId
 import com.andrewtinyakov.messenger.shared.id.newId
 import com.andrewtinyakov.messenger.shared.web.ApiException
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -36,6 +36,7 @@ class ScopedDeletionTests
     constructor(
         private val sends: MessageSendService,
         private val history: MessageHistoryService,
+        private val sendStatusService: SendStatusService,
         private val deletions: DeletionService,
         private val purge: HistoryPurgeService,
         private val chats: ChatService,
@@ -64,7 +65,7 @@ class ScopedDeletionTests
             assertEquals(
                 HttpStatus.NOT_FOUND,
                 assertThrows(ApiException::class.java) {
-                    history.around(ChatId(chat), UserId(owner), MessageId(first.id), 10)
+                    history.around(ChatId(chat), UserId(owner), MessageId(first.id), null, 10)
                 }.status,
             )
             assertEquals(
@@ -121,7 +122,7 @@ class ScopedDeletionTests
             val changes = history.changes(ChatId(chat), UserId(member), "0", 100)
             assertTrue(changes.changes.all { it.kind == MessageChangeKind.REMOVED && it.message == null && it.messageId == target.id })
             assertEquals(CommandResult.DUPLICATE, sends.process(request))
-            assertEquals(target.id, history.status(UserId(member), RequestId(request.requestId)).messageId)
+            assertEquals(target.id, sendStatusService.status(UserId(member), RequestId(request.requestId)).messageId)
             assertEquals(1, db.queryForObject("SELECT count(*) FROM messages WHERE chat_id=?", Int::class.java, chat))
             assertEquals(
                 listOf("2"),
@@ -154,7 +155,7 @@ class ScopedDeletionTests
             )
             val first = command(owner, newId(), "direct", recipient = member)
             sends.process(first)
-            val direct = history.status(UserId(owner), RequestId(first.requestId))
+            val direct = sendStatusService.status(UserId(owner), RequestId(first.requestId))
             delete(direct.chatId!!, member, DeletionScope.EVERYONE, DeletionTarget.MESSAGES, listOf(direct.messageId!!))
             assertTrue(history.messages(ChatId(direct.chatId), UserId(owner), null, null, 10).messages.isEmpty())
         }
@@ -328,7 +329,7 @@ class ScopedDeletionTests
                 gate.countDown()
                 assertEquals(CommandResult.SAVED, saved.get(10, TimeUnit.SECONDS))
                 val cutoff = cleared.get(10, TimeUnit.SECONDS).clearedThroughSequence.toLong()
-                val sequence = history.status(UserId(owner), RequestId(command.requestId)).sequence!!.toLong()
+                val sequence = sendStatusService.status(UserId(owner), RequestId(command.requestId)).sequence!!.toLong()
                 val rows = history.messages(ChatId(chat), UserId(member), "0", null, 10).messages
                 assertEquals(sequence > cutoff, rows.any { it.sequence.toLong() == sequence })
                 val fresh = send(owner, chat, "later")
@@ -342,7 +343,7 @@ class ScopedDeletionTests
             val member = user("scope-redelete-member")
             val send = command(owner, newId(), "hide then erase", recipient = member)
             sends.process(send)
-            val saved = history.status(UserId(owner), RequestId(send.requestId))
+            val saved = sendStatusService.status(UserId(owner), RequestId(send.requestId))
             val chat = saved.chatId!!
             val target = saved.messageId!!
             delete(chat, member, DeletionScope.SELF, DeletionTarget.MESSAGES, listOf(target))

@@ -1,6 +1,6 @@
 package com.andrewtinyakov.messenger.infrastructure.outbox.monitoring
 
-import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxMessage
+import com.andrewtinyakov.messenger.infrastructure.outbox.model.OutboxMessage
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry

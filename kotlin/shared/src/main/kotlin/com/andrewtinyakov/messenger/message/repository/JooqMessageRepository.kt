@@ -1,5 +1,7 @@
 package com.andrewtinyakov.messenger.message.repository
 
+import com.andrewtinyakov.messenger.auth.model.UserId
+import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.generated.messaging.event.SendRejectionReason
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Routines
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHATS
@@ -10,15 +12,13 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.rec
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseObservation
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseOperation
 import com.andrewtinyakov.messenger.message.model.Message
+import com.andrewtinyakov.messenger.message.model.MessageId
+import com.andrewtinyakov.messenger.message.model.RequestId
 import com.andrewtinyakov.messenger.message.model.SavedMessage
 import com.andrewtinyakov.messenger.message.model.SendResult
 import com.andrewtinyakov.messenger.message.model.SendResultStatus
 import com.andrewtinyakov.messenger.message.model.asReply
-import com.andrewtinyakov.messenger.message.visibility.visibleMessage
-import com.andrewtinyakov.messenger.shared.id.ChatId
-import com.andrewtinyakov.messenger.shared.id.MessageId
-import com.andrewtinyakov.messenger.shared.id.RequestId
-import com.andrewtinyakov.messenger.shared.id.UserId
+import com.andrewtinyakov.messenger.message.visibility.repository.visibleMessage
 import org.jooq.DSLContext
 import org.jooq.impl.DSL
 import org.springframework.stereotype.Repository
@@ -221,7 +221,7 @@ class JooqMessageRepository(
     private fun visibleToMember(chatId: ChatId, userId: UserId) = visibleMessage(chatId, userId, MESSAGES.SEQUENCE)
 
     override fun findMessagesByIds(chatId: ChatId, userId: UserId, messageIds: List<MessageId>): List<Message> =
-        DatabaseObservation.query(DatabaseOperation.MESSAGE_FIND_MESSAGE) {
+        DatabaseObservation.query(DatabaseOperation.MESSAGE_FIND_MESSAGES_BY_IDS) {
             require(messageIds.size <= 100)
             if (messageIds.isEmpty()) return@query emptyList()
             db.selectFrom(MESSAGES)

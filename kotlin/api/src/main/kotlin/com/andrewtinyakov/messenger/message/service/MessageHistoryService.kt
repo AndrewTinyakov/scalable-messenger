@@ -1,15 +1,16 @@
 package com.andrewtinyakov.messenger.message.service
 
+import com.andrewtinyakov.messenger.auth.model.UserId
+import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseTransaction
 import com.andrewtinyakov.messenger.infrastructure.database.observability.observedExecute
-import com.andrewtinyakov.messenger.message.change.MessageChangeRepository
-import com.andrewtinyakov.messenger.message.model.SendResult
-import com.andrewtinyakov.messenger.message.model.SendResultStatus
+import com.andrewtinyakov.messenger.message.change.repository.MessageChangeRepository
+import com.andrewtinyakov.messenger.message.model.MessageId
 import com.andrewtinyakov.messenger.message.monitoring.HistoryDirection
 import com.andrewtinyakov.messenger.message.monitoring.MessageMetrics
 import com.andrewtinyakov.messenger.message.repository.MessageRepository
-import com.andrewtinyakov.messenger.message.visibility.VisibilityRepository
-import com.andrewtinyakov.messenger.message.visibility.VisibilitySnapshot
+import com.andrewtinyakov.messenger.message.visibility.model.VisibilitySnapshot
+import com.andrewtinyakov.messenger.message.visibility.repository.VisibilityRepository
 import com.andrewtinyakov.messenger.message.web.payload.MessageAroundResponse
 import com.andrewtinyakov.messenger.message.web.payload.MessageChangeKind
 import com.andrewtinyakov.messenger.message.web.payload.MessageChangeResponse
@@ -17,15 +18,7 @@ import com.andrewtinyakov.messenger.message.web.payload.MessageChangesResponse
 import com.andrewtinyakov.messenger.message.web.payload.MessageHistoryResponse
 import com.andrewtinyakov.messenger.message.web.payload.MessageResolveResponse
 import com.andrewtinyakov.messenger.message.web.payload.MessageVisibilityResponse
-import com.andrewtinyakov.messenger.message.web.payload.SendLookupStatus
-import com.andrewtinyakov.messenger.message.web.payload.SendStatusEntry
-import com.andrewtinyakov.messenger.message.web.payload.SendStatusResponse
-import com.andrewtinyakov.messenger.message.web.payload.SendStatusesResponse
 import com.andrewtinyakov.messenger.message.web.payload.toResponse
-import com.andrewtinyakov.messenger.shared.id.ChatId
-import com.andrewtinyakov.messenger.shared.id.MessageId
-import com.andrewtinyakov.messenger.shared.id.RequestId
-import com.andrewtinyakov.messenger.shared.id.UserId
 import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
 import com.andrewtinyakov.messenger.shared.web.badRequest
 import com.andrewtinyakov.messenger.shared.web.notFound
@@ -34,6 +27,7 @@ import com.andrewtinyakov.messenger.shared.web.requirePageLimit
 import org.springframework.stereotype.Service
 import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.support.TransactionTemplate
+import kotlin.math.abs
 
 @Service
 class MessageHistoryService(
@@ -80,14 +74,6 @@ class MessageHistoryService(
         }
     }
 
-    fun around(chatId: ChatId, userId: UserId, messageId: MessageId, limit: Int): MessageAroundResponse = around(
-        chatId,
-        userId,
-        messageId,
-        null,
-        limit,
-    )
-
     fun around(
         chatId: ChatId,
         userId: UserId,
@@ -111,7 +97,7 @@ class MessageHistoryService(
             val anchor =
                 requested
                     ?: listOfNotNull(beforeAnchor.messages.lastOrNull(), afterAnchor.messages.firstOrNull()).minByOrNull {
-                        kotlin.math.abs(it.sequence - anchorAt)
+                        abs(it.sequence - anchorAt)
                     }
             if (anchor == null) {
                 return@observedExecute MessageAroundResponse(
@@ -240,36 +226,4 @@ class MessageHistoryService(
 
     private fun sequence(value: String, positive: Boolean = false): Long =
         parseSequence(value)?.takeIf { !positive || it > 0 } ?: badRequest(ApiErrorCode.INVALID_SEQUENCE, "Invalid decimal sequence")
-
-    fun status(userId: UserId, requestId: RequestId): SendStatusResponse =
-        repository.findSendResult(userId, requestId)?.toStatusResponse() ?: SendStatusResponse(SendLookupStatus.UNKNOWN)
-
-    fun statuses(userId: UserId, requestIds: List<RequestId>): SendStatusesResponse {
-        if (requestIds.size !in 1..100 ||
-            requestIds.size != requestIds.toSet().size
-        ) {
-            badRequest(ApiErrorCode.INVALID_ID, "Provide 1 to 100 distinct request IDs")
-        }
-        val found = repository.findSendResults(userId, requestIds).associateBy { it.requestId }
-        return SendStatusesResponse(
-            requestIds.map {
-                SendStatusEntry(
-                    it.value,
-                    found[it]?.toStatusResponse() ?: SendStatusResponse(SendLookupStatus.UNKNOWN),
-                )
-            },
-        )
-    }
-
-    private fun SendResult.toStatusResponse(): SendStatusResponse = SendStatusResponse(
-        if (status == SendResultStatus.SAVED) {
-            SendLookupStatus.SAVED
-        } else {
-            SendLookupStatus.REJECTED
-        },
-        chatId?.value,
-        messageId?.value,
-        sequence?.toString(),
-        reason,
-    )
 }

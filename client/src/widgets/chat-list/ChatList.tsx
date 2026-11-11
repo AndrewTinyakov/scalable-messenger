@@ -1,6 +1,6 @@
 import { useHotkey } from '@tanstack/react-hotkeys'
 import { Pencil, Search, X } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { chatPeer, chatTitle, hasUnread, type Chat } from '../../entities/chat/model'
 import type { Message, PendingSend } from '../../entities/message/model'
 import type { User } from '../../entities/session/model'
@@ -108,6 +108,30 @@ function useEndReached(enabled: boolean, onReached: () => void) {
   return ref
 }
 
+const INTRO_MS = 900
+
+function useIntro(loading: boolean) {
+  const [intro, setIntro] = useState(true)
+  useEffect(() => {
+    if (loading || !intro) return
+    const timer = window.setTimeout(() => setIntro(false), INTRO_MS)
+    return () => window.clearTimeout(timer)
+  }, [loading, intro])
+  return intro
+}
+
+function useFolderFade(list: React.RefObject<HTMLElement>, folder: ChatFolder) {
+  const shown = useRef(folder)
+  useLayoutEffect(() => {
+    if (shown.current === folder) return
+    shown.current = folder
+    const root = list.current
+    if (!root || typeof root.animate !== 'function') return
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
+    root.animate([{ opacity: 0.2 }, { opacity: 1 }], { duration: 180, easing: 'ease-out' })
+  }, [folder, list])
+}
+
 export function ChatList({
   user,
   chats,
@@ -173,6 +197,8 @@ export function ChatList({
   const visibleIds = useMemo(() => visible.map((chat) => chat.id).join(), [visible])
   useVisibleChats(listRef, visibleIds, onVisibleChats)
   const loadMoreRef = useEndReached(hasMore && !loadingMore, onLoadMore)
+  const intro = useIntro(loading)
+  useFolderFade(listRef, folder)
 
   function step(offset: number) {
     if (!visible.length) return
@@ -227,7 +253,13 @@ export function ChatList({
           )}
         </label>
       </div>
-      <nav className="chat-list" aria-label="Chats" ref={listRef} onKeyDown={moveFocus}>
+      <nav
+        className="chat-list"
+        aria-label="Chats"
+        ref={listRef}
+        onKeyDown={moveFocus}
+        data-intro={intro || undefined}
+      >
         {loading &&
           chats.length === 0 &&
           [0, 1, 2, 3, 4, 5, 6].map((index) => (
@@ -244,11 +276,12 @@ export function ChatList({
             {query ? 'Nothing found' : folder === 'unread' ? 'All caught up' : 'No chats here yet'}
           </div>
         )}
-        {visible.map((chat) => {
+        {visible.map((chat, index) => {
           const peer = chatPeer(chat, user.id)
           return (
             <ChatRow
               key={chat.id}
+              index={intro ? index : undefined}
               chat={chat}
               userId={user.id}
               selected={selectedId === chat.id}

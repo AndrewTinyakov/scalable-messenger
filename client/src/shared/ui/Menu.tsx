@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from 'react'
 import { createPortal } from 'react-dom'
+import { fadeOutMenu, useExitAnimation } from './useExitAnimation'
 
 const EDGE = 8
 const GAP = 6
@@ -32,7 +33,7 @@ function clamp(value: number, size: number, limit: number): number {
 }
 
 function placement(
-  size: DOMRect,
+  size: { width: number; height: number },
   anchor: DOMRect,
   point: MenuPoint | undefined,
   align: 'start' | 'end',
@@ -70,6 +71,7 @@ export function Menu({
   const ref = useRef<HTMLDivElement>(null)
   const [position, setPosition] = useState({ top: 0, left: 0, origin: 'top left' })
   const close = useRef(onClose)
+  useExitAnimation(ref, fadeOutMenu)
   close.current = onClose
   const x = point?.x
   const y = point?.y
@@ -80,7 +82,7 @@ export function Menu({
     const place = () =>
       setPosition(
         placement(
-          menu.getBoundingClientRect(),
+          { width: menu.offsetWidth, height: menu.offsetHeight },
           anchor.getBoundingClientRect(),
           x === undefined || y === undefined ? undefined : { x, y },
           align,

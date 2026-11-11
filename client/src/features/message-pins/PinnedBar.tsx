@@ -38,7 +38,7 @@ export function PinnedBar({ pins, total, onJump, onOpenList, onUnpin }: Props) {
             <i key={segment} className={segment === activeSegment ? 'active' : ''} />
           ))}
         </span>
-        <span className="pinned-bar-copy">
+        <span className="pinned-bar-copy" key={current.message.id}>
           <strong>
             {total > 1 && index > 0 ? `Pinned message #${total - index}` : 'Pinned message'}
           </strong>

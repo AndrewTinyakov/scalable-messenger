@@ -4,6 +4,7 @@ import type { Chat } from '../../entities/chat/model'
 import type { Session, User } from '../../entities/session/model'
 import { api } from '../../shared/api/http'
 import { Avatar } from '../../shared/ui/Avatar'
+import { fadeOutDialog, useExitAnimation } from '../../shared/ui/useExitAnimation'
 
 interface Props {
   chat: Chat
@@ -40,6 +41,8 @@ export function GroupMembersDialog({
   const revision = useRef(0)
   const busyRef = useRef(false)
   const dialogRef = useRef<HTMLElement>(null)
+  const backdrop = useRef<HTMLDivElement>(null)
+  useExitAnimation(backdrop, fadeOutDialog)
   const listRef = useRef<HTMLUListElement>(null)
   function observeMembers() {
     const list = listRef.current
@@ -201,6 +204,7 @@ export function GroupMembersDialog({
 
   return (
     <div
+      ref={backdrop}
       className="dialog-backdrop"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget && !busyRef.current) onClose()

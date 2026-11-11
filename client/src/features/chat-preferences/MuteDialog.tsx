@@ -34,7 +34,7 @@ export function MuteDialog({ title, onCancel, onMute }: Props) {
     <Dialog title="Mute notifications" onClose={onCancel} busy={busy}>
       <p className="dialog-description">Silence sounds and alerts from {title}.</p>
       <fieldset className="deletion-scopes" disabled={busy}>
-        <legend>Mute</legend>
+        <legend className="visually-hidden">Mute for</legend>
         {MUTE_OPTIONS.map((option, index) => (
           <label key={option.label}>
             <input

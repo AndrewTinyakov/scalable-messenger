@@ -1,5 +1,6 @@
 import { X } from 'lucide-react'
 import { useEffect, useRef, type ReactNode } from 'react'
+import { fadeOutDialog, useExitAnimation } from './useExitAnimation'
 
 interface Props {
   title: string
@@ -9,6 +10,8 @@ interface Props {
 }
 export function Dialog({ title, children, onClose, busy = false }: Props) {
   const ref = useRef<HTMLElement>(null)
+  const backdrop = useRef<HTMLDivElement>(null)
+  useExitAnimation(backdrop, fadeOutDialog)
   const closeRef = useRef(onClose)
   const busyRef = useRef(busy)
   closeRef.current = onClose
@@ -40,6 +43,7 @@ export function Dialog({ title, children, onClose, busy = false }: Props) {
   }, [])
   return (
     <div
+      ref={backdrop}
       className="dialog-backdrop"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget && !busy) onClose()

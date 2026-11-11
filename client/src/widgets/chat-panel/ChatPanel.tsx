@@ -1,6 +1,6 @@
 import { useHotkey } from '@tanstack/react-hotkeys'
 import { ChevronDown, Copy, Forward, Trash2, X } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { isMuted, type Chat } from '../../entities/chat/model'
 import type { DeleteScope } from '../../entities/message/historySnapshot'
 import { groupByDay } from '../../entities/message/messageDays'
@@ -27,6 +27,7 @@ import type { MenuPoint } from '../../shared/ui/Menu'
 import { ChatHeader } from './ChatHeader'
 import { messageEntries } from './messageEntries'
 import { sameMessageRun } from './messageGrouping'
+import { useEnteringEntries } from './useEnteringEntries'
 import { useMessageSelection } from './useMessageSelection'
 import { useMessageViewport } from './useMessageViewport'
 import { useSenderNames } from './useSenderNames'
@@ -332,6 +333,26 @@ export function ChatPanel({
     [chat?.id, recipient, messages, pending, hasNewer],
   )
   const days = useMemo(() => groupByDay(entries), [entries])
+  const knownEmpty = !chat || chat.lastSequence === '0'
+  const entering = useEnteringEntries(
+    modeKey,
+    entries.map((entry) => entry.key),
+    knownEmpty,
+  )
+  const fadedFor = useRef<string | undefined>()
+  const hasEntries = entries.length > 0
+  useLayoutEffect(() => {
+    if (fadedFor.current === modeKey) return
+    if (!hasEntries) {
+      if (knownEmpty) fadedFor.current = modeKey
+      return
+    }
+    fadedFor.current = modeKey
+    const body = scrollRef.current
+    if (!body || typeof body.animate !== 'function') return
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
+    body.animate([{ opacity: 0.35 }, { opacity: 1 }], { duration: 160, easing: 'ease-out' })
+  }, [modeKey, hasEntries, knownEmpty, scrollRef])
 
   async function confirmDelete(scope: DeleteScope) {
     if (!confirm || !chat || busyRef.current) return
@@ -482,6 +503,7 @@ export function ChatPanel({
                       features?.jumpLoading === message.replyToMessageId,
                     )}
                     highlighted={message?.id === highlight}
+                    entering={entering.has(key)}
                   />
                 )
               })}

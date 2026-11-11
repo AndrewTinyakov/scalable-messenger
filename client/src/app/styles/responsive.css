@@ -3,14 +3,14 @@
     padding-right: 0;
   }
   .message-selection-mark {
-    right: -38px;
+    right: -40px;
   }
 }
 
 @media (max-width: 1100px) {
   :root {
-    --sidebar-width: 312px;
-    --rail-width: 68px;
+    --sidebar-width: 320px;
+    --rail-width: 72px;
   }
 }
 
@@ -24,13 +24,15 @@
     order: 2;
     display: flex;
     height: 52px;
-    padding: 0 4px;
+    padding: 0 6px;
     overflow-x: auto;
     flex-direction: row;
     align-items: center;
     gap: 0;
     border-bottom: 1px solid var(--line);
     background: var(--bg-sidebar);
+    -webkit-mask-image: linear-gradient(90deg, #000 88%, transparent);
+    mask-image: linear-gradient(90deg, #000 88%, transparent);
   }
   .rail-menu {
     width: 44px;
@@ -46,28 +48,41 @@
     gap: 6px;
     font-size: 14px;
   }
+  .rail-folder-icon,
+  .rail-folder:hover .rail-folder-icon,
+  .rail-folder.active .rail-folder-icon {
+    width: auto;
+    height: auto;
+    background: none;
+  }
   .rail-folder-icon svg {
     display: none;
+  }
+  .rail-folder-icon {
+    order: 2;
   }
   .rail-folder-icon b {
     position: static;
     box-shadow: none;
   }
+  .rail-folder.active {
+    color: var(--accent-text);
+  }
   .rail-folder.active::before {
-    top: auto;
+    position: absolute;
     right: 12px;
     bottom: 0;
     left: 12px;
-    width: auto;
     height: 3px;
     border-radius: 3px 3px 0 0;
-  }
-  .rail-folder:hover {
-    background: none;
+    background: var(--accent);
+    content: '';
+    animation: tab-in 260ms var(--spring) backwards;
   }
   .sidebar {
     order: 3;
     border-right: 0;
+    border-left: 0;
   }
   .chat-panel {
     position: absolute;
@@ -75,14 +90,15 @@
     inset: 0;
     transform: translateX(100%);
     transition:
-      transform 240ms var(--ease),
-      visibility 0s 240ms;
+      transform 320ms var(--ease),
+      visibility 0s 320ms;
     visibility: hidden;
   }
   .workspace.show-chat .chat-panel {
     transform: none;
-    transition: transform 240ms var(--ease);
+    transition: transform 320ms var(--ease);
     visibility: visible;
+    box-shadow: -20px 0 40px rgb(0 0 0 / 40%);
   }
   .mobile-back {
     display: inline-grid;
@@ -103,7 +119,7 @@
   }
   .fixed-latest {
     right: 12px;
-    bottom: 76px;
+    bottom: 80px;
   }
   .connection-status {
     z-index: 8;
@@ -117,5 +133,15 @@
   .message-selection-toolbar {
     width: calc(100% - 20px);
     margin-bottom: calc(10px + env(safe-area-inset-bottom));
+  }
+  .create-dialog {
+    border-radius: 22px;
+  }
+}
+
+@keyframes tab-in {
+  from {
+    opacity: 0;
+    transform: scaleX(0.3);
   }
 }

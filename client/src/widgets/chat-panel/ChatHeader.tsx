@@ -76,7 +76,7 @@ export function ChatHeader({
         group={group}
         online={status.online}
       />
-      <div className="chat-header-info">
+      <div className="chat-header-info" key={recipient ?? chat.id}>
         <h2>
           {title}
           {muted && <BellOff className="chat-muted-icon" size={15} aria-label="Muted" />}

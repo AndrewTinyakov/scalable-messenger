@@ -16,13 +16,22 @@ function rect(left: number, top: number, width: number, height: number) {
 async function open(
   anchorRect: DOMRect,
   props: { align?: 'start' | 'end'; point?: { x: number; y: number } },
+  renderedScale = 1,
 ) {
   const anchor = document.createElement('button')
   anchor.getBoundingClientRect = () => anchorRect
   document.body.append(anchor)
   dom.window.HTMLElement.prototype.getBoundingClientRect = function () {
-    return this === anchor ? anchorRect : rect(0, 0, 200, 120)
+    return this === anchor ? anchorRect : rect(0, 0, 200 * renderedScale, 120 * renderedScale)
   }
+  Object.defineProperty(dom.window.HTMLElement.prototype, 'offsetWidth', {
+    configurable: true,
+    get: () => 200,
+  })
+  Object.defineProperty(dom.window.HTMLElement.prototype, 'offsetHeight', {
+    configurable: true,
+    get: () => 120,
+  })
   const close = vi.fn()
   await act(async () =>
     root.render(
@@ -59,6 +68,11 @@ describe('floating menu placement', () => {
     const { menu } = await open(rect(960, 20, 36, 36), {})
     expect(parseFloat(menu.style.left)).toBe(792)
     expect(parseFloat(menu.style.top)).toBe(62)
+  })
+
+  it('uses its layout size while its opening animation scales it down', async () => {
+    const { menu } = await open(rect(960, 20, 36, 36), {}, 0.9)
+    expect(parseFloat(menu.style.left)).toBe(792)
   })
 
   it('flips above an anchor that has no room below', async () => {

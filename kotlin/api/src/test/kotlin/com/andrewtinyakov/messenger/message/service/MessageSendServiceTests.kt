@@ -4,7 +4,9 @@ import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.service.ChatMembershipService
 import com.andrewtinyakov.messenger.chat.service.ChatService
+import com.andrewtinyakov.messenger.generated.messaging.command.SendMessageCommandV1
 import com.andrewtinyakov.messenger.generated.messaging.event.SendRejectionReason
+import com.andrewtinyakov.messenger.message.model.CommandResult
 import com.andrewtinyakov.messenger.message.model.RequestId
 import com.andrewtinyakov.messenger.message.web.payload.SendLookupStatus
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
@@ -19,6 +21,7 @@ class MessageSendServiceTests
     @Autowired
     constructor(
         private val service: MessageSendService,
+        private val batches: MessageSendBatchService,
         private val sendStatusService: SendStatusService,
         private val chatService: ChatService,
         private val chatMembershipService: ChatMembershipService,
@@ -218,6 +221,67 @@ class MessageSendServiceTests
             service.process(command(sender, request, "hello", recipient = newId()))
             assertEquals(SendRejectionReason.RECIPIENT_NOT_FOUND, sendStatusService.status(UserId(sender), RequestId(request)).reason)
             assertEquals(null, sendStatusService.status(UserId(sender), RequestId(request)).chatId)
+        }
+
+        @Test
+        fun `single and batched chat sends share one rejection order`() {
+            val owner = user("rejection-order-owner")
+            val member = user("rejection-order-member")
+            val outsider = user("rejection-order-outsider")
+            val chat = chatService.createGroup(UserId(owner), "Rejection order", listOf(member).map(::UserId)).id
+            val target = newId()
+            service.process(command(owner, target, "target", chat = chat))
+            val targetId = sendStatusService.status(UserId(owner), RequestId(target)).messageId!!
+
+            fun replyAndForward(sender: String, body: String, chatId: String = chat) =
+                command(sender, newId(), body, chat = chatId).copy(
+                    replyToMessageId = targetId,
+                    forwardFromChatId = chat,
+                    forwardFromMessageId = targetId,
+                )
+
+            assertRejectedAlike(SendRejectionReason.EMPTY_BODY) { replyAndForward(member, " ") }
+            assertRejectedAlike(SendRejectionReason.BODY_TOO_LONG) { replyAndForward(outsider, "x".repeat(4001)) }
+            assertRejectedAlike(SendRejectionReason.CHAT_NOT_FOUND) { replyAndForward(member, "missing chat", chatId = newId()) }
+            assertRejectedAlike(SendRejectionReason.NOT_A_MEMBER) { replyAndForward(outsider, "outsider") }
+            assertRejectedAlike(SendRejectionReason.INVALID_FORWARD_SOURCE) { replyAndForward(member, "both references") }
+            assertRejectedAlike(SendRejectionReason.INVALID_REPLY_TARGET) {
+                command(member, newId(), "missing reply", chat = chat).copy(replyToMessageId = newId())
+            }
+            assertRejectedAlike(SendRejectionReason.INVALID_FORWARD_SOURCE) {
+                command(member, newId(), "missing source", chat = chat).copy(forwardFromChatId = chat, forwardFromMessageId = newId())
+            }
+        }
+
+        @Test
+        fun `direct send with one invalid field keeps its reason and creates no chat`() {
+            val sender = user("direct-invalid-sender")
+            val recipient = user("direct-invalid-recipient")
+            val pair = listOf(sender, recipient).sorted().joinToString(":")
+
+            assertRejectedAlike(SendRejectionReason.INVALID_RECIPIENT) { command(sender, newId(), "self", recipient = sender) }
+            assertRejectedAlike(SendRejectionReason.RECIPIENT_NOT_FOUND) { command(sender, newId(), "nobody", recipient = newId()) }
+            assertRejectedAlike(SendRejectionReason.EMPTY_BODY) { command(sender, newId(), " ", recipient = recipient) }
+            assertRejectedAlike(SendRejectionReason.INVALID_REPLY_TARGET) {
+                command(sender, newId(), "reply", recipient = recipient).copy(replyToMessageId = newId())
+            }
+            assertRejectedAlike(SendRejectionReason.INVALID_FORWARD_SOURCE) {
+                command(sender, newId(), "forward", recipient = recipient).copy(forwardFromChatId = newId(), forwardFromMessageId = newId())
+            }
+            assertRejectedAlike(SendRejectionReason.INVALID_REPLY_TARGET) {
+                command(sender, newId(), " ", recipient = recipient).copy(replyToMessageId = newId())
+            }
+            assertEquals(0, db.queryForObject("SELECT count(*) FROM chats WHERE direct_pair_key=?", Int::class.java, pair))
+        }
+
+        private fun assertRejectedAlike(reason: SendRejectionReason, send: () -> SendMessageCommandV1) {
+            val single = send()
+            val batched = send()
+            assertEquals(CommandResult.REJECTED, service.process(single))
+            assertEquals(listOf(CommandResult.REJECTED), batches.process(listOf(batched)))
+            listOf(single, batched).forEach { command ->
+                assertEquals(reason, sendStatusService.status(UserId(command.senderId), RequestId(command.requestId)).reason)
+            }
         }
 
         @Test

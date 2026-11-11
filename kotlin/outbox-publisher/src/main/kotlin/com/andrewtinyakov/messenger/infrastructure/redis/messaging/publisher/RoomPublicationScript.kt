@@ -26,32 +26,45 @@ internal class RoomPublicationScript(
 
     fun publish(message: OutboxMessage): Mono<String> {
         require(message.room.length <= 96 && message.room.none { it.isWhitespace() || it == '{' || it == '}' })
+        return appendAndPublish(message, publicationOptions(message)).flatMap { streamId ->
+            publishSidebarActivity(message).thenReturn(streamId)
+        }
+    }
+
+    private fun publicationOptions(message: OutboxMessage) = PublicationOptions(
+        version = 1,
+        room = message.room,
+        eventId = message.id.value,
+        epoch = UUID.randomUUID(),
+        historyMaxLength = properties.historyMaxLength,
+        historyMaxBytes = properties.historyMaxBytes,
+        historySeconds = properties.historySeconds,
+        idleTtlSeconds = properties.idleTtlSeconds,
+        groupPublicationOrder = message.groupPublicationOrder?.also { require(it > 0) }?.toString(),
+    )
+
+    private fun appendAndPublish(message: OutboxMessage, options: PublicationOptions): Mono<String> {
         val prefix = "messenger:{${message.room}}"
-        val options = PublicationOptions(
-            version = 1,
-            room = message.room,
-            eventId = message.id.value,
-            epoch = UUID.randomUUID(),
-            historyMaxLength = properties.historyMaxLength,
-            historyMaxBytes = properties.historyMaxBytes,
-            historySeconds = properties.historySeconds,
-            idleTtlSeconds = properties.idleTtlSeconds,
-            groupPublicationOrder = message.groupPublicationOrder?.also { require(it > 0) }?.toString(),
-        )
         return redis.execute(
             script,
             listOf("$prefix:stream", "$prefix:epoch", "$prefix:live", "$prefix:history-bytes"),
             listOf(message.payload, mapper.writeValueAsString(options), message.replayPayload ?: message.payload),
-        ).single().doOnNext { check(streamIdPattern.matches(it)) { "Redis returned an invalid stream ID" } }.flatMap { streamId ->
-            val event = mapper.readTree(message.payload)
-            if (RoomAddress.isGroup(message.room) && event.path("type").asText() == RoomEventType.MESSAGE_SAVED.value) {
-                val chatId = event.path("chatId").asText()
-                val hint = mapper.writeValueAsString(SidebarActivityEventV1.create(chatId, event.path("sequence").asText()))
-                redis.execute(activityScript, listOf("messenger:{activity:$chatId}:live"), listOf(hint)).single().thenReturn(streamId)
-            } else {
-                Mono.just(streamId)
-            }
-        }
+        ).single().doOnNext { check(streamIdPattern.matches(it)) { "Redis returned an invalid stream ID" } }
+    }
+
+    private fun publishSidebarActivity(message: OutboxMessage): Mono<Long> {
+        val activity = sidebarActivity(message) ?: return Mono.empty()
+        return redis.execute(
+            activityScript,
+            listOf("messenger:{activity:${activity.chatId}}:live"),
+            listOf(mapper.writeValueAsString(activity)),
+        ).single()
+    }
+
+    private fun sidebarActivity(message: OutboxMessage): SidebarActivityEventV1? {
+        val event = mapper.readTree(message.payload)
+        if (!RoomAddress.isGroup(message.room) || event.path("type").asText() != RoomEventType.MESSAGE_SAVED.value) return null
+        return SidebarActivityEventV1.create(event.path("chatId").asText(), event.path("sequence").asText())
     }
 }
 

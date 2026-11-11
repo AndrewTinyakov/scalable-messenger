@@ -6,6 +6,7 @@ import com.andrewtinyakov.messenger.infrastructure.messaging.listener.consumeMes
 import com.andrewtinyakov.messenger.infrastructure.messaging.model.CommandKind
 import com.andrewtinyakov.messenger.infrastructure.messaging.monitoring.CommandMetrics
 import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStage
+import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStageEvent
 import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStageRecorder
 import com.andrewtinyakov.messenger.message.model.SendTarget
 import com.andrewtinyakov.messenger.message.service.MessageSendBatchService
@@ -36,55 +37,65 @@ class SendMessageListener(
     )
     fun onSendCommand(messages: List<Message>, channel: Channel) {
         val received = SendStageRecorder.beginEach(SendStage.LISTENER_RECEIVED, messages) { it.messageProperties.deliveryTag }
-        val deliveries = messages.groupBy { it.messageProperties.deliveryTag }
-        val accepted = mutableListOf<PendingSend>()
-        for (fragments in deliveries.values) {
-            val message = fragments.first()
-            val started = metrics.commandProcessingStarted()
-            val decoded = runCatching {
-                require(fragments.size == 1) { "Producer command batches are unsupported" }
-                require(message.body.size <= MAX_COMMAND_BYTES) { "Command exceeds wire byte limit" }
-                val command: SendMessageCommandV1 = reader.readValue(message.body)
-                SendStageRecorder.commit(received[message.messageProperties.deliveryTag], command.requestId)
-                val target = SendTarget.from(command.toSendRequest())
-                metrics.commandDequeued(
-                    Duration.between(command.sentAt, OffsetDateTime.now()),
-                )
-                PendingSend(message, command, target, started)
-            }
-            val pending = decoded.getOrElse { error ->
-                consumeMessage(message, channel, logger, metrics, CommandKind.SEND, started) { throw error }
-                null
-            }
-            if (pending != null) accepted.add(pending)
-        }
-        for (group in accepted.groupBy { it.target }.values) {
-            for (chunk in group.chunked(MessageSendBatchService.MAX_BATCH_SIZE)) {
-                val processed = try {
-                    Result.success(batches.process(chunk.map { it.command }))
-                } catch (error: Exception) {
-                    Result.failure(error)
-                }
-                val results = processed.getOrNull()
-                if (results != null) {
-                    chunk.zip(results).forEach { (pending, _) ->
-                        consumeMessage(pending.message, channel, logger, metrics, CommandKind.SEND, pending.started) {}
-                    }
-                } else {
-                    logger.warn("Send batch failed; resolving {} commands individually", chunk.size, processed.exceptionOrNull())
-                    for (pending in chunk) {
-                        consumeMessage(pending.message, channel, logger, metrics, CommandKind.SEND, pending.started) {
-                            if (chunk.size == 1) {
-                                throw processed.exceptionOrNull()!!
-                            } else {
-                                batches.process(listOf(pending.command)).single()
-                            }
-                        }
-                    }
-                }
-            }
+        val sends = decodeDeliveries(messages, received, channel)
+        sends.groupBy { it.target }.values
+            .flatMap { it.chunked(MessageSendBatchService.MAX_BATCH_SIZE) }
+            .forEach { chunk -> processChunk(chunk, channel) }
+    }
+
+    private fun decodeDeliveries(
+        messages: List<Message>,
+        received: Map<Long, SendStageEvent?>,
+        channel: Channel,
+    ): List<PendingSend> = messages.groupBy { it.messageProperties.deliveryTag }.values.mapNotNull { fragments ->
+        val started = metrics.commandProcessingStarted()
+        runCatching { decodeDelivery(fragments, received, started) }.getOrElse { error ->
+            settle(fragments.first(), started, channel) { throw error }
+            null
         }
     }
+
+    private fun decodeDelivery(fragments: List<Message>, received: Map<Long, SendStageEvent?>, started: Long): PendingSend {
+        val message = fragments.first()
+        require(fragments.size == 1) { "Producer command batches are unsupported" }
+        require(message.body.size <= MAX_COMMAND_BYTES) { "Command exceeds wire byte limit" }
+        val command: SendMessageCommandV1 = reader.readValue(message.body)
+        SendStageRecorder.commit(received[message.messageProperties.deliveryTag], command.requestId)
+        val target = SendTarget.from(command.toSendRequest())
+        metrics.commandDequeued(Duration.between(command.sentAt, OffsetDateTime.now()))
+        return PendingSend(message, command, target, started)
+    }
+
+    private fun processChunk(chunk: List<PendingSend>, channel: Channel) {
+        try {
+            batches.process(chunk.map { it.command })
+        } catch (error: Exception) {
+            processIndividually(chunk, error, channel)
+            return
+        }
+        acknowledge(chunk, channel)
+    }
+
+    private fun processIndividually(chunk: List<PendingSend>, batchFailure: Exception, channel: Channel) {
+        logger.warn("Send batch failed; resolving {} commands individually", chunk.size, batchFailure)
+        if (chunk.size == 1) {
+            settle(chunk.single(), channel) { throw batchFailure }
+            return
+        }
+        chunk.forEach { pending -> settle(pending, channel) { batches.process(listOf(pending.command)).single() } }
+    }
+
+    private fun acknowledge(chunk: List<PendingSend>, channel: Channel) = chunk.forEach { pending -> settle(pending, channel) {} }
+
+    private fun settle(pending: PendingSend, channel: Channel, action: () -> Unit) = settle(
+        pending.message,
+        pending.started,
+        channel,
+        action,
+    )
+
+    private fun settle(message: Message, started: Long, channel: Channel, action: () -> Unit) =
+        consumeMessage(message, channel, logger, metrics, CommandKind.SEND, started, action)
 
     @RabbitListener(queues = [CommandTopology.DEAD_QUEUE])
     fun onExhaustedCommand(

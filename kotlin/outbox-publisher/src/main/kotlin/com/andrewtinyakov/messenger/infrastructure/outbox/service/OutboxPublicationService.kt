@@ -62,47 +62,74 @@ class OutboxPublicationService(
     )
 
     private fun publishClaimedBatch(): BatchPublication {
+        val deadline = workDeadline()
+        val rooms = claimRooms()
+        if (rooms.isEmpty()) return BatchPublication(0, BatchOutcome.EMPTY)
+        recordClaimed(rooms)
+        val prepared = hydrate(rooms)
+        val published = publishRooms(rooms, prepared, deadline)
+        return summarize(published)
+    }
+
+    private fun workDeadline(): Long {
         val completionBudgetMs = maxOf(1000, properties.publishTimeoutMs * 2)
         val workBudgetMs = TimeUnit.SECONDS.toMillis(properties.leaseSeconds) - completionBudgetMs
-        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(workBudgetMs)
+        return System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(workBudgetMs)
+    }
+
+    private fun claimRooms(): List<List<OutboxMessage>> {
         val now = OffsetDateTime.now(clock)
         val leaseUntil = now.plusSeconds(properties.leaseSeconds)
         val limit = minOf(properties.batchSize, properties.batchBytes / MAX_EVENT_BYTES)
-        val rooms = observePhase(Stage.CLAIM) {
-            tx.observedExecute(DatabaseTransaction.OUTBOX_CLAIM) {
-                val anchors = repository.claim(now, minOf(limit, properties.concurrency), owner, leaseUntil)
-                var remaining = limit - anchors.size
-                anchors.groupBy { it.room }.values.map { rows ->
-                    val anchor = rows.first()
-                    val wanted = if (anchor.groupPublicationOrder != null) properties.roomBatchSize - rows.size else 0
-                    val tail = if (wanted > 0 && remaining > 0) {
-                        repository.claimGroupTail(anchor, OffsetDateTime.now(clock), minOf(wanted, remaining), owner, leaseUntil)
-                    } else {
-                        emptyList()
-                    }
-                    remaining -= tail.size
-                    rows + tail
-                }
-            }
+        return observePhase(Stage.CLAIM) {
+            tx.observedExecute(DatabaseTransaction.OUTBOX_CLAIM) { claimAnchorsWithGroupTails(now, leaseUntil, limit) }
         }
-        if (rooms.isEmpty()) return BatchPublication(0, BatchOutcome.EMPTY)
+    }
+
+    private fun claimAnchorsWithGroupTails(now: OffsetDateTime, leaseUntil: OffsetDateTime, limit: Int): List<List<OutboxMessage>> {
+        val anchors = repository.claim(now, minOf(limit, properties.concurrency), owner, leaseUntil)
+        var remaining = limit - anchors.size
+        return anchors.groupBy { it.room }.values.map { roomAnchors ->
+            val tail = claimGroupTail(roomAnchors, remaining, leaseUntil)
+            remaining -= tail.size
+            roomAnchors + tail
+        }
+    }
+
+    private fun claimGroupTail(roomAnchors: List<OutboxMessage>, remaining: Int, leaseUntil: OffsetDateTime): List<OutboxMessage> {
+        val anchor = roomAnchors.first()
+        val wanted = if (anchor.groupPublicationOrder != null) properties.roomBatchSize - roomAnchors.size else 0
+        if (wanted <= 0 || remaining <= 0) return emptyList()
+        return repository.claimGroupTail(anchor, OffsetDateTime.now(clock), minOf(wanted, remaining), owner, leaseUntil)
+    }
+
+    private fun recordClaimed(rooms: List<List<OutboxMessage>>) {
         if (SendStageRecorder.isEnabled) {
             rooms.forEach { rows ->
                 rows.forEach { row -> SendStageRecorder.record(SendStage.OUTBOX_CLAIM_COMMITTED, eventId = row.id.value) }
             }
         }
         metrics.claimed(rooms.sumOf { it.size })
-        val prepared = observePhase(Stage.HYDRATE) {
-            publisher.hydrate(rooms.flatten()).associateBy { it.id }
+    }
+
+    private fun hydrate(rooms: List<List<OutboxMessage>>): Map<EventId, OutboxMessage> = observePhase(Stage.HYDRATE) {
+        publisher.hydrate(rooms.flatten()).associateBy { it.id }
+    }
+
+    private fun publishRooms(
+        rooms: List<List<OutboxMessage>>,
+        prepared: Map<EventId, OutboxMessage>,
+        deadline: Long,
+    ): List<BatchPublication> = Executors.newVirtualThreadPerTaskExecutor().use { executor ->
+        val tasks = rooms.map { roomRows ->
+            executor.submit(
+                Callable { publishClaimedRoom(roomRows.map { checkNotNull(prepared[it.id]) }, deadline) },
+            )
         }
-        val published = Executors.newVirtualThreadPerTaskExecutor().use { executor ->
-            val tasks = rooms.map { roomRows ->
-                executor.submit(
-                    Callable { publishClaimedRoom(roomRows.map { checkNotNull(prepared[it.id]) }, deadline) },
-                )
-            }
-            tasks.map { it.get() }
-        }
+        tasks.map { it.get() }
+    }
+
+    private fun summarize(published: List<BatchPublication>): BatchPublication {
         val outcome = if (published.any { it.outcome == BatchOutcome.FAILED }) BatchOutcome.FAILED else BatchOutcome.WORK
         return BatchPublication(published.sumOf { it.completed }, outcome)
     }

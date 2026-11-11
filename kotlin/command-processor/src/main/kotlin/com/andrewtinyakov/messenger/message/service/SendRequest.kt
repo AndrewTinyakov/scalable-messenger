@@ -34,6 +34,14 @@ internal data class SendRequest(
         }
     }
 
+    val draftReferenceRejection: SendRejectionReason?
+        get() = when {
+            recipientId == null -> null
+            replyToMessageId != null -> SendRejectionReason.INVALID_REPLY_TARGET
+            forwardSource != null -> SendRejectionReason.INVALID_FORWARD_SOURCE
+            else -> null
+        }
+
     val bodyRejection: SendRejectionReason?
         get() = when {
             body.isBlank() -> SendRejectionReason.EMPTY_BODY

@@ -26,7 +26,7 @@
   align-items: center;
   border: 1px solid var(--line-strong);
   border-radius: 28px;
-  background: oklch(0.18 0.006 75);
+  background: #13110f;
   text-align: center;
   animation: rise 520ms var(--ease) backwards;
 }
@@ -80,7 +80,7 @@
   font-weight: 600;
   text-decoration: underline;
   text-underline-offset: 3px;
-  text-decoration-color: oklch(0.77 0.085 265 / 35%);
+  text-decoration-color: rgb(154 180 235 / 35%);
   transition: text-decoration-color 160ms;
 }
 .auth-switch button:hover {
@@ -122,7 +122,7 @@
 }
 .field input:-webkit-autofill {
   -webkit-text-fill-color: var(--text);
-  box-shadow: 0 0 0 40px oklch(0.15 0.005 75) inset;
+  box-shadow: 0 0 0 40px var(--bg-panel) inset;
   caret-color: var(--text);
 }
 .field label {

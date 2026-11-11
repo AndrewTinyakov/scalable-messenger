@@ -5,7 +5,6 @@ import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.auth.service.AuthenticationService
 import com.andrewtinyakov.messenger.auth.web.payload.AuthRequest
 import com.andrewtinyakov.messenger.chat.service.ChatService
-import com.andrewtinyakov.messenger.chat.web.payload.CreateGroupChatRequest
 import com.andrewtinyakov.messenger.message.service.MessageSendService
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
 import com.andrewtinyakov.messenger.shared.id.newId
@@ -45,7 +44,7 @@ class TelegramFeatureHttpTests
         fun `pinned chats lead the first page in rank order and reorder only the current set`() {
             val owner = account()
             val member = account()
-            val groups = (1..4).map { chats.createGroup(UserId(owner.first), CreateGroupChatRequest("Pins $it", listOf(member.first))).id }
+            val groups = (1..4).map { chats.createGroup(UserId(owner.first), "Pins $it", listOf(member.first).map(::UserId)).id }
             assertEquals(listOf(groups[0]), ids(request("/${groups[0]}/pin", owner.second, "PUT")))
             assertEquals(listOf(groups[2], groups[0]), ids(request("/${groups[2]}/pin", owner.second, "PUT")))
             assertEquals(listOf(groups[2], groups[0]), ids(request("/${groups[2]}/pin", owner.second, "PUT")))
@@ -73,7 +72,7 @@ class TelegramFeatureHttpTests
             val owner = account()
             val member = account()
             val groups = (1..11).map {
-                chats.createGroup(UserId(owner.first), CreateGroupChatRequest("Limit $it", listOf(member.first))).id
+                chats.createGroup(UserId(owner.first), "Limit $it", listOf(member.first).map(::UserId)).id
             }
             groups.take(10).forEach { assertEquals(200, request("/$it/pin", owner.second, "PUT").statusCode()) }
             assertEquals(409, request("/${groups[10]}/pin", owner.second, "PUT").statusCode())
@@ -88,7 +87,7 @@ class TelegramFeatureHttpTests
         fun `mute and unread marks are personal and expire without cleanup`() {
             val owner = account()
             val member = account()
-            val group = chats.createGroup(UserId(owner.first), CreateGroupChatRequest("Mute", listOf(member.first))).id
+            val group = chats.createGroup(UserId(owner.first), "Mute", listOf(member.first).map(::UserId)).id
             val timed = json(request("/$group/mute", owner.second, "PUT", """{"durationSeconds":3600}"""))
             assertFalse(timed.path("mutedForever").booleanValue())
             assertTrue(OffsetDateTime.parse(timed.path("mutedUntil").stringValue()).isAfter(OffsetDateTime.now().plusMinutes(59)))
@@ -170,7 +169,7 @@ class TelegramFeatureHttpTests
             assertEquals(0, json(request("/$direct/pins", bob.second)).path("totalCount").intValue())
             assertEquals(404, request("/$direct/pins", account().second).statusCode())
 
-            val group = chats.createGroup(UserId(alice.first), CreateGroupChatRequest("Group pins", listOf(bob.first))).id
+            val group = chats.createGroup(UserId(alice.first), "Group pins", listOf(bob.first).map(::UserId)).id
             sends.process(command(bob.first, newId(), "group text", chat = group))
             val groupMessage = db.queryForObject("SELECT id FROM messages WHERE chat_id=?", String::class.java, group)!!
             assertEquals(400, request("/$group/pins/$groupMessage", bob.second, "PUT", """{"scope":"SELF"}""").statusCode())
@@ -201,7 +200,7 @@ class TelegramFeatureHttpTests
         fun `a chat keeps at most two hundred shared pins`() {
             val owner = account()
             val member = account()
-            val group = chats.createGroup(UserId(owner.first), CreateGroupChatRequest("Pin cap", listOf(member.first))).id
+            val group = chats.createGroup(UserId(owner.first), "Pin cap", listOf(member.first).map(::UserId)).id
             repeat(201) { sends.process(command(owner.first, newId(), "message $it", chat = group)) }
             db.update(
                 "INSERT INTO message_pins(chat_id, sequence) SELECT chat_id, sequence FROM messages WHERE chat_id=? AND sequence <= 200",

@@ -6,14 +6,13 @@ import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.model.ChatKind
 import com.andrewtinyakov.messenger.chat.repository.ChatDirectoryRepository
 import com.andrewtinyakov.messenger.chat.repository.ChatRepository
+import com.andrewtinyakov.messenger.chat.service.ChatEventAudience
 import com.andrewtinyakov.messenger.generated.messaging.event.PinsChangedEventV1
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseTransaction
 import com.andrewtinyakov.messenger.infrastructure.database.observability.observedExecute
 import com.andrewtinyakov.messenger.infrastructure.database.observability.observedExecuteWithoutResult
-import com.andrewtinyakov.messenger.infrastructure.outbox.model.EventId
-import com.andrewtinyakov.messenger.infrastructure.outbox.model.OutboxMessage
+import com.andrewtinyakov.messenger.infrastructure.outbox.model.toOutboxMessage
 import com.andrewtinyakov.messenger.infrastructure.outbox.repository.OutboxRepository
-import com.andrewtinyakov.messenger.infrastructure.redis.RoomAddress
 import com.andrewtinyakov.messenger.message.model.Message
 import com.andrewtinyakov.messenger.message.model.MessageId
 import com.andrewtinyakov.messenger.message.pin.model.PinScope
@@ -27,8 +26,6 @@ import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
 import com.andrewtinyakov.messenger.shared.web.badRequest
 import com.andrewtinyakov.messenger.shared.web.conflict
 import com.andrewtinyakov.messenger.shared.web.notFound
-import com.andrewtinyakov.messenger.shared.web.parseSequence
-import com.andrewtinyakov.messenger.shared.web.requirePageLimit
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
 import tools.jackson.databind.ObjectMapper
@@ -41,18 +38,15 @@ class MessagePinService(
     private val messages: MessageRepository,
     private val chats: ChatRepository,
     private val directory: ChatDirectoryRepository,
+    private val audience: ChatEventAudience,
     private val outbox: OutboxRepository,
     private val mapper: ObjectMapper,
     private val tx: TransactionTemplate,
 ) {
-    fun list(chatId: ChatId, userId: UserId, beforeSequence: String?, limit: Int): PinnedMessagePageResponse {
-        requirePageLimit(limit)
-        val before = beforeSequence?.let {
-            parseSequence(it) ?: badRequest(ApiErrorCode.INVALID_SEQUENCE, "beforeSequence must be a nonnegative decimal integer")
-        }
-        return tx.observedExecute(DatabaseTransaction.MESSAGE_PIN) {
+    fun list(chatId: ChatId, userId: UserId, beforeSequence: Long?, limit: Int): PinnedMessagePageResponse =
+        tx.observedExecute(DatabaseTransaction.MESSAGE_PIN) {
             if (!chats.isMember(chatId, userId)) notFound()
-            val fetched = pins.page(chatId, userId, before, limit + 1)
+            val fetched = pins.page(chatId, userId, beforeSequence, limit + 1)
             val pinnedIds = pins.visibleIds(chatId, userId)
             val page = fetched.take(limit)
             val loaded = messages.findMessagesByIds(chatId, userId, page.map { it.messageId }).associateBy { it.id }
@@ -63,7 +57,6 @@ class MessagePinService(
                 nextBeforeSequence = page.lastOrNull()?.takeIf { fetched.size > limit }?.sequence?.toString(),
             )
         }
-    }
 
     fun pin(chatId: ChatId, userId: UserId, messageId: MessageId, scope: PinScope) = tx.observedExecuteWithoutResult(
         DatabaseTransaction.MESSAGE_PIN,
@@ -107,15 +100,9 @@ class MessagePinService(
     }
 
     private fun notify(chat: Chat, personalViewer: UserId?) {
-        val rooms = when {
-            personalViewer != null -> listOf(RoomAddress.user(personalViewer))
-            chat.kind == ChatKind.GROUP -> listOf(RoomAddress.group(chat.id))
-            else -> chats.findMemberIds(chat.id).map(RoomAddress::user)
-        }
         outbox.enqueue(
-            rooms.map { room ->
-                val event = PinsChangedEventV1.create(eventId = newId(), room = room, chatId = chat.id.value)
-                OutboxMessage(EventId(event.eventId), event.room, mapper.writeValueAsString(event))
+            audience.rooms(chat.id, chat.kind, personalViewer).map { room ->
+                PinsChangedEventV1.create(eventId = newId(), room = room, chatId = chat.id.value).toOutboxMessage(mapper)
             },
         )
     }

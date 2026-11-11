@@ -15,8 +15,19 @@ fun notFound(): Nothing =
         "The requested resource was not found",
     )
 
+fun notFound(code: ApiErrorCode, message: String): Nothing =
+    throw ApiException(HttpStatus.NOT_FOUND, code, message)
+
+fun userNotFound(): Nothing = notFound(ApiErrorCode.USER_NOT_FOUND, "User not found")
+
 fun conflict(code: ApiErrorCode, message: String): Nothing =
     throw ApiException(HttpStatus.CONFLICT, code, message)
 
 fun badRequest(code: ApiErrorCode, message: String): Nothing =
     throw ApiException(HttpStatus.BAD_REQUEST, code, message)
+
+fun forbidden(message: String): Nothing =
+    throw ApiException(HttpStatus.FORBIDDEN, ApiErrorCode.FORBIDDEN, message)
+
+fun unauthorized(code: ApiErrorCode, message: String): Nothing =
+    throw ApiException(HttpStatus.UNAUTHORIZED, code, message)

@@ -1,22 +1,21 @@
 package com.andrewtinyakov.messenger.message.change.service
 
 import com.andrewtinyakov.messenger.auth.model.UserId
+import com.andrewtinyakov.messenger.chat.deletion.model.DeletionCommand
+import com.andrewtinyakov.messenger.chat.deletion.model.DeletionScope
+import com.andrewtinyakov.messenger.chat.deletion.model.DeletionTarget
 import com.andrewtinyakov.messenger.chat.deletion.service.DeletionService
-import com.andrewtinyakov.messenger.chat.deletion.web.payload.DeletionRequest
-import com.andrewtinyakov.messenger.chat.deletion.web.payload.DeletionScope
-import com.andrewtinyakov.messenger.chat.deletion.web.payload.DeletionTarget
 import com.andrewtinyakov.messenger.chat.model.ChatId
-import com.andrewtinyakov.messenger.chat.model.ChatKind
 import com.andrewtinyakov.messenger.chat.repository.ChatRepository
+import com.andrewtinyakov.messenger.chat.service.ChatEventAudience
 import com.andrewtinyakov.messenger.generated.messaging.event.HistoryChangedEventV1
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseTransaction
 import com.andrewtinyakov.messenger.infrastructure.database.observability.observedExecute
-import com.andrewtinyakov.messenger.infrastructure.outbox.model.EventId
-import com.andrewtinyakov.messenger.infrastructure.outbox.model.OutboxMessage
+import com.andrewtinyakov.messenger.infrastructure.outbox.model.toOutboxMessage
 import com.andrewtinyakov.messenger.infrastructure.outbox.repository.OutboxRepository
-import com.andrewtinyakov.messenger.infrastructure.redis.RoomAddress
 import com.andrewtinyakov.messenger.message.change.repository.MessageChangeRepository
 import com.andrewtinyakov.messenger.message.model.MessageId
+import com.andrewtinyakov.messenger.message.model.RequestId
 import com.andrewtinyakov.messenger.message.monitoring.MessageEditFailure
 import com.andrewtinyakov.messenger.message.monitoring.MessageMetrics
 import com.andrewtinyakov.messenger.message.repository.MessageRepository
@@ -26,8 +25,9 @@ import com.andrewtinyakov.messenger.shared.id.newId
 import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
 import com.andrewtinyakov.messenger.shared.web.ApiException
 import com.andrewtinyakov.messenger.shared.web.badRequest
+import com.andrewtinyakov.messenger.shared.web.conflict
+import com.andrewtinyakov.messenger.shared.web.forbidden
 import com.andrewtinyakov.messenger.shared.web.notFound
-import com.andrewtinyakov.messenger.shared.web.parseSequence
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
@@ -40,6 +40,7 @@ class MessageMutationService(
     private val deletions: DeletionService,
     private val messages: MessageRepository,
     private val chats: ChatRepository,
+    private val audience: ChatEventAudience,
     private val changes: MessageChangeRepository,
     private val outbox: OutboxRepository,
     private val tx: TransactionTemplate,
@@ -47,20 +48,22 @@ class MessageMutationService(
     private val clock: Clock,
     private val metrics: MessageMetrics,
 ) {
-    fun edit(chatId: ChatId, userId: UserId, messageId: MessageId, body: String, expectedVersion: String): MessageResponse =
+    fun edit(chatId: ChatId, userId: UserId, messageId: MessageId, body: String, expectedVersion: Long): MessageResponse =
         mutate(chatId, userId, messageId, body, expectedVersion)
 
-    fun delete(chatId: ChatId, userId: UserId, messageId: MessageId, expectedVersion: String): MessageResponse {
-        requireVersion(expectedVersion)
+    fun delete(chatId: ChatId, userId: UserId, messageId: MessageId, expectedVersion: Long): MessageResponse {
         val previous = messages.findMessage(chatId, userId, messageId) ?: notFound()
-        if (previous.messageVersion.toString() != expectedVersion) {
-            throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.INVALID_REQUEST, "Message version changed")
-        }
+        if (previous.messageVersion != expectedVersion) versionChanged()
         deletions.delete(
-            chatId,
-            userId,
-            DeletionRequest(newId(), DeletionScope.EVERYONE, DeletionTarget.MESSAGES, listOf(messageId.value)),
-            mapOf(messageId to previous.messageVersion),
+            chatId = chatId,
+            actorId = userId,
+            command = DeletionCommand(
+                requestId = RequestId(newId()),
+                scope = DeletionScope.EVERYONE,
+                target = DeletionTarget.MESSAGES,
+                messageIds = listOf(messageId),
+            ),
+            expectedVersions = mapOf(messageId to previous.messageVersion),
         )
         return previous.copy(
             body = "",
@@ -76,43 +79,30 @@ class MessageMutationService(
         userId: UserId,
         messageId: MessageId,
         body: String,
-        expectedVersion: String,
+        expectedVersion: Long,
     ): MessageResponse {
         val response = try {
             tx.observedExecute(DatabaseTransaction.MESSAGE_MUTATE) {
                 val chat = chats.findByIdForUpdate(chatId) ?: notFound()
                 val message = messages.findMessage(chatId, userId, messageId) ?: notFound()
-                if (message.senderId != userId) {
-                    throw ApiException(HttpStatus.FORBIDDEN, ApiErrorCode.FORBIDDEN, "Only the author can change a message")
-                }
-                if (message.forwardedFromUserId != null) {
-                    throw ApiException(HttpStatus.FORBIDDEN, ApiErrorCode.FORBIDDEN, "Forwarded messages cannot be edited")
-                }
-                val version = requireVersion(expectedVersion)
-                if (message.deletedAt != null || version != message.messageVersion) {
-                    throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.INVALID_REQUEST, "Message version changed")
-                }
+                if (message.senderId != userId) forbidden("Only the author can change a message")
+                if (message.forwardedFromUserId != null) forbidden("Forwarded messages cannot be edited")
+                if (message.deletedAt != null || expectedVersion != message.messageVersion) versionChanged()
                 if (body.isBlank() || body.codePointCount(0, body.length) !in 1..4000) {
                     badRequest(ApiErrorCode.INVALID_REQUEST, "body must contain 1 to 4000 characters and cannot be blank")
                 }
                 val revision = changes.mutate(chatId, messageId, body, OffsetDateTime.now(clock))
                 val updated = checkNotNull(messages.findMessage(chatId, userId, messageId))
-                val rooms = if (chat.kind == ChatKind.GROUP) {
-                    listOf(RoomAddress.group(chatId))
-                } else {
-                    chats.findMemberIds(chatId).map(RoomAddress::user)
-                }
                 outbox.enqueue(
-                    rooms.map { room ->
-                        val event = HistoryChangedEventV1.create(
+                    audience.rooms(chatId, chat.kind).map { room ->
+                        HistoryChangedEventV1.create(
                             eventId = newId(),
                             room = room,
                             chatId = chatId.value,
                             sequence = chat.lastSequence.toString(),
                             mutationRevision = revision.toString(),
                             visibilityRevision = "0",
-                        )
-                        OutboxMessage(EventId(event.eventId), event.room, mapper.writeValueAsString(event))
+                        ).toOutboxMessage(mapper)
                     },
                 )
                 updated.toResponse()
@@ -131,7 +121,5 @@ class MessageMutationService(
         return response
     }
 
-    private fun requireVersion(value: String): Long =
-        parseSequence(value)?.takeIf { it > 0 }
-            ?: badRequest(ApiErrorCode.INVALID_REQUEST, "expectedVersion must be a positive decimal integer")
+    private fun versionChanged(): Nothing = conflict(ApiErrorCode.INVALID_REQUEST, "Message version changed")
 }

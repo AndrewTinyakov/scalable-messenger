@@ -3,7 +3,6 @@ package com.andrewtinyakov.messenger.message.service
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.service.ChatService
-import com.andrewtinyakov.messenger.chat.web.payload.CreateGroupChatRequest
 import com.andrewtinyakov.messenger.generated.messaging.event.SendRejectionReason
 import com.andrewtinyakov.messenger.message.change.service.MessageMutationService
 import com.andrewtinyakov.messenger.message.model.CommandResult
@@ -36,7 +35,7 @@ class MessageForwardTests
             val source = group(author, relay)
             val target = group(relay, reader)
             val original = send(author, source, "original body")
-            mutations.edit(ChatId(source), UserId(author), MessageId(original), "edited body", "1")
+            mutations.edit(ChatId(source), UserId(author), MessageId(original), "edited body", 1L)
             assertEquals(
                 CommandResult.SAVED,
                 sends.process(forward(relay, target, source, original, "stale client copy")),
@@ -50,7 +49,7 @@ class MessageForwardTests
             assertEquals(CommandResult.SAVED, sends.process(forward(reader, again, target, copied.id, copied.body)))
             assertEquals(author, history.messages(ChatId(again), UserId(author), null, null, 10).messages.single().forwardedFromUserId)
             val error = assertThrows(ApiException::class.java) {
-                mutations.edit(ChatId(target), UserId(relay), MessageId(copied.id), "rewrite", copied.messageVersion)
+                mutations.edit(ChatId(target), UserId(relay), MessageId(copied.id), "rewrite", copied.messageVersion.toLong())
             }
             assertEquals(HttpStatus.FORBIDDEN, error.status)
         }
@@ -91,7 +90,7 @@ class MessageForwardTests
             command(sender, newId(), body, chat = chat).copy(forwardFromChatId = sourceChat, forwardFromMessageId = sourceMessage)
 
         private fun group(owner: String, member: String): String =
-            chats.createGroup(UserId(owner), CreateGroupChatRequest("Forward ${newId()}", listOf(member))).id
+            chats.createGroup(UserId(owner), "Forward ${newId()}", listOf(member).map(::UserId)).id
 
         private fun send(sender: String, chat: String, body: String): String {
             assertEquals(CommandResult.SAVED, sends.process(command(sender, newId(), body, chat = chat)))

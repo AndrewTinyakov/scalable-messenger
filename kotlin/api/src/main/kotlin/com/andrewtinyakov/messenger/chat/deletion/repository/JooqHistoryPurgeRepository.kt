@@ -64,17 +64,12 @@ class JooqHistoryPurgeRepository(
                 CHATS.PURGED_THROUGH_SEQUENCE,
                 DSL.greatest(CHATS.PURGED_THROUGH_SEQUENCE, DSL.`val`(through)),
             ).where(CHATS.ID.eq(chatId)).execute()
-            if (obsolete.size < limit) {
-                db.deleteFrom(HISTORY_PURGE_JOBS).where(HISTORY_PURGE_JOBS.CHAT_ID.eq(chatId)).execute()
-            } else {
-                db.update(
-                    HISTORY_PURGE_JOBS,
-                ).set(HISTORY_PURGE_JOBS.UPDATED_AT, OffsetDateTime.now(clock)).where(HISTORY_PURGE_JOBS.CHAT_ID.eq(chatId)).execute()
-            }
+        }
+        if (ids.size < limit && obsolete.size < limit) {
+            db.deleteFrom(HISTORY_PURGE_JOBS).where(HISTORY_PURGE_JOBS.CHAT_ID.eq(chatId)).execute()
         } else {
-            db.update(
-                HISTORY_PURGE_JOBS,
-            ).set(HISTORY_PURGE_JOBS.UPDATED_AT, OffsetDateTime.now(clock)).where(HISTORY_PURGE_JOBS.CHAT_ID.eq(chatId)).execute()
+            db.update(HISTORY_PURGE_JOBS).set(HISTORY_PURGE_JOBS.UPDATED_AT, OffsetDateTime.now(clock))
+                .where(HISTORY_PURGE_JOBS.CHAT_ID.eq(chatId)).execute()
         }
         return@query removed
     }

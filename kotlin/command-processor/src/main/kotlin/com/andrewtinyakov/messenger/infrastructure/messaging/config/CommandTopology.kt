@@ -1,5 +1,8 @@
 package com.andrewtinyakov.messenger.infrastructure.messaging.config
 
+import com.andrewtinyakov.messenger.auth.model.UserId
+import com.andrewtinyakov.messenger.chat.model.directPairKey
+
 object CommandTopology {
     const val EXCHANGE = "messenger.commands"
     const val DEAD_EXCHANGE = "messenger.commands.dead"
@@ -15,6 +18,5 @@ object CommandTopology {
         return "messenger.send.${hash % PARTITIONS.toUInt()}"
     }
 
-    fun routeDirect(senderId: String, recipientId: String): String =
-        route(listOf(senderId, recipientId).sorted().joinToString(":"))
+    fun routeDirect(senderId: UserId, recipientId: UserId): String = route(directPairKey(senderId, recipientId))
 }

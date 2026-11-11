@@ -1,6 +1,7 @@
 package com.andrewtinyakov.messenger.infrastructure.outbox.monitoring
 
 import com.andrewtinyakov.messenger.infrastructure.outbox.model.OutboxMessage
+import com.andrewtinyakov.messenger.infrastructure.redis.RoomAddress
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
@@ -171,7 +172,7 @@ class OutboxMetrics(
 
     fun publicationAttempted(row: OutboxMessage, now: OffsetDateTime) {
         try {
-            val room = if (row.room.startsWith("group:")) RoomKind.GROUP else RoomKind.USER
+            val room = if (RoomAddress.isGroup(row.room)) RoomKind.GROUP else RoomKind.USER
             val age = row.createdAt?.let { Duration.between(it, now) }
             if (age == null || age.isNegative) {
                 invalidAges.getValue(room to if (age == null) InvalidAge.MISSING else InvalidAge.FUTURE).increment()

@@ -51,7 +51,7 @@ internal fun chatSummary(userId: UserId): Field<ChatSummary> {
                 CHAT_MEMBERS.USER_ID.eq(userId.value),
                 sequence.gt(CHATS.CLEARED_THROUGH_SEQUENCE),
                 sequence.gt(CHAT_MEMBERS.CLEARED_THROUGH_SEQUENCE),
-                CHAT_MEMBERS.HIDDEN_THROUGH_SEQUENCE.isNull.or(CHATS.NEXT_SEQUENCE.minus(1L).gt(CHAT_MEMBERS.HIDDEN_THROUGH_SEQUENCE)),
+                notHidden(CHAT_MEMBERS),
             ),
         ),
     ).and(

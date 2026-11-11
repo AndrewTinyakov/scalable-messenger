@@ -2,17 +2,18 @@ package com.andrewtinyakov.messenger.chat.deletion.repository
 
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.deletion.model.DeletionChat
+import com.andrewtinyakov.messenger.chat.deletion.model.DeletionCommand
 import com.andrewtinyakov.messenger.chat.deletion.model.DeletionMessage
+import com.andrewtinyakov.messenger.chat.deletion.model.DeletionScope
 import com.andrewtinyakov.messenger.chat.deletion.model.StoredDeletion
-import com.andrewtinyakov.messenger.chat.deletion.web.payload.DeletionRequest
-import com.andrewtinyakov.messenger.chat.deletion.web.payload.DeletionScope
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.message.model.MessageId
+import com.andrewtinyakov.messenger.message.model.RequestId
 
 interface DeletionRepository {
-    fun lockRequest(actorId: UserId, requestId: String)
+    fun lockRequest(actorId: UserId, requestId: RequestId)
 
-    fun operation(chatId: ChatId, actorId: UserId, requestId: String): StoredDeletion?
+    fun operation(actorId: UserId, requestId: RequestId): StoredDeletion?
 
     fun targets(chatId: ChatId, actorId: UserId, ids: List<MessageId>, scope: DeletionScope): List<DeletionMessage>
 
@@ -31,7 +32,7 @@ interface DeletionRepository {
     fun saveOperation(
         chatId: ChatId,
         actorId: UserId,
-        request: DeletionRequest,
+        command: DeletionCommand,
         fingerprint: String,
         chat: DeletionChat,
         revision: Long,

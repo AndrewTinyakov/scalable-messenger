@@ -1,7 +1,7 @@
 package com.andrewtinyakov.messenger.chat.deletion.monitoring
 
-import com.andrewtinyakov.messenger.chat.deletion.web.payload.DeletionScope
-import com.andrewtinyakov.messenger.chat.deletion.web.payload.DeletionTarget
+import com.andrewtinyakov.messenger.chat.deletion.model.DeletionScope
+import com.andrewtinyakov.messenger.chat.deletion.model.DeletionTarget
 import io.micrometer.prometheusmetrics.PrometheusConfig
 import io.micrometer.prometheusmetrics.PrometheusMeterRegistry
 import org.junit.jupiter.api.Assertions.assertThrows

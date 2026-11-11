@@ -4,8 +4,7 @@ import com.andrewtinyakov.messenger.auth.config.AuthProperties
 import com.andrewtinyakov.messenger.auth.model.AuthenticatedSession
 import com.andrewtinyakov.messenger.auth.web.payload.WsTicketResponse
 import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
-import com.andrewtinyakov.messenger.shared.web.ApiException
-import org.springframework.http.HttpStatus
+import com.andrewtinyakov.messenger.shared.web.unauthorized
 import org.springframework.stereotype.Service
 import tools.jackson.databind.ObjectMapper
 import java.nio.charset.StandardCharsets
@@ -46,7 +45,7 @@ class WsTicketService(
     fun issue(session: AuthenticatedSession): WsTicketResponse {
         val now = clock.instant()
         val expiry = minOf(now.plus(Duration.ofHours(1)), session.expiresAt).epochSecond
-        if (expiry <= now.epochSecond) unauthorized()
+        if (expiry <= now.epochSecond) unauthorized(ApiErrorCode.UNAUTHORIZED, "Invalid WS ticket")
         val header = encoder.encodeToString(mapper.writeValueAsBytes(TicketHeader(alg = JWT_ALGORITHM, typ = JWT_TYPE)))
         val body = encoder.encodeToString(
             mapper.writeValueAsBytes(
@@ -68,6 +67,4 @@ class WsTicketService(
         init(SecretKeySpec(key, "HmacSHA256"))
         doFinal(input.toByteArray(StandardCharsets.US_ASCII))
     }
-
-    private fun unauthorized(): Nothing = throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.UNAUTHORIZED, "Invalid WS ticket")
 }

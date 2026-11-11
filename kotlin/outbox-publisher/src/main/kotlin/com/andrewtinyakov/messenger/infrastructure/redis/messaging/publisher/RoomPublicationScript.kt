@@ -1,7 +1,9 @@
 package com.andrewtinyakov.messenger.infrastructure.redis.messaging.publisher
 
+import com.andrewtinyakov.messenger.generated.messaging.event.RoomEventType
 import com.andrewtinyakov.messenger.generated.messaging.event.SidebarActivityEventV1
 import com.andrewtinyakov.messenger.infrastructure.outbox.model.OutboxMessage
+import com.andrewtinyakov.messenger.infrastructure.redis.RoomAddress
 import com.andrewtinyakov.messenger.infrastructure.redis.config.RedisRoomProperties
 import org.springframework.core.io.ClassPathResource
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate
@@ -42,7 +44,7 @@ internal class RoomPublicationScript(
             listOf(message.payload, mapper.writeValueAsString(options), message.replayPayload ?: message.payload),
         ).single().doOnNext { check(streamIdPattern.matches(it)) { "Redis returned an invalid stream ID" } }.flatMap { streamId ->
             val event = mapper.readTree(message.payload)
-            if (message.room.startsWith("group:") && event.path("type").asText() == "message_saved") {
+            if (RoomAddress.isGroup(message.room) && event.path("type").asText() == RoomEventType.MESSAGE_SAVED.value) {
                 val chatId = event.path("chatId").asText()
                 val hint = mapper.writeValueAsString(SidebarActivityEventV1.create(chatId, event.path("sequence").asText()))
                 redis.execute(activityScript, listOf("messenger:{activity:$chatId}:live"), listOf(hint)).single().thenReturn(streamId)

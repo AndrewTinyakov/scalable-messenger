@@ -47,7 +47,7 @@ class JooqChatDirectoryRepository(
             .join(CHATS)
             .on(CHATS.ID.eq(CHAT_MEMBERS.CHAT_ID))
             .where(CHAT_MEMBERS.USER_ID.eq(userId.value), CHATS.DELETED_AT.isNull)
-            .and(CHAT_MEMBERS.HIDDEN_THROUGH_SEQUENCE.isNull.or(CHATS.NEXT_SEQUENCE.minus(1L).gt(CHAT_MEMBERS.HIDDEN_THROUGH_SEQUENCE)))
+            .and(notHidden(CHAT_MEMBERS))
             .and(if (pinned) CHAT_MEMBERS.PINNED_RANK.isNotNull else CHAT_MEMBERS.PINNED_RANK.isNull)
             .and(
                 if (!pinned && beforeActivityAt != null && beforeChatId != null) {

@@ -18,11 +18,15 @@ import com.andrewtinyakov.messenger.message.web.payload.MessageChangesResponse
 import com.andrewtinyakov.messenger.message.web.payload.MessageHistoryResponse
 import com.andrewtinyakov.messenger.message.web.payload.MessageResolveResponse
 import com.andrewtinyakov.messenger.message.web.payload.MessageVisibilityResponse
+import com.andrewtinyakov.messenger.message.web.payload.toAroundResponse
+import com.andrewtinyakov.messenger.message.web.payload.toChangesResponse
+import com.andrewtinyakov.messenger.message.web.payload.toHistoryResponse
+import com.andrewtinyakov.messenger.message.web.payload.toResolveResponse
 import com.andrewtinyakov.messenger.message.web.payload.toResponse
+import com.andrewtinyakov.messenger.message.web.payload.toVisibilityResponse
 import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
 import com.andrewtinyakov.messenger.shared.web.badRequest
 import com.andrewtinyakov.messenger.shared.web.notFound
-import com.andrewtinyakov.messenger.shared.web.parseSequence
 import com.andrewtinyakov.messenger.shared.web.requirePageLimit
 import org.springframework.stereotype.Service
 import org.springframework.transaction.TransactionDefinition
@@ -43,32 +47,31 @@ class MessageHistoryService(
         isReadOnly = true
     }
 
-    fun messages(chatId: ChatId, userId: UserId, afterSeq: String?, beforeSeq: String?, limit: Int): MessageHistoryResponse {
+    fun messages(chatId: ChatId, userId: UserId, afterSeq: Long?, beforeSeq: Long?, limit: Int): MessageHistoryResponse {
+        require(afterSeq == null || beforeSeq == null)
         val direction = if (afterSeq != null) HistoryDirection.AFTER else HistoryDirection.BEFORE
         return metrics.timeMessages(direction) {
             snapshot.observedExecute(DatabaseTransaction.MESSAGE_HISTORY) {
                 val state = state(chatId, userId)
                 requirePageLimit(limit)
-                if (afterSeq != null && beforeSeq != null) badRequest(ApiErrorCode.INVALID_SEQUENCE, "Use either afterSeq or beforeSeq")
-                val cursor = (afterSeq ?: beforeSeq)?.let { sequence(it, beforeSeq != null) }
-                if (afterSeq != null && cursor != null &&
-                    cursor > state.snapshotSequence
-                ) {
+                if (afterSeq != null && afterSeq > state.snapshotSequence) {
                     badRequest(ApiErrorCode.INVALID_SEQUENCE, "afterSeq exceeds saved history")
                 }
-                val page = pages.page(chatId, userId, state, cursor, afterSeq != null, limit)
+                val page = pages.page(
+                    chatId = chatId,
+                    userId = userId,
+                    state = state,
+                    cursor = afterSeq ?: beforeSeq,
+                    ascending = afterSeq != null,
+                    limit = limit,
+                )
                 metrics.messagesServed(direction, page.messages.size)
-                MessageHistoryResponse(
-                    page.messages.map { it.toResponse() },
-                    page.next.toString(),
-                    page.hasMore,
-                    state.mutationRevision.toString(),
-                    state.snapshotSequence.toString(),
-                    state.visibilityRevision.toString(),
-                    state.clearedThroughSequence.toString(),
-                    state.globalClearedThroughSequence.toString(),
-                    page.after.toString(),
-                    page.through.toString(),
+                state.toHistoryResponse(
+                    messages = page.messages,
+                    nextSequence = page.next,
+                    hasMore = page.hasMore,
+                    coverageAfterSequence = page.after,
+                    coverageThroughSequence = page.through,
                 )
             }
         }
@@ -78,7 +81,7 @@ class MessageHistoryService(
         chatId: ChatId,
         userId: UserId,
         messageId: MessageId?,
-        anchorSequence: String?,
+        anchorSequence: Long?,
         limit: Int,
     ): MessageAroundResponse = metrics.timeAround {
         snapshot.observedExecute(DatabaseTransaction.MESSAGE_HISTORY) {
@@ -91,48 +94,66 @@ class MessageHistoryService(
             }
             val requested = messageId?.let { repository.findMessage(chatId, userId, it) }
             if (messageId != null && requested == null && anchorSequence == null) notFound()
-            val anchorAt = requested?.sequence ?: anchorSequence?.let { sequence(it, true) } ?: state.snapshotSequence
-            val beforeAnchor = pages.page(chatId, userId, state, minOf(anchorAt, state.snapshotSequence) + 1, false, 1)
-            val afterAnchor = pages.page(chatId, userId, state, minOf(maxOf(anchorAt - 1, 0), state.snapshotSequence), true, 1)
+            val anchorAt = requested?.sequence ?: anchorSequence ?: state.snapshotSequence
+            val beforeAnchor = pages.page(
+                chatId = chatId,
+                userId = userId,
+                state = state,
+                cursor = minOf(anchorAt, state.snapshotSequence) + 1,
+                ascending = false,
+                limit = 1,
+            )
+            val afterAnchor = pages.page(
+                chatId = chatId,
+                userId = userId,
+                state = state,
+                cursor = minOf(maxOf(anchorAt - 1, 0), state.snapshotSequence),
+                ascending = true,
+                limit = 1,
+            )
             val anchor =
                 requested
                     ?: listOfNotNull(beforeAnchor.messages.lastOrNull(), afterAnchor.messages.firstOrNull()).minByOrNull {
                         abs(it.sequence - anchorAt)
                     }
             if (anchor == null) {
-                return@observedExecute MessageAroundResponse(
-                    null,
-                    emptyList(),
-                    beforeAnchor.hasMore,
-                    afterAnchor.hasMore,
-                    state.mutationRevision.toString(),
-                    state.snapshotSequence.toString(),
-                    state.visibilityRevision.toString(),
-                    state.clearedThroughSequence.toString(),
-                    state.globalClearedThroughSequence.toString(),
-                    beforeAnchor.after.toString(),
-                    afterAnchor.through.toString(),
+                return@observedExecute state.toAroundResponse(
+                    anchorMessageId = null,
+                    messages = emptyList(),
+                    hasOlder = beforeAnchor.hasMore,
+                    hasNewer = afterAnchor.hasMore,
+                    coverageAfterSequence = beforeAnchor.after,
+                    coverageThroughSequence = afterAnchor.through,
                 )
             }
-            val older = pages.page(chatId, userId, state, anchor.sequence, false, limit)
-            val newer = pages.page(chatId, userId, state, anchor.sequence, true, limit)
+            val older = pages.page(
+                chatId = chatId,
+                userId = userId,
+                state = state,
+                cursor = anchor.sequence,
+                ascending = false,
+                limit = limit,
+            )
+            val newer = pages.page(
+                chatId = chatId,
+                userId = userId,
+                state = state,
+                cursor = anchor.sequence,
+                ascending = true,
+                limit = limit,
+            )
             val newerCount = minOf(newer.messages.size, limit - 1 - minOf(older.messages.size, (limit - 1) / 2))
             val olderCount = minOf(older.messages.size, limit - 1 - newerCount)
             val rows = older.messages.takeLast(olderCount) + anchor + newer.messages.take(newerCount)
             val after = if (olderCount == older.messages.size) older.after else rows.first().sequence - 1
             val through = if (newerCount == newer.messages.size) newer.through else rows.last().sequence
-            MessageAroundResponse(
-                anchor.id.value,
-                rows.map { it.toResponse() },
-                older.hasMore || older.messages.size > olderCount,
-                newer.hasMore || newer.messages.size > newerCount,
-                state.mutationRevision.toString(),
-                state.snapshotSequence.toString(),
-                state.visibilityRevision.toString(),
-                state.clearedThroughSequence.toString(),
-                state.globalClearedThroughSequence.toString(),
-                after.toString(),
-                through.toString(),
+            state.toAroundResponse(
+                anchorMessageId = anchor.id,
+                messages = rows,
+                hasOlder = older.hasMore || older.messages.size > olderCount,
+                hasNewer = newer.hasMore || newer.messages.size > newerCount,
+                coverageAfterSequence = after,
+                coverageThroughSequence = through,
             )
         }
     }
@@ -146,50 +167,29 @@ class MessageHistoryService(
         ) {
             badRequest(ApiErrorCode.INVALID_REQUEST, "Provide 1 to 100 distinct message IDs")
         }
-        MessageResolveResponse(
-            repository.findMessagesByIds(chatId, userId, ids).map { it.toResponse() },
-            state.snapshotSequence.toString(),
-            state.mutationRevision.toString(),
-            state.visibilityRevision.toString(),
-            state.clearedThroughSequence.toString(),
-            state.globalClearedThroughSequence.toString(),
-        )
+        state.toResolveResponse(messages = repository.findMessagesByIds(chatId, userId, ids))
     }
 
-    fun visibility(chatId: ChatId, userId: UserId): MessageVisibilityResponse = state(chatId, userId).let {
-        MessageVisibilityResponse(
-            it.snapshotSequence.toString(),
-            it.mutationRevision.toString(),
-            it.visibilityRevision.toString(),
-            it.clearedThroughSequence.toString(),
-            it.globalClearedThroughSequence.toString(),
-            it.hidden,
-        )
-    }
+    fun visibility(chatId: ChatId, userId: UserId): MessageVisibilityResponse = state(chatId, userId).toVisibilityResponse()
 
-    fun changes(chatId: ChatId, userId: UserId, afterRevision: String, limit: Int): MessageChangesResponse = metrics.timeChanges {
+    fun changes(chatId: ChatId, userId: UserId, after: Long, limit: Int): MessageChangesResponse = metrics.timeChanges {
         snapshot.observedExecute(DatabaseTransaction.MESSAGE_HISTORY) {
             val state = state(chatId, userId)
             val cursor = changes.cursor(chatId, userId) ?: notFound()
             requirePageLimit(limit)
-            val after = sequence(afterRevision)
             if (after < cursor.floor || after > cursor.revision) {
                 metrics.changesReset()
-                return@observedExecute MessageChangesResponse(
-                    emptyList(),
-                    cursor.revision.toString(),
-                    cursor.revision.toString(),
-                    true,
-                    state.snapshotSequence.toString(),
-                    state.visibilityRevision.toString(),
-                    state.clearedThroughSequence.toString(),
-                    state.globalClearedThroughSequence.toString(),
+                return@observedExecute state.toChangesResponse(
+                    changes = emptyList(),
+                    lastRevision = cursor.revision,
+                    nextRevision = cursor.revision,
+                    resetRequired = true,
                 )
             }
             val page = changes.changes(chatId, after, cursor.revision, limit)
             val current = repository.findMessagesByIds(chatId, userId, page.mapNotNull { it.messageId }.distinct()).associateBy { it.id }
-            MessageChangesResponse(
-                page.map { change ->
+            state.toChangesResponse(
+                changes = page.map { change ->
                     val message = current[change.messageId]
                     val kind = if (change.kind == "UPSERT" &&
                         message == null
@@ -199,31 +199,24 @@ class MessageHistoryService(
                         MessageChangeKind.valueOf(change.kind)
                     }
                     MessageChangeResponse(
-                        change.revision.toString(),
-                        kind,
-                        if (kind == MessageChangeKind.UPSERT) {
+                        revision = change.revision.toString(),
+                        kind = kind,
+                        message = if (kind == MessageChangeKind.UPSERT) {
                             message?.toResponse()
                         } else {
                             null
                         },
-                        change.messageId?.value,
-                        change.sequence?.toString(),
-                        change.clearedThroughSequence?.toString(),
+                        messageId = change.messageId?.value,
+                        sequence = change.sequence?.toString(),
+                        clearedThroughSequence = change.clearedThroughSequence?.toString(),
                     )
                 },
-                cursor.revision.toString(),
-                (page.lastOrNull()?.revision ?: after).toString(),
-                false,
-                state.snapshotSequence.toString(),
-                state.visibilityRevision.toString(),
-                state.clearedThroughSequence.toString(),
-                state.globalClearedThroughSequence.toString(),
+                lastRevision = cursor.revision,
+                nextRevision = page.lastOrNull()?.revision ?: after,
+                resetRequired = false,
             )
         }
     }
 
     private fun state(chatId: ChatId, userId: UserId): VisibilitySnapshot = visibility.snapshot(chatId, userId) ?: notFound()
-
-    private fun sequence(value: String, positive: Boolean = false): Long =
-        parseSequence(value)?.takeIf { !positive || it > 0 } ?: badRequest(ApiErrorCode.INVALID_SEQUENCE, "Invalid decimal sequence")
 }

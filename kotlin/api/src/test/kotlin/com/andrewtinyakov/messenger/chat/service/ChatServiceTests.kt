@@ -7,8 +7,6 @@ import com.andrewtinyakov.messenger.chat.model.MemberChatDetails
 import com.andrewtinyakov.messenger.chat.repository.ChatDirectoryRepository
 import com.andrewtinyakov.messenger.chat.repository.ChatRepository
 import com.andrewtinyakov.messenger.chat.repository.GroupMembershipRepository
-import com.andrewtinyakov.messenger.chat.web.payload.AddGroupMembersRequest
-import com.andrewtinyakov.messenger.chat.web.payload.CreateGroupChatRequest
 import com.andrewtinyakov.messenger.generated.messaging.event.SendRejectionReason
 import com.andrewtinyakov.messenger.infrastructure.outbox.model.OutboxMessage
 import com.andrewtinyakov.messenger.infrastructure.outbox.repository.OutboxRepository
@@ -49,7 +47,7 @@ class ChatServiceTests
         fun `activity uses acceptance time rather than an earlier transaction start`() {
             val owner = user("activity-clock-owner")
             val peer = user("activity-clock-peer")
-            val chat = chatService.createGroup(UserId(owner), CreateGroupChatRequest("Clock", listOf(peer)))
+            val chat = chatService.createGroup(UserId(owner), "Clock", listOf(peer).map(::UserId))
             tx.executeWithoutResult {
                 val began = db.queryForObject("SELECT transaction_timestamp()", java.time.OffsetDateTime::class.java)!!
                 db.execute("SELECT pg_sleep(0.03)")
@@ -67,7 +65,7 @@ class ChatServiceTests
         fun `a fully hidden candidate window does not scan backwards to an older visible message`() {
             val owner = user("window-owner")
             val peer = user("window-peer")
-            val chat = chatService.createGroup(UserId(owner), CreateGroupChatRequest("Hidden window", listOf(peer)))
+            val chat = chatService.createGroup(UserId(owner), "Hidden window", listOf(peer).map(::UserId))
             db.update(
                 "INSERT INTO messages(id,chat_id,sequence,sender_id,body,created_at) SELECT left(?,20)||lpad(i::text,6,'0'),?,i,?,'body',now() FROM generate_series(1,300) i",
                 chat.id,
@@ -91,7 +89,7 @@ class ChatServiceTests
         fun `chat pages order by activity with deterministic ties and sends update activity transactionally`() {
             val owner = user("activity-owner")
             val peer = user("activity-peer")
-            val chats = (1..3).map { chatService.createGroup(UserId(owner), CreateGroupChatRequest("Activity $it", listOf(peer))) }
+            val chats = (1..3).map { chatService.createGroup(UserId(owner), "Activity $it", listOf(peer).map(::UserId)) }
             db.update("UPDATE chat_members SET joined_at='2026-01-01T00:00:00Z' WHERE user_id=?", owner)
             db.update("UPDATE chats SET last_activity_at='2026-02-01T00:00:00Z' WHERE id IN (?,?)", chats[0].id, chats[1].id)
             val first = chatService.list(UserId(owner), null, 1)
@@ -121,7 +119,7 @@ class ChatServiceTests
         fun `unread windows cap raw candidates before own and personal visibility filters`() {
             val owner = user("unread-owner")
             val peer = user("unread-peer")
-            val chat = chatService.createGroup(UserId(owner), CreateGroupChatRequest("Unread", listOf(peer)))
+            val chat = chatService.createGroup(UserId(owner), "Unread", listOf(peer).map(::UserId))
 
             fun insert(after: Int, through: Int, sender: String) {
                 db.update(
@@ -170,7 +168,7 @@ class ChatServiceTests
         fun `chat summaries include sender names and obey viewer visibility across sequence gaps`() {
             val owner = user("summary-owner")
             val member = user("summary-member")
-            val chat = chatService.createGroup(UserId(owner), CreateGroupChatRequest("Summary", listOf(member)))
+            val chat = chatService.createGroup(UserId(owner), "Summary", listOf(member).map(::UserId))
             assertEquals(null, chat.lastMessage)
             messageSendService.process(command(member, newId(), "Earlier", chat = chat.id))
             messageSendService.process(command(owner, newId(), "x".repeat(180), chat = chat.id))
@@ -202,7 +200,7 @@ class ChatServiceTests
         fun `chat reads retain one authorized snapshot during member removal`() {
             val owner = user("snapshot-chat-owner")
             val member = user("snapshot-chat-member")
-            val chat = chatService.createGroup(UserId(owner), CreateGroupChatRequest("Snapshot", listOf(member)))
+            val chat = chatService.createGroup(UserId(owner), "Snapshot", listOf(member).map(::UserId))
             val removingRepository = object : ChatDirectoryRepository by chatDirectoryRepository {
                 override fun findMemberDetails(chatId: ChatId, userId: UserId): MemberChatDetails? {
                     val snapshot = chatDirectoryRepository.findMemberDetails(chatId = chatId, userId = userId)
@@ -259,7 +257,7 @@ class ChatServiceTests
             )
 
             assertThrows(RuntimeException::class.java) {
-                failing.createGroup(UserId(owner), CreateGroupChatRequest("Rollback", listOf(member)))
+                failing.createGroup(UserId(owner), "Rollback", listOf(member).map(::UserId))
             }
 
             val chatId = requireNotNull(attempted)
@@ -277,12 +275,12 @@ class ChatServiceTests
             val members = (1..501).map { user("chunk-initial-$it") }
             val additions = (1..501).map { user("chunk-addition-$it") }
 
-            val chat = chatService.createGroup(UserId(owner), CreateGroupChatRequest("Chunks", members))
+            val chat = chatService.createGroup(UserId(owner), "Chunks", members.map(::UserId))
             assertEquals(502, chat.memberCount)
             assertEquals(50, chat.members.size)
             assertEquals((members + owner).sorted().take(50), chat.members.map { it.id })
 
-            chatService.addMembers(ChatId(chat.id), UserId(owner), AddGroupMembersRequest(additions))
+            chatService.addMembers(ChatId(chat.id), UserId(owner), additions.map(::UserId))
 
             assertEquals(1003, chatService.get(ChatId(chat.id), UserId(owner)).memberCount)
             assertEquals(1003, chatRepository.findMemberIds(ChatId(chat.id)).size)
@@ -300,7 +298,7 @@ class ChatServiceTests
         fun `missing and repeated removal do not change counters or publish events`() {
             val owner = user("noop-remove-owner")
             val member = user("noop-remove-member")
-            val chat = chatService.createGroup(UserId(owner), CreateGroupChatRequest("Removal", listOf(member)))
+            val chat = chatService.createGroup(UserId(owner), "Removal", listOf(member).map(::UserId))
             val chatId = ChatId(chat.id)
 
             assertThrows(ApiException::class.java) { chatMembershipService.removeMember(chatId, UserId(owner), UserId(newId())) }
@@ -323,7 +321,7 @@ class ChatServiceTests
         fun `failed removal events roll back membership and its counter`() {
             val owner = user("remove-rollback-owner")
             val member = user("remove-rollback-member")
-            val chat = chatService.createGroup(UserId(owner), CreateGroupChatRequest("Rollback removal", listOf(member)))
+            val chat = chatService.createGroup(UserId(owner), "Rollback removal", listOf(member).map(::UserId))
             val failingOutbox = object : OutboxRepository by outboxRepository {
                 override fun enqueue(messages: Collection<OutboxMessage>) {
                     outboxRepository.enqueue(messages.map { it.copy(id = messages.first().id) })
@@ -355,7 +353,7 @@ class ChatServiceTests
             val owner = user("concurrent-add-owner")
             val member = user("concurrent-add-member")
             val addition = user("concurrent-add-new")
-            val chat = chatService.createGroup(UserId(owner), CreateGroupChatRequest("Concurrent", listOf(member)))
+            val chat = chatService.createGroup(UserId(owner), "Concurrent", listOf(member).map(::UserId))
             val removed = CountDownLatch(1)
             val release = CountDownLatch(1)
             val pausedRepository = object : GroupMembershipRepository by groupMembershipRepository {
@@ -394,7 +392,7 @@ class ChatServiceTests
                         tx = tx,
                     )
                 val adding = concurrently {
-                    addingService.addMembers(ChatId(chat.id), UserId(owner), AddGroupMembersRequest(listOf(addition)))
+                    addingService.addMembers(ChatId(chat.id), UserId(owner), listOf(addition).map(::UserId))
                 }
                 assertTrue(addingStarted.await(10, TimeUnit.SECONDS))
                 release.countDown()
@@ -412,7 +410,7 @@ class ChatServiceTests
         fun `concurrent removals delete and notify only once`() {
             val owner = user("concurrent-remove-owner")
             val member = user("concurrent-remove-member")
-            val chat = chatService.createGroup(UserId(owner), CreateGroupChatRequest("Concurrent removal", listOf(member)))
+            val chat = chatService.createGroup(UserId(owner), "Concurrent removal", listOf(member).map(::UserId))
             val removing = ChatMembershipService(
                 repository = chatRepository,
                 memberships = groupMembershipRepository,
@@ -443,7 +441,7 @@ class ChatServiceTests
         fun `send waiting behind removal rejects without allocating a sequence`() {
             val owner = user("remove-before-send-owner")
             val member = user("remove-before-send-member")
-            val chat = chatService.createGroup(UserId(owner), CreateGroupChatRequest("Remove before send", listOf(member)))
+            val chat = chatService.createGroup(UserId(owner), "Remove before send", listOf(member).map(::UserId))
             val request = newId()
             val deleted = CountDownLatch(1)
             val release = CountDownLatch(1)
@@ -496,7 +494,7 @@ class ChatServiceTests
         fun `send holding chat lock commits its message event before removal`() {
             val owner = user("send-before-remove-owner")
             val member = user("send-before-remove-member")
-            val chat = chatService.createGroup(UserId(owner), CreateGroupChatRequest("Send before remove", listOf(member)))
+            val chat = chatService.createGroup(UserId(owner), "Send before remove", listOf(member).map(::UserId))
             val locked = CountDownLatch(1)
             val removalStarted = CountDownLatch(1)
             val release = CountDownLatch(1)
@@ -578,7 +576,7 @@ class ChatServiceTests
                 concurrently {
                     ready.countDown()
                     check(ready.await(10, TimeUnit.SECONDS))
-                    runCatching { chatService.createGroup(UserId(owner), CreateGroupChatRequest("Capacity $index", listOf(member))) }
+                    runCatching { chatService.createGroup(UserId(owner), "Capacity $index", listOf(member).map(::UserId)) }
                 }
             }.map { it.get(10, TimeUnit.SECONDS) }
 
@@ -595,8 +593,8 @@ class ChatServiceTests
             val owner = user("batch-group-owner")
             val member = user("batch-group-member")
             val other = user("batch-group-other")
-            val included = chatService.createGroup(UserId(owner), CreateGroupChatRequest("Included", listOf(member)))
-            val excluded = chatService.createGroup(UserId(owner), CreateGroupChatRequest("Excluded", listOf(other)))
+            val included = chatService.createGroup(UserId(owner), "Included", listOf(member).map(::UserId))
+            val excluded = chatService.createGroup(UserId(owner), "Excluded", listOf(other).map(::UserId))
             assertEquals(
                 setOf(ChatId(included.id)),
                 groupMembershipRepository.groupMemberships(listOf(included.id, excluded.id).map(::ChatId), UserId(member)),
@@ -607,7 +605,7 @@ class ChatServiceTests
         fun `group creation notifies every member`() {
             val owner = user("group-owner")
             val member = user("group-member")
-            val chat = chatService.createGroup(UserId(owner), CreateGroupChatRequest("Group", listOf(member)))
+            val chat = chatService.createGroup(UserId(owner), "Group", listOf(member).map(::UserId))
             assertEquals(
                 2,
                 db.queryForObject(
@@ -631,7 +629,7 @@ class ChatServiceTests
         fun `removing a group member updates the count and writes a personal-room event`() {
             val owner = user("remove-owner")
             val member = user("remove-member")
-            val chat = chatService.createGroup(UserId(owner), CreateGroupChatRequest("Group", listOf(member)))
+            val chat = chatService.createGroup(UserId(owner), "Group", listOf(member).map(::UserId))
             assertEquals(2, chat.memberCount)
 
             chatMembershipService.removeMember(ChatId(chat.id), UserId(owner), UserId(member))
@@ -663,10 +661,10 @@ class ChatServiceTests
             val owner = user("add-owner")
             val first = user("add-first")
             val second = user("add-second")
-            val chat = chatService.createGroup(UserId(owner), CreateGroupChatRequest("Group", listOf(first)))
+            val chat = chatService.createGroup(UserId(owner), "Group", listOf(first).map(::UserId))
 
-            chatService.addMembers(ChatId(chat.id), UserId(owner), AddGroupMembersRequest(listOf(first, second)))
-            chatService.addMembers(ChatId(chat.id), UserId(owner), AddGroupMembersRequest(listOf(second)))
+            chatService.addMembers(ChatId(chat.id), UserId(owner), listOf(first, second).map(::UserId))
+            chatService.addMembers(ChatId(chat.id), UserId(owner), listOf(second).map(::UserId))
 
             assertEquals(3, chatService.get(ChatId(chat.id), UserId(owner)).memberCount)
             assertEquals(3, chatService.get(ChatId(chat.id), UserId(second)).memberCount)
@@ -708,7 +706,7 @@ class ChatServiceTests
             val owner = user("add-rollback-owner")
             val first = user("add-rollback-first")
             val addition = user("add-rollback-new")
-            val chat = chatService.createGroup(UserId(owner), CreateGroupChatRequest("Rollback add", listOf(first)))
+            val chat = chatService.createGroup(UserId(owner), "Rollback add", listOf(first).map(::UserId))
             val failingOutbox = object : OutboxRepository by outboxRepository {
                 override fun enqueue(messages: Collection<OutboxMessage>) {
                     outboxRepository.enqueue(messages.map { it.copy(id = messages.first().id) })
@@ -724,7 +722,7 @@ class ChatServiceTests
             )
 
             assertThrows(RuntimeException::class.java) {
-                failing.addMembers(ChatId(chat.id), UserId(owner), AddGroupMembersRequest(listOf(addition)))
+                failing.addMembers(ChatId(chat.id), UserId(owner), listOf(addition).map(::UserId))
             }
 
             assertEquals(2, chatService.get(ChatId(chat.id), UserId(owner)).memberCount)
@@ -744,10 +742,10 @@ class ChatServiceTests
             val owner = user("privacy-owner")
             val member = user("privacy-member")
             val outsider = user("privacy-outsider")
-            val chat = chatService.createGroup(UserId(owner), CreateGroupChatRequest("Group", listOf(member)))
+            val chat = chatService.createGroup(UserId(owner), "Group", listOf(member).map(::UserId))
 
             val denied = assertThrows(ApiException::class.java) {
-                chatService.addMembers(ChatId(chat.id), UserId(outsider), AddGroupMembersRequest(listOf(newId())))
+                chatService.addMembers(ChatId(chat.id), UserId(outsider), listOf(newId()).map(::UserId))
             }
 
             assertEquals(HttpStatus.FORBIDDEN, denied.status)
@@ -757,7 +755,7 @@ class ChatServiceTests
         fun `large group list returns an exact count and a bounded member preview`() {
             val owner = user("preview-owner")
             val members = (1..60).map { user("preview-member-$it") }
-            val chat = chatService.createGroup(UserId(owner), CreateGroupChatRequest("Group", members))
+            val chat = chatService.createGroup(UserId(owner), "Group", members.map(::UserId))
 
             val listed = chatService.list(UserId(owner), null, 50).chats.first { it.id == chat.id }
             val opened = chatService.get(ChatId(chat.id), UserId(owner))
@@ -773,7 +771,7 @@ class ChatServiceTests
         fun `chat list cursor visits each chat once when join times tie`() {
             val owner = user("page-owner")
             val member = user("page-member")
-            val ids = (1..3).map { chatService.createGroup(UserId(owner), CreateGroupChatRequest("Page $it", listOf(member))).id }
+            val ids = (1..3).map { chatService.createGroup(UserId(owner), "Page $it", listOf(member).map(::UserId)).id }
             db.update("UPDATE chat_members SET joined_at='2026-09-26 10:00:00+00' WHERE user_id=?", owner)
 
             val first = chatService.list(UserId(owner), null, 2)

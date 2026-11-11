@@ -4,10 +4,11 @@ import com.andrewtinyakov.messenger.auth.model.AuthenticatedSession
 import com.andrewtinyakov.messenger.chat.deletion.service.DeletionService
 import com.andrewtinyakov.messenger.chat.deletion.web.payload.DeletionRequest
 import com.andrewtinyakov.messenger.chat.deletion.web.payload.DeletionResponse
+import com.andrewtinyakov.messenger.chat.deletion.web.payload.toCommand
 import com.andrewtinyakov.messenger.chat.model.ChatId
+import com.andrewtinyakov.messenger.message.model.RequestId
 import com.andrewtinyakov.messenger.message.service.MessageHistoryService
 import com.andrewtinyakov.messenger.message.web.payload.MessageVisibilityResponse
-import com.andrewtinyakov.messenger.shared.id.requireId
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
@@ -27,7 +28,7 @@ class DeletionController(
         @PathVariable id: String,
         @RequestBody input: DeletionRequest,
     ): DeletionResponse =
-        deletions.delete(ChatId.parse(id), session.userId, input)
+        deletions.delete(ChatId.parse(id), session.userId, input.toCommand())
 
     @GetMapping("/deletions/{operationId}")
     fun status(
@@ -35,7 +36,7 @@ class DeletionController(
         @PathVariable id: String,
         @PathVariable operationId: String,
     ): DeletionResponse =
-        deletions.status(ChatId.parse(id), session.userId, requireId(operationId))
+        deletions.status(ChatId.parse(id), session.userId, RequestId.parse(operationId))
 
     @GetMapping("/visibility")
     fun visibility(

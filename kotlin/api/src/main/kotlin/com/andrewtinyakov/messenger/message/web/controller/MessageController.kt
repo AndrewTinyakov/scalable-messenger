@@ -12,6 +12,9 @@ import com.andrewtinyakov.messenger.message.web.payload.MessageHistoryResponse
 import com.andrewtinyakov.messenger.message.web.payload.MessageResolveRequest
 import com.andrewtinyakov.messenger.message.web.payload.MessageResolveResponse
 import com.andrewtinyakov.messenger.message.web.payload.MessageResponse
+import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
+import com.andrewtinyakov.messenger.shared.web.badRequest
+import com.andrewtinyakov.messenger.shared.web.parseSequence
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PatchMapping
@@ -35,11 +38,11 @@ class MessageController(
         @PathVariable messageId: String,
         @RequestBody input: EditMessageRequest,
     ): MessageResponse = mutations.edit(
-        ChatId.parse(id),
-        session.userId,
-        MessageId.parse(messageId),
-        input.body,
-        input.expectedVersion,
+        chatId = ChatId.parse(id),
+        userId = session.userId,
+        messageId = MessageId.parse(messageId),
+        body = input.body,
+        expectedVersion = messageVersion(input.expectedVersion),
     )
 
     @DeleteMapping("/{id}/messages/{messageId}")
@@ -48,7 +51,12 @@ class MessageController(
         @PathVariable id: String,
         @PathVariable messageId: String,
         @RequestParam expectedVersion: String,
-    ): MessageResponse = mutations.delete(ChatId.parse(id), session.userId, MessageId.parse(messageId), expectedVersion)
+    ): MessageResponse = mutations.delete(
+        chatId = ChatId.parse(id),
+        userId = session.userId,
+        messageId = MessageId.parse(messageId),
+        expectedVersion = messageVersion(expectedVersion),
+    )
 
     @GetMapping("/{id}/messages/around")
     fun around(
@@ -58,13 +66,11 @@ class MessageController(
         @RequestParam(required = false) anchorSequence: String?,
         @RequestParam(defaultValue = "50") limit: Int,
     ): MessageAroundResponse = messageHistoryService.around(
-        ChatId.parse(id),
-        session.userId,
-        messageId?.let {
-            MessageId.parse(it)
-        },
-        anchorSequence,
-        limit,
+        chatId = ChatId.parse(id),
+        userId = session.userId,
+        messageId = messageId?.let(MessageId::parse),
+        anchorSequence = anchorSequence?.let { sequence(it, positive = true) },
+        limit = limit,
     )
 
     @PostMapping("/{id}/messages/resolve")
@@ -86,7 +92,12 @@ class MessageController(
         @PathVariable id: String,
         @RequestParam afterRevision: String,
         @RequestParam(defaultValue = "100") limit: Int,
-    ): MessageChangesResponse = messageHistoryService.changes(ChatId.parse(id), session.userId, afterRevision, limit)
+    ): MessageChangesResponse = messageHistoryService.changes(
+        chatId = ChatId.parse(id),
+        userId = session.userId,
+        after = sequence(afterRevision),
+        limit = limit,
+    )
 
     @GetMapping("/{id}/messages")
     fun messages(
@@ -95,11 +106,22 @@ class MessageController(
         @RequestParam(required = false) afterSeq: String?,
         @RequestParam(required = false) beforeSeq: String?,
         @RequestParam(defaultValue = "50") limit: Int,
-    ): MessageHistoryResponse = messageHistoryService.messages(
-        chatId = ChatId.parse(id),
-        userId = session.userId,
-        afterSeq = afterSeq,
-        beforeSeq = beforeSeq,
-        limit = limit,
-    )
+    ): MessageHistoryResponse {
+        val chatId = ChatId.parse(id)
+        if (afterSeq != null && beforeSeq != null) badRequest(ApiErrorCode.INVALID_SEQUENCE, "Use either afterSeq or beforeSeq")
+        return messageHistoryService.messages(
+            chatId = chatId,
+            userId = session.userId,
+            afterSeq = afterSeq?.let { sequence(it) },
+            beforeSeq = beforeSeq?.let { sequence(it, positive = true) },
+            limit = limit,
+        )
+    }
+
+    private fun sequence(value: String, positive: Boolean = false): Long =
+        parseSequence(value)?.takeIf { !positive || it > 0 } ?: badRequest(ApiErrorCode.INVALID_SEQUENCE, "Invalid decimal sequence")
+
+    private fun messageVersion(value: String): Long =
+        parseSequence(value)?.takeIf { it > 0 }
+            ?: badRequest(ApiErrorCode.INVALID_REQUEST, "expectedVersion must be a positive decimal integer")
 }

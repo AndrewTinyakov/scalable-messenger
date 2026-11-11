@@ -23,7 +23,7 @@ class MessageSendBatchService(
 ) {
     fun process(commands: List<SendMessageCommandV1>): List<CommandResult> {
         require(commands.size in 1..MAX_BATCH_SIZE) { "Send batch size must be between 1 and $MAX_BATCH_SIZE" }
-        require(commands.map(SendTarget::from).distinct().size == 1) { "A send batch must share one target" }
+        require(commands.map { SendTarget.from(it.toSendRequest()) }.distinct().size == 1) { "A send batch must share one target" }
         check(!TransactionSynchronizationManager.isActualTransactionActive()) { "Send batch must own its transaction" }
         val started = System.nanoTime()
         var callbackFinished = started

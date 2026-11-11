@@ -5,7 +5,6 @@ import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.auth.service.AuthenticationService
 import com.andrewtinyakov.messenger.auth.web.payload.AuthRequest
 import com.andrewtinyakov.messenger.chat.service.ChatService
-import com.andrewtinyakov.messenger.chat.web.payload.CreateGroupChatRequest
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
 import com.andrewtinyakov.messenger.shared.id.newId
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -16,9 +15,11 @@ import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.test.context.SpringBootTest
 import tools.jackson.databind.ObjectMapper
 import java.net.URI
+import java.net.URLEncoder
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.nio.charset.StandardCharsets
 import java.time.Duration
 
 @SpringBootTest(
@@ -41,7 +42,7 @@ class MessageFeatureHttpTests
         fun `HTTP edit delete around and changes expose explicit nullable versioned state`() {
             val owner = account()
             val member = account()
-            val chat = chats.createGroup(UserId(owner.first), CreateGroupChatRequest("HTTP mutations", listOf(member.first))).id
+            val chat = chats.createGroup(UserId(owner.first), "HTTP mutations", listOf(member.first).map(::UserId)).id
             sends.process(command(owner.first, newId(), "original", chat = chat))
             val initial = mapper.readTree(request("/$chat/messages", owner.second).body())
             val target = initial.path("messages").first()
@@ -101,7 +102,7 @@ class MessageFeatureHttpTests
         fun `HTTP mutation routes require sessions and reject malformed identifiers`() {
             val owner = account()
             val member = account()
-            val chat = chats.createGroup(UserId(owner.first), CreateGroupChatRequest("HTTP auth", listOf(member.first))).id
+            val chat = chats.createGroup(UserId(owner.first), "HTTP auth", listOf(member.first).map(::UserId)).id
             sends.process(command(owner.first, newId(), "text", chat = chat))
             val id = db.queryForObject("SELECT id FROM messages WHERE chat_id=?", String::class.java, chat)!!
             assertEquals(401, request("/$chat/messages/$id?expectedVersion=1", null, "DELETE").statusCode())
@@ -112,10 +113,37 @@ class MessageFeatureHttpTests
         }
 
         @Test
+        fun `HTTP history pin and read routes require canonical decimal sequences`() {
+            val owner = account()
+            val member = account()
+            val chat = chats.createGroup(UserId(owner.first), "HTTP sequences", listOf(UserId(member.first))).id
+            sends.process(command(owner.first, newId(), "text", chat = chat))
+            for (invalid in listOf("+1", "01", "-1", " 1", "1 ", "9223372036854775808")) {
+                val value = URLEncoder.encode(invalid, StandardCharsets.UTF_8)
+                for (path in listOf(
+                    "messages?afterSeq=$value",
+                    "messages?beforeSeq=$value",
+                    "messages/around?anchorSequence=$value",
+                    "messages/changes?afterRevision=$value",
+                    "pins?beforeSequence=$value",
+                )) {
+                    assertInvalidSequence(request("/$chat/$path", owner.second), path)
+                }
+                assertInvalidSequence(request("/$chat/reads", owner.second, "POST", """{"throughSequence":"$invalid"}"""), invalid)
+            }
+            assertInvalidSequence(request("/$chat/messages?beforeSeq=0", owner.second), "beforeSeq=0")
+            assertInvalidSequence(request("/$chat/messages/around?anchorSequence=0", owner.second), "anchorSequence=0")
+            assertInvalidSequence(request("/$chat/messages?afterSeq=0&beforeSeq=1", owner.second), "both cursors")
+            assertInvalidSequence(request("/$chat/messages?afterSeq=2", owner.second), "afterSeq beyond history")
+            assertEquals(200, request("/$chat/messages?afterSeq=0", owner.second).statusCode())
+            assertEquals(200, request("/$chat/messages?beforeSeq=1", owner.second).statusCode())
+        }
+
+        @Test
         fun `HTTP scoped deletion resolves account visibility and returns durable operation status`() {
             val owner = account()
             val member = account()
-            val chat = chats.createGroup(UserId(owner.first), CreateGroupChatRequest("HTTP scoped deletion", listOf(member.first))).id
+            val chat = chats.createGroup(UserId(owner.first), "HTTP scoped deletion", listOf(member.first).map(::UserId)).id
             sends.process(command(owner.first, newId(), "private hide", chat = chat))
             val target = db.queryForObject("SELECT id FROM messages WHERE chat_id=?", String::class.java, chat)!!
             val requestId = newId()
@@ -163,6 +191,11 @@ class MessageFeatureHttpTests
         private fun account(): Pair<String, String> {
             val registered = authentication.register(AuthRequest("mutations_${newId()}", "long-demo-password"))
             return registered.user.id.value to "messenger_session=${registered.token.value}"
+        }
+
+        private fun assertInvalidSequence(response: HttpResponse<String>, case: String) {
+            assertEquals(400, response.statusCode(), case)
+            assertEquals("INVALID_SEQUENCE", mapper.readTree(response.body()).path("code").stringValue(), case)
         }
 
         private fun request(path: String, cookie: String?, method: String = "GET", body: String = ""): HttpResponse<String> {

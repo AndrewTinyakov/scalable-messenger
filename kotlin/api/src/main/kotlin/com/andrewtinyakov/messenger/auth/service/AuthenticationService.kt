@@ -16,17 +16,16 @@ import com.andrewtinyakov.messenger.generated.messaging.event.SessionRevokedEven
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseTransaction
 import com.andrewtinyakov.messenger.infrastructure.database.observability.observedExecute
 import com.andrewtinyakov.messenger.infrastructure.database.observability.observedExecuteWithoutResult
-import com.andrewtinyakov.messenger.infrastructure.outbox.model.EventId
+import com.andrewtinyakov.messenger.infrastructure.outbox.model.toOutboxMessage
 import com.andrewtinyakov.messenger.infrastructure.outbox.repository.OutboxRepository
 import com.andrewtinyakov.messenger.infrastructure.redis.RoomAddress
 import com.andrewtinyakov.messenger.shared.crypto.sha256
 import com.andrewtinyakov.messenger.shared.id.newId
 import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
-import com.andrewtinyakov.messenger.shared.web.ApiException
 import com.andrewtinyakov.messenger.shared.web.badRequest
 import com.andrewtinyakov.messenger.shared.web.conflict
+import com.andrewtinyakov.messenger.shared.web.unauthorized
 import org.springframework.dao.DuplicateKeyException
-import org.springframework.http.HttpStatus
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
@@ -82,13 +81,13 @@ class AuthenticationService(
         val user = userRepository.findUserByUsername(username = username)
         val matches = encoder.matches(input.password, user?.passwordHash ?: rejectedPasswordHash)
         if (user == null || !matches) {
-            throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.INVALID_CREDENTIALS, "Invalid username or password")
+            unauthorized(ApiErrorCode.INVALID_CREDENTIALS, "Invalid username or password")
         }
         return issue(user = user, requestedDeviceId = input.deviceId?.let(::DeviceId))
     }
 
     fun authenticatedSession(token: SessionToken?): AuthenticatedSession =
-        sessionIfActive(token) ?: throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.UNAUTHORIZED, "Session expired or invalid")
+        sessionIfActive(token) ?: unauthorized(ApiErrorCode.UNAUTHORIZED, "Session expired or invalid")
 
     fun sessionIfActive(token: SessionToken?): AuthenticatedSession? =
         token?.let { sessionRepository.findSession(sessionId = it.sessionId(), now = OffsetDateTime.now(clock)) }
@@ -104,13 +103,13 @@ class AuthenticationService(
                 room = RoomAddress.user(session.userId),
                 sessionId = sessionId.value,
             )
-            outboxRepository.enqueue(eventId = EventId(event.eventId), room = event.room, payload = mapper.writeValueAsString(event))
+            outboxRepository.enqueue(event.toOutboxMessage(mapper))
         }
     }
 
     fun requireExpectedIdentity(expectedIdentity: ExpectedSessionIdentity, session: AuthenticatedSession) {
         if (!expectedIdentity.matches(session)) {
-            throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.UNAUTHORIZED, "Session identity changed")
+            unauthorized(ApiErrorCode.UNAUTHORIZED, "Session identity changed")
         }
     }
 

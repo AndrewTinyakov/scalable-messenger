@@ -2,13 +2,12 @@ package com.andrewtinyakov.messenger.chat.deletion.repository
 
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.deletion.model.DeletionChat
+import com.andrewtinyakov.messenger.chat.deletion.model.DeletionCommand
 import com.andrewtinyakov.messenger.chat.deletion.model.DeletionMessage
+import com.andrewtinyakov.messenger.chat.deletion.model.DeletionScope
+import com.andrewtinyakov.messenger.chat.deletion.model.DeletionState
+import com.andrewtinyakov.messenger.chat.deletion.model.DeletionTarget
 import com.andrewtinyakov.messenger.chat.deletion.model.StoredDeletion
-import com.andrewtinyakov.messenger.chat.deletion.web.payload.DeletionRequest
-import com.andrewtinyakov.messenger.chat.deletion.web.payload.DeletionResponse
-import com.andrewtinyakov.messenger.chat.deletion.web.payload.DeletionScope
-import com.andrewtinyakov.messenger.chat.deletion.web.payload.DeletionState
-import com.andrewtinyakov.messenger.chat.deletion.web.payload.DeletionTarget
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.model.ChatKind
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Routines
@@ -20,11 +19,15 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.HIS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSAGES
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSAGE_CHANGES
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.VISIBILITY_CLEANUP_JOBS
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.DeletionOperationsRecord
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.HistoryPurgeJobsRecord
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseObservation
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseOperation
 import com.andrewtinyakov.messenger.message.model.MessageId
+import com.andrewtinyakov.messenger.message.model.RequestId
 import com.andrewtinyakov.messenger.message.visibility.repository.visibleMessage
 import org.jooq.DSLContext
+import org.jooq.InsertOnDuplicateStep
 import org.jooq.impl.DSL
 import org.springframework.stereotype.Repository
 import java.time.Clock
@@ -35,34 +38,20 @@ class JooqDeletionRepository(
     private val db: DSLContext,
     private val clock: Clock,
 ) : DeletionRepository {
-    override fun lockRequest(actorId: UserId, requestId: String) = DatabaseObservation.query(DatabaseOperation.DELETION_REQUEST_LOCK) {
-        Routines.acquireTransactionLock(db.configuration(), "deletion:${actorId.value}:$requestId")
+    override fun lockRequest(actorId: UserId, requestId: RequestId) = DatabaseObservation.query(DatabaseOperation.DELETION_REQUEST_LOCK) {
+        Routines.acquireTransactionLock(db.configuration(), "deletion:${actorId.value}:${requestId.value}")
     }
 
-    override fun operation(chatId: ChatId, actorId: UserId, requestId: String): StoredDeletion? = DatabaseObservation.query(
+    override fun operation(actorId: UserId, requestId: RequestId): StoredDeletion? = DatabaseObservation.query(
         DatabaseOperation.DELETION_OPERATION_STATUS,
     ) {
         db.select(DELETION_OPERATIONS.asterisk(), CHATS.PURGED_THROUGH_SEQUENCE, CHATS.PURGED_ROWS)
             .from(DELETION_OPERATIONS).join(CHATS).on(CHATS.ID.eq(DELETION_OPERATIONS.CHAT_ID))
-            .where(DELETION_OPERATIONS.ACTOR_ID.eq(actorId.value), DELETION_OPERATIONS.REQUEST_ID.eq(requestId))
+            .where(DELETION_OPERATIONS.ACTOR_ID.eq(actorId.value), DELETION_OPERATIONS.REQUEST_ID.eq(requestId.value))
             .fetchOne { row ->
-                val stored = row.into(DELETION_OPERATIONS)
-                val prefix = stored.scope == "EVERYONE" && stored.target != "MESSAGES"
-                val complete = !prefix || row.get(CHATS.PURGED_THROUGH_SEQUENCE)!! >= stored.throughSequence!!
-                val deletedRows = if (prefix) maxOf(0L, row.get(CHATS.PURGED_ROWS)!! - stored.purgeRowsBefore!!) else stored.deletedRows!!
-                StoredDeletion(
-                    stored.chatId!!,
-                    stored.fingerprint!!,
-                    DeletionResponse(
-                        stored.requestId!!,
-                        DeletionScope.valueOf(stored.scope!!),
-                        DeletionTarget.valueOf(stored.target!!),
-                        stored.throughSequence!!.toString(),
-                        stored.mutationRevision!!.toString(),
-                        stored.visibilityRevision!!.toString(),
-                        if (complete) DeletionState.COMPLETED else DeletionState.ACCEPTED,
-                        deletedRows.toString(),
-                    ),
+                row.into(DELETION_OPERATIONS).toModel(
+                    purgedThroughSequence = row.get(CHATS.PURGED_THROUGH_SEQUENCE)!!,
+                    purgedRows = row.get(CHATS.PURGED_ROWS)!!,
                 )
             }
     }
@@ -81,7 +70,14 @@ class JooqDeletionRepository(
                     MESSAGES.SEQUENCE.gt(CHATS.CLEARED_THROUGH_SEQUENCE),
                 )
                 .and(if (scope == DeletionScope.SELF) visibleMessage(chatId, actorId, MESSAGES.SEQUENCE) else DSL.trueCondition())
-                .fetch { DeletionMessage(MessageId(it.value1()!!), it.value2()!!, UserId(it.value3()!!), it.value4()!!) }
+                .fetch {
+                    DeletionMessage(
+                        id = MessageId(it.get(MESSAGES.ID)!!),
+                        sequence = it.get(MESSAGES.SEQUENCE)!!,
+                        senderId = UserId(it.get(MESSAGES.SENDER_ID)!!),
+                        messageVersion = it.get(MESSAGES.MESSAGE_VERSION)!!,
+                    )
+                }
         }
 
     override fun lockChat(chatId: ChatId, actorId: UserId): DeletionChat? = DatabaseObservation.query(
@@ -93,13 +89,13 @@ class JooqDeletionRepository(
             .forNoKeyUpdate().of(CHATS).fetchOne {
                 val chat = it.into(CHATS)
                 DeletionChat(
-                    ChatKind.valueOf(chat.kind!!.name),
-                    chat.ownerId?.let(::UserId),
-                    chat.nextSequence!! - 1,
-                    chat.mutationRevision!!,
-                    it.get(CHAT_MEMBERS.VISIBILITY_REVISION)!!,
-                    chat.purgedRows!!,
-                    chat.deletedAt != null,
+                    kind = ChatKind.valueOf(chat.kind!!.name),
+                    owner = chat.ownerId?.let(::UserId),
+                    high = chat.nextSequence!! - 1,
+                    revision = chat.mutationRevision!!,
+                    visibility = it.get(CHAT_MEMBERS.VISIBILITY_REVISION)!!,
+                    purgedRows = chat.purgedRows!!,
+                    deleted = chat.deletedAt != null,
                 )
             }
     }
@@ -205,8 +201,7 @@ class JooqDeletionRepository(
                         CHATS.PURGED_THROUGH_SEQUENCE.lt(CHATS.CLEARED_THROUGH_SEQUENCE),
                     ),
             )
-            .onConflict(HISTORY_PURGE_JOBS.CHAT_ID).doUpdate()
-            .set(HISTORY_PURGE_JOBS.THROUGH_SEQUENCE, DSL.greatest(HISTORY_PURGE_JOBS.THROUGH_SEQUENCE, DSL.`val`(through))).execute()
+            .raisePurgeThrough(through).execute()
         Unit
     }
 
@@ -231,14 +226,13 @@ class JooqDeletionRepository(
                 "CLEARED",
             ).set(MESSAGE_CHANGES.CLEARED_THROUGH_SEQUENCE, through).set(MESSAGE_CHANGES.CHANGED_AT, now).execute()
         db.insertInto(HISTORY_PURGE_JOBS).set(HISTORY_PURGE_JOBS.CHAT_ID, chatId.value).set(HISTORY_PURGE_JOBS.THROUGH_SEQUENCE, through)
-            .onConflict(
-                HISTORY_PURGE_JOBS.CHAT_ID,
-            ).doUpdate().set(
-                HISTORY_PURGE_JOBS.THROUGH_SEQUENCE,
-                DSL.greatest(HISTORY_PURGE_JOBS.THROUGH_SEQUENCE, DSL.`val`(through)),
-            ).execute()
+            .raisePurgeThrough(through).execute()
         return@query revision
     }
+
+    private fun InsertOnDuplicateStep<HistoryPurgeJobsRecord>.raisePurgeThrough(through: Long) =
+        onConflict(HISTORY_PURGE_JOBS.CHAT_ID).doUpdate()
+            .set(HISTORY_PURGE_JOBS.THROUGH_SEQUENCE, DSL.greatest(HISTORY_PURGE_JOBS.THROUGH_SEQUENCE, DSL.`val`(through)))
 
     private fun nextRevision(chatId: ChatId): Long = db.update(CHATS).set(CHATS.MUTATION_REVISION, CHATS.MUTATION_REVISION.plus(1L))
         .where(CHATS.ID.eq(chatId.value)).returning(CHATS.MUTATION_REVISION).fetchOne()!!.mutationRevision!!
@@ -246,7 +240,7 @@ class JooqDeletionRepository(
     override fun saveOperation(
         chatId: ChatId,
         actorId: UserId,
-        request: DeletionRequest,
+        command: DeletionCommand,
         fingerprint: String,
         chat: DeletionChat,
         revision: Long,
@@ -257,14 +251,14 @@ class JooqDeletionRepository(
     ) {
         db.insertInto(
             DELETION_OPERATIONS,
-        ).set(DELETION_OPERATIONS.ACTOR_ID, actorId.value).set(DELETION_OPERATIONS.REQUEST_ID, request.requestId)
+        ).set(DELETION_OPERATIONS.ACTOR_ID, actorId.value).set(DELETION_OPERATIONS.REQUEST_ID, command.requestId.value)
             .set(
                 DELETION_OPERATIONS.CHAT_ID,
                 chatId.value,
-            ).set(DELETION_OPERATIONS.FINGERPRINT, fingerprint).set(DELETION_OPERATIONS.SCOPE, request.scope.name)
-            .set(DELETION_OPERATIONS.TARGET, request.target.name).set(
+            ).set(DELETION_OPERATIONS.FINGERPRINT, fingerprint).set(DELETION_OPERATIONS.SCOPE, command.scope.name)
+            .set(DELETION_OPERATIONS.TARGET, command.target.name).set(
                 DELETION_OPERATIONS.THROUGH_SEQUENCE,
-                if (request.target == DeletionTarget.MESSAGES) {
+                if (command.target == DeletionTarget.MESSAGES) {
                     0L
                 } else {
                     chat.high
@@ -274,4 +268,23 @@ class JooqDeletionRepository(
             .set(DELETION_OPERATIONS.DELETED_ROWS, rows.toLong()).set(DELETION_OPERATIONS.PURGE_ROWS_BEFORE, chat.purgedRows).execute()
         Unit
     }
+}
+
+private fun DeletionOperationsRecord.toModel(purgedThroughSequence: Long, purgedRows: Long): StoredDeletion {
+    val scope = DeletionScope.valueOf(scope!!)
+    val target = DeletionTarget.valueOf(target!!)
+    val prefix = scope == DeletionScope.EVERYONE && target != DeletionTarget.MESSAGES
+    val complete = !prefix || purgedThroughSequence >= throughSequence!!
+    return StoredDeletion(
+        requestId = RequestId(requestId!!),
+        chatId = ChatId(chatId!!),
+        fingerprint = fingerprint!!,
+        scope = scope,
+        target = target,
+        clearedThroughSequence = throughSequence!!,
+        mutationRevision = mutationRevision!!,
+        visibilityRevision = visibilityRevision!!,
+        state = if (complete) DeletionState.COMPLETED else DeletionState.ACCEPTED,
+        deletedRows = if (prefix) maxOf(0L, purgedRows - purgeRowsBefore!!) else deletedRows!!,
+    )
 }

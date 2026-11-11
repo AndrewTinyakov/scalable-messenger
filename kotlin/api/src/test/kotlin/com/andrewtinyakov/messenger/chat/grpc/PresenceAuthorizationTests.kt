@@ -1,18 +1,19 @@
 package com.andrewtinyakov.messenger.chat.grpc
 
+import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.auth.service.AuthenticationService
 import com.andrewtinyakov.messenger.auth.web.payload.AuthRequest
+import com.andrewtinyakov.messenger.chat.deletion.model.DeletionCommand
+import com.andrewtinyakov.messenger.chat.deletion.model.DeletionScope
+import com.andrewtinyakov.messenger.chat.deletion.model.DeletionTarget
 import com.andrewtinyakov.messenger.chat.deletion.service.DeletionService
-import com.andrewtinyakov.messenger.chat.deletion.web.payload.DeletionRequest
-import com.andrewtinyakov.messenger.chat.deletion.web.payload.DeletionScope
-import com.andrewtinyakov.messenger.chat.deletion.web.payload.DeletionTarget
 import com.andrewtinyakov.messenger.chat.grpc.service.ChatAuthorizationGrpcService
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.service.ChatMembershipService
 import com.andrewtinyakov.messenger.chat.service.ChatService
-import com.andrewtinyakov.messenger.chat.web.payload.CreateGroupChatRequest
 import com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest
 import com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceResponse
+import com.andrewtinyakov.messenger.message.model.RequestId
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
 import com.andrewtinyakov.messenger.shared.id.newId
 import io.grpc.Status
@@ -41,11 +42,13 @@ class PresenceAuthorizationTests
             val foreign = credentials()
             val shared = chats.createGroup(
                 owner.session.userId,
-                CreateGroupChatRequest("Presence shared", listOf(member.session.userId.value)),
+                "Presence shared",
+                listOf(member.session.userId.value).map(::UserId),
             )
             chats.createGroup(
                 owner.session.userId,
-                CreateGroupChatRequest("Presence elsewhere", listOf(foreign.session.userId.value)),
+                "Presence elsewhere",
+                listOf(foreign.session.userId.value).map(::UserId),
             )
             val peers = listOf(foreign.session.userId.value, member.session.userId.value, newId(), owner.session.userId.value)
             val reply = call(request(member.session.sessionId.value, shared.id, peers))
@@ -61,7 +64,8 @@ class PresenceAuthorizationTests
             val peer = credentials()
             val chat = chats.createGroup(
                 owner.session.userId,
-                CreateGroupChatRequest("Presence removals", listOf(member.session.userId.value, peer.session.userId.value)),
+                "Presence removals",
+                listOf(member.session.userId.value, peer.session.userId.value).map(::UserId),
             )
             val request = request(member.session.sessionId.value, chat.id, listOf(peer.session.userId.value))
             assertEquals(listOf(peer.session.userId.value), call(request).value?.authorizedUserIdsList)
@@ -80,7 +84,8 @@ class PresenceAuthorizationTests
             val foreign = credentials()
             val chat = chats.createGroup(
                 owner.session.userId,
-                CreateGroupChatRequest("Presence session", listOf(member.session.userId.value)),
+                "Presence session",
+                listOf(member.session.userId.value).map(::UserId),
             )
             assertDenied(request(foreign.session.sessionId.value, chat.id, listOf(owner.session.userId.value)))
             assertDenied(request(member.session.sessionId.value, newId(), listOf(owner.session.userId.value)))
@@ -103,11 +108,16 @@ class PresenceAuthorizationTests
             val member = credentials()
             val group = chats.createGroup(
                 owner.session.userId,
-                CreateGroupChatRequest("Presence deleted", listOf(member.session.userId.value)),
+                "Presence deleted",
+                listOf(member.session.userId.value).map(::UserId),
             )
             val groupRequest = request(member.session.sessionId.value, group.id, listOf(owner.session.userId.value))
             assertEquals(listOf(owner.session.userId.value), call(groupRequest).value?.authorizedUserIdsList)
-            deletion.delete(ChatId(group.id), owner.session.userId, DeletionRequest(group.id, DeletionScope.EVERYONE, DeletionTarget.CHAT))
+            deletion.delete(
+                ChatId(group.id),
+                owner.session.userId,
+                DeletionCommand(RequestId(group.id), DeletionScope.EVERYONE, DeletionTarget.CHAT),
+            )
             assertDenied(groupRequest)
             val direct = newId()
             db.update("INSERT INTO chats(id,kind,direct_pair_key) VALUES (?,'DIRECT',?)", direct, "presence_$direct")
@@ -120,7 +130,11 @@ class PresenceAuthorizationTests
             )
             val directRequest = request(member.session.sessionId.value, direct, listOf(owner.session.userId.value))
             assertEquals(listOf(owner.session.userId.value), call(directRequest).value?.authorizedUserIdsList)
-            deletion.delete(ChatId(direct), member.session.userId, DeletionRequest(direct, DeletionScope.EVERYONE, DeletionTarget.CHAT))
+            deletion.delete(
+                ChatId(direct),
+                member.session.userId,
+                DeletionCommand(RequestId(direct), DeletionScope.EVERYONE, DeletionTarget.CHAT),
+            )
             assertDenied(directRequest)
         }
 

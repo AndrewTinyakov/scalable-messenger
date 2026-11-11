@@ -1,32 +1,31 @@
 package com.andrewtinyakov.messenger.chat.deletion.service
 
 import com.andrewtinyakov.messenger.auth.model.UserId
+import com.andrewtinyakov.messenger.chat.deletion.model.DeletionCommand
+import com.andrewtinyakov.messenger.chat.deletion.model.DeletionScope
+import com.andrewtinyakov.messenger.chat.deletion.model.DeletionTarget
+import com.andrewtinyakov.messenger.chat.deletion.model.StoredDeletion
 import com.andrewtinyakov.messenger.chat.deletion.monitoring.DeletionMetrics
 import com.andrewtinyakov.messenger.chat.deletion.repository.DeletionRepository
-import com.andrewtinyakov.messenger.chat.deletion.web.payload.DeletionRequest
 import com.andrewtinyakov.messenger.chat.deletion.web.payload.DeletionResponse
-import com.andrewtinyakov.messenger.chat.deletion.web.payload.DeletionScope
-import com.andrewtinyakov.messenger.chat.deletion.web.payload.DeletionTarget
+import com.andrewtinyakov.messenger.chat.deletion.web.payload.toResponse
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.model.ChatKind
-import com.andrewtinyakov.messenger.chat.repository.ChatRepository
+import com.andrewtinyakov.messenger.chat.service.ChatEventAudience
 import com.andrewtinyakov.messenger.generated.messaging.event.ChatDeletedEventV1
 import com.andrewtinyakov.messenger.generated.messaging.event.HistoryChangedEventV1
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseTransaction
 import com.andrewtinyakov.messenger.infrastructure.database.observability.observedExecute
-import com.andrewtinyakov.messenger.infrastructure.outbox.model.EventId
-import com.andrewtinyakov.messenger.infrastructure.outbox.model.OutboxMessage
+import com.andrewtinyakov.messenger.infrastructure.outbox.model.toOutboxMessage
 import com.andrewtinyakov.messenger.infrastructure.outbox.repository.OutboxRepository
-import com.andrewtinyakov.messenger.infrastructure.redis.RoomAddress
 import com.andrewtinyakov.messenger.message.model.MessageId
+import com.andrewtinyakov.messenger.message.model.RequestId
 import com.andrewtinyakov.messenger.shared.crypto.sha256
 import com.andrewtinyakov.messenger.shared.id.newId
-import com.andrewtinyakov.messenger.shared.id.requireId
 import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
-import com.andrewtinyakov.messenger.shared.web.ApiException
-import com.andrewtinyakov.messenger.shared.web.badRequest
+import com.andrewtinyakov.messenger.shared.web.conflict
+import com.andrewtinyakov.messenger.shared.web.forbidden
 import com.andrewtinyakov.messenger.shared.web.notFound
-import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
 import tools.jackson.databind.ObjectMapper
@@ -34,7 +33,7 @@ import tools.jackson.databind.ObjectMapper
 @Service
 class DeletionService(
     private val repository: DeletionRepository,
-    private val chats: ChatRepository,
+    private val audience: ChatEventAudience,
     private val outbox: OutboxRepository,
     private val mapper: ObjectMapper,
     private val tx: TransactionTemplate,
@@ -48,149 +47,143 @@ class DeletionService(
     fun delete(
         chatId: ChatId,
         actorId: UserId,
-        input: DeletionRequest,
+        command: DeletionCommand,
         expectedVersions: Map<MessageId, Long> = emptyMap(),
-    ): DeletionResponse = metrics.timeAcceptance(input.scope, input.target) {
-        val committed = executeDeletion(chatId, actorId, input, expectedVersions)
-        if (committed.newlyAccepted) metrics.accepted(input.scope, input.target)
+    ): DeletionResponse = metrics.timeAcceptance(command.scope, command.target) {
+        val committed = executeDeletion(chatId, actorId, command, expectedVersions)
+        if (committed.newlyAccepted) metrics.accepted(command.scope, command.target)
         committed.response
     }
 
     private fun executeDeletion(
         chatId: ChatId,
         actorId: UserId,
-        input: DeletionRequest,
+        command: DeletionCommand,
         expectedVersions: Map<MessageId, Long>,
     ): CommittedDeletion {
-        requireId(input.requestId)
-        val ids = input.messageIds.orEmpty()
-        if (input.target == DeletionTarget.MESSAGES) {
-            if (ids.size !in 1..100 ||
-                ids.size != ids.distinct().size
-            ) {
-                badRequest(ApiErrorCode.INVALID_REQUEST, "Provide 1 to 100 distinct message IDs")
-            }
-            ids.forEach(::requireId)
-        } else if (input.messageIds != null) {
-            badRequest(ApiErrorCode.INVALID_REQUEST, "messageIds is only valid for message deletion")
-        }
-        val fingerprint = sha256("${chatId.value}|${input.scope}|${input.target}|${ids.sorted().joinToString(",")}")
+        val ids = command.messageIds.orEmpty()
+        val fingerprint = sha256("${chatId.value}|${command.scope}|${command.target}|${ids.map { it.value }.sorted().joinToString(",")}")
         return tx.observedExecute(DatabaseTransaction.DELETION_ACCEPT) {
-            repository.lockRequest(actorId, input.requestId)
-            repository.operation(chatId, actorId, input.requestId)?.let { existing ->
-                if (existing.chatId != chatId.value ||
+            repository.lockRequest(actorId, command.requestId)
+            repository.operation(actorId, command.requestId)?.let { existing ->
+                if (existing.chatId != chatId ||
                     existing.fingerprint != fingerprint
                 ) {
-                    throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.INVALID_REQUEST, "Deletion request ID changed")
+                    conflict(ApiErrorCode.INVALID_REQUEST, "Deletion request ID changed")
                 }
-                return@observedExecute CommittedDeletion(existing.response, newlyAccepted = false)
+                return@observedExecute CommittedDeletion(existing.toResponse(), newlyAccepted = false)
             }
             val chat = repository.lockChat(chatId, actorId) ?: notFound()
-            if (input.scope == DeletionScope.EVERYONE && input.target != DeletionTarget.MESSAGES && chat.kind == ChatKind.GROUP &&
+            if (command.scope == DeletionScope.EVERYONE && command.target != DeletionTarget.MESSAGES && chat.kind == ChatKind.GROUP &&
                 chat.owner != actorId
             ) {
-                forbidden()
+                forbiddenDeletion()
             }
             if (chat.deleted) {
-                if (input.scope != DeletionScope.EVERYONE || input.target != DeletionTarget.CHAT) notFound()
+                if (command.scope != DeletionScope.EVERYONE || command.target != DeletionTarget.CHAT) notFound()
                 repository.repairClosedPurge(chatId, chat.high)
-                repository.saveOperation(chatId, actorId, input, fingerprint, chat, chat.revision, chat.visibility, 0)
-                val repaired = repository.operation(chatId, actorId, input.requestId)!!.response
-                return@observedExecute CommittedDeletion(repaired, newlyAccepted = false)
+                repository.saveOperation(
+                    chatId = chatId,
+                    actorId = actorId,
+                    command = command,
+                    fingerprint = fingerprint,
+                    chat = chat,
+                    revision = chat.revision,
+                    visibility = chat.visibility,
+                    rows = 0,
+                )
+                return@observedExecute CommittedDeletion(saved(actorId, command.requestId).toResponse(), newlyAccepted = false)
             }
-            val targets = if (input.target == DeletionTarget.MESSAGES) {
-                repository.targets(chatId, actorId, ids.map(::MessageId), input.scope)
+            val targets = if (command.target == DeletionTarget.MESSAGES) {
+                repository.targets(chatId, actorId, ids, command.scope)
             } else {
                 emptyList()
             }
             if (expectedVersions.any { (id, version) -> targets.singleOrNull { it.id == id }?.messageVersion != version }) {
-                throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.INVALID_REQUEST, "Message version changed")
+                conflict(ApiErrorCode.INVALID_REQUEST, "Message version changed")
             }
-            if (input.scope == DeletionScope.EVERYONE && chat.kind == ChatKind.GROUP && chat.owner != actorId &&
+            if (command.scope == DeletionScope.EVERYONE && chat.kind == ChatKind.GROUP && chat.owner != actorId &&
                 targets.any { it.senderId != actorId }
             ) {
-                forbidden()
+                forbiddenDeletion()
             }
             var revision = chat.revision
             var visibility = chat.visibility
-            when (input.scope) {
+            when (command.scope) {
                 DeletionScope.SELF -> {
                     visibility =
-                        if (input.target == DeletionTarget.MESSAGES) {
+                        if (command.target == DeletionTarget.MESSAGES) {
                             repository.hideMessages(chatId, actorId, targets)
                         } else {
                             repository.clearPersonal(
-                                chatId,
-                                actorId,
-                                chat.high,
-                                input.target == DeletionTarget.CHAT,
+                                chatId = chatId,
+                                actorId = actorId,
+                                through = chat.high,
+                                hide = command.target == DeletionTarget.CHAT,
                             )
                         }
                 }
 
                 DeletionScope.EVERYONE -> {
                     revision =
-                        if (input.target == DeletionTarget.MESSAGES) {
+                        if (command.target == DeletionTarget.MESSAGES) {
                             repository.removeMessages(chatId, targets)
                         } else {
                             repository.clearGlobal(
-                                chatId,
-                                actorId,
-                                chat.high,
-                                input.target == DeletionTarget.CHAT,
+                                chatId = chatId,
+                                actorId = actorId,
+                                through = chat.high,
+                                close = command.target == DeletionTarget.CHAT,
                             )
                         }
                 }
             }
             repository.saveOperation(
-                chatId,
-                actorId,
-                input,
-                fingerprint,
-                chat,
-                revision,
-                visibility,
-                if (input.scope == DeletionScope.EVERYONE) {
+                chatId = chatId,
+                actorId = actorId,
+                command = command,
+                fingerprint = fingerprint,
+                chat = chat,
+                revision = revision,
+                visibility = visibility,
+                rows = if (command.scope == DeletionScope.EVERYONE) {
                     targets.size
                 } else {
                     0
                 },
             )
-            val rooms = when {
-                input.scope == DeletionScope.SELF -> listOf(RoomAddress.user(actorId))
-                chat.kind == ChatKind.GROUP -> listOf(RoomAddress.group(chatId))
-                else -> chats.findMemberIds(chatId).map(RoomAddress::user)
-            }
-            val notifications = rooms.map { room ->
-                val event = HistoryChangedEventV1.create(
-                    eventId = newId(),
-                    room = room,
-                    chatId = chatId.value,
-                    sequence = chat.high.toString(),
-                    mutationRevision = revision.toString(),
-                    visibilityRevision = if (input.scope == DeletionScope.SELF) {
-                        visibility.toString()
-                    } else {
-                        "0"
-                    },
-                )
-                OutboxMessage(EventId(event.eventId), room, mapper.writeValueAsString(event))
-            }
-            outbox.enqueue(notifications)
-            if (input.scope == DeletionScope.EVERYONE && input.target == DeletionTarget.CHAT) {
+            val rooms = audience.rooms(chatId, chat.kind, personalViewer = actorId.takeIf { command.scope == DeletionScope.SELF })
+            outbox.enqueue(
+                rooms.map { room ->
+                    HistoryChangedEventV1.create(
+                        eventId = newId(),
+                        room = room,
+                        chatId = chatId.value,
+                        sequence = chat.high.toString(),
+                        mutationRevision = revision.toString(),
+                        visibilityRevision = if (command.scope == DeletionScope.SELF) {
+                            visibility.toString()
+                        } else {
+                            "0"
+                        },
+                    ).toOutboxMessage(mapper)
+                },
+            )
+            if (command.scope == DeletionScope.EVERYONE && command.target == DeletionTarget.CHAT) {
                 outbox.enqueue(
                     rooms.map { room ->
-                        val event = ChatDeletedEventV1.create(eventId = newId(), room = room, chatId = chatId.value)
-                        OutboxMessage(EventId(event.eventId), room, mapper.writeValueAsString(event))
+                        ChatDeletedEventV1.create(eventId = newId(), room = room, chatId = chatId.value).toOutboxMessage(mapper)
                     },
                 )
             }
-            CommittedDeletion(repository.operation(chatId, actorId, input.requestId)!!.response, newlyAccepted = true)
+            CommittedDeletion(saved(actorId, command.requestId).toResponse(), newlyAccepted = true)
         }
     }
 
-    fun status(chatId: ChatId, actorId: UserId, requestId: String): DeletionResponse =
-        repository.operation(chatId, actorId, requestId)?.takeIf { it.chatId == chatId.value }?.response ?: notFound()
+    fun status(chatId: ChatId, actorId: UserId, requestId: RequestId): DeletionResponse =
+        repository.operation(actorId, requestId)?.takeIf { it.chatId == chatId }?.toResponse() ?: notFound()
 
-    private fun forbidden(): Nothing = throw ApiException(HttpStatus.FORBIDDEN, ApiErrorCode.FORBIDDEN, "This deletion is not permitted")
+    private fun saved(actorId: UserId, requestId: RequestId): StoredDeletion = checkNotNull(repository.operation(actorId, requestId))
+
+    private fun forbiddenDeletion(): Nothing = forbidden("This deletion is not permitted")
 }

@@ -4,7 +4,6 @@ import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.service.ChatMembershipService
 import com.andrewtinyakov.messenger.chat.service.ChatService
-import com.andrewtinyakov.messenger.chat.web.payload.CreateGroupChatRequest
 import com.andrewtinyakov.messenger.generated.messaging.event.SendRejectionReason
 import com.andrewtinyakov.messenger.message.model.RequestId
 import com.andrewtinyakov.messenger.message.web.payload.SendLookupStatus
@@ -168,7 +167,7 @@ class MessageSendServiceTests
         fun `rejected sends preserve the next accepted group sequence`() {
             val owner = user("removed-send-owner")
             val member = user("removed-send-member")
-            val chat = chatService.createGroup(UserId(owner), CreateGroupChatRequest("Group", listOf(member)))
+            val chat = chatService.createGroup(UserId(owner), "Group", listOf(member).map(::UserId))
             val requestId = newId()
 
             listOf(" " to SendRejectionReason.EMPTY_BODY, "x".repeat(4001) to SendRejectionReason.BODY_TOO_LONG).forEach { (body, reason) ->

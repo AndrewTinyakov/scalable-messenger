@@ -16,8 +16,8 @@ import com.andrewtinyakov.messenger.infrastructure.database.observability.observ
 import com.andrewtinyakov.messenger.infrastructure.database.observability.observedExecuteWithoutResult
 import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStage
 import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStageRecorder
-import com.andrewtinyakov.messenger.infrastructure.outbox.model.EventId
 import com.andrewtinyakov.messenger.infrastructure.outbox.model.OutboxMessage
+import com.andrewtinyakov.messenger.infrastructure.outbox.model.toOutboxMessage
 import com.andrewtinyakov.messenger.infrastructure.outbox.repository.OutboxRepository
 import com.andrewtinyakov.messenger.infrastructure.redis.RoomAddress
 import com.andrewtinyakov.messenger.message.model.CommandResult
@@ -354,9 +354,7 @@ class MessageSendService(
         }
         return PendingMessage(
             saved,
-            events.map {
-                OutboxMessage(id = EventId(it.eventId), room = it.room, payload = mapper.writeValueAsString(it))
-            },
+            events.map { it.toOutboxMessage(mapper) },
         )
     }
 
@@ -395,7 +393,7 @@ class MessageSendService(
 
     private fun enqueue(event: SendRejectedEventV1) {
         SendStageRecorder.record(SendStage.EVENT_PREPARED, requestId = event.requestId, eventId = event.eventId)
-        outboxRepository.enqueue(eventId = EventId(event.eventId), room = event.room, payload = mapper.writeValueAsString(event))
+        outboxRepository.enqueue(event.toOutboxMessage(mapper))
         SendStageRecorder.record(SendStage.OUTBOX_WRITTEN, requestId = event.requestId, eventId = event.eventId)
     }
 

@@ -1,6 +1,7 @@
 package com.andrewtinyakov.messenger.read.web.controller
 
 import com.andrewtinyakov.messenger.auth.model.AuthenticatedSession
+import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.message.model.MessageId
 import com.andrewtinyakov.messenger.read.service.ReadService
@@ -8,6 +9,9 @@ import com.andrewtinyakov.messenger.read.web.payload.AdvanceReadRequest
 import com.andrewtinyakov.messenger.read.web.payload.MessageReadsResponse
 import com.andrewtinyakov.messenger.read.web.payload.ReadProgressResponse
 import com.andrewtinyakov.messenger.read.web.payload.ReadSummaryResponse
+import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
+import com.andrewtinyakov.messenger.shared.web.badRequest
+import com.andrewtinyakov.messenger.shared.web.parseSequence
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
@@ -26,7 +30,12 @@ class ReadController(
         session: AuthenticatedSession,
         @PathVariable id: String,
         @RequestBody input: AdvanceReadRequest,
-    ): ReadProgressResponse = service.advance(ChatId.parse(id), session.userId, input)
+    ): ReadProgressResponse {
+        val chatId = ChatId.parse(id)
+        val throughSequence = parseSequence(input.throughSequence)
+            ?: badRequest(ApiErrorCode.INVALID_SEQUENCE, "throughSequence must be a nonnegative decimal integer")
+        return service.advance(chatId = chatId, userId = session.userId, throughSequence = throughSequence)
+    }
 
     @GetMapping("/reads")
     fun summary(
@@ -41,5 +50,11 @@ class ReadController(
         @PathVariable messageId: String,
         @RequestParam(required = false) afterUserId: String?,
         @RequestParam(defaultValue = "50") limit: Int,
-    ): MessageReadsResponse = service.readers(ChatId.parse(id), session.userId, MessageId.parse(messageId), afterUserId, limit)
+    ): MessageReadsResponse = service.readers(
+        chatId = ChatId.parse(id),
+        userId = session.userId,
+        messageId = MessageId.parse(messageId),
+        afterUserId = afterUserId?.let(UserId::parse),
+        limit = limit,
+    )
 }

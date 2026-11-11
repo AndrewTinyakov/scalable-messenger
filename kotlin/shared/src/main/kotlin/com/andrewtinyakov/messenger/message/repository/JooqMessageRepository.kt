@@ -93,7 +93,7 @@ class JooqMessageRepository(
     }
 
     override fun insertSendResult(result: SendResult) = DatabaseObservation.query(DatabaseOperation.MESSAGE_INSERT_SEND_RESULT) {
-        check(sendResultInsert(result).execute() == 1)
+        check(sendResultsInsert(listOf(result)).execute() == 1)
     }
 
     override fun findSendResults(requests: Map<UserId, List<RequestId>>): List<SendResult> = DatabaseObservation.query(
@@ -112,16 +112,32 @@ class JooqMessageRepository(
             .fetch { it.toSendResult() }
     }
 
-    private fun sendResultInsert(result: SendResult) = db.insertInto(SEND_REQUESTS)
-        .set(SEND_REQUESTS.SENDER_ID, result.senderId.value)
-        .set(SEND_REQUESTS.REQUEST_ID, result.requestId.value)
-        .set(SEND_REQUESTS.CHAT_ID, result.chatId?.value)
-        .set(SEND_REQUESTS.RECIPIENT_ID, result.recipientId?.value)
-        .set(SEND_REQUESTS.FINGERPRINT, result.fingerprint)
-        .set(SEND_REQUESTS.STATUS, DbSendResultStatus.valueOf(result.status.name))
-        .set(SEND_REQUESTS.MESSAGE_ID, result.messageId?.value)
-        .set(SEND_REQUESTS.SEQUENCE, result.sequence)
-        .set(SEND_REQUESTS.REASON, result.reason?.let { DbSendRejectionReason.valueOf(it.name) })
+    private fun sendResultsInsert(results: List<SendResult>) = results.fold(
+        db.insertInto(
+            SEND_REQUESTS,
+            SEND_REQUESTS.SENDER_ID,
+            SEND_REQUESTS.REQUEST_ID,
+            SEND_REQUESTS.CHAT_ID,
+            SEND_REQUESTS.RECIPIENT_ID,
+            SEND_REQUESTS.FINGERPRINT,
+            SEND_REQUESTS.STATUS,
+            SEND_REQUESTS.MESSAGE_ID,
+            SEND_REQUESTS.SEQUENCE,
+            SEND_REQUESTS.REASON,
+        ),
+    ) { insert, result ->
+        insert.values(
+            result.senderId.value,
+            result.requestId.value,
+            result.chatId?.value,
+            result.recipientId?.value,
+            result.fingerprint,
+            DbSendResultStatus.valueOf(result.status.name),
+            result.messageId?.value,
+            result.sequence,
+            result.reason?.let { DbSendRejectionReason.valueOf(it.name) },
+        )
+    }
 
     override fun insertSavedMessage(message: Message, result: SendResult) = DatabaseObservation.query(
         DatabaseOperation.MESSAGE_INSERT_SAVED_MESSAGE,
@@ -145,19 +161,7 @@ class JooqMessageRepository(
             MESSAGES.REPLY_TO_MESSAGE_ID,
             MESSAGES.FORWARDED_FROM_USER_ID,
         )
-        val resultInsert = db.insertInto(
-            SEND_REQUESTS,
-            SEND_REQUESTS.SENDER_ID,
-            SEND_REQUESTS.REQUEST_ID,
-            SEND_REQUESTS.CHAT_ID,
-            SEND_REQUESTS.RECIPIENT_ID,
-            SEND_REQUESTS.FINGERPRINT,
-            SEND_REQUESTS.STATUS,
-            SEND_REQUESTS.MESSAGE_ID,
-            SEND_REQUESTS.SEQUENCE,
-            SEND_REQUESTS.REASON,
-        )
-        for ((message, result) in messages) {
+        for ((message, _) in messages) {
             messageInsert.values(
                 message.id.value,
                 message.chatId.value,
@@ -168,18 +172,8 @@ class JooqMessageRepository(
                 message.reply?.messageId?.value,
                 message.forwardedFromUserId?.value,
             )
-            resultInsert.values(
-                result.senderId.value,
-                result.requestId.value,
-                result.chatId?.value,
-                result.recipientId?.value,
-                result.fingerprint,
-                DbSendResultStatus.valueOf(result.status.name),
-                result.messageId?.value,
-                result.sequence,
-                result.reason?.let { DbSendRejectionReason.valueOf(it.name) },
-            )
         }
+        val resultInsert = sendResultsInsert(messages.map { it.result })
         check(db.batch(messageInsert, resultInsert).execute().all { it == messages.size })
     }
 

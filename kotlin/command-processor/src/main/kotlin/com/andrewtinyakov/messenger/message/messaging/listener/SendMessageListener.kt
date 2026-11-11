@@ -10,6 +10,7 @@ import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStageRecorder
 import com.andrewtinyakov.messenger.message.model.SendTarget
 import com.andrewtinyakov.messenger.message.service.MessageSendBatchService
 import com.andrewtinyakov.messenger.message.service.MessageSendService
+import com.andrewtinyakov.messenger.message.service.toSendRequest
 import com.rabbitmq.client.Channel
 import org.slf4j.LoggerFactory
 import org.springframework.amqp.core.Message
@@ -45,7 +46,7 @@ class SendMessageListener(
                 require(message.body.size <= MAX_COMMAND_BYTES) { "Command exceeds wire byte limit" }
                 val command: SendMessageCommandV1 = reader.readValue(message.body)
                 SendStageRecorder.commit(received[message.messageProperties.deliveryTag], command.requestId)
-                val target = SendTarget.from(command)
+                val target = SendTarget.from(command.toSendRequest())
                 metrics.commandDequeued(
                     Duration.between(command.sentAt, OffsetDateTime.now()),
                 )

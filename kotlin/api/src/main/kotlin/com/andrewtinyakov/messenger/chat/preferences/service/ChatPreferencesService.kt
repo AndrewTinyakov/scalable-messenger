@@ -11,8 +11,7 @@ import com.andrewtinyakov.messenger.chat.preferences.web.payload.toResponse
 import com.andrewtinyakov.messenger.generated.messaging.event.ChatPreferencesChangedEventV1
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseTransaction
 import com.andrewtinyakov.messenger.infrastructure.database.observability.observedExecute
-import com.andrewtinyakov.messenger.infrastructure.outbox.model.EventId
-import com.andrewtinyakov.messenger.infrastructure.outbox.model.OutboxMessage
+import com.andrewtinyakov.messenger.infrastructure.outbox.model.toOutboxMessage
 import com.andrewtinyakov.messenger.infrastructure.outbox.repository.OutboxRepository
 import com.andrewtinyakov.messenger.infrastructure.redis.RoomAddress
 import com.andrewtinyakov.messenger.shared.id.newId
@@ -102,8 +101,8 @@ class ChatPreferencesService(
     private fun notify(userId: UserId, chatIds: List<ChatId>) {
         outbox.enqueue(
             chatIds.map { chatId ->
-                val event = ChatPreferencesChangedEventV1.create(eventId = newId(), room = RoomAddress.user(userId), chatId = chatId.value)
-                OutboxMessage(EventId(event.eventId), event.room, mapper.writeValueAsString(event))
+                ChatPreferencesChangedEventV1.create(eventId = newId(), room = RoomAddress.user(userId), chatId = chatId.value)
+                    .toOutboxMessage(mapper)
             },
         )
     }

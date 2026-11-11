@@ -6,6 +6,7 @@ import com.andrewtinyakov.messenger.chat.model.ChatPreferences
 import com.andrewtinyakov.messenger.chat.preferences.model.MuteEnd
 import com.andrewtinyakov.messenger.chat.repository.ChatPreferenceFields
 import com.andrewtinyakov.messenger.chat.repository.PERMANENT_MUTE
+import com.andrewtinyakov.messenger.chat.repository.notHidden
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Routines
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHATS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHAT_MEMBERS
@@ -98,6 +99,6 @@ class JooqChatPreferencesRepository(
         .execute() == 1
 
     private fun visibleInDirectory(): Condition = CHATS.DELETED_AT.isNull.and(
-        CHAT_MEMBERS.HIDDEN_THROUGH_SEQUENCE.isNull.or(CHATS.NEXT_SEQUENCE.minus(1L).gt(CHAT_MEMBERS.HIDDEN_THROUGH_SEQUENCE)),
+        notHidden(CHAT_MEMBERS),
     )
 }

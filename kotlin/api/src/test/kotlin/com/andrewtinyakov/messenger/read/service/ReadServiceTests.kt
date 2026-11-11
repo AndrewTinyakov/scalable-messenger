@@ -3,12 +3,10 @@ package com.andrewtinyakov.messenger.read.service
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.service.ChatService
-import com.andrewtinyakov.messenger.chat.web.payload.CreateGroupChatRequest
 import com.andrewtinyakov.messenger.infrastructure.outbox.repository.OutboxRepository
 import com.andrewtinyakov.messenger.message.model.MessageId
 import com.andrewtinyakov.messenger.read.monitoring.ReadMetrics
 import com.andrewtinyakov.messenger.read.repository.JooqReadRepository
-import com.andrewtinyakov.messenger.read.web.payload.AdvanceReadRequest
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
 import com.andrewtinyakov.messenger.shared.id.newId
 import com.andrewtinyakov.messenger.shared.web.ApiException
@@ -70,7 +68,7 @@ class ReadServiceTests
         private fun fixture(count: Int = 3, messages: Int = 3, createdAt: String = "2026-11-01T12:00:00Z"): Fixture {
             val owner = UserId(user("reads-${newId()}"))
             val members = (1..count).map { UserId(user("reader-${newId()}")) }
-            val chat = ChatId(chatService.createGroup(owner, CreateGroupChatRequest("Read receipts", members.map { it.value })).id)
+            val chat = ChatId(chatService.createGroup(owner, "Read receipts", members).id)
             val ids = (1..messages).map { sequence ->
                 MessageId(newId()).also { id ->
                     db.update(
@@ -142,13 +140,13 @@ class ReadServiceTests
             val f = fixture(messages = 3)
             val clock = MutableClock("2026-11-02T12:00:00Z")
             val reads = service(clock)
-            reads.advance(f.chat, f.members.first(), AdvanceReadRequest("1"))
+            reads.advance(f.chat, f.members.first(), 1L)
             assertEquals(1, sharedNotifications(f.chat))
             clock.set("2026-11-02T12:00:02Z")
             reads.publishPendingNotifications()
             assertEquals(1, sharedNotifications(f.chat))
             clock.set("2026-11-02T12:00:02.100Z")
-            reads.advance(f.chat, f.members.first(), AdvanceReadRequest("3"))
+            reads.advance(f.chat, f.members.first(), 3L)
             assertEquals(2, sharedNotifications(f.chat))
             assertEquals("3", reads.summary(f.chat, f.owner).maxOtherReadSequence)
         }
@@ -158,10 +156,10 @@ class ReadServiceTests
             val f = fixture(messages = 3)
             val clock = MutableClock("2026-11-02T12:00:00Z")
             val reads = service(clock)
-            reads.advance(f.chat, f.members.first(), AdvanceReadRequest("1"))
+            reads.advance(f.chat, f.members.first(), 1L)
             db.update("DELETE FROM messenger_outbox_events WHERE room=?", "group:${f.chat.value}")
             clock.set("2026-11-02T12:00:01Z")
-            reads.advance(f.chat, f.members.first(), AdvanceReadRequest("3"))
+            reads.advance(f.chat, f.members.first(), 3L)
             reads.publishPendingNotifications()
             assertEquals(0, sharedNotifications(f.chat))
             clock.set("2026-11-02T12:00:02Z")
@@ -184,7 +182,7 @@ class ReadServiceTests
             val release = CountDownLatch(1)
             val winner = concurrently {
                 tx.execute { status ->
-                    reads.advance(f.chat, f.members[0], AdvanceReadRequest("1"))
+                    reads.advance(f.chat, f.members[0], 1L)
                     claimed.countDown()
                     check(release.await(10, TimeUnit.SECONDS))
                     status.setRollbackOnly()
@@ -192,7 +190,7 @@ class ReadServiceTests
             }
             try {
                 assertTrue(claimed.await(10, TimeUnit.SECONDS))
-                assertEquals("2", reads.advance(f.chat, f.members[1], AdvanceReadRequest("2")).throughSequence)
+                assertEquals("2", reads.advance(f.chat, f.members[1], 2L).throughSequence)
             } finally {
                 release.countDown()
                 winner.get(10, TimeUnit.SECONDS)
@@ -214,9 +212,9 @@ class ReadServiceTests
             val registry = SimpleMeterRegistry()
             val reads = service(MutableClock("2026-11-02T12:00:00Z"), registry)
             assertEquals(2, chatService.get(f.chat, f.members[0]).unreadCount)
-            reads.advance(f.chat, f.members[0], AdvanceReadRequest("2"))
-            reads.advance(f.chat, f.members[1], AdvanceReadRequest("2"))
-            reads.advance(f.chat, f.members[1], AdvanceReadRequest("2"))
+            reads.advance(f.chat, f.members[0], 2L)
+            reads.advance(f.chat, f.members[1], 2L)
+            reads.advance(f.chat, f.members[1], 2L)
             assertEquals(0, chatService.get(f.chat, f.members[0]).unreadCount)
             assertEquals(2.0, registry.get("messenger.read.advances").tag("outcome", "advanced").counter().count())
             assertEquals(1.0, registry.get("messenger.read.advances").tag("outcome", "unchanged").counter().count())
@@ -241,13 +239,13 @@ class ReadServiceTests
             val clock = MutableClock("2026-11-02T12:00:00Z")
             val reads = service(clock)
             val member = f.members.first()
-            val first = reads.advance(f.chat, member, AdvanceReadRequest("2"))
+            val first = reads.advance(f.chat, member, 2L)
             assertEquals("2", first.throughSequence)
             assertEquals(OffsetDateTime.parse("2026-11-02T12:00:00Z"), first.readAt)
             clock.set("2026-11-02T13:00:00Z")
-            assertEquals(first.readAt!!.toInstant(), reads.advance(f.chat, member, AdvanceReadRequest("1")).readAt!!.toInstant())
-            assertEquals(first.readAt.toInstant(), reads.advance(f.chat, member, AdvanceReadRequest("2")).readAt!!.toInstant())
-            val latest = reads.advance(f.chat, member, AdvanceReadRequest("3"))
+            assertEquals(first.readAt!!.toInstant(), reads.advance(f.chat, member, 1L).readAt!!.toInstant())
+            assertEquals(first.readAt.toInstant(), reads.advance(f.chat, member, 2L).readAt!!.toInstant())
+            val latest = reads.advance(f.chat, member, 3L)
             assertEquals(OffsetDateTime.parse("2026-11-02T13:00:00Z"), latest.readAt)
             assertEquals(
                 first.readAt.toInstant(),
@@ -261,7 +259,7 @@ class ReadServiceTests
             assertEquals("0", reads.summary(f.chat, member).maxOtherReadSequence)
             assertEquals(2, db.queryForObject("SELECT count(*) FROM chat_read_ranges WHERE chat_id=?", Int::class.java, f.chat.value))
             clock.set("2026-11-02T11:00:00Z")
-            assertEquals(latest.readAt.toInstant(), reads.advance(f.chat, member, AdvanceReadRequest("3")).readAt!!.toInstant())
+            assertEquals(latest.readAt.toInstant(), reads.advance(f.chat, member, 3L).readAt!!.toInstant())
         }
 
         @Test
@@ -276,14 +274,14 @@ class ReadServiceTests
                     pool.submit(
                         Callable {
                             start.await()
-                            reads.advance(f.chat, f.members.first(), AdvanceReadRequest(sequence.toString()))
+                            reads.advance(f.chat, f.members.first(), sequence.toLong())
                         },
                     )
                 }
                 start.countDown()
                 tasks.forEach { it.get(20, TimeUnit.SECONDS) }
                 val others = f.members.drop(1).map { member ->
-                    pool.submit(Callable { reads.advance(f.chat, member, AdvanceReadRequest("30")) })
+                    pool.submit(Callable { reads.advance(f.chat, member, 30L) })
                 }
                 others.forEach { it.get(20, TimeUnit.SECONDS) }
             } finally {
@@ -325,7 +323,7 @@ class ReadServiceTests
             val winner = pool.submit(
                 Callable {
                     tx.execute {
-                        val progress = reads.advance(f.chat, f.members[0], AdvanceReadRequest("1"))
+                        val progress = reads.advance(f.chat, f.members[0], 1L)
                         claimed.countDown()
                         check(release.await(10, TimeUnit.SECONDS))
                         progress
@@ -334,7 +332,7 @@ class ReadServiceTests
             )
             try {
                 assertTrue(claimed.await(10, TimeUnit.SECONDS))
-                val other = pool.submit(Callable { reads.advance(f.chat, f.members[1], AdvanceReadRequest("2")) })
+                val other = pool.submit(Callable { reads.advance(f.chat, f.members[1], 2L) })
                 assertEquals("2", other.get(2, TimeUnit.SECONDS).throughSequence)
                 assertEquals("2", reads.summary(f.chat, f.owner).maxOtherReadSequence)
                 assertEquals(
@@ -366,11 +364,11 @@ class ReadServiceTests
             val f = fixture(messages = 1, createdAt = "2026-11-01T12:00:00Z")
             val clock = MutableClock("2026-11-08T11:59:59Z")
             val reads = service(clock)
-            f.members.forEach { reads.advance(f.chat, it, AdvanceReadRequest("1")) }
+            f.members.forEach { reads.advance(f.chat, it, 1L) }
             val first = reads.readers(f.chat, f.owner, f.messages.single(), null, 2)
             assertTrue(first.detailsAvailable)
             assertEquals(f.members.map { it.value }.sorted().take(2), first.readers.map { it.userId })
-            val second = reads.readers(f.chat, f.owner, f.messages.single(), first.nextUserId, 2)
+            val second = reads.readers(f.chat, f.owner, f.messages.single(), first.nextUserId?.let(::UserId), 2)
             assertEquals(f.members.map { it.value }.sorted().drop(2), second.readers.map { it.userId })
             assertNull(second.nextUserId)
             assertEquals(Instant.parse("2026-11-08T12:00:00Z"), first.detailsExpiresAt.toInstant())
@@ -391,7 +389,7 @@ class ReadServiceTests
             assertEquals(
                 HttpStatus.NOT_FOUND,
                 assertThrows(ApiException::class.java) {
-                    reads.advance(f.chat, outsider, AdvanceReadRequest("bad"))
+                    reads.advance(f.chat, outsider, 1L)
                 }.status,
             )
             assertEquals(HttpStatus.NOT_FOUND, assertThrows(ApiException::class.java) { reads.summary(f.chat, outsider) }.status)
@@ -401,21 +399,19 @@ class ReadServiceTests
                     reads.readers(f.chat, f.members.first(), f.messages.single(), null, 50)
                 }.status,
             )
-            listOf("01", "-1", "9223372036854775808", "2").forEach { value ->
-                assertEquals(
-                    HttpStatus.BAD_REQUEST,
-                    assertThrows(ApiException::class.java) {
-                        reads.advance(f.chat, f.members.first(), AdvanceReadRequest(value))
-                    }.status,
-                )
-            }
-            reads.advance(f.chat, f.members.first(), AdvanceReadRequest("1"))
+            assertEquals(
+                HttpStatus.BAD_REQUEST,
+                assertThrows(ApiException::class.java) {
+                    reads.advance(f.chat, f.members.first(), 2L)
+                }.status,
+            )
+            reads.advance(f.chat, f.members.first(), 1L)
             db.update("DELETE FROM chat_members WHERE chat_id=? AND user_id=?", f.chat.value, f.members.first().value)
             assertEquals("0", reads.summary(f.chat, f.owner).maxOtherReadSequence)
             assertEquals(
                 HttpStatus.NOT_FOUND,
                 assertThrows(ApiException::class.java) {
-                    reads.advance(f.chat, f.members.first(), AdvanceReadRequest("1"))
+                    reads.advance(f.chat, f.members.first(), 1L)
                 }.status,
             )
             db.update("UPDATE messages SET body='',deleted_at=now() WHERE id=?", f.messages.single().value)
@@ -425,7 +421,7 @@ class ReadServiceTests
             assertEquals(
                 HttpStatus.NOT_FOUND,
                 assertThrows(ApiException::class.java) {
-                    reads.advance(f.chat, f.owner, AdvanceReadRequest("1"))
+                    reads.advance(f.chat, f.owner, 1L)
                 }.status,
             )
             assertEquals(
@@ -442,13 +438,13 @@ class ReadServiceTests
             db.update("UPDATE messages SET created_at='2026-11-08T11:00:00Z' WHERE id=?", f.messages.last().value)
             val clock = MutableClock("2026-11-08T11:59:59Z")
             val reads = service(clock)
-            reads.advance(f.chat, f.members.first(), AdvanceReadRequest("1"))
+            reads.advance(f.chat, f.members.first(), 1L)
             clock.set("2026-11-09T00:00:00Z")
             val repo = JooqReadRepository(jooq, clock)
             val cleanup = ReadCleanupService(repo, tx, clock, ReadMetrics(SimpleMeterRegistry()))
             val first = cleanup.cleanup(1)!!
             assertEquals(1, first.ranges)
-            reads.advance(f.chat, f.members.first(), AdvanceReadRequest("2"))
+            reads.advance(f.chat, f.members.first(), 2L)
             for (attempt in 1..300) {
                 if (cleanup.cleanup(1)!!.backlog == 0) break
             }
@@ -473,9 +469,9 @@ class ReadServiceTests
             val f = fixture(messages = 2)
             val clock = MutableClock("2026-11-02T12:00:00Z")
             val reads = service(clock)
-            val first = reads.advance(f.chat, f.members.first(), AdvanceReadRequest("1"))
+            val first = reads.advance(f.chat, f.members.first(), 1L)
             clock.set("2026-11-02T11:00:00Z")
-            val second = reads.advance(f.chat, f.members.first(), AdvanceReadRequest("2"))
+            val second = reads.advance(f.chat, f.members.first(), 2L)
             assertEquals(first.readAt!!.toInstant(), second.readAt!!.toInstant())
             assertEquals(
                 second.readAt.toInstant(),
@@ -488,7 +484,7 @@ class ReadServiceTests
             val f = fixture(messages = 2)
             val clock = MutableClock("2026-11-08T11:59:59Z")
             val reads = service(clock)
-            reads.advance(f.chat, f.members.first(), AdvanceReadRequest("1"))
+            reads.advance(f.chat, f.members.first(), 1L)
             clock.set("2026-11-09T00:00:00Z")
             val repository = JooqReadRepository(jooq, clock)
             val cleanup = ReadCleanupService(repository, tx, clock, ReadMetrics(SimpleMeterRegistry()))
@@ -508,7 +504,7 @@ class ReadServiceTests
                 )
                 assertTrue(locked.await(10, TimeUnit.SECONDS))
                 assertNull(cleanup.cleanup(1))
-                val progress = pool.submit(Callable { reads.advance(f.chat, f.members.first(), AdvanceReadRequest("2")) })
+                val progress = pool.submit(Callable { reads.advance(f.chat, f.members.first(), 2L) })
                 assertEquals("2", progress.get(10, TimeUnit.SECONDS).throughSequence)
                 release.countDown()
                 assertEquals(1, owner.get(10, TimeUnit.SECONDS)!!.ranges)
@@ -526,7 +522,7 @@ class ReadServiceTests
             val clock = MutableClock("2026-11-02T12:00:00Z")
             val reads = service(clock)
             val member = f.members.first()
-            val first = reads.advance(f.chat, member, AdvanceReadRequest("1"))
+            val first = reads.advance(f.chat, member, 1L)
             db.update("DELETE FROM chat_members WHERE chat_id=? AND user_id=?", f.chat.value, member.value)
             assertEquals("0", reads.summary(f.chat, f.owner).maxOtherReadSequence)
             assertFalse(
@@ -540,7 +536,7 @@ class ReadServiceTests
             db.update("INSERT INTO chat_members(chat_id,user_id) VALUES (?,?)", f.chat.value, member.value)
             assertEquals("1", reads.summary(f.chat, f.owner).maxOtherReadSequence)
             clock.set("2026-11-02T13:00:00Z")
-            assertEquals(first.readAt!!.toInstant(), reads.advance(f.chat, member, AdvanceReadRequest("1")).readAt!!.toInstant())
+            assertEquals(first.readAt!!.toInstant(), reads.advance(f.chat, member, 1L).readAt!!.toInstant())
             assertEquals(
                 first.readAt.toInstant(),
                 reads.readers(f.chat, f.owner, f.messages.single(), null, 50).readers.single().readAt.toInstant(),
@@ -564,7 +560,7 @@ class ReadServiceTests
                             repository.requireMember(f.chat, f.members.first())
                             authorized.countDown()
                             check(release.await(15, TimeUnit.SECONDS))
-                            reads.advance(f.chat, f.members.first(), AdvanceReadRequest("1"))
+                            reads.advance(f.chat, f.members.first(), 1L)
                         }
                     },
                 )
@@ -600,7 +596,7 @@ class ReadServiceTests
         fun `zero progress and final reader page serialize required nullable fields`() {
             val f = fixture(messages = 1)
             val reads = service(Clock.fixed(Instant.parse("2026-11-02T12:00:00Z"), ZoneOffset.UTC))
-            val progress = reads.advance(f.chat, f.members.first(), AdvanceReadRequest("0"))
+            val progress = reads.advance(f.chat, f.members.first(), 0L)
             val serializedProgress = mapper.readTree(mapper.writeValueAsString(progress))
             assertTrue(serializedProgress.has("readAt"))
             assertTrue(serializedProgress.get("readAt").isNull)
@@ -617,7 +613,7 @@ class ReadServiceTests
         fun `future creation time does not expose receipt detail`() {
             val f = fixture(messages = 1, createdAt = "2026-11-03T12:00:00Z")
             val reads = service(Clock.fixed(Instant.parse("2026-11-02T12:00:00Z"), ZoneOffset.UTC))
-            reads.advance(f.chat, f.members.first(), AdvanceReadRequest("1"))
+            reads.advance(f.chat, f.members.first(), 1L)
             val details = reads.readers(f.chat, f.owner, f.messages.single(), null, 50)
             assertFalse(details.detailsAvailable)
             assertTrue(details.readers.isEmpty())
@@ -629,7 +625,7 @@ class ReadServiceTests
             db.update("UPDATE messages SET created_at='2026-10-28T13:00:00Z' WHERE id=?", f.messages[1].value)
             db.update("UPDATE messages SET created_at='2026-11-02T11:00:00Z' WHERE id=?", f.messages[2].value)
             val reads = service(Clock.fixed(Instant.parse("2026-11-02T12:00:00Z"), ZoneOffset.UTC))
-            reads.advance(f.chat, f.members.first(), AdvanceReadRequest("3"))
+            reads.advance(f.chat, f.members.first(), 3L)
             assertEquals(3, db.queryForObject("SELECT count(*) FROM chat_read_ranges WHERE chat_id=?", Int::class.java, f.chat.value))
             for (id in f.messages) assertEquals(1, reads.readers(f.chat, f.owner, id, null, 50).readers.size)
         }
@@ -639,12 +635,12 @@ class ReadServiceTests
             val f = fixture(messages = 300)
             val clock = MutableClock("2026-11-02T12:00:00Z")
             val reads = service(clock)
-            reads.advance(f.chat, f.members.first(), AdvanceReadRequest("300"))
+            reads.advance(f.chat, f.members.first(), 300L)
             assertEquals(8, db.queryForObject("SELECT count(*) FROM chat_read_ranges WHERE chat_id=?", Int::class.java, f.chat.value))
             assertEquals(1, reads.readers(f.chat, f.owner, f.messages.first(), null, 50).readers.size)
             assertEquals(1, reads.readers(f.chat, f.owner, f.messages.last(), null, 50).readers.size)
             val old = fixture(messages = 1, createdAt = "2026-10-25T12:00:00Z")
-            reads.advance(old.chat, old.members.first(), AdvanceReadRequest("1"))
+            reads.advance(old.chat, old.members.first(), 1L)
             assertEquals(0, db.queryForObject("SELECT count(*) FROM chat_read_ranges WHERE chat_id=?", Int::class.java, old.chat.value))
             assertEquals("1", reads.summary(old.chat, old.members.first()).throughSequence)
             assertFalse(reads.readers(old.chat, old.owner, old.messages.single(), null, 50).detailsAvailable)
@@ -655,7 +651,7 @@ class ReadServiceTests
             val f = fixture(messages = 1)
             val clock = MutableClock("2026-11-02T12:00:00Z")
             val reads = service(clock)
-            reads.advance(f.chat, f.members.first(), AdvanceReadRequest("1"))
+            reads.advance(f.chat, f.members.first(), 1L)
             clock.set("2026-11-02T12:02:00Z")
             val cleanup = ReadCleanupService(JooqReadRepository(jooq, clock), tx, clock, ReadMetrics(SimpleMeterRegistry()))
             assertEquals(1, cleanup.cleanup()!!.notifications)
@@ -666,8 +662,8 @@ class ReadServiceTests
         fun `accepted read timestamps use database precision across first response repeat and details`() {
             val f = fixture(messages = 1)
             val reads = service(Clock.fixed(Instant.parse("2026-11-02T12:00:00.123456789Z"), ZoneOffset.UTC))
-            val first = reads.advance(f.chat, f.members.first(), AdvanceReadRequest("1"))
-            val repeated = reads.advance(f.chat, f.members.first(), AdvanceReadRequest("1"))
+            val first = reads.advance(f.chat, f.members.first(), 1L)
+            val repeated = reads.advance(f.chat, f.members.first(), 1L)
             val details = reads.readers(f.chat, f.owner, f.messages.single(), null, 50)
             assertEquals(Instant.parse("2026-11-02T12:00:00.123456Z"), first.readAt!!.toInstant())
             assertEquals(first.readAt.toInstant(), repeated.readAt!!.toInstant())

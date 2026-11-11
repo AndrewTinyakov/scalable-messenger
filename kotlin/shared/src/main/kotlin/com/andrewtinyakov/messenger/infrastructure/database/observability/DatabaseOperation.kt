@@ -63,6 +63,7 @@ enum class DatabaseOperation(
     READ_CLEANUP("read.cleanup"),
     READ_BACKLOG("read.backlog"),
     PRESENCE_AUTHORIZE("presence.authorize"),
+    SIDEBAR_AUTHORIZE("sidebar.authorize"),
     VISIBILITY_SNAPSHOT("visibility.snapshot"),
     VISIBILITY_INTERVAL_SEEK("visibility.interval_seek"),
     MESSAGE_VISIBLE_SPAN("message.visible_span"),

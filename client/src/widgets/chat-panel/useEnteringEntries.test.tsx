@@ -17,7 +17,13 @@ function Probe({
   keys: string[]
   empty?: boolean
 }) {
-  seen.push([...useEnteringEntries(chatId, keys, empty)])
+  seen.push([
+    ...useEnteringEntries(
+      chatId,
+      keys.map((key) => ({ key, saved: !key.startsWith('pending') })),
+      empty,
+    ),
+  ])
   return null
 }
 
@@ -53,6 +59,12 @@ describe('entering message entries', () => {
     await show('a', ['2', '3'])
     expect(await show('a', ['1', '2', '3'])).toEqual([])
     expect(await show('a', ['1', '2', '3', '4'])).toEqual(['4'])
+  })
+
+  it('animates a peer message that lands before an own pending send', async () => {
+    await show('a', ['1'])
+    expect(await show('a', ['1', 'pending-a'])).toEqual(['pending-a'])
+    expect(await show('a', ['1', '2', 'pending-a'])).toEqual(['2'])
   })
 
   it('does not animate a chat switch or a page of history', async () => {

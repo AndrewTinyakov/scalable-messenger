@@ -193,10 +193,8 @@ export function useChatDirectory({
     const refreshGeneration = refreshGenerationRef.current
     const requestGeneration = ++requestGenerationRef.current
     try {
-      const [page, firstPage] = await Promise.all([
-        sessionApi.chats(nextChatCursor),
-        sessionApi.chats(),
-      ])
+      const page = await sessionApi.chats(nextChatCursor)
+      const firstPage = await sessionApi.chats()
       if (!activeRef.current || refreshGeneration !== refreshGenerationRef.current) return
       const byId = new Map(chatsRef.current.map((chat) => [chat.id, chat]))
       const fresh = new Map(page.chats.map((chat) => [chat.id, chat]))

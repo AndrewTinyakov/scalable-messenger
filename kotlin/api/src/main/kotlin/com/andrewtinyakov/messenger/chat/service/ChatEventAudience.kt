@@ -9,11 +9,11 @@ import org.springframework.stereotype.Component
 
 @Component
 class ChatEventAudience(
-    private val chats: ChatRepository,
+    private val chatRepository: ChatRepository,
 ) {
     fun rooms(chatId: ChatId, kind: ChatKind, personalViewer: UserId? = null): List<String> = when {
         personalViewer != null -> listOf(RoomAddress.user(personalViewer))
         kind == ChatKind.GROUP -> listOf(RoomAddress.group(chatId))
-        else -> chats.findMemberIds(chatId).map(RoomAddress::user)
+        else -> chatRepository.findMemberIds(chatId).map(RoomAddress::user)
     }
 }

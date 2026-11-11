@@ -3,6 +3,7 @@ package com.andrewtinyakov.messenger.message.web.payload
 import com.andrewtinyakov.messenger.generated.messaging.event.SendRejectionReason
 import com.andrewtinyakov.messenger.message.model.Message
 import com.andrewtinyakov.messenger.message.model.MessageId
+import com.andrewtinyakov.messenger.message.model.SendResult
 import com.andrewtinyakov.messenger.message.visibility.model.VisibilitySnapshot
 import com.andrewtinyakov.messenger.shared.web.StrictStringDeserializer
 import com.fasterxml.jackson.annotation.JsonInclude
@@ -90,7 +91,7 @@ data class SendStatusResponse(
 )
 
 data class SendStatusesRequest(
-    @field:Size(min = 1, max = 100)
+    @field:Size(min = 1, max = SendResult.MAX_LOOKUP_REQUEST_IDS)
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val requestIds: List<String>,
 )

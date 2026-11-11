@@ -13,6 +13,8 @@ import org.jooq.impl.DSL
 import org.springframework.stereotype.Repository
 import com.andrewtinyakov.messenger.infrastructure.database.generated.enums.ChatKind as DbChatKind
 
+private const val INSERT_CHUNK_SIZE = 500
+
 @Repository
 class JooqGroupMembershipRepository(
     private val db: DSLContext,
@@ -56,7 +58,7 @@ class JooqGroupMembershipRepository(
         userIds: List<UserId>,
     ) = DatabaseObservation.query(DatabaseOperation.CHAT_INSERT_MEMBERS_AND_INCREMENT_COUNT) {
         if (userIds.isEmpty()) return@query
-        userIds.chunked(500)
+        userIds.chunked(INSERT_CHUNK_SIZE)
             .forEach { chunk ->
                 val insert = db.insertInto(
                     CHAT_MEMBERS,
@@ -113,27 +115,6 @@ class JooqGroupMembershipRepository(
                 ),
             )
             .fetchOne { it.get(members) }
-    }
-
-    override fun groupMemberships(
-        chatIds: List<ChatId>,
-        userId: UserId,
-    ): Set<ChatId> = DatabaseObservation.query(DatabaseOperation.CHAT_GROUP_MEMBERSHIPS) {
-        if (chatIds.isEmpty()) return emptySet()
-        return db.select(CHAT_MEMBERS.CHAT_ID)
-            .from(CHAT_MEMBERS)
-            .join(CHATS)
-            .on(CHATS.ID.eq(CHAT_MEMBERS.CHAT_ID))
-            .where(
-                CHAT_MEMBERS.USER_ID.eq(userId.value),
-                CHAT_MEMBERS.CHAT_ID.`in`(chatIds.map(ChatId::value)),
-                CHATS.KIND.eq(DbChatKind.GROUP),
-                CHATS.DELETED_AT.isNull,
-            )
-            .fetch(CHAT_MEMBERS.CHAT_ID)
-            .filterNotNull()
-            .map(::ChatId)
-            .toSet()
     }
 
     override fun deleteMemberAndDecrementCount(

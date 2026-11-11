@@ -58,7 +58,7 @@ class DatabaseTransactionListener(
     private fun phase(state: State, name: String, started: Long, failure: Throwable?) {
         metrics.record(
             "messenger.database.transaction.phase",
-            state.operation.label,
+            state.operation.metricValue,
             if (failure == null) "success" else "failure",
             System.nanoTime() - started,
             name,
@@ -69,7 +69,7 @@ class DatabaseTransactionListener(
         val states = transactions.get() ?: return
         val state = states.remove(transaction) ?: return
         if (states.isEmpty()) transactions.remove()
-        metrics.record("messenger.database.transaction", state.operation.label, outcome, System.nanoTime() - state.started)
+        metrics.record("messenger.database.transaction", state.operation.metricValue, outcome, System.nanoTime() - state.started)
     }
 
     private class State(

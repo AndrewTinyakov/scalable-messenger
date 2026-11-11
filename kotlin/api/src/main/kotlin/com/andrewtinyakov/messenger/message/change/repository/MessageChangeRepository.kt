@@ -10,9 +10,9 @@ import java.time.OffsetDateTime
 interface MessageChangeRepository {
     fun cursor(chatId: ChatId, userId: UserId): MutationCursor?
 
-    fun changes(chatId: ChatId, afterRevision: Long, throughRevision: Long, limit: Int): List<MessageChange>
+    fun page(chatId: ChatId, afterRevision: Long, throughRevision: Long, limit: Int): List<MessageChange>
 
-    fun mutate(chatId: ChatId, messageId: MessageId, body: String, now: OffsetDateTime): Long
+    fun edit(chatId: ChatId, messageId: MessageId, body: String, now: OffsetDateTime): Long
 
     fun prune(before: OffsetDateTime, limit: Int): Int
 }

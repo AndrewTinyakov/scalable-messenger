@@ -11,32 +11,32 @@ import com.andrewtinyakov.messenger.message.model.MessageId
 import com.andrewtinyakov.messenger.message.model.RequestId
 
 interface DeletionRepository {
-    fun lockRequest(actorId: UserId, requestId: RequestId)
+    fun lockRequest(userId: UserId, requestId: RequestId)
 
-    fun operation(actorId: UserId, requestId: RequestId): StoredDeletion?
+    fun operation(userId: UserId, requestId: RequestId): StoredDeletion?
 
-    fun targets(chatId: ChatId, actorId: UserId, ids: List<MessageId>, scope: DeletionScope): List<DeletionMessage>
+    fun targets(chatId: ChatId, userId: UserId, ids: List<MessageId>, scope: DeletionScope): List<DeletionMessage>
 
-    fun lockChat(chatId: ChatId, actorId: UserId): DeletionChat?
+    fun lockChat(chatId: ChatId, userId: UserId): DeletionChat?
 
-    fun hideMessages(chatId: ChatId, actorId: UserId, messages: List<DeletionMessage>): Long
+    fun hideMessages(chatId: ChatId, userId: UserId, messages: List<DeletionMessage>): Long
 
-    fun clearPersonal(chatId: ChatId, actorId: UserId, through: Long, hide: Boolean): Long
+    fun clearPersonal(chatId: ChatId, userId: UserId, through: Long, hide: Boolean): Long
 
     fun removeMessages(chatId: ChatId, messages: List<DeletionMessage>): Long
 
     fun repairClosedPurge(chatId: ChatId, through: Long)
 
-    fun clearGlobal(chatId: ChatId, actorId: UserId, through: Long, close: Boolean): Long
+    fun clearGlobal(chatId: ChatId, userId: UserId, through: Long, close: Boolean): Long
 
     fun saveOperation(
         chatId: ChatId,
-        actorId: UserId,
+        userId: UserId,
         command: DeletionCommand,
         fingerprint: String,
         chat: DeletionChat,
-        revision: Long,
-        visibility: Long,
+        mutationRevision: Long,
+        visibilityRevision: Long,
         rows: Int,
     )
 }

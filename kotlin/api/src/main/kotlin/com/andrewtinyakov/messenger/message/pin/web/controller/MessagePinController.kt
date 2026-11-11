@@ -24,7 +24,7 @@ import org.springframework.web.bind.annotation.RestController
 @RestController
 @RequestMapping("/v1/chats/{id}/pins")
 class MessagePinController(
-    private val service: MessagePinService,
+    private val messagePinService: MessagePinService,
 ) {
     @GetMapping
     fun list(
@@ -35,7 +35,7 @@ class MessagePinController(
     ): PinnedMessagePageResponse {
         val chatId = ChatId.parse(id)
         requirePageLimit(limit)
-        return service.list(
+        return messagePinService.list(
             chatId = chatId,
             userId = session.userId,
             beforeSequence = beforeSequence?.let {
@@ -52,7 +52,7 @@ class MessagePinController(
         @PathVariable id: String,
         @PathVariable messageId: String,
         @RequestBody input: PinMessageRequest,
-    ) = service.pin(ChatId.parse(id), session.userId, MessageId.parse(messageId), input.scope)
+    ) = messagePinService.pin(ChatId.parse(id), session.userId, MessageId.parse(messageId), input.scope)
 
     @DeleteMapping("/{messageId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
@@ -60,12 +60,12 @@ class MessagePinController(
         session: AuthenticatedSession,
         @PathVariable id: String,
         @PathVariable messageId: String,
-    ) = service.unpin(ChatId.parse(id), session.userId, MessageId.parse(messageId))
+    ) = messagePinService.unpin(ChatId.parse(id), session.userId, MessageId.parse(messageId))
 
     @DeleteMapping
     @ResponseStatus(HttpStatus.NO_CONTENT)
     fun unpinAll(
         session: AuthenticatedSession,
         @PathVariable id: String,
-    ) = service.unpinAll(ChatId.parse(id), session.userId)
+    ) = messagePinService.unpinAll(ChatId.parse(id), session.userId)
 }

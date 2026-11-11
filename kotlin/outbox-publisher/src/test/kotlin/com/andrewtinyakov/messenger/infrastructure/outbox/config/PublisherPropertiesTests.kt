@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.context.annotation.Configuration
+import java.time.Duration
 
 class PublisherPropertiesTests {
     private val runner = ApplicationContextRunner().withUserConfiguration(PropertiesConfiguration::class.java)
@@ -19,17 +20,21 @@ class PublisherPropertiesTests {
             "messenger.publisher.batch-bytes=131072",
             "messenger.publisher.publish-timeout-ms=2500",
             "messenger.publisher.room-batch-size=3",
+            "messenger.publisher.worker-join-timeout=3s",
+            "messenger.publisher.room-publication-queue-capacity=50",
         ).run { context ->
             assertThat(context).hasNotFailed()
             assertThat(context.getBean(PublisherProperties::class.java)).isEqualTo(
                 PublisherProperties(
-                    pollMs = 250,
+                    pollInterval = Duration.ofMillis(250),
                     batchSize = 20,
-                    leaseSeconds = 10,
+                    lease = Duration.ofSeconds(10),
                     concurrency = 4,
                     batchBytes = 131072,
-                    publishTimeoutMs = 2500,
+                    publishTimeout = Duration.ofMillis(2500),
                     roomBatchSize = 3,
+                    workerJoinTimeout = Duration.ofSeconds(3),
+                    roomPublicationQueueCapacity = 50,
                 ),
             )
         }
@@ -47,6 +52,8 @@ class PublisherPropertiesTests {
             "messenger.publisher.publish-timeout-ms=7501",
             "messenger.publisher.room-batch-size=0",
             "messenger.publisher.room-batch-size=101",
+            "messenger.publisher.worker-join-timeout=0s",
+            "messenger.publisher.room-publication-queue-capacity=0",
         )) {
             runner.withPropertyValues(property).run { context ->
                 assertThat(context).hasFailed()

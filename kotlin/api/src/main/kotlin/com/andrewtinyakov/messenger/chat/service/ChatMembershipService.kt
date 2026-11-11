@@ -26,15 +26,15 @@ import tools.jackson.databind.ObjectMapper
 
 @Service
 class ChatMembershipService(
-    private val repository: ChatRepository,
-    private val memberships: GroupMembershipRepository,
+    private val chatRepository: ChatRepository,
+    private val groupMembershipRepository: GroupMembershipRepository,
     private val tx: TransactionTemplate,
     private val outboxRepository: OutboxRepository,
     private val mapper: ObjectMapper,
 ) {
     fun listMembers(chatId: ChatId, viewerId: UserId, afterUserId: UserId?, limit: Int): GroupMemberPageResponse {
         requirePageLimit(limit)
-        val fetched = memberships.findGroupMemberPage(chatId, viewerId, afterUserId, limit + 1) ?: notFound()
+        val fetched = groupMembershipRepository.findGroupMemberPage(chatId, viewerId, afterUserId, limit + 1) ?: notFound()
         val page = fetched.take(limit)
         return GroupMemberPageResponse(
             members = page.map(UserSummary::toResponse),
@@ -42,12 +42,12 @@ class ChatMembershipService(
         )
     }
 
-    fun removeMember(chatId: ChatId, actorId: UserId, memberId: UserId) {
+    fun removeMember(chatId: ChatId, userId: UserId, memberId: UserId) {
         tx.observedExecuteWithoutResult(DatabaseTransaction.CHAT_REMOVE_MEMBER) {
-            val owner = repository.findByIdForUpdate(chatId = chatId)?.takeIf { it.kind == ChatKind.GROUP }?.ownerId ?: notFound()
-            if (owner != actorId) forbidden("Only the group owner can remove members")
+            val owner = chatRepository.findByIdForUpdate(chatId = chatId)?.takeIf { it.kind == ChatKind.GROUP }?.ownerId ?: notFound()
+            if (owner != userId) forbidden("Only the group owner can remove members")
             if (memberId == owner) badRequest(ApiErrorCode.INVALID_MEMBER, "The group owner cannot be removed")
-            if (!memberships.deleteMemberAndDecrementCount(chatId = chatId, userId = memberId)) {
+            if (!groupMembershipRepository.deleteMemberAndDecrementCount(chatId = chatId, userId = memberId)) {
                 notFound(ApiErrorCode.MEMBER_NOT_FOUND, "Member not found")
             }
             val events = listOf(RoomAddress.user(memberId), RoomAddress.group(chatId)).map { room ->

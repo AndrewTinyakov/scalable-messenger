@@ -9,6 +9,7 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MES
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseObservation
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseOperation
 import com.andrewtinyakov.messenger.message.change.model.MessageChange
+import com.andrewtinyakov.messenger.message.change.model.MessageChangeKind
 import com.andrewtinyakov.messenger.message.change.model.MutationCursor
 import com.andrewtinyakov.messenger.message.model.MessageId
 import org.jooq.DSLContext
@@ -34,7 +35,7 @@ class JooqMessageChangeRepository(
                 .fetchOne { MutationCursor(it.value1()!!, it.value2()!!) }
         }
 
-    override fun changes(chatId: ChatId, afterRevision: Long, throughRevision: Long, limit: Int): List<MessageChange> =
+    override fun page(chatId: ChatId, afterRevision: Long, throughRevision: Long, limit: Int): List<MessageChange> =
         DatabaseObservation.query(DatabaseOperation.MESSAGE_CHANGE_PAGE) {
             db.select(
                 MESSAGE_CHANGES.REVISION,
@@ -49,10 +50,18 @@ class JooqMessageChangeRepository(
                     MESSAGE_CHANGES.REVISION.le(throughRevision),
                 )
                 .orderBy(MESSAGE_CHANGES.REVISION).limit(limit)
-                .fetch { MessageChange(it.value1()!!, it.value2()?.let(::MessageId), it.value3()!!, it.value4(), it.value5()) }
+                .fetch {
+                    MessageChange(
+                        revision = it.value1()!!,
+                        messageId = it.value2()?.let(::MessageId),
+                        kind = MessageChangeKind.valueOf(it.value3()!!),
+                        sequence = it.value4(),
+                        clearedThroughSequence = it.value5(),
+                    )
+                }
         }
 
-    override fun mutate(chatId: ChatId, messageId: MessageId, body: String, now: OffsetDateTime): Long =
+    override fun edit(chatId: ChatId, messageId: MessageId, body: String, now: OffsetDateTime): Long =
         DatabaseObservation.query(DatabaseOperation.MESSAGE_MUTATE) {
             check(
                 db.update(MESSAGES).set(MESSAGES.BODY, body)

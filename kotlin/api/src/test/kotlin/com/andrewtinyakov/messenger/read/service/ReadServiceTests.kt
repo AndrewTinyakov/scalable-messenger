@@ -5,6 +5,7 @@ import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.service.ChatService
 import com.andrewtinyakov.messenger.infrastructure.outbox.repository.OutboxRepository
 import com.andrewtinyakov.messenger.message.model.MessageId
+import com.andrewtinyakov.messenger.read.config.ReadProperties
 import com.andrewtinyakov.messenger.read.monitoring.ReadMetrics
 import com.andrewtinyakov.messenger.read.repository.JooqReadRepository
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
@@ -88,6 +89,7 @@ class ReadServiceTests
         private fun service(clock: Clock, registry: SimpleMeterRegistry = SimpleMeterRegistry()): ReadService = ReadService(
             JooqReadRepository(jooq, clock),
             outbox,
+            ReadProperties(),
             mapper,
             tx,
             clock,
@@ -441,7 +443,7 @@ class ReadServiceTests
             reads.advance(f.chat, f.members.first(), 1L)
             clock.set("2026-11-09T00:00:00Z")
             val repo = JooqReadRepository(jooq, clock)
-            val cleanup = ReadCleanupService(repo, tx, clock, ReadMetrics(SimpleMeterRegistry()))
+            val cleanup = ReadCleanupService(repo, ReadProperties(), tx, clock, ReadMetrics(SimpleMeterRegistry()))
             val first = cleanup.cleanup(1)!!
             assertEquals(1, first.ranges)
             reads.advance(f.chat, f.members.first(), 2L)
@@ -487,7 +489,7 @@ class ReadServiceTests
             reads.advance(f.chat, f.members.first(), 1L)
             clock.set("2026-11-09T00:00:00Z")
             val repository = JooqReadRepository(jooq, clock)
-            val cleanup = ReadCleanupService(repository, tx, clock, ReadMetrics(SimpleMeterRegistry()))
+            val cleanup = ReadCleanupService(repository, ReadProperties(), tx, clock, ReadMetrics(SimpleMeterRegistry()))
             val locked = CountDownLatch(1)
             val release = CountDownLatch(1)
             val pool = Executors.newFixedThreadPool(2)
@@ -653,7 +655,8 @@ class ReadServiceTests
             val reads = service(clock)
             reads.advance(f.chat, f.members.first(), 1L)
             clock.set("2026-11-02T12:02:00Z")
-            val cleanup = ReadCleanupService(JooqReadRepository(jooq, clock), tx, clock, ReadMetrics(SimpleMeterRegistry()))
+            val cleanup =
+                ReadCleanupService(JooqReadRepository(jooq, clock), ReadProperties(), tx, clock, ReadMetrics(SimpleMeterRegistry()))
             assertEquals(1, cleanup.cleanup()!!.notifications)
             assertEquals(1, reads.readers(f.chat, f.owner, f.messages.single(), null, 50).readers.size)
         }

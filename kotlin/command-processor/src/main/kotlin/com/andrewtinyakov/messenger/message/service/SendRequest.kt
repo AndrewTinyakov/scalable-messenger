@@ -4,11 +4,10 @@ import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.generated.messaging.command.SendMessageCommandV1
 import com.andrewtinyakov.messenger.generated.messaging.event.SendRejectionReason
+import com.andrewtinyakov.messenger.message.model.Message
 import com.andrewtinyakov.messenger.message.model.MessageId
 import com.andrewtinyakov.messenger.message.model.RequestId
 import com.andrewtinyakov.messenger.shared.crypto.sha256
-
-private const val MAX_BODY_CODE_POINTS = 4000
 
 internal data class SendRequest(
     val chatId: ChatId?,
@@ -45,7 +44,7 @@ internal data class SendRequest(
     val bodyRejection: SendRejectionReason?
         get() = when {
             body.isBlank() -> SendRejectionReason.EMPTY_BODY
-            body.codePointCount(0, body.length) > MAX_BODY_CODE_POINTS -> SendRejectionReason.BODY_TOO_LONG
+            body.codePointCount(0, body.length) > Message.MAX_BODY_LENGTH -> SendRejectionReason.BODY_TOO_LONG
             else -> null
         }
 }

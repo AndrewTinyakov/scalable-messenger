@@ -28,22 +28,22 @@ data class ChatResponse(
     @field:Schema(
         requiredMode = Schema.RequiredMode.NOT_REQUIRED,
         nullable = true,
-        description = "Latest visible message in the newest 256 rows; null can leave older visible history",
+        description = "Latest visible message in the newest ${Chat.SUMMARY_WINDOW} rows; null can leave older visible history",
     )
     @field:JsonInclude(JsonInclude.Include.ALWAYS)
     val lastMessage: ChatLastMessageResponse? = null,
     @field:Schema(
         requiredMode = Schema.RequiredMode.NOT_REQUIRED,
         minimum = "0",
-        maximum = "256",
-        description = "Visible other-author unread messages in the newest 256 candidates; lower bound when capped",
+        maximum = "${Chat.SUMMARY_WINDOW}",
+        description = "Visible other-author unread messages in the newest ${Chat.SUMMARY_WINDOW} candidates; lower bound when capped",
     )
     val unreadCount: Int = 0,
     @field:Schema(requiredMode = Schema.RequiredMode.NOT_REQUIRED, nullable = true)
     val activityAt: OffsetDateTime? = null,
     @field:Schema(
         requiredMode = Schema.RequiredMode.NOT_REQUIRED,
-        description = "True for 256 raw unread candidates; real count may be higher even when unreadCount is zero",
+        description = "True for ${Chat.SUMMARY_WINDOW} raw unread candidates; real count may be higher even when unreadCount is zero",
     )
     val unreadCountCapped: Boolean = false,
     @field:Schema(
@@ -87,16 +87,16 @@ data class GroupMemberPageResponse(
 data class CreateGroupChatRequest(
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     @field:NotBlank
-    @field:Size(max = 80)
+    @field:Size(max = Chat.MAX_NAME_LENGTH)
     val name: String,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
-    @field:Size(min = 1, max = 999)
+    @field:Size(min = 1, max = Chat.MAX_INITIAL_GROUP_MEMBERS - 1)
     val memberIds: List<String>,
 )
 
 data class AddGroupMembersRequest(
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
-    @field:Size(min = 1, max = 1000)
+    @field:Size(min = 1, max = Chat.MAX_ADDED_MEMBERS)
     val memberIds: List<String>,
 )
 

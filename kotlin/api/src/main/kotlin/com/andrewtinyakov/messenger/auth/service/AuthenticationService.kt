@@ -36,8 +36,9 @@ import java.time.OffsetDateTime
 import java.util.Base64
 import java.util.UUID
 
-private val usernamePattern = Regex("[a-z0-9_]{3,40}")
+private val usernamePattern = Regex("[a-z0-9_]{${User.MIN_USERNAME_LENGTH},${User.MAX_USERNAME_LENGTH}}")
 private const val SESSION_LIFETIME_DAYS = 30L
+private const val SESSION_TOKEN_BYTES = 32
 
 private fun SessionToken.sessionId() = SessionId(sha256(value))
 
@@ -45,14 +46,14 @@ private fun SessionToken.sessionId() = SessionId(sha256(value))
 class AuthenticationService(
     private val userRepository: UserRepository,
     private val sessionRepository: SessionRepository,
-    private val encoder: PasswordEncoder,
+    private val passwordEncoder: PasswordEncoder,
     private val clock: Clock,
     private val tx: TransactionTemplate,
     private val outboxRepository: OutboxRepository,
     private val mapper: ObjectMapper,
 ) {
     private val random = SecureRandom()
-    private val rejectedPasswordHash = requireNotNull(encoder.encode(UUID.randomUUID().toString()))
+    private val rejectedPasswordHash = requireNotNull(passwordEncoder.encode(UUID.randomUUID().toString()))
 
     fun register(input: AuthRequest): SessionCredentials {
         validateInput(input)
@@ -63,7 +64,7 @@ class AuthenticationService(
         val user = User(
             id = UserId(newId()),
             username = username,
-            passwordHash = requireNotNull(encoder.encode(input.password)),
+            passwordHash = requireNotNull(passwordEncoder.encode(input.password)),
         )
         try {
             return tx.observedExecute(DatabaseTransaction.AUTH_REGISTER) {
@@ -79,7 +80,7 @@ class AuthenticationService(
         validateInput(input)
         val username = input.username.trim().lowercase()
         val user = userRepository.findUserByUsername(username = username)
-        val matches = encoder.matches(input.password, user?.passwordHash ?: rejectedPasswordHash)
+        val matches = passwordEncoder.matches(input.password, user?.passwordHash ?: rejectedPasswordHash)
         if (user == null || !matches) {
             unauthorized(ApiErrorCode.INVALID_CREDENTIALS, "Invalid username or password")
         }
@@ -115,7 +116,7 @@ class AuthenticationService(
 
     private fun issue(user: User, requestedDeviceId: DeviceId?): SessionCredentials {
         val deviceId = requestedDeviceId ?: DeviceId(UUID.randomUUID().toString())
-        val bytes = ByteArray(32).also(random::nextBytes)
+        val bytes = ByteArray(SESSION_TOKEN_BYTES).also(random::nextBytes)
         val token = SessionToken(Base64.getUrlEncoder().withoutPadding().encodeToString(bytes))
         val expiresAt = OffsetDateTime.now(clock).plusDays(SESSION_LIFETIME_DAYS)
         val sessionId = token.sessionId()

@@ -1,6 +1,7 @@
 package com.andrewtinyakov.messenger.message.pin.web.payload
 
 import com.andrewtinyakov.messenger.message.pin.model.PinScope
+import com.andrewtinyakov.messenger.message.pin.model.PinnedMessage
 import com.andrewtinyakov.messenger.message.web.payload.MessageResponse
 import com.fasterxml.jackson.annotation.JsonInclude
 import io.swagger.v3.oas.annotations.media.Schema
@@ -20,7 +21,7 @@ data class PinnedMessageResponse(
 data class PinnedMessagePageResponse(
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED, description = "Newest pinned messages first")
     val pins: List<PinnedMessageResponse>,
-    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED, minimum = "0", maximum = "400")
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED, minimum = "0", maximum = "${PinnedMessage.MAX_VISIBLE}")
     val totalCount: Int,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED, description = "Every visible pinned message ID, newest first")
     val pinnedMessageIds: List<String>,

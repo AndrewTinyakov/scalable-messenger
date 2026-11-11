@@ -130,7 +130,7 @@ class JooqHistoryPurgeRepository(
         val rows = db.select(
             HISTORY_PURGE_JOBS.CREATED_AT,
         ).from(HISTORY_PURGE_JOBS).orderBy(HISTORY_PURGE_JOBS.CREATED_AT, HISTORY_PURGE_JOBS.CHAT_ID)
-            .limit(10001).fetch(HISTORY_PURGE_JOBS.CREATED_AT)
+            .limit(PurgeBacklog.SAMPLE_CAP + 1).fetch(HISTORY_PURGE_JOBS.CREATED_AT)
         return@query PurgeBacklog(rows.size, rows.firstOrNull())
     }
 }

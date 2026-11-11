@@ -9,15 +9,13 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHA
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.HIDDEN_MESSAGE_RANGES
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSAGES
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.USERS
+import com.andrewtinyakov.messenger.message.model.Message
 import com.andrewtinyakov.messenger.message.model.MessageId
 import org.jooq.CommonTableExpression
 import org.jooq.Condition
 import org.jooq.Field
 import org.jooq.impl.DSL
 import java.time.OffsetDateTime
-
-private const val SUMMARY_CANDIDATES = 256
-private const val PREVIEW_LENGTH = 160
 
 internal data class ChatSummary(
     val unreadCount: Int,
@@ -43,7 +41,7 @@ internal fun chatSummary(userId: UserId): Field<ChatSummary> {
     return DSL.multiset(
         DSL.with(candidates).select(
             DSL.count().filterWhere(visible.and(sender.ne(userId.value)).and(sequence.gt(readThrough))),
-            DSL.count().filterWhere(sequence.gt(readThrough)).eq(SUMMARY_CANDIDATES),
+            DSL.count().filterWhere(sequence.gt(readThrough)).eq(Chat.SUMMARY_WINDOW),
             last,
         ).from(candidates),
     ).convertFrom { rows -> rows.single().let { ChatSummary(it.value1(), it.value2(), it.value3()) } }
@@ -52,7 +50,7 @@ internal fun chatSummary(userId: UserId): Field<ChatSummary> {
 private fun summaryCandidates(): CommonTableExpression<*> = DSL.name("summary_candidates").asMaterialized(
     DSL.select(MESSAGES.ID, MESSAGES.SEQUENCE, MESSAGES.SENDER_ID, MESSAGES.CREATED_AT, MESSAGES.BODY, MESSAGES.DELETED_AT)
         .from(MESSAGES).where(MESSAGES.CHAT_ID.eq(CHATS.ID))
-        .orderBy(MESSAGES.SEQUENCE.desc()).limit(SUMMARY_CANDIDATES),
+        .orderBy(MESSAGES.SEQUENCE.desc()).limit(Chat.SUMMARY_WINDOW),
 )
 
 private fun readThrough(userId: UserId): Field<Long> = DSL.coalesce(
@@ -99,7 +97,7 @@ private fun lastVisibleMessage(candidates: CommonTableExpression<*>, visible: Co
             sender,
             USERS.USERNAME,
             candidates.field(MESSAGES.CREATED_AT),
-            DSL.left(candidates.field(MESSAGES.BODY), PREVIEW_LENGTH),
+            DSL.left(candidates.field(MESSAGES.BODY), Message.PREVIEW_LENGTH),
         )
             .from(candidates).join(USERS).on(USERS.ID.eq(sender)).where(visible).orderBy(sequence.desc()).limit(1),
     ).convertFrom { rows ->

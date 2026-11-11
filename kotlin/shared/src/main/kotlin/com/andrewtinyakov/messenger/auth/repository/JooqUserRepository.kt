@@ -10,6 +10,8 @@ import org.jooq.DSLContext
 import org.jooq.Record2
 import org.springframework.stereotype.Repository
 
+private const val SEARCH_RESULT_LIMIT = 30
+
 @Repository
 class JooqUserRepository(
     private val db: DSLContext,
@@ -49,7 +51,7 @@ class JooqUserRepository(
                 USERS.USERNAME.like("%${query.lowercase().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")}%", '\\'),
             )
             .orderBy(USERS.USERNAME)
-            .limit(30)
+            .limit(SEARCH_RESULT_LIMIT)
             .fetch { it.toUserSummary() }
     }
 }

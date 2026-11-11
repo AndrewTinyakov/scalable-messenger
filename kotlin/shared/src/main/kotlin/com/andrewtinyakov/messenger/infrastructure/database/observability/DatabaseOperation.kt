@@ -1,7 +1,7 @@
 package com.andrewtinyakov.messenger.infrastructure.database.observability
 
 enum class DatabaseOperation(
-    val label: String,
+    val metricValue: String,
 ) {
     CHAT_ALLOCATE_SEQUENCES_FOR_MEMBERS("chat.allocate_sequences_for_members"),
     CHAT_ALLOCATE_SEQUENCE_FOR_MEMBER("chat.allocate_sequence_for_member"),

@@ -15,18 +15,18 @@ import org.springframework.stereotype.Service
 
 @Service
 class SendStatusService(
-    private val repository: MessageRepository,
+    private val messageRepository: MessageRepository,
 ) {
     fun status(userId: UserId, requestId: RequestId): SendStatusResponse =
-        repository.findSendResult(userId, requestId)?.toStatusResponse() ?: SendStatusResponse(SendLookupStatus.UNKNOWN)
+        messageRepository.findSendResult(userId, requestId)?.toStatusResponse() ?: SendStatusResponse(SendLookupStatus.UNKNOWN)
 
     fun statuses(userId: UserId, requestIds: List<RequestId>): SendStatusesResponse {
-        if (requestIds.size !in 1..100 ||
+        if (requestIds.size !in 1..SendResult.MAX_LOOKUP_REQUEST_IDS ||
             requestIds.size != requestIds.toSet().size
         ) {
-            badRequest(ApiErrorCode.INVALID_ID, "Provide 1 to 100 distinct request IDs")
+            badRequest(ApiErrorCode.INVALID_ID, "Provide 1 to ${SendResult.MAX_LOOKUP_REQUEST_IDS} distinct request IDs")
         }
-        val found = repository.findSendResults(userId, requestIds).associateBy { it.requestId }
+        val found = messageRepository.findSendResults(userId, requestIds).associateBy { it.requestId }
         return SendStatusesResponse(
             requestIds.map {
                 SendStatusEntry(

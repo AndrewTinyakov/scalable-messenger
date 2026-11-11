@@ -2,6 +2,7 @@ package com.andrewtinyakov.messenger.chat.deletion.monitoring
 
 import com.andrewtinyakov.messenger.chat.deletion.model.DeletionScope
 import com.andrewtinyakov.messenger.chat.deletion.model.DeletionTarget
+import com.andrewtinyakov.messenger.chat.deletion.model.PurgeBacklog
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
@@ -65,10 +66,12 @@ class DeletionMetrics(
     private val oldestJob = AtomicReference<OffsetDateTime?>()
 
     init {
-        Gauge.builder("messenger.deletion.purge.pending", pendingJobs) { minOf(it.get(), PENDING_SAMPLE_CAP).toDouble() }
-            .description("Sampled history purge jobs, capped at $PENDING_SAMPLE_CAP.")
+        Gauge.builder("messenger.deletion.purge.pending", pendingJobs) { minOf(it.get(), PurgeBacklog.SAMPLE_CAP).toDouble() }
+            .description("Sampled history purge jobs, capped at ${PurgeBacklog.SAMPLE_CAP}.")
             .register(registry)
-        Gauge.builder("messenger.deletion.purge.pending.sample.capped", pendingJobs) { if (it.get() > PENDING_SAMPLE_CAP) 1.0 else 0.0 }
+        Gauge.builder("messenger.deletion.purge.pending.sample.capped", pendingJobs) {
+            if (it.get() > PurgeBacklog.SAMPLE_CAP) 1.0 else 0.0
+        }
             .description("Whether the history purge job sample reached its cap.")
             .register(registry)
         Gauge.builder("messenger.deletion.purge.oldest.seconds", oldestJob) { state ->
@@ -119,7 +122,6 @@ class DeletionMetrics(
     private companion object {
         const val SUCCESS = "success"
         const val FAILED = "failed"
-        const val PENDING_SAMPLE_CAP = 10000
 
         fun Enum<*>.metricValue(): String = name.lowercase()
     }

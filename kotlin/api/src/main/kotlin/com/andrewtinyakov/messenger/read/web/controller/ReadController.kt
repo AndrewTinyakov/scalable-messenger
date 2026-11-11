@@ -23,7 +23,7 @@ import org.springframework.web.bind.annotation.RestController
 @RestController
 @RequestMapping("/v1/chats/{id}")
 class ReadController(
-    private val service: ReadService,
+    private val readService: ReadService,
 ) {
     @PostMapping("/reads")
     fun advance(
@@ -34,14 +34,14 @@ class ReadController(
         val chatId = ChatId.parse(id)
         val throughSequence = parseSequence(input.throughSequence)
             ?: badRequest(ApiErrorCode.INVALID_SEQUENCE, "throughSequence must be a nonnegative decimal integer")
-        return service.advance(chatId = chatId, userId = session.userId, throughSequence = throughSequence)
+        return readService.advance(chatId = chatId, userId = session.userId, throughSequence = throughSequence)
     }
 
     @GetMapping("/reads")
     fun summary(
         session: AuthenticatedSession,
         @PathVariable id: String,
-    ): ReadSummaryResponse = service.summary(ChatId.parse(id), session.userId)
+    ): ReadSummaryResponse = readService.summary(ChatId.parse(id), session.userId)
 
     @GetMapping("/messages/{messageId}/reads")
     fun readers(
@@ -50,7 +50,7 @@ class ReadController(
         @PathVariable messageId: String,
         @RequestParam(required = false) afterUserId: String?,
         @RequestParam(defaultValue = "50") limit: Int,
-    ): MessageReadsResponse = service.readers(
+    ): MessageReadsResponse = readService.readers(
         chatId = ChatId.parse(id),
         userId = session.userId,
         messageId = MessageId.parse(messageId),

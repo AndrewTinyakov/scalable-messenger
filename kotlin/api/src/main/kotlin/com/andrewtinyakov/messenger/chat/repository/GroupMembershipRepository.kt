@@ -13,7 +13,5 @@ interface GroupMembershipRepository {
 
     fun findGroupMemberPage(chatId: ChatId, viewerId: UserId, afterUserId: UserId?, limit: Int): List<UserSummary>?
 
-    fun groupMemberships(chatIds: List<ChatId>, userId: UserId): Set<ChatId>
-
     fun deleteMemberAndDecrementCount(chatId: ChatId, userId: UserId): Boolean
 }

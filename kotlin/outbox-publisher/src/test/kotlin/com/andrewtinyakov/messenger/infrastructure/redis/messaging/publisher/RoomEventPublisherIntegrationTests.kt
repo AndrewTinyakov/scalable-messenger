@@ -9,6 +9,9 @@ import com.andrewtinyakov.messenger.infrastructure.outbox.outboxEvent
 import com.andrewtinyakov.messenger.infrastructure.outbox.outboxTransactions
 import com.andrewtinyakov.messenger.infrastructure.outbox.service.OutboxPublicationService
 import com.andrewtinyakov.messenger.infrastructure.redis.config.RedisRoomProperties
+import com.andrewtinyakov.messenger.infrastructure.redis.monitoring.PublicationHydrationMetrics
+import com.andrewtinyakov.messenger.infrastructure.redis.service.PublicationHydration
+import com.andrewtinyakov.messenger.message.repository.MessageRepository
 import com.andrewtinyakov.messenger.shared.id.newId
 import io.lettuce.core.RedisClient
 import io.lettuce.core.pubsub.RedisPubSubAdapter
@@ -18,6 +21,7 @@ import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
+import org.mockito.Mockito.mock
 import org.springframework.data.domain.Range
 import org.springframework.data.redis.connection.ReactiveRedisConnection
 import org.springframework.data.redis.connection.ReactiveRedisConnectionFactory
@@ -301,9 +305,9 @@ class RoomEventPublisherIntegrationTests {
                 assertTrue(generateSequence<Throwable>(failure) { it.cause }.any { it.message?.contains(reason) == true })
             }
             val service = OutboxPublicationService(
-                repository = repository,
+                outboxClaimRepository = repository,
                 tx = outboxTransactions(),
-                publisher = publisher,
+                outboxEventPublisher = publisher,
                 metrics = OutboxMetrics(SimpleMeterRegistry(), Clock.systemUTC()),
                 clock = Clock.systemUTC(),
                 properties = PublisherProperties(),
@@ -334,9 +338,9 @@ class RoomEventPublisherIntegrationTests {
             val repository = MemoryOutbox(initial = rows)
             val publisher = roomPublisher(redis = ReactiveStringRedisTemplate(connections))
             val service = OutboxPublicationService(
-                repository = repository,
+                outboxClaimRepository = repository,
                 tx = outboxTransactions(),
-                publisher = publisher,
+                outboxEventPublisher = publisher,
                 metrics = OutboxMetrics(SimpleMeterRegistry(), Clock.systemUTC()),
                 clock = Clock.systemUTC(),
                 properties = PublisherProperties(),
@@ -361,9 +365,9 @@ class RoomEventPublisherIntegrationTests {
             val repository = MemoryOutbox(initial = rows)
             val redis = StringRedisTemplate(factory)
             val service = OutboxPublicationService(
-                repository = repository,
+                outboxClaimRepository = repository,
                 tx = outboxTransactions(),
-                publisher = roomPublisher(redis = ReactiveStringRedisTemplate(factory)),
+                outboxEventPublisher = roomPublisher(redis = ReactiveStringRedisTemplate(factory)),
                 metrics = OutboxMetrics(SimpleMeterRegistry(), Clock.systemUTC()),
                 clock = Clock.systemUTC(),
                 properties = PublisherProperties(),
@@ -384,9 +388,9 @@ class RoomEventPublisherIntegrationTests {
             val repository = MemoryOutbox(initial = listOf(failed, later, healthy))
             val redis = StringRedisTemplate(factory)
             val service = OutboxPublicationService(
-                repository = repository,
+                outboxClaimRepository = repository,
                 tx = outboxTransactions(),
-                publisher = roomPublisher(redis = ReactiveStringRedisTemplate(factory)),
+                outboxEventPublisher = roomPublisher(redis = ReactiveStringRedisTemplate(factory)),
                 metrics = OutboxMetrics(SimpleMeterRegistry(), Clock.systemUTC()),
                 clock = Clock.systemUTC(),
                 properties = PublisherProperties(),
@@ -404,9 +408,9 @@ class RoomEventPublisherIntegrationTests {
             val rows = listOf(outboxEvent(), outboxEvent())
             val repository = MemoryOutbox(initial = rows)
             val service = OutboxPublicationService(
-                repository = repository,
+                outboxClaimRepository = repository,
                 tx = outboxTransactions(),
-                publisher = roomPublisher(redis = ReactiveStringRedisTemplate(factory)),
+                outboxEventPublisher = roomPublisher(redis = ReactiveStringRedisTemplate(factory)),
                 metrics = OutboxMetrics(SimpleMeterRegistry(), Clock.systemUTC()),
                 clock = Clock.systemUTC(),
                 properties = PublisherProperties(batchBytes = 65536),
@@ -443,14 +447,14 @@ class RoomEventPublisherIntegrationTests {
             }
             val row = outboxEvent()
             val repository = MemoryOutbox(initial = listOf(row))
-            val publisher = roomPublisher(redis = ReactiveStringRedisTemplate(connections), timeoutMs = 100)
+            val publisher = roomPublisher(redis = ReactiveStringRedisTemplate(connections), timeout = Duration.ofMillis(100))
             val service = OutboxPublicationService(
-                repository = repository,
+                outboxClaimRepository = repository,
                 tx = outboxTransactions(),
-                publisher = publisher,
+                outboxEventPublisher = publisher,
                 metrics = OutboxMetrics(SimpleMeterRegistry(), Clock.systemUTC()),
                 clock = Clock.systemUTC(),
-                properties = PublisherProperties(leaseSeconds = 5, publishTimeoutMs = 100),
+                properties = PublisherProperties(lease = Duration.ofSeconds(5), publishTimeout = Duration.ofMillis(100)),
             )
 
             val before = System.nanoTime()
@@ -471,14 +475,19 @@ class RoomEventPublisherIntegrationTests {
 
     private fun roomPublisher(
         redis: ReactiveStringRedisTemplate,
-        timeoutMs: Long = 1000,
+        timeout: Duration = Duration.ofSeconds(1),
         properties: RedisRoomProperties = RedisRoomProperties(),
     ): RoomEventPublisher =
         RoomEventPublisher(
             redis = redis,
             properties = properties,
-            publisherProperties = PublisherProperties(publishTimeoutMs = timeoutMs),
+            publisherProperties = PublisherProperties(publishTimeout = timeout),
             mapper = JsonMapper.builder().build(),
+            publicationHydration = PublicationHydration(
+                mock(MessageRepository::class.java),
+                JsonMapper.builder().build(),
+                PublicationHydrationMetrics(SimpleMeterRegistry()),
+            ),
         ).also { publishers.add(it) }
 
     private fun withLiveMessages(factory: LettuceConnectionFactory, room: String, action: (LinkedBlockingQueue<String>) -> Unit) {

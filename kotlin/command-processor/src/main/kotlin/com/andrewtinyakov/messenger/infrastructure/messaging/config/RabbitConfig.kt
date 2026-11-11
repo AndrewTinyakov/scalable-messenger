@@ -26,8 +26,8 @@ class RabbitConfig {
         setAcknowledgeMode(AcknowledgeMode.MANUAL)
         setConsumerBatchEnabled(true)
         setBatchSize(properties.sendBatchSize)
-        setReceiveTimeout(1L)
-        setBatchReceiveTimeout(5L)
+        setReceiveTimeout(properties.receiveTimeout.toMillis())
+        setBatchReceiveTimeout(properties.batchReceiveTimeout.toMillis())
     }
 
     @Bean
@@ -41,9 +41,9 @@ class RabbitConfig {
             add(
                 QueueBuilder.durable(CommandTopology.DEAD_QUEUE)
                     .quorum()
-                    .withArgument("x-quorum-initial-group-size", 3)
+                    .withArgument("x-quorum-initial-group-size", properties.quorumInitialGroupSize)
                     .deliveryLimit(-1)
-                    .withFailedDeliveryRetry()
+                    .withFailedDeliveryRetry(properties)
                     .build(),
             )
             add(binding(CommandTopology.DEAD_QUEUE, CommandTopology.DEAD_EXCHANGE))
@@ -51,14 +51,14 @@ class RabbitConfig {
                 add(
                     QueueBuilder.durable(queue)
                         .quorum()
-                        .withArgument("x-quorum-initial-group-size", 3)
+                        .withArgument("x-quorum-initial-group-size", properties.quorumInitialGroupSize)
                         .withArgument("x-max-length", properties.maxQueueLength)
                         .overflow(QueueBuilder.Overflow.rejectPublish)
                         .deliveryLimit(properties.deliveryLimit)
                         .deadLetterExchange(CommandTopology.DEAD_EXCHANGE)
                         .deadLetterRoutingKey(CommandTopology.DEAD_QUEUE)
                         .withArgument("x-dead-letter-strategy", "at-least-once")
-                        .withFailedDeliveryRetry()
+                        .withFailedDeliveryRetry(properties)
                         .build(),
                 )
                 add(binding(queue, CommandTopology.EXCHANGE))
@@ -76,7 +76,7 @@ class RabbitConfig {
     )
 }
 
-private fun QueueBuilder.withFailedDeliveryRetry(): QueueBuilder =
+private fun QueueBuilder.withFailedDeliveryRetry(properties: MessagingProperties): QueueBuilder =
     withArgument("x-delayed-retry-type", "failed")
-        .withArgument("x-delayed-retry-min", 1000)
-        .withArgument("x-delayed-retry-max", 30000)
+        .withArgument("x-delayed-retry-min", properties.failedDeliveryRetryMinDelay.toMillis().toInt())
+        .withArgument("x-delayed-retry-max", properties.failedDeliveryRetryMaxDelay.toMillis().toInt())

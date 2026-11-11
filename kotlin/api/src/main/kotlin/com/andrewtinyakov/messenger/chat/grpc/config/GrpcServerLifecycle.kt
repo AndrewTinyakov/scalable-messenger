@@ -32,7 +32,7 @@ class GrpcServerLifecycle(
         server = NettyServerBuilder.forAddress(InetSocketAddress(properties.bindAddress, properties.port))
             .sslContext(tls)
             .intercept(GrpcClientIdentityInterceptor(properties.allowedClientIdentity))
-            .maxInboundMessageSize(8192)
+            .maxInboundMessageSize(properties.maxInboundMessageBytes)
             .addService(chatAuthorizationGrpcService)
             .build().start()
     }
@@ -41,14 +41,18 @@ class GrpcServerLifecycle(
         val stopping = server ?: return
         stopping.shutdown()
         try {
-            if (!stopping.awaitTermination(5, TimeUnit.SECONDS)) {
+            if (!stopping.awaitTermination(properties.shutdownTimeout.toNanos(), TimeUnit.NANOSECONDS)) {
                 stopping.shutdownNow()
-                check(stopping.awaitTermination(5, TimeUnit.SECONDS)) { "Authorization server did not terminate" }
+                check(stopping.awaitTermination(properties.shutdownTimeout.toNanos(), TimeUnit.NANOSECONDS)) {
+                    "Authorization server did not terminate"
+                }
             }
         } catch (error: InterruptedException) {
             stopping.shutdownNow()
             try {
-                check(stopping.awaitTermination(5, TimeUnit.SECONDS)) { "Authorization server did not terminate" }
+                check(stopping.awaitTermination(properties.shutdownTimeout.toNanos(), TimeUnit.NANOSECONDS)) {
+                    "Authorization server did not terminate"
+                }
             } catch (terminationError: Exception) {
                 error.addSuppressed(terminationError)
             } finally {

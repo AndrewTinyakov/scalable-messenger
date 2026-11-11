@@ -9,15 +9,15 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer
 
 @Configuration(proxyBeanMethods = false)
 class ApiSessionConfiguration(
-    private val interceptor: ApiSessionInterceptor,
-    private val sessionArgument: AuthenticatedSessionArgumentResolver,
+    private val apiSessionInterceptor: ApiSessionInterceptor,
+    private val authenticatedSessionArgumentResolver: AuthenticatedSessionArgumentResolver,
 ) : WebMvcConfigurer {
     override fun addArgumentResolvers(resolvers: MutableList<HandlerMethodArgumentResolver>) {
-        resolvers.add(sessionArgument)
+        resolvers.add(authenticatedSessionArgumentResolver)
     }
 
     override fun addInterceptors(registry: InterceptorRegistry) {
-        registry.addInterceptor(interceptor)
+        registry.addInterceptor(apiSessionInterceptor)
             .addPathPatterns("/**")
             .excludePathPatterns(
                 "/v1/auth/register",

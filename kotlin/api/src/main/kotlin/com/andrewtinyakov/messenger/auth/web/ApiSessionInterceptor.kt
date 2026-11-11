@@ -13,11 +13,11 @@ const val AUTHENTICATED_SESSION_ATTRIBUTE = "authenticatedSession"
 @Component
 class ApiSessionInterceptor(
     private val authenticationService: AuthenticationService,
-    private val cookies: SessionCookie,
+    private val sessionCookie: SessionCookie,
 ) : HandlerInterceptor {
     override fun preHandle(request: HttpServletRequest, response: HttpServletResponse, handler: Any): Boolean {
         if (handler is ResourceHttpRequestHandler) return true
-        val session = authenticationService.authenticatedSession(cookies.read(request))
+        val session = authenticationService.authenticatedSession(sessionCookie.read(request))
         authenticationService.requireExpectedIdentity(expectedIdentity = request.expectedSessionIdentity(), session = session)
         request.setAttribute(AUTHENTICATED_SESSION_ATTRIBUTE, session)
         return true

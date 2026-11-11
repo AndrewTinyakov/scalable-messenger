@@ -2,6 +2,7 @@ package com.andrewtinyakov.messenger.message.service
 
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.auth.repository.JooqUserRepository
+import com.andrewtinyakov.messenger.chat.deletion.config.HistoryPurgeProperties
 import com.andrewtinyakov.messenger.chat.deletion.model.DeletionCommand
 import com.andrewtinyakov.messenger.chat.deletion.model.DeletionScope
 import com.andrewtinyakov.messenger.chat.deletion.model.DeletionState
@@ -179,7 +180,7 @@ class LegacyChatDeletionUpgradeTests
                 val deletionMetrics = DeletionMetrics(metrics, clock)
                 val deletions =
                     DeletionService(JooqDeletionRepository(jooq, clock), ChatEventAudience(chats), outbox, mapper, tx, deletionMetrics)
-                val worker = HistoryPurgeService(JooqHistoryPurgeRepository(jooq, clock), tx, deletionMetrics)
+                val worker = HistoryPurgeService(JooqHistoryPurgeRepository(jooq, clock), HistoryPurgeProperties(), tx, deletionMetrics)
                 assertNull(
                     messages.findMessage(ChatId(closedGroup), UserId(owner), MessageId(messageId)),
                 )

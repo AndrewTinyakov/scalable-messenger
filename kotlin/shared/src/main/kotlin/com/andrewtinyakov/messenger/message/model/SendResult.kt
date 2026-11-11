@@ -31,4 +31,8 @@ data class SendResult(
             }
         }
     }
+
+    companion object {
+        const val MAX_LOOKUP_REQUEST_IDS = 100
+    }
 }

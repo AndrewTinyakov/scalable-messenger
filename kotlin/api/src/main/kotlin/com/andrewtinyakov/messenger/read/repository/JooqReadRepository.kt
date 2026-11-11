@@ -33,6 +33,11 @@ import java.time.ZoneOffset
 import java.time.temporal.ChronoUnit
 
 private const val MAX_CREATION_DAY_LOOKUP_SPAN = 256L
+private const val RANGE_EXPIRY_DAYS = MessageReadTarget.DETAILS_RETENTION_DAYS + 1
+private const val NOTIFICATION_BUCKET_SECONDS = 2L
+private const val NOTIFICATION_BUCKET_RETENTION_MINUTES = 2L
+private const val NOTIFICATION_LOCK_NAMESPACE = 761291005
+private const val CLEANUP_LOCK_KEY = 7612910046L
 
 @Repository
 class JooqReadRepository(
@@ -76,7 +81,7 @@ class JooqReadRepository(
                     .set(CHAT_READ_RANGES.USER_ID, userId.value).set(CHAT_READ_RANGES.CREATION_DAY, day)
                     .set(CHAT_READ_RANGES.AFTER_SEQUENCE, previous.throughSequence)
                     .set(CHAT_READ_RANGES.THROUGH_SEQUENCE, sequence).set(CHAT_READ_RANGES.READ_AT, acceptedAt)
-                    .set(CHAT_READ_RANGES.EXPIRES_AT, day.plusDays(8).atStartOfDay().atOffset(ZoneOffset.UTC))
+                    .set(CHAT_READ_RANGES.EXPIRES_AT, day.plusDays(RANGE_EXPIRY_DAYS).atStartOfDay().atOffset(ZoneOffset.UTC))
             }
             if (inserts.isNotEmpty()) check(db.batch(inserts).execute().all { it == 1 })
             db.insertInto(PENDING_READ_NOTIFICATIONS)
@@ -90,7 +95,7 @@ class JooqReadRepository(
     private fun creationDays(chatId: ChatId, after: Long, through: Long, acceptedAt: OffsetDateTime): List<LocalDate> {
         if (through - after > MAX_CREATION_DAY_LOOKUP_SPAN) {
             val today = acceptedAt.withOffsetSameInstant(ZoneOffset.UTC).toLocalDate()
-            return (0L..7L).map(today::minusDays)
+            return (0L..MessageReadTarget.DETAILS_RETENTION_DAYS).map(today::minusDays)
         }
         return DatabaseObservation.query(DatabaseOperation.READ_RANGE_DAYS) {
             val day = DSL.field("({0} AT TIME ZONE 'UTC')::date", LocalDate::class.java, MESSAGES.CREATED_AT)
@@ -98,7 +103,7 @@ class JooqReadRepository(
                 MESSAGES.CHAT_ID.eq(chatId.value),
                 MESSAGES.SEQUENCE.gt(after),
                 MESSAGES.SEQUENCE.le(through),
-                MESSAGES.CREATED_AT.gt(acceptedAt.minusDays(7)),
+                MESSAGES.CREATED_AT.gt(acceptedAt.minusDays(MessageReadTarget.DETAILS_RETENTION_DAYS)),
                 MESSAGES.CREATED_AT.le(acceptedAt),
             ).fetch(day).filterNotNull()
         }
@@ -170,8 +175,11 @@ class JooqReadRepository(
             CHAT_READ_NOTIFICATIONS.BUCKET,
             CHAT_READ_NOTIFICATIONS.EXPIRES_AT,
         ).select(
-            DSL.select(DSL.`val`(chatId.value), DSL.`val`(now.toEpochSecond() / 2), DSL.`val`(now.plusMinutes(2)))
-                .where(DSL.condition("pg_try_advisory_xact_lock(761291005, hashtext({0}))", DSL.`val`(chatId.value))),
+            DSL.select(
+                DSL.`val`(chatId.value),
+                DSL.`val`(notificationBucket(now)),
+                DSL.`val`(now.plusMinutes(NOTIFICATION_BUCKET_RETENTION_MINUTES)),
+            ).where(DSL.condition("pg_try_advisory_xact_lock($NOTIFICATION_LOCK_NAMESPACE, hashtext({0}))", DSL.`val`(chatId.value))),
         ).onConflictDoNothing().execute()
         if (inserted == 0) return@query emptyList()
         val kind = db.select(CHATS.KIND).from(CHATS).where(CHATS.ID.eq(chatId.value), CHATS.DELETED_AT.isNull).fetchOne(CHATS.KIND)
@@ -195,7 +203,7 @@ class JooqReadRepository(
                 DSL.notExists(
                     DSL.selectOne().from(CHAT_READ_NOTIFICATIONS).where(
                         CHAT_READ_NOTIFICATIONS.CHAT_ID.eq(PENDING_READ_NOTIFICATIONS.CHAT_ID),
-                        CHAT_READ_NOTIFICATIONS.BUCKET.eq(now.toEpochSecond() / 2),
+                        CHAT_READ_NOTIFICATIONS.BUCKET.eq(notificationBucket(now)),
                     ),
                 ),
             )
@@ -225,7 +233,10 @@ class JooqReadRepository(
     }
 
     private fun tryCleanupLock(): Boolean =
-        db.select(DSL.field("pg_try_advisory_xact_lock(7612910046)", Boolean::class.java)).fetchOne(0, Boolean::class.java) == true
+        db.select(DSL.field("pg_try_advisory_xact_lock($CLEANUP_LOCK_KEY)", Boolean::class.java))
+            .fetchOne(0, Boolean::class.java) == true
+
+    private fun notificationBucket(now: OffsetDateTime): Long = now.toEpochSecond() / NOTIFICATION_BUCKET_SECONDS
 
     private fun deleteExpiredRanges(now: OffsetDateTime, limit: Int): Int {
         val ranges = db.select(
@@ -267,6 +278,6 @@ class JooqReadRepository(
 
     private fun expiredRangeBacklog(now: OffsetDateTime): List<OffsetDateTime> = DatabaseObservation.query(DatabaseOperation.READ_BACKLOG) {
         db.select(CHAT_READ_RANGES.EXPIRES_AT).from(CHAT_READ_RANGES).where(CHAT_READ_RANGES.EXPIRES_AT.le(now))
-            .orderBy(CHAT_READ_RANGES.EXPIRES_AT).limit(10001).fetch(CHAT_READ_RANGES.EXPIRES_AT)
+            .orderBy(CHAT_READ_RANGES.EXPIRES_AT).limit(ReadCleanup.BACKLOG_SAMPLE_CAP + 1).fetch(CHAT_READ_RANGES.EXPIRES_AT)
     }
 }

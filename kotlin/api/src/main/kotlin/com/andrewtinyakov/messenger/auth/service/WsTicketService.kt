@@ -18,6 +18,7 @@ private const val TICKET_ISSUER = "messenger-api"
 private const val TICKET_AUDIENCE = "messenger-ws"
 private const val JWT_ALGORITHM = "HS256"
 private const val JWT_TYPE = "JWT"
+private val TICKET_LIFETIME = Duration.ofHours(1)
 
 private data class TicketHeader(
     val alg: String,
@@ -44,7 +45,7 @@ class WsTicketService(
 
     fun issue(session: AuthenticatedSession): WsTicketResponse {
         val now = clock.instant()
-        val expiry = minOf(now.plus(Duration.ofHours(1)), session.expiresAt).epochSecond
+        val expiry = minOf(now.plus(TICKET_LIFETIME), session.expiresAt).epochSecond
         if (expiry <= now.epochSecond) unauthorized(ApiErrorCode.UNAUTHORIZED, "Invalid WS ticket")
         val header = encoder.encodeToString(mapper.writeValueAsBytes(TicketHeader(alg = JWT_ALGORITHM, typ = JWT_TYPE)))
         val body = encoder.encodeToString(

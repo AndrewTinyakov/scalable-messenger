@@ -6,6 +6,7 @@ import com.andrewtinyakov.messenger.infrastructure.database.observability.observ
 import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStage
 import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStageRecorder
 import com.andrewtinyakov.messenger.message.model.CommandResult
+import com.andrewtinyakov.messenger.message.model.SendBatch
 import com.andrewtinyakov.messenger.message.model.SendTarget
 import com.andrewtinyakov.messenger.message.monitoring.MessageSendMetrics
 import org.springframework.stereotype.Service
@@ -15,7 +16,7 @@ import java.time.Duration
 
 @Service
 class MessageSendBatchService(
-    private val service: MessageSendService,
+    private val messageSendService: MessageSendService,
     private val tx: TransactionTemplate,
     private val metrics: MessageSendMetrics,
 ) {
@@ -27,7 +28,7 @@ class MessageSendBatchService(
     }
 
     private fun validateBatch(commands: List<SendMessageCommandV1>) {
-        require(commands.size in 1..MAX_BATCH_SIZE) { "Send batch size must be between 1 and $MAX_BATCH_SIZE" }
+        require(commands.size in 1..SendBatch.MAX_SIZE) { "Send batch size must be between 1 and ${SendBatch.MAX_SIZE}" }
         require(commands.map { SendTarget.from(it.toSendRequest()) }.distinct().size == 1) { "A send batch must share one target" }
         check(!TransactionSynchronizationManager.isActualTransactionActive()) { "Send batch must own its transaction" }
     }
@@ -47,15 +48,11 @@ class MessageSendBatchService(
                 )
             }
             try {
-                service.processBatchInTransaction(commands)
+                messageSendService.processBatchInTransaction(commands)
             } finally {
                 callbackFinished = System.nanoTime()
                 SendStageRecorder.requests(SendStage.TRANSACTION_CALLBACK_FINISHED, commands) { it.requestId }
             }
         }
-    }
-
-    companion object {
-        const val MAX_BATCH_SIZE = 16
     }
 }

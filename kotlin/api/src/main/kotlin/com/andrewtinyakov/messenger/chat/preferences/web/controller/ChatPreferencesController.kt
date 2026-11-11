@@ -18,48 +18,48 @@ import org.springframework.web.bind.annotation.RestController
 @RestController
 @RequestMapping("/v1/chats")
 class ChatPreferencesController(
-    private val service: ChatPreferencesService,
+    private val chatPreferencesService: ChatPreferencesService,
 ) {
     @PutMapping("/pinned")
     fun reorder(
         session: AuthenticatedSession,
         @Valid @RequestBody input: ReorderPinnedChatsRequest,
-    ): PinnedChatsResponse = service.reorder(session.userId, input.chatIds.map { ChatId.parse(it) })
+    ): PinnedChatsResponse = chatPreferencesService.reorder(session.userId, input.chatIds.map { ChatId.parse(it) })
 
     @PutMapping("/{id}/pin")
     fun pin(
         session: AuthenticatedSession,
         @PathVariable id: String,
-    ): PinnedChatsResponse = service.pin(ChatId.parse(id), session.userId)
+    ): PinnedChatsResponse = chatPreferencesService.pin(ChatId.parse(id), session.userId)
 
     @DeleteMapping("/{id}/pin")
     fun unpin(
         session: AuthenticatedSession,
         @PathVariable id: String,
-    ): PinnedChatsResponse = service.unpin(ChatId.parse(id), session.userId)
+    ): PinnedChatsResponse = chatPreferencesService.unpin(ChatId.parse(id), session.userId)
 
     @PutMapping("/{id}/mute")
     fun mute(
         session: AuthenticatedSession,
         @PathVariable id: String,
         @RequestBody input: MuteChatRequest,
-    ): ChatPreferencesResponse = service.mute(ChatId.parse(id), session.userId, input.durationSeconds)
+    ): ChatPreferencesResponse = chatPreferencesService.mute(ChatId.parse(id), session.userId, input.durationSeconds)
 
     @DeleteMapping("/{id}/mute")
     fun unmute(
         session: AuthenticatedSession,
         @PathVariable id: String,
-    ): ChatPreferencesResponse = service.unmute(ChatId.parse(id), session.userId)
+    ): ChatPreferencesResponse = chatPreferencesService.unmute(ChatId.parse(id), session.userId)
 
     @PutMapping("/{id}/unread-mark")
     fun markUnread(
         session: AuthenticatedSession,
         @PathVariable id: String,
-    ): ChatPreferencesResponse = service.markUnread(ChatId.parse(id), session.userId, unread = true)
+    ): ChatPreferencesResponse = chatPreferencesService.markUnread(ChatId.parse(id), session.userId, unread = true)
 
     @DeleteMapping("/{id}/unread-mark")
     fun clearUnreadMark(
         session: AuthenticatedSession,
         @PathVariable id: String,
-    ): ChatPreferencesResponse = service.markUnread(ChatId.parse(id), session.userId, unread = false)
+    ): ChatPreferencesResponse = chatPreferencesService.markUnread(ChatId.parse(id), session.userId, unread = false)
 }

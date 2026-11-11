@@ -8,13 +8,15 @@ import org.jooq.DSLContext
 import org.jooq.JSONB
 import org.springframework.stereotype.Repository
 
+private const val INSERT_CHUNK_SIZE = 500
+
 @Repository
 class JooqOutboxRepository(
     private val db: DSLContext,
 ) : OutboxRepository {
     override fun enqueue(messages: Collection<OutboxMessage>) = DatabaseObservation.query(DatabaseOperation.OUTBOX_ENQUEUE) {
         if (messages.isEmpty()) return@query
-        messages.chunked(500).forEach { chunk ->
+        messages.chunked(INSERT_CHUNK_SIZE).forEach { chunk ->
             val insert = db.insertInto(
                 MESSENGER_OUTBOX_EVENTS,
                 MESSENGER_OUTBOX_EVENTS.ID,

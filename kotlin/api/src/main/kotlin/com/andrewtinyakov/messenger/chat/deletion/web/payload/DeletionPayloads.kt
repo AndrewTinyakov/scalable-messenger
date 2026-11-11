@@ -50,7 +50,7 @@ fun DeletionRequest.toCommand(): DeletionCommand {
     val ids = messageIds.orEmpty()
     if (target == DeletionTarget.MESSAGES) {
         if (ids.size !in 1..DeletionCommand.MAX_MESSAGE_IDS || ids.size != ids.distinct().size) {
-            badRequest(ApiErrorCode.INVALID_REQUEST, "Provide 1 to 100 distinct message IDs")
+            badRequest(ApiErrorCode.INVALID_REQUEST, "Provide 1 to ${DeletionCommand.MAX_MESSAGE_IDS} distinct message IDs")
         }
     } else if (messageIds != null) {
         badRequest(ApiErrorCode.INVALID_REQUEST, "messageIds is only valid for message deletion")

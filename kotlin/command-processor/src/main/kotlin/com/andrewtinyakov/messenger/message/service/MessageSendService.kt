@@ -43,7 +43,7 @@ import java.time.OffsetDateTime
 
 @Service
 class MessageSendService(
-    private val repository: MessageRepository,
+    private val messageRepository: MessageRepository,
     private val chatRepository: ChatRepository,
     private val directChatService: DirectChatService,
     private val userRepository: UserRepository,
@@ -64,10 +64,10 @@ class MessageSendService(
     fun rejectExhausted(command: SendMessageCommandV1) {
         val request = command.toSendRequest()
         tx.observedExecuteWithoutResult(DatabaseTransaction.SEND_REJECT_EXHAUSTED) {
-            repository.lockSend(senderId = request.senderId, requestId = request.requestId)
-            if (repository.findSendResult(senderId = request.senderId, requestId = request.requestId) == null) {
+            messageRepository.lockSend(senderId = request.senderId, requestId = request.requestId)
+            if (messageRepository.findSendResult(senderId = request.senderId, requestId = request.requestId) == null) {
                 val result = rejected(request, SendRejectionReason.PROCESSING_FAILED)
-                repository.insertSendResult(result)
+                messageRepository.insertSendResult(result)
                 enqueueRejection(request, result.reason!!)
             }
         }
@@ -123,7 +123,7 @@ class MessageSendService(
     private fun lockRequests(requests: List<SendRequest>) {
         requests.map { it.key }.distinct()
             .sortedWith(compareBy({ it.first.value }, { it.second.value }))
-            .forEach { (sender, request) -> repository.lockSend(sender, request) }
+            .forEach { (sender, request) -> messageRepository.lockSend(sender, request) }
         SendStageRecorder.requests(SendStage.REQUEST_LOCKS_ACQUIRED, requests) { it.requestId.value }
     }
 
@@ -134,7 +134,7 @@ class MessageSendService(
     }
 
     private fun findPriorResults(requests: List<SendRequest>): Map<Pair<UserId, RequestId>, SendResult> {
-        val results = repository.findSendResults(
+        val results = messageRepository.findSendResults(
             requests.groupBy { it.senderId }.mapValues { (_, sends) -> sends.map { it.requestId } },
         ).associateBy { it.senderId to it.requestId }
         SendStageRecorder.requests(SendStage.RESULTS_LOOKED_UP, requests) { it.requestId.value }
@@ -193,7 +193,7 @@ class MessageSendService(
         requests.filter { it.replyToMessageId != null }
             .groupBy { it.senderId }
             .flatMap { (sender, sends) ->
-                repository.findMessagesByIds(chatId, sender, sends.mapNotNull { it.replyToMessageId }.distinct())
+                messageRepository.findMessagesByIds(chatId, sender, sends.mapNotNull { it.replyToMessageId }.distinct())
                     .filter { it.deletedAt == null }
                     .map { (sender to it.id) to it }
             }.toMap()
@@ -203,8 +203,8 @@ class MessageSendService(
             .groupBy({ (sender, source) -> sender to source.chatId }, { (_, source) -> source.messageId })
             .flatMap { (key, ids) ->
                 val (sender, sourceChat) = key
-                ids.distinct().chunked(100).flatMap { chunk ->
-                    repository.findMessagesByIds(sourceChat, sender, chunk)
+                ids.distinct().chunked(Message.MAX_LOOKUP_IDS).flatMap { chunk ->
+                    messageRepository.findMessagesByIds(sourceChat, sender, chunk)
                         .filter { it.deletedAt == null }
                         .map { (sender to ForwardSource(sourceChat, it.id)) to it }
                 }
@@ -258,7 +258,7 @@ class MessageSendService(
                 forwarded = context.forwardSource(request),
             )
         }
-        repository.insertSavedMessages(pending.map { it.saved })
+        messageRepository.insertSavedMessages(pending.map { it.saved })
         SendStageRecorder.requests(SendStage.MESSAGES_RESULTS_WRITTEN, accepted) { it.requestId.value }
         outboxRepository.enqueue(pending.flatMap { it.events })
         SendStageRecorder.requests(SendStage.OUTBOX_WRITTEN, accepted) { it.requestId.value }
@@ -278,7 +278,7 @@ class MessageSendService(
     }
 
     private fun rejectedOutcome(request: SendRequest, reason: SendRejectionReason): CommandResult {
-        repository.insertSendResult(rejected(request, reason))
+        messageRepository.insertSendResult(rejected(request, reason))
         SendStageRecorder.record(SendStage.MESSAGES_RESULTS_WRITTEN, requestId = request.requestId.value)
         enqueueRejection(request = request, reason = reason)
         return CommandResult.REJECTED

@@ -7,4 +7,8 @@ data class ReadCleanup(
     val notifications: Int,
     val backlog: Int,
     val oldestExpiredAt: OffsetDateTime?,
-)
+) {
+    companion object {
+        const val BACKLOG_SAMPLE_CAP = 10000
+    }
+}

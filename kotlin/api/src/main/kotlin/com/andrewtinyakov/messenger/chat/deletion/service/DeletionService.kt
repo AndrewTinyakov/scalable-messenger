@@ -34,9 +34,9 @@ import tools.jackson.databind.ObjectMapper
 
 @Service
 class DeletionService(
-    private val repository: DeletionRepository,
-    private val audience: ChatEventAudience,
-    private val outbox: OutboxRepository,
+    private val deletionRepository: DeletionRepository,
+    private val chatEventAudience: ChatEventAudience,
+    private val outboxRepository: OutboxRepository,
     private val mapper: ObjectMapper,
     private val tx: TransactionTemplate,
     private val metrics: DeletionMetrics,
@@ -53,40 +53,40 @@ class DeletionService(
 
     fun delete(
         chatId: ChatId,
-        actorId: UserId,
+        userId: UserId,
         command: DeletionCommand,
         expectedVersions: Map<MessageId, Long> = emptyMap(),
     ): DeletionResponse = metrics.timeAcceptance(command.scope, command.target) {
-        val committed = executeDeletion(chatId, actorId, command, expectedVersions)
+        val committed = executeDeletion(chatId, userId, command, expectedVersions)
         if (committed.newlyAccepted) metrics.accepted(command.scope, command.target)
         committed.response
     }
 
     private fun executeDeletion(
         chatId: ChatId,
-        actorId: UserId,
+        userId: UserId,
         command: DeletionCommand,
         expectedVersions: Map<MessageId, Long>,
     ): CommittedDeletion {
         val fingerprint = fingerprint(chatId, command)
         return tx.observedExecute(DatabaseTransaction.DELETION_ACCEPT) {
-            repository.lockRequest(actorId, command.requestId)
-            replayExistingOperation(chatId, actorId, command.requestId, fingerprint)?.let { return@observedExecute it }
-            val chat = repository.lockChat(chatId, actorId) ?: notFound()
-            requireChatDeletionAllowed(chat, actorId, command)
-            if (chat.deleted) return@observedExecute repairClosedChat(chatId, actorId, command, fingerprint, chat)
-            val targets = findTargets(chatId, actorId, command)
+            deletionRepository.lockRequest(userId, command.requestId)
+            replayExistingOperation(chatId, userId, command.requestId, fingerprint)?.let { return@observedExecute it }
+            val chat = deletionRepository.lockChat(chatId, userId) ?: notFound()
+            requireChatDeletionAllowed(chat, userId, command)
+            if (chat.deleted) return@observedExecute repairClosedChat(chatId, userId, command, fingerprint, chat)
+            val targets = findTargets(chatId, userId, command)
             requireExpectedVersions(targets, expectedVersions)
-            requireMessageDeletionAllowed(chat, actorId, command, targets)
-            val revisions = applyDeletion(chatId, actorId, command, chat, targets)
-            saveOperation(chatId, actorId, command, fingerprint, chat, revisions, rows = deletedRows(command, targets))
-            enqueueDeletionEvents(chatId, actorId, command, chat, revisions)
-            CommittedDeletion(saved(actorId, command.requestId).toResponse(), newlyAccepted = true)
+            requireMessageDeletionAllowed(chat, userId, command, targets)
+            val revisions = applyDeletion(chatId, userId, command, chat, targets)
+            saveOperation(chatId, userId, command, fingerprint, chat, revisions, rows = deletedRows(command, targets))
+            enqueueDeletionEvents(chatId, userId, command, chat, revisions)
+            CommittedDeletion(saved(userId, command.requestId).toResponse(), newlyAccepted = true)
         }
     }
 
-    fun status(chatId: ChatId, actorId: UserId, requestId: RequestId): DeletionResponse =
-        repository.operation(actorId, requestId)?.takeIf { it.chatId == chatId }?.toResponse() ?: notFound()
+    fun status(chatId: ChatId, userId: UserId, requestId: RequestId): DeletionResponse =
+        deletionRepository.operation(userId, requestId)?.takeIf { it.chatId == chatId }?.toResponse() ?: notFound()
 
     private fun fingerprint(chatId: ChatId, command: DeletionCommand): String {
         val ids = command.messageIds.orEmpty()
@@ -95,22 +95,22 @@ class DeletionService(
 
     private fun replayExistingOperation(
         chatId: ChatId,
-        actorId: UserId,
+        userId: UserId,
         requestId: RequestId,
         fingerprint: String,
     ): CommittedDeletion? {
-        val existing = repository.operation(actorId, requestId) ?: return null
+        val existing = deletionRepository.operation(userId, requestId) ?: return null
         if (existing.chatId != chatId || existing.fingerprint != fingerprint) {
             conflict(ApiErrorCode.INVALID_REQUEST, "Deletion request ID changed")
         }
         return CommittedDeletion(existing.toResponse(), newlyAccepted = false)
     }
 
-    private fun requireChatDeletionAllowed(chat: DeletionChat, actorId: UserId, command: DeletionCommand) {
+    private fun requireChatDeletionAllowed(chat: DeletionChat, userId: UserId, command: DeletionCommand) {
         if (command.scope == DeletionScope.EVERYONE &&
             command.target != DeletionTarget.MESSAGES &&
             chat.kind == ChatKind.GROUP &&
-            chat.owner != actorId
+            chat.ownerId != userId
         ) {
             forbiddenDeletion()
         }
@@ -118,28 +118,28 @@ class DeletionService(
 
     private fun repairClosedChat(
         chatId: ChatId,
-        actorId: UserId,
+        userId: UserId,
         command: DeletionCommand,
         fingerprint: String,
         chat: DeletionChat,
     ): CommittedDeletion {
         if (command.scope != DeletionScope.EVERYONE || command.target != DeletionTarget.CHAT) notFound()
-        repository.repairClosedPurge(chatId, chat.high)
+        deletionRepository.repairClosedPurge(chatId, chat.lastSequence)
         saveOperation(
             chatId = chatId,
-            actorId = actorId,
+            userId = userId,
             command = command,
             fingerprint = fingerprint,
             chat = chat,
-            revisions = DeletionRevisions(mutation = chat.revision, visibility = chat.visibility),
+            revisions = DeletionRevisions(mutation = chat.mutationRevision, visibility = chat.visibilityRevision),
             rows = 0,
         )
-        return CommittedDeletion(saved(actorId, command.requestId).toResponse(), newlyAccepted = false)
+        return CommittedDeletion(saved(userId, command.requestId).toResponse(), newlyAccepted = false)
     }
 
-    private fun findTargets(chatId: ChatId, actorId: UserId, command: DeletionCommand): List<DeletionMessage> =
+    private fun findTargets(chatId: ChatId, userId: UserId, command: DeletionCommand): List<DeletionMessage> =
         if (command.target == DeletionTarget.MESSAGES) {
-            repository.targets(chatId, actorId, command.messageIds.orEmpty(), command.scope)
+            deletionRepository.targets(chatId, userId, command.messageIds.orEmpty(), command.scope)
         } else {
             emptyList()
         }
@@ -152,14 +152,14 @@ class DeletionService(
 
     private fun requireMessageDeletionAllowed(
         chat: DeletionChat,
-        actorId: UserId,
+        userId: UserId,
         command: DeletionCommand,
         targets: List<DeletionMessage>,
     ) {
         if (command.scope == DeletionScope.EVERYONE &&
             chat.kind == ChatKind.GROUP &&
-            chat.owner != actorId &&
-            targets.any { it.senderId != actorId }
+            chat.ownerId != userId &&
+            targets.any { it.senderId != userId }
         ) {
             forbiddenDeletion()
         }
@@ -167,52 +167,52 @@ class DeletionService(
 
     private fun applyDeletion(
         chatId: ChatId,
-        actorId: UserId,
+        userId: UserId,
         command: DeletionCommand,
         chat: DeletionChat,
         targets: List<DeletionMessage>,
     ): DeletionRevisions = when (command.scope) {
         DeletionScope.SELF -> DeletionRevisions(
-            mutation = chat.revision,
-            visibility = applyPersonalDeletion(chatId, actorId, command.target, chat, targets),
+            mutation = chat.mutationRevision,
+            visibility = applyPersonalDeletion(chatId, userId, command.target, chat, targets),
         )
 
         DeletionScope.EVERYONE -> DeletionRevisions(
-            mutation = applyEveryoneDeletion(chatId, actorId, command.target, chat, targets),
-            visibility = chat.visibility,
+            mutation = applyEveryoneDeletion(chatId, userId, command.target, chat, targets),
+            visibility = chat.visibilityRevision,
         )
     }
 
     private fun applyPersonalDeletion(
         chatId: ChatId,
-        actorId: UserId,
+        userId: UserId,
         target: DeletionTarget,
         chat: DeletionChat,
         targets: List<DeletionMessage>,
     ): Long = if (target == DeletionTarget.MESSAGES) {
-        repository.hideMessages(chatId, actorId, targets)
+        deletionRepository.hideMessages(chatId, userId, targets)
     } else {
-        repository.clearPersonal(
+        deletionRepository.clearPersonal(
             chatId = chatId,
-            actorId = actorId,
-            through = chat.high,
+            userId = userId,
+            through = chat.lastSequence,
             hide = target == DeletionTarget.CHAT,
         )
     }
 
     private fun applyEveryoneDeletion(
         chatId: ChatId,
-        actorId: UserId,
+        userId: UserId,
         target: DeletionTarget,
         chat: DeletionChat,
         targets: List<DeletionMessage>,
     ): Long = if (target == DeletionTarget.MESSAGES) {
-        repository.removeMessages(chatId, targets)
+        deletionRepository.removeMessages(chatId, targets)
     } else {
-        repository.clearGlobal(
+        deletionRepository.clearGlobal(
             chatId = chatId,
-            actorId = actorId,
-            through = chat.high,
+            userId = userId,
+            through = chat.lastSequence,
             close = target == DeletionTarget.CHAT,
         )
     }
@@ -222,31 +222,31 @@ class DeletionService(
 
     private fun saveOperation(
         chatId: ChatId,
-        actorId: UserId,
+        userId: UserId,
         command: DeletionCommand,
         fingerprint: String,
         chat: DeletionChat,
         revisions: DeletionRevisions,
         rows: Int,
-    ) = repository.saveOperation(
+    ) = deletionRepository.saveOperation(
         chatId = chatId,
-        actorId = actorId,
+        userId = userId,
         command = command,
         fingerprint = fingerprint,
         chat = chat,
-        revision = revisions.mutation,
-        visibility = revisions.visibility,
+        mutationRevision = revisions.mutation,
+        visibilityRevision = revisions.visibility,
         rows = rows,
     )
 
     private fun enqueueDeletionEvents(
         chatId: ChatId,
-        actorId: UserId,
+        userId: UserId,
         command: DeletionCommand,
         chat: DeletionChat,
         revisions: DeletionRevisions,
     ) {
-        val rooms = audience.rooms(chatId, chat.kind, personalViewer = actorId.takeIf { command.scope == DeletionScope.SELF })
+        val rooms = chatEventAudience.rooms(chatId, chat.kind, personalViewer = userId.takeIf { command.scope == DeletionScope.SELF })
         enqueueHistoryChanged(
             rooms = rooms,
             chatId = chatId,
@@ -264,13 +264,13 @@ class DeletionService(
         chat: DeletionChat,
         revisions: DeletionRevisions,
     ) {
-        outbox.enqueue(
+        outboxRepository.enqueue(
             rooms.map { room ->
                 HistoryChangedEventV1.create(
                     eventId = newId(),
                     room = room,
                     chatId = chatId.value,
-                    sequence = chat.high.toString(),
+                    sequence = chat.lastSequence.toString(),
                     mutationRevision = revisions.mutation.toString(),
                     visibilityRevision = if (scope == DeletionScope.SELF) revisions.visibility.toString() else "0",
                 ).toOutboxMessage(mapper)
@@ -279,14 +279,14 @@ class DeletionService(
     }
 
     private fun enqueueChatDeleted(rooms: List<String>, chatId: ChatId) {
-        outbox.enqueue(
+        outboxRepository.enqueue(
             rooms.map { room ->
                 ChatDeletedEventV1.create(eventId = newId(), room = room, chatId = chatId.value).toOutboxMessage(mapper)
             },
         )
     }
 
-    private fun saved(actorId: UserId, requestId: RequestId): StoredDeletion = checkNotNull(repository.operation(actorId, requestId))
+    private fun saved(userId: UserId, requestId: RequestId): StoredDeletion = checkNotNull(deletionRepository.operation(userId, requestId))
 
     private fun forbiddenDeletion(): Nothing = forbidden("This deletion is not permitted")
 }

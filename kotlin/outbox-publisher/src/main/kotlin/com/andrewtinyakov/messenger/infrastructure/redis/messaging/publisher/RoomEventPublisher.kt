@@ -12,7 +12,6 @@ import org.springframework.data.redis.core.ReactiveStringRedisTemplate
 import org.springframework.stereotype.Component
 import reactor.core.scheduler.Schedulers
 import tools.jackson.databind.ObjectMapper
-import java.time.Duration
 
 @Component
 class RoomEventPublisher(
@@ -20,20 +19,24 @@ class RoomEventPublisher(
     properties: RedisRoomProperties,
     private val publisherProperties: PublisherProperties,
     mapper: ObjectMapper,
-    private val hydration: PublicationHydration? = null,
+    private val publicationHydration: PublicationHydration,
 ) : OutboxEventPublisher,
     AutoCloseable {
-    private val scheduler = Schedulers.newBoundedElastic(publisherProperties.concurrency, 500, "room-publication")
+    private val scheduler = Schedulers.newBoundedElastic(
+        publisherProperties.concurrency,
+        publisherProperties.roomPublicationQueueCapacity,
+        "room-publication",
+    )
     private val publication = RoomPublicationScript(redis, mapper, properties)
 
-    override fun hydrate(messages: List<OutboxMessage>): List<OutboxMessage> = hydration?.prepare(messages) ?: messages
+    override fun hydrate(messages: List<OutboxMessage>): List<OutboxMessage> = publicationHydration.prepare(messages)
 
     override fun publish(message: OutboxMessage) {
         SendStageRecorder.record(SendStage.REDIS_PUBLISH_STARTED, eventId = message.id.value)
         try {
             val streamId = publication.publish(message)
                 .subscribeOn(scheduler)
-                .timeout(Duration.ofMillis(publisherProperties.publishTimeoutMs))
+                .timeout(publisherProperties.publishTimeout)
                 .block()
             check(streamId != null) { "Redis returned no stream ID" }
             SendStageRecorder.record(SendStage.REDIS_PUBLISH_CONFIRMED, eventId = message.id.value)

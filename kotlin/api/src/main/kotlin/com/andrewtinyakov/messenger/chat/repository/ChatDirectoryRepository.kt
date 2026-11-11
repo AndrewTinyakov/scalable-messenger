@@ -22,6 +22,4 @@ interface ChatDirectoryRepository {
     fun findById(chatId: ChatId): Chat?
 
     fun findMemberDetails(chatId: ChatId, userId: UserId): MemberChatDetails?
-
-    fun findMembers(chatId: ChatId): List<UserSummary>
 }

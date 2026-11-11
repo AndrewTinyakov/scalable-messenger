@@ -25,13 +25,10 @@ import tools.jackson.databind.ObjectMapper
 import java.time.Clock
 import java.time.OffsetDateTime
 
-private const val MIN_MUTE_SECONDS = 60L
-private const val MAX_MUTE_SECONDS = 366L * 24 * 60 * 60
-
 @Service
 class ChatPreferencesService(
-    private val repository: ChatPreferencesRepository,
-    private val outbox: OutboxRepository,
+    private val chatPreferencesRepository: ChatPreferencesRepository,
+    private val outboxRepository: OutboxRepository,
     private val mapper: ObjectMapper,
     private val tx: TransactionTemplate,
     private val clock: Clock,
@@ -42,7 +39,7 @@ class ChatPreferencesService(
                 current
             }
 
-            !repository.isVisibleMember(chatId, userId) -> {
+            !chatPreferencesRepository.isVisibleMember(chatId, userId) -> {
                 notFound()
             }
 
@@ -66,40 +63,45 @@ class ChatPreferencesService(
     }
 
     fun mute(chatId: ChatId, userId: UserId, durationSeconds: Long?): ChatPreferencesResponse {
-        if (durationSeconds != null && durationSeconds !in MIN_MUTE_SECONDS..MAX_MUTE_SECONDS) {
-            badRequest(ApiErrorCode.INVALID_REQUEST, "durationSeconds must be $MIN_MUTE_SECONDS to $MAX_MUTE_SECONDS")
+        if (durationSeconds != null && durationSeconds !in MuteEnd.MIN_DURATION_SECONDS..MuteEnd.MAX_DURATION_SECONDS) {
+            badRequest(
+                ApiErrorCode.INVALID_REQUEST,
+                "durationSeconds must be ${MuteEnd.MIN_DURATION_SECONDS} to ${MuteEnd.MAX_DURATION_SECONDS}",
+            )
         }
         val end = durationSeconds?.let { MuteEnd.At(OffsetDateTime.now(clock).plusSeconds(it)) } ?: MuteEnd.Forever
-        return change(chatId, userId) { repository.mute(chatId, userId, end) }
+        return change(chatId, userId) { chatPreferencesRepository.mute(chatId, userId, end) }
     }
 
-    fun unmute(chatId: ChatId, userId: UserId): ChatPreferencesResponse = change(chatId, userId) { repository.mute(chatId, userId, null) }
+    fun unmute(chatId: ChatId, userId: UserId): ChatPreferencesResponse = change(chatId, userId) {
+        chatPreferencesRepository.mute(chatId, userId, null)
+    }
 
     fun markUnread(chatId: ChatId, userId: UserId, unread: Boolean): ChatPreferencesResponse = change(chatId, userId) {
-        repository.markUnread(chatId, userId, if (unread) OffsetDateTime.now(clock) else null)
+        chatPreferencesRepository.markUnread(chatId, userId, if (unread) OffsetDateTime.now(clock) else null)
     }
 
     private fun change(chatId: ChatId, userId: UserId, update: () -> Boolean): ChatPreferencesResponse =
         tx.observedExecute(DatabaseTransaction.CHAT_PREFERENCES) {
             if (!update()) notFound()
             notify(userId, listOf(chatId))
-            checkNotNull(repository.find(chatId, userId)).toResponse(chatId.value)
+            checkNotNull(chatPreferencesRepository.find(chatId, userId)).toResponse(chatId.value)
         }
 
     private fun changePins(userId: UserId, change: (List<ChatId>) -> List<ChatId>): PinnedChatsResponse =
         tx.observedExecute(DatabaseTransaction.CHAT_PREFERENCES) {
-            repository.lockPins(userId)
-            val current = repository.pinnedChatIds(userId)
+            chatPreferencesRepository.lockPins(userId)
+            val current = chatPreferencesRepository.pinnedChatIds(userId)
             val next = change(current)
             if (next != current) {
-                repository.replacePinnedOrder(userId, next)
+                chatPreferencesRepository.replacePinnedOrder(userId, next)
                 notify(userId, (current + next).distinct().filter { current.indexOf(it) != next.indexOf(it) })
             }
             PinnedChatsResponse(next.map(ChatId::value))
         }
 
     private fun notify(userId: UserId, chatIds: List<ChatId>) {
-        outbox.enqueue(
+        outboxRepository.enqueue(
             chatIds.map { chatId ->
                 ChatPreferencesChangedEventV1.create(eventId = newId(), room = RoomAddress.user(userId), chatId = chatId.value)
                     .toOutboxMessage(mapper)

@@ -15,6 +15,7 @@ import com.andrewtinyakov.messenger.message.model.Message
 import com.andrewtinyakov.messenger.message.model.MessageId
 import com.andrewtinyakov.messenger.message.model.RequestId
 import com.andrewtinyakov.messenger.message.model.SavedMessage
+import com.andrewtinyakov.messenger.message.model.SendBatch
 import com.andrewtinyakov.messenger.message.model.SendResult
 import com.andrewtinyakov.messenger.message.model.SendResultStatus
 import com.andrewtinyakov.messenger.message.model.asReply
@@ -32,7 +33,7 @@ class JooqMessageRepository(
     override fun findMessagesForPublication(
         messageIds: List<MessageId>,
     ): List<Message> = DatabaseObservation.query(DatabaseOperation.MESSAGE_PUBLICATION_HYDRATE) {
-        require(messageIds.size <= 100)
+        require(messageIds.size <= Message.MAX_LOOKUP_IDS)
         if (messageIds.isEmpty()) return@query emptyList()
         return@query db.select(MESSAGES.asterisk()).from(MESSAGES).join(CHATS).on(CHATS.ID.eq(MESSAGES.CHAT_ID))
             .where(
@@ -149,7 +150,7 @@ class JooqMessageRepository(
         DatabaseOperation.MESSAGE_INSERT_SAVED_MESSAGES,
     ) {
         if (messages.isEmpty()) return@query
-        require(messages.size <= 16) { "Saved message batch must contain at most sixteen messages" }
+        require(messages.size <= SendBatch.MAX_SIZE) { "Saved message batch must contain at most ${SendBatch.MAX_SIZE} messages" }
         val messageInsert = db.insertInto(
             MESSAGES,
             MESSAGES.ID,
@@ -216,7 +217,7 @@ class JooqMessageRepository(
 
     override fun findMessagesByIds(chatId: ChatId, userId: UserId, messageIds: List<MessageId>): List<Message> =
         DatabaseObservation.query(DatabaseOperation.MESSAGE_FIND_MESSAGES_BY_IDS) {
-            require(messageIds.size <= 100)
+            require(messageIds.size <= Message.MAX_LOOKUP_IDS)
             if (messageIds.isEmpty()) return@query emptyList()
             db.selectFrom(MESSAGES)
                 .where(MESSAGES.CHAT_ID.eq(chatId.value), MESSAGES.ID.`in`(messageIds.map { it.value }), visibleToMember(chatId, userId))

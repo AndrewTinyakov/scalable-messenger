@@ -9,6 +9,7 @@ import org.mockito.Mockito.`when`
 import org.postgresql.PGConnection
 import org.postgresql.PGNotification
 import java.sql.Connection
+import java.time.Duration
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -42,7 +43,7 @@ class OutboxPublicationWorkerTests {
             if (calls.getAndIncrement() == 0) notification.set(true) else nextQuery.countDown()
             0
         }
-        val publisher = OutboxPublicationWorker(dataSource, publication, PublisherProperties(pollMs = 5000))
+        val publisher = OutboxPublicationWorker(dataSource, publication, PublisherProperties(pollInterval = Duration.ofSeconds(5)))
         publisher.start()
         try {
             assertTrue(nextQuery.await(1, TimeUnit.SECONDS))

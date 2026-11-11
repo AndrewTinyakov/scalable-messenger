@@ -28,7 +28,7 @@ class AuthController(
     private val authenticationService: AuthenticationService,
     private val userLookupService: UserLookupService,
     private val wsTicketService: WsTicketService,
-    private val cookies: SessionCookie,
+    private val sessionCookie: SessionCookie,
 ) {
     @PostMapping("/register")
     @ResponseStatus(HttpStatus.CREATED)
@@ -37,7 +37,7 @@ class AuthController(
         response: HttpServletResponse,
     ): AuthResponse {
         val credentials = authenticationService.register(input)
-        cookies.issue(response = response, credentials = credentials)
+        sessionCookie.issue(response = response, credentials = credentials)
         return credentials.toAuthResponse()
     }
 
@@ -47,7 +47,7 @@ class AuthController(
         response: HttpServletResponse,
     ): AuthResponse {
         val credentials = authenticationService.login(input)
-        cookies.issue(response = response, credentials = credentials)
+        sessionCookie.issue(response = response, credentials = credentials)
         return credentials.toAuthResponse()
     }
 
@@ -65,8 +65,8 @@ class AuthController(
         request: HttpServletRequest,
         response: HttpServletResponse,
     ) {
-        authenticationService.logout(token = cookies.read(request), expectedIdentity = request.expectedSessionIdentity())
-        cookies.clear(response)
+        authenticationService.logout(token = sessionCookie.read(request), expectedIdentity = request.expectedSessionIdentity())
+        sessionCookie.clear(response)
     }
 
     @PostMapping("/ws-ticket")

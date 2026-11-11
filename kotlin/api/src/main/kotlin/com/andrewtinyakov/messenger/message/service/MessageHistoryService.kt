@@ -5,6 +5,7 @@ import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseTransaction
 import com.andrewtinyakov.messenger.infrastructure.database.observability.observedExecute
 import com.andrewtinyakov.messenger.message.change.model.MessageChange
+import com.andrewtinyakov.messenger.message.change.model.MessageChangeKind
 import com.andrewtinyakov.messenger.message.change.model.MutationCursor
 import com.andrewtinyakov.messenger.message.change.repository.MessageChangeRepository
 import com.andrewtinyakov.messenger.message.model.Message
@@ -15,7 +16,6 @@ import com.andrewtinyakov.messenger.message.repository.MessageRepository
 import com.andrewtinyakov.messenger.message.visibility.model.VisibilitySnapshot
 import com.andrewtinyakov.messenger.message.visibility.repository.VisibilityRepository
 import com.andrewtinyakov.messenger.message.web.payload.MessageAroundResponse
-import com.andrewtinyakov.messenger.message.web.payload.MessageChangeKind
 import com.andrewtinyakov.messenger.message.web.payload.MessageChangeResponse
 import com.andrewtinyakov.messenger.message.web.payload.MessageChangesResponse
 import com.andrewtinyakov.messenger.message.web.payload.MessageHistoryResponse
@@ -35,14 +35,15 @@ import org.springframework.stereotype.Service
 import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.support.TransactionTemplate
 import kotlin.math.abs
+import com.andrewtinyakov.messenger.message.web.payload.MessageChangeKind as MessageChangeKindResponse
 
 @Service
 class MessageHistoryService(
-    private val repository: MessageRepository,
+    private val messageRepository: MessageRepository,
     private val metrics: MessageMetrics,
-    private val changes: MessageChangeRepository,
-    private val visibility: VisibilityRepository,
-    private val pages: VisibleHistory,
+    private val messageChangeRepository: MessageChangeRepository,
+    private val visibilityRepository: VisibilityRepository,
+    private val visibleHistory: VisibleHistory,
     tx: TransactionTemplate,
 ) {
     private val snapshot = TransactionTemplate(requireNotNull(tx.transactionManager)).apply {
@@ -60,7 +61,7 @@ class MessageHistoryService(
                 if (afterSeq != null && afterSeq > state.snapshotSequence) {
                     badRequest(ApiErrorCode.INVALID_SEQUENCE, "afterSeq exceeds saved history")
                 }
-                val page = pages.page(
+                val page = visibleHistory.page(
                     chatId = chatId,
                     userId = userId,
                     state = state,
@@ -106,12 +107,12 @@ class MessageHistoryService(
         DatabaseTransaction.MESSAGE_HISTORY,
     ) {
         val state = state(chatId, userId)
-        if (ids.size !in 1..100 ||
+        if (ids.size !in 1..Message.MAX_LOOKUP_IDS ||
             ids.distinct().size != ids.size
         ) {
-            badRequest(ApiErrorCode.INVALID_REQUEST, "Provide 1 to 100 distinct message IDs")
+            badRequest(ApiErrorCode.INVALID_REQUEST, "Provide 1 to ${Message.MAX_LOOKUP_IDS} distinct message IDs")
         }
-        state.toResolveResponse(messages = repository.findMessagesByIds(chatId, userId, ids))
+        state.toResolveResponse(messages = messageRepository.findMessagesByIds(chatId, userId, ids))
     }
 
     fun visibility(chatId: ChatId, userId: UserId): MessageVisibilityResponse = state(chatId, userId).toVisibilityResponse()
@@ -119,10 +120,10 @@ class MessageHistoryService(
     fun changes(chatId: ChatId, userId: UserId, after: Long, limit: Int): MessageChangesResponse = metrics.timeChanges {
         snapshot.observedExecute(DatabaseTransaction.MESSAGE_HISTORY) {
             val state = state(chatId, userId)
-            val cursor = changes.cursor(chatId, userId) ?: notFound()
+            val cursor = messageChangeRepository.cursor(chatId, userId) ?: notFound()
             requirePageLimit(limit)
             if (after < cursor.floor || after > cursor.revision) return@observedExecute resetChanges(state, cursor)
-            val page = changes.changes(chatId, after, cursor.revision, limit)
+            val page = messageChangeRepository.page(chatId, after, cursor.revision, limit)
             val current = findCurrentMessages(chatId, userId, page)
             state.toChangesResponse(
                 changes = page.map { change -> change.toChangeResponse(current[change.messageId]) },
@@ -145,14 +146,14 @@ class MessageHistoryService(
         messageId: MessageId?,
         anchorSequence: Long?,
     ): Message? {
-        val requested = messageId?.let { repository.findMessage(chatId, userId, it) }
+        val requested = messageId?.let { messageRepository.findMessage(chatId, userId, it) }
         if (messageId != null && requested == null && anchorSequence == null) notFound()
         return requested
     }
 
     private fun readNeighbours(chatId: ChatId, userId: UserId, state: VisibilitySnapshot, anchorAt: Long): AnchorNeighbours =
         AnchorNeighbours(
-            before = pages.page(
+            before = visibleHistory.page(
                 chatId = chatId,
                 userId = userId,
                 state = state,
@@ -160,7 +161,7 @@ class MessageHistoryService(
                 ascending = false,
                 limit = 1,
             ),
-            after = pages.page(
+            after = visibleHistory.page(
                 chatId = chatId,
                 userId = userId,
                 state = state,
@@ -186,7 +187,7 @@ class MessageHistoryService(
         anchor: Message,
         limit: Int,
     ): AnchorWindow = AnchorWindow(
-        older = pages.page(
+        older = visibleHistory.page(
             chatId = chatId,
             userId = userId,
             state = state,
@@ -194,7 +195,7 @@ class MessageHistoryService(
             ascending = false,
             limit = limit,
         ),
-        newer = pages.page(
+        newer = visibleHistory.page(
             chatId = chatId,
             userId = userId,
             state = state,
@@ -233,13 +234,13 @@ class MessageHistoryService(
     }
 
     private fun findCurrentMessages(chatId: ChatId, userId: UserId, page: List<MessageChange>): Map<MessageId, Message> =
-        repository.findMessagesByIds(chatId, userId, page.mapNotNull { it.messageId }.distinct()).associateBy { it.id }
+        messageRepository.findMessagesByIds(chatId, userId, page.mapNotNull { it.messageId }.distinct()).associateBy { it.id }
 
     private fun MessageChange.toChangeResponse(current: Message?): MessageChangeResponse {
-        val resolvedKind = if (kind == "UPSERT" && current == null) MessageChangeKind.REMOVED else MessageChangeKind.valueOf(kind)
+        val resolvedKind = if (kind == MessageChangeKind.UPSERT && current == null) MessageChangeKind.REMOVED else kind
         return MessageChangeResponse(
             revision = revision.toString(),
-            kind = resolvedKind,
+            kind = MessageChangeKindResponse.valueOf(resolvedKind.name),
             message = if (resolvedKind == MessageChangeKind.UPSERT) current?.toResponse() else null,
             messageId = messageId?.value,
             sequence = sequence?.toString(),
@@ -247,7 +248,7 @@ class MessageHistoryService(
         )
     }
 
-    private fun state(chatId: ChatId, userId: UserId): VisibilitySnapshot = visibility.snapshot(chatId, userId) ?: notFound()
+    private fun state(chatId: ChatId, userId: UserId): VisibilitySnapshot = visibilityRepository.snapshot(chatId, userId) ?: notFound()
 
     private data class AnchorNeighbours(
         val before: VisiblePage,

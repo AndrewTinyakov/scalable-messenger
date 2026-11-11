@@ -30,14 +30,14 @@ class JooqVisibilityRepository(
         ).from(CHATS).join(CHAT_MEMBERS).on(CHAT_MEMBERS.CHAT_ID.eq(CHATS.ID))
             .where(CHATS.ID.eq(chatId.value), CHAT_MEMBERS.USER_ID.eq(userId.value), CHATS.DELETED_AT.isNull)
             .fetchOne {
-                val high = it.value1()!! - 1
+                val snapshotSequence = it.value1()!! - 1
                 VisibilitySnapshot(
-                    high,
+                    snapshotSequence,
                     it.value2()!!,
                     it.value3()!!,
                     it.value4()!!,
                     it.value5()!!,
-                    it.value6()?.let { cutoff -> high <= cutoff } == true,
+                    it.value6()?.let { cutoff -> snapshotSequence <= cutoff } == true,
                 )
             }
     }

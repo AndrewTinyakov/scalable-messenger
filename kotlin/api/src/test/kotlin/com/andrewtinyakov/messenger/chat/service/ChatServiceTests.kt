@@ -18,6 +18,7 @@ import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
 import com.andrewtinyakov.messenger.shared.id.newId
 import com.andrewtinyakov.messenger.shared.web.ApiException
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -209,9 +210,9 @@ class ChatServiceTests
                 }
             }
             val concurrentReads = ChatService(
-                repository = chatRepository,
-                directory = removingRepository,
-                memberships = groupMembershipRepository,
+                chatRepository = chatRepository,
+                chatDirectoryRepository = removingRepository,
+                groupMembershipRepository = groupMembershipRepository,
                 outboxRepository = outboxRepository,
                 mapper = mapper,
                 tx = tx,
@@ -248,9 +249,9 @@ class ChatServiceTests
                 }
             }
             val failing = ChatService(
-                repository = invalidEvents,
-                directory = chatDirectoryRepository,
-                memberships = groupMembershipRepository,
+                chatRepository = invalidEvents,
+                chatDirectoryRepository = chatDirectoryRepository,
+                groupMembershipRepository = groupMembershipRepository,
                 outboxRepository = outboxRepository,
                 mapper = mapper,
                 tx = tx,
@@ -328,8 +329,8 @@ class ChatServiceTests
                 }
             }
             val failing = ChatMembershipService(
-                repository = chatRepository,
-                memberships = groupMembershipRepository,
+                chatRepository = chatRepository,
+                groupMembershipRepository = groupMembershipRepository,
                 tx = tx,
                 outboxRepository = failingOutbox,
                 mapper = mapper,
@@ -366,8 +367,8 @@ class ChatServiceTests
             }
             val removing =
                 ChatMembershipService(
-                    repository = chatRepository,
-                    memberships = pausedRepository,
+                    chatRepository = chatRepository,
+                    groupMembershipRepository = pausedRepository,
                     tx = tx,
                     outboxRepository = outboxRepository,
                     mapper = mapper,
@@ -384,9 +385,9 @@ class ChatServiceTests
                 }
                 val addingService =
                     ChatService(
-                        repository = addingRepository,
-                        directory = chatDirectoryRepository,
-                        memberships = groupMembershipRepository,
+                        chatRepository = addingRepository,
+                        chatDirectoryRepository = chatDirectoryRepository,
+                        groupMembershipRepository = groupMembershipRepository,
                         outboxRepository = outboxRepository,
                         mapper = mapper,
                         tx = tx,
@@ -412,8 +413,8 @@ class ChatServiceTests
             val member = user("concurrent-remove-member")
             val chat = chatService.createGroup(UserId(owner), "Concurrent removal", listOf(member).map(::UserId))
             val removing = ChatMembershipService(
-                repository = chatRepository,
-                memberships = groupMembershipRepository,
+                chatRepository = chatRepository,
+                groupMembershipRepository = groupMembershipRepository,
                 tx = tx,
                 outboxRepository = outboxRepository,
                 mapper = mapper,
@@ -456,8 +457,8 @@ class ChatServiceTests
                 }
             }
             val removing = ChatMembershipService(
-                repository = chatRepository,
-                memberships = paused,
+                chatRepository = chatRepository,
+                groupMembershipRepository = paused,
                 tx = tx,
                 outboxRepository = outboxRepository,
                 mapper = mapper,
@@ -514,8 +515,8 @@ class ChatServiceTests
                 }
             }
             val removing = ChatMembershipService(
-                repository = observing,
-                memberships = groupMembershipRepository,
+                chatRepository = observing,
+                groupMembershipRepository = groupMembershipRepository,
                 tx = tx,
                 outboxRepository = outboxRepository,
                 mapper = mapper,
@@ -595,10 +596,9 @@ class ChatServiceTests
             val other = user("batch-group-other")
             val included = chatService.createGroup(UserId(owner), "Included", listOf(member).map(::UserId))
             val excluded = chatService.createGroup(UserId(owner), "Excluded", listOf(other).map(::UserId))
-            assertEquals(
-                setOf(ChatId(included.id)),
-                groupMembershipRepository.groupMemberships(listOf(included.id, excluded.id).map(::ChatId), UserId(member)),
-            )
+            val memberChatIds = chatService.list(UserId(member), cursor = null, limit = 100).chats.map { it.id }
+            assertTrue(included.id in memberChatIds)
+            assertFalse(excluded.id in memberChatIds)
         }
 
         @Test
@@ -713,9 +713,9 @@ class ChatServiceTests
                 }
             }
             val failing = ChatService(
-                repository = chatRepository,
-                directory = chatDirectoryRepository,
-                memberships = groupMembershipRepository,
+                chatRepository = chatRepository,
+                chatDirectoryRepository = chatDirectoryRepository,
+                groupMembershipRepository = groupMembershipRepository,
                 outboxRepository = failingOutbox,
                 mapper = mapper,
                 tx = tx,

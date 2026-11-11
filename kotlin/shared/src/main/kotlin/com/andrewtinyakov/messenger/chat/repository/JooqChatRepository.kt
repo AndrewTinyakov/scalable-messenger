@@ -12,6 +12,7 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.rec
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseObservation
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseOperation
 import com.andrewtinyakov.messenger.infrastructure.outbox.model.OutboxMessage
+import com.andrewtinyakov.messenger.message.model.SendBatch
 import org.jooq.DSLContext
 import org.jooq.JSONB
 import org.jooq.Query
@@ -19,6 +20,9 @@ import org.jooq.impl.DSL
 import org.springframework.stereotype.Repository
 import java.time.OffsetDateTime
 import com.andrewtinyakov.messenger.infrastructure.database.generated.enums.ChatKind as DbChatKind
+
+private const val INSERT_CHUNK_SIZE = 500
+private const val MAX_CREATION_EVENT_BYTES = 1_048_576L
 
 @Repository
 class JooqChatRepository(
@@ -101,7 +105,7 @@ class JooqChatRepository(
         members: List<UserId>,
         events: List<OutboxMessage>,
     ) = DatabaseObservation.query(DatabaseOperation.CHAT_INSERT_GROUP_WITH_MEMBERS_AND_EVENTS) {
-        require(members.size in 2..1000 && members.distinct().size == members.size && ownerId in members)
+        require(members.size in 2..Chat.MAX_INITIAL_GROUP_MEMBERS && members.distinct().size == members.size && ownerId in members)
         val chat = db.insertInto(CHATS)
             .set(
                 CHATS.ID,
@@ -138,10 +142,10 @@ class JooqChatRepository(
         events: List<OutboxMessage>,
     ) {
         require(events.size == members.size)
-        require(events.sumOf { it.payload.toByteArray(Charsets.UTF_8).size.toLong() } <= 1_048_576)
+        require(events.sumOf { it.payload.toByteArray(Charsets.UTF_8).size.toLong() } <= MAX_CREATION_EVENT_BYTES)
         val statements = mutableListOf(chat)
         val expectedCounts = mutableListOf(1)
-        members.chunked(500)
+        members.chunked(INSERT_CHUNK_SIZE)
             .forEach { chunk ->
                 val insert = db.insertInto(
                     CHAT_MEMBERS,
@@ -157,7 +161,7 @@ class JooqChatRepository(
                 statements.add(insert)
                 expectedCounts.add(chunk.size)
             }
-        events.chunked(500)
+        events.chunked(INSERT_CHUNK_SIZE)
             .forEach { chunk ->
                 val insert = db.insertInto(
                     MESSENGER_OUTBOX_EVENTS,
@@ -206,7 +210,7 @@ class JooqChatRepository(
     override fun allocateSequencesForMembers(chatId: ChatId, userIds: List<UserId>): Long? = DatabaseObservation.query(
         DatabaseOperation.CHAT_ALLOCATE_SEQUENCES_FOR_MEMBERS,
     ) {
-        require(userIds.size in 1..16) { "Sequence allocation must contain one to sixteen senders" }
+        require(userIds.size in 1..SendBatch.MAX_SIZE) { "Sequence allocation must contain 1 to ${SendBatch.MAX_SIZE} senders" }
         val distinctUsers = userIds.distinct()
         val activityNow = DSL.field("clock_timestamp()", OffsetDateTime::class.java)
         return db.update(CHATS)

@@ -11,13 +11,15 @@ import org.springframework.stereotype.Component
 import java.sql.Connection
 import javax.sql.DataSource
 
+private const val NOTIFICATION_CHANNEL = "messenger_outbox"
+
 @Component
 class OutboxPublicationWorker(
     private val dataSource: DataSource,
     private val outboxPublicationService: OutboxPublicationService,
     private val properties: PublisherProperties,
 ) {
-    private val log = LoggerFactory.getLogger(javaClass)
+    private val logger = LoggerFactory.getLogger(javaClass)
 
     @Volatile
     private var running = false
@@ -33,10 +35,10 @@ class OutboxPublicationWorker(
     @PreDestroy
     fun stop() {
         running = false
-        worker?.join(2000)
+        worker?.join(properties.workerJoinTimeout)
         if (worker?.isAlive == true) {
             worker?.interrupt()
-            worker?.join(2000)
+            worker?.join(properties.workerJoinTimeout)
         }
     }
 
@@ -52,7 +54,7 @@ class OutboxPublicationWorker(
                             postgres.getNotifications()
                             published = outboxPublicationService.publishBatch()
                         } while (running && published > 0)
-                        if (running) postgres.getNotifications(properties.pollMs)
+                        if (running) postgres.getNotifications(properties.pollInterval.toMillis().toInt())
                     }
                 }
             } catch (error: InterruptedException) {
@@ -60,9 +62,9 @@ class OutboxPublicationWorker(
                 return
             } catch (error: Exception) {
                 if (!running) return
-                log.error("Outbox publisher connection failed", error)
+                logger.error("Outbox publisher connection failed", error)
                 try {
-                    Thread.sleep(properties.pollMs.toLong())
+                    Thread.sleep(properties.pollInterval)
                 } catch (interrupted: InterruptedException) {
                     Thread.currentThread().interrupt()
                     return
@@ -73,6 +75,6 @@ class OutboxPublicationWorker(
 
     private fun listen(connection: Connection) {
         connection.autoCommit = true
-        connection.createStatement().use { it.execute("LISTEN messenger_outbox") }
+        connection.createStatement().use { it.execute("LISTEN $NOTIFICATION_CHANNEL") }
     }
 }

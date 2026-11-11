@@ -8,6 +8,7 @@ import com.andrewtinyakov.messenger.infrastructure.messaging.monitoring.CommandM
 import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStage
 import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStageEvent
 import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStageRecorder
+import com.andrewtinyakov.messenger.message.model.SendBatch
 import com.andrewtinyakov.messenger.message.model.SendTarget
 import com.andrewtinyakov.messenger.message.service.MessageSendBatchService
 import com.andrewtinyakov.messenger.message.service.MessageSendService
@@ -23,8 +24,8 @@ import java.time.OffsetDateTime
 
 @Component
 class SendMessageListener(
-    private val service: MessageSendService,
-    private val batches: MessageSendBatchService,
+    private val messageSendService: MessageSendService,
+    private val sendBatchService: MessageSendBatchService,
     private val metrics: CommandMetrics,
     mapper: ObjectMapper,
 ) {
@@ -39,7 +40,7 @@ class SendMessageListener(
         val received = SendStageRecorder.beginEach(SendStage.LISTENER_RECEIVED, messages) { it.messageProperties.deliveryTag }
         val sends = decodeDeliveries(messages, received, channel)
         sends.groupBy { it.target }.values
-            .flatMap { it.chunked(MessageSendBatchService.MAX_BATCH_SIZE) }
+            .flatMap { it.chunked(SendBatch.MAX_SIZE) }
             .forEach { chunk -> processChunk(chunk, channel) }
     }
 
@@ -68,7 +69,7 @@ class SendMessageListener(
 
     private fun processChunk(chunk: List<PendingSend>, channel: Channel) {
         try {
-            batches.process(chunk.map { it.command })
+            sendBatchService.process(chunk.map { it.command })
         } catch (error: Exception) {
             processIndividually(chunk, error, channel)
             return
@@ -82,7 +83,7 @@ class SendMessageListener(
             settle(chunk.single(), channel) { throw batchFailure }
             return
         }
-        chunk.forEach { pending -> settle(pending, channel) { batches.process(listOf(pending.command)).single() } }
+        chunk.forEach { pending -> settle(pending, channel) { sendBatchService.process(listOf(pending.command)).single() } }
     }
 
     private fun acknowledge(chunk: List<PendingSend>, channel: Channel) = chunk.forEach { pending -> settle(pending, channel) {} }
@@ -107,7 +108,7 @@ class SendMessageListener(
             "Command did not exhaust its delivery limit"
         }
         val command: SendMessageCommandV1 = reader.readValue(message.body)
-        service.rejectExhausted(command)
+        messageSendService.rejectExhausted(command)
     }
 
     private data class PendingSend(

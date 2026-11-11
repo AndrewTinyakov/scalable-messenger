@@ -33,9 +33,9 @@ import tools.jackson.databind.ObjectMapper
 
 @Service
 class ChatService(
-    private val repository: ChatRepository,
-    private val directory: ChatDirectoryRepository,
-    private val memberships: GroupMembershipRepository,
+    private val chatRepository: ChatRepository,
+    private val chatDirectoryRepository: ChatDirectoryRepository,
+    private val groupMembershipRepository: GroupMembershipRepository,
     private val outboxRepository: OutboxRepository,
     private val mapper: ObjectMapper,
     private val tx: TransactionTemplate,
@@ -47,14 +47,14 @@ class ChatService(
     ): ChatPageResponse {
         requirePageLimit(limit)
         val position = cursor?.let(ChatCursor::decode)
-        val fetched = directory.findByMember(
+        val fetched = chatDirectoryRepository.findByMember(
             userId = userId,
             beforeActivityAt = position?.activityAt,
             beforeChatId = position?.chatId,
             limit = limit + 1,
         )
         val pinned = if (position == null) {
-            directory.findByMember(
+            chatDirectoryRepository.findByMember(
                 userId = userId,
                 beforeActivityAt = null,
                 beforeChatId = null,
@@ -73,7 +73,7 @@ class ChatService(
             )
         }
         val chats = page.map { it.chat }
-        val members = directory.findMembersByChatIds(
+        val members = chatDirectoryRepository.findMembersByChatIds(
             chats.filter { it.kind == ChatKind.DIRECT }
                 .map { it.id },
         )
@@ -92,12 +92,12 @@ class ChatService(
         memberIds: List<UserId>,
     ): ChatResponse {
         val groupName = name.trim()
-        if (groupName.length !in 1..80) {
-            badRequest(ApiErrorCode.INVALID_NAME, "Group name must be 1 to 80 characters")
+        if (groupName.length !in 1..Chat.MAX_NAME_LENGTH) {
+            badRequest(ApiErrorCode.INVALID_NAME, "Group name must be 1 to ${Chat.MAX_NAME_LENGTH} characters")
         }
         val members = (memberIds + userId).distinct()
-        if (members.size !in 2..1000) {
-            badRequest(ApiErrorCode.INVALID_MEMBERS, "Initial group needs 2 to 1000 members")
+        if (members.size !in 2..Chat.MAX_INITIAL_GROUP_MEMBERS) {
+            badRequest(ApiErrorCode.INVALID_MEMBERS, "Initial group needs 2 to ${Chat.MAX_INITIAL_GROUP_MEMBERS} members")
         }
         return tx.observedExecute(DatabaseTransaction.CHAT_CREATE_GROUP) {
             requireUsersAndLock(members)
@@ -110,7 +110,7 @@ class ChatService(
                 ownerId = userId,
                 memberCount = members.size,
             )
-            repository.insertGroupWithMembersAndEvents(
+            chatRepository.insertGroupWithMembersAndEvents(
                 id = chat.id,
                 name = groupName,
                 ownerId = userId,
@@ -128,7 +128,7 @@ class ChatService(
         chatId: ChatId,
         userId: UserId,
     ): ChatResponse {
-        val details = directory.findMemberDetails(
+        val details = chatDirectoryRepository.findMemberDetails(
             chatId = chatId,
             userId = userId,
         ) ?: notFound()
@@ -137,12 +137,12 @@ class ChatService(
 
     fun addMembers(
         chatId: ChatId,
-        actorId: UserId,
+        userId: UserId,
         memberIds: List<UserId>,
     ) {
         val requested = memberIds.distinct()
         tx.observedExecuteWithoutResult(DatabaseTransaction.CHAT_ADD_MEMBERS) {
-            val chat = lockOwnedGroup(chatId, actorId)
+            val chat = lockOwnedGroup(chatId, userId)
             requireUsersAndLock(requested)
             val additions = newMembers(chatId, requested)
             requireMemberLimit(chat, additions)
@@ -150,15 +150,15 @@ class ChatService(
         }
     }
 
-    private fun lockOwnedGroup(chatId: ChatId, actorId: UserId): Chat {
-        val chat = repository.findByIdForUpdate(chatId = chatId)
+    private fun lockOwnedGroup(chatId: ChatId, userId: UserId): Chat {
+        val chat = chatRepository.findByIdForUpdate(chatId = chatId)
             ?.takeIf { it.kind == ChatKind.GROUP } ?: notFound()
-        if (chat.ownerId != actorId) forbidden("Only the group owner can add members")
+        if (chat.ownerId != userId) forbidden("Only the group owner can add members")
         return chat
     }
 
     private fun newMembers(chatId: ChatId, requested: List<UserId>): List<UserId> {
-        val existing = repository.existingMemberIds(
+        val existing = chatRepository.existingMemberIds(
             chatId = chatId,
             userIds = requested,
         )
@@ -166,14 +166,14 @@ class ChatService(
     }
 
     private fun requireMemberLimit(chat: Chat, additions: List<UserId>) {
-        if (chat.memberCount + additions.size > 100_000) {
-            badRequest(ApiErrorCode.INVALID_MEMBERS, "Group cannot exceed 100000 members")
+        if (chat.memberCount + additions.size > Chat.MAX_MEMBERS) {
+            badRequest(ApiErrorCode.INVALID_MEMBERS, "Group cannot exceed ${Chat.MAX_MEMBERS} members")
         }
     }
 
     private fun addAndAnnounceMembers(chatId: ChatId, additions: List<UserId>) {
         requireGroupCapacity(additions)
-        memberships.insertMembersAndIncrementCount(
+        groupMembershipRepository.insertMembersAndIncrementCount(
             chatId = chatId,
             userIds = additions,
         )
@@ -191,12 +191,12 @@ class ChatService(
     }
 
     private fun requireUsersAndLock(userIds: List<UserId>) {
-        if (memberships.lockUsers(userIds = userIds).size != userIds.size) userNotFound()
+        if (groupMembershipRepository.lockUsers(userIds = userIds).size != userIds.size) userNotFound()
     }
 
     private fun requireGroupCapacity(userIds: List<UserId>) {
-        if (memberships.groupCountsByUser(userIds = userIds).values.any { it >= 200 }) {
-            badRequest(ApiErrorCode.INVALID_MEMBERS, "A member cannot join more than 200 groups")
+        if (groupMembershipRepository.groupCountsByUser(userIds = userIds).values.any { it >= Chat.MAX_GROUPS_PER_USER }) {
+            badRequest(ApiErrorCode.INVALID_MEMBERS, "A member cannot join more than ${Chat.MAX_GROUPS_PER_USER} groups")
         }
     }
 

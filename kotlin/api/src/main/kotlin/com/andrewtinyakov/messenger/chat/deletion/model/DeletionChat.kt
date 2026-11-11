@@ -5,10 +5,10 @@ import com.andrewtinyakov.messenger.chat.model.ChatKind
 
 data class DeletionChat(
     val kind: ChatKind,
-    val owner: UserId?,
-    val high: Long,
-    val revision: Long,
-    val visibility: Long,
+    val ownerId: UserId?,
+    val lastSequence: Long,
+    val mutationRevision: Long,
+    val visibilityRevision: Long,
     val purgedRows: Long,
     val deleted: Boolean,
 )

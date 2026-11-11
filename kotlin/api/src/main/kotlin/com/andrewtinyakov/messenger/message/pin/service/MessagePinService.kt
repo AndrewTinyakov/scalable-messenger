@@ -16,6 +16,7 @@ import com.andrewtinyakov.messenger.infrastructure.outbox.repository.OutboxRepos
 import com.andrewtinyakov.messenger.message.model.Message
 import com.andrewtinyakov.messenger.message.model.MessageId
 import com.andrewtinyakov.messenger.message.pin.model.PinScope
+import com.andrewtinyakov.messenger.message.pin.model.PinnedMessage
 import com.andrewtinyakov.messenger.message.pin.repository.MessagePinRepository
 import com.andrewtinyakov.messenger.message.pin.web.payload.PinnedMessagePageResponse
 import com.andrewtinyakov.messenger.message.pin.web.payload.PinnedMessageResponse
@@ -30,26 +31,24 @@ import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
 import tools.jackson.databind.ObjectMapper
 
-const val MAX_PINS_PER_SCOPE = 200
-
 @Service
 class MessagePinService(
-    private val pins: MessagePinRepository,
-    private val messages: MessageRepository,
-    private val chats: ChatRepository,
-    private val directory: ChatDirectoryRepository,
-    private val audience: ChatEventAudience,
-    private val outbox: OutboxRepository,
+    private val messagePinRepository: MessagePinRepository,
+    private val messageRepository: MessageRepository,
+    private val chatRepository: ChatRepository,
+    private val chatDirectoryRepository: ChatDirectoryRepository,
+    private val chatEventAudience: ChatEventAudience,
+    private val outboxRepository: OutboxRepository,
     private val mapper: ObjectMapper,
     private val tx: TransactionTemplate,
 ) {
     fun list(chatId: ChatId, userId: UserId, beforeSequence: Long?, limit: Int): PinnedMessagePageResponse =
         tx.observedExecute(DatabaseTransaction.MESSAGE_PIN) {
-            if (!chats.isMember(chatId, userId)) notFound()
-            val fetched = pins.page(chatId, userId, beforeSequence, limit + 1)
-            val pinnedIds = pins.visibleIds(chatId, userId)
+            if (!chatRepository.isMember(chatId, userId)) notFound()
+            val fetched = messagePinRepository.page(chatId, userId, beforeSequence, limit + 1)
+            val pinnedIds = messagePinRepository.visibleIds(chatId, userId)
             val page = fetched.take(limit)
-            val loaded = messages.findMessagesByIds(chatId, userId, page.map { it.messageId }).associateBy { it.id }
+            val loaded = messageRepository.findMessagesByIds(chatId, userId, page.map { it.messageId }).associateBy { it.id }
             PinnedMessagePageResponse(
                 pins = page.mapNotNull { pin -> loaded[pin.messageId]?.let { PinnedMessageResponse(it.toResponse(), pin.scope) } },
                 totalCount = pinnedIds.size,
@@ -66,24 +65,24 @@ class MessagePinService(
             badRequest(ApiErrorCode.INVALID_REQUEST, "Messages can be pinned only for everyone in groups")
         }
         val viewer = userId.takeIf { scope == PinScope.SELF }
-        pins.lock(chatId)
-        if (pins.exists(chatId, message.sequence, viewer)) return@observedExecuteWithoutResult
-        if (pins.count(chatId, viewer) >= MAX_PINS_PER_SCOPE) {
-            conflict(ApiErrorCode.PIN_LIMIT, "A chat can have up to $MAX_PINS_PER_SCOPE pinned messages")
+        messagePinRepository.lock(chatId)
+        if (messagePinRepository.exists(chatId, message.sequence, viewer)) return@observedExecuteWithoutResult
+        if (messagePinRepository.count(chatId, viewer) >= PinnedMessage.MAX_PER_SCOPE) {
+            conflict(ApiErrorCode.PIN_LIMIT, "A chat can have up to ${PinnedMessage.MAX_PER_SCOPE} pinned messages")
         }
-        if (pins.pin(chatId, message.sequence, viewer)) notify(chat, viewer)
+        if (messagePinRepository.pin(chatId, message.sequence, viewer)) notify(chat, viewer)
     }
 
     fun unpin(chatId: ChatId, userId: UserId, messageId: MessageId) = tx.observedExecuteWithoutResult(DatabaseTransaction.MESSAGE_PIN) {
         val (chat, message) = target(chatId, userId, messageId)
-        pins.lock(chatId)
-        notifyRemoved(chat, userId, pins.unpin(chatId, message.sequence, userId))
+        messagePinRepository.lock(chatId)
+        notifyRemoved(chat, userId, messagePinRepository.unpin(chatId, message.sequence, userId))
     }
 
     fun unpinAll(chatId: ChatId, userId: UserId) = tx.observedExecuteWithoutResult(DatabaseTransaction.MESSAGE_PIN) {
-        val chat = directory.findById(chatId)?.takeIf { chats.isMember(chatId, userId) } ?: notFound()
-        pins.lock(chatId)
-        notifyRemoved(chat, userId, pins.unpinAll(chatId, userId))
+        val chat = chatDirectoryRepository.findById(chatId)?.takeIf { chatRepository.isMember(chatId, userId) } ?: notFound()
+        messagePinRepository.lock(chatId)
+        notifyRemoved(chat, userId, messagePinRepository.unpinAll(chatId, userId))
     }
 
     private fun notifyRemoved(chat: Chat, userId: UserId, removed: Set<PinScope>) {
@@ -94,14 +93,14 @@ class MessagePinService(
     }
 
     private fun target(chatId: ChatId, userId: UserId, messageId: MessageId): Pair<Chat, Message> {
-        val chat = directory.findById(chatId) ?: notFound()
-        val message = messages.findMessage(chatId, userId, messageId)?.takeIf { it.deletedAt == null } ?: notFound()
+        val chat = chatDirectoryRepository.findById(chatId) ?: notFound()
+        val message = messageRepository.findMessage(chatId, userId, messageId)?.takeIf { it.deletedAt == null } ?: notFound()
         return chat to message
     }
 
     private fun notify(chat: Chat, personalViewer: UserId?) {
-        outbox.enqueue(
-            audience.rooms(chat.id, chat.kind, personalViewer).map { room ->
+        outboxRepository.enqueue(
+            chatEventAudience.rooms(chat.id, chat.kind, personalViewer).map { room ->
                 PinsChangedEventV1.create(eventId = newId(), room = room, chatId = chat.id.value).toOutboxMessage(mapper)
             },
         )

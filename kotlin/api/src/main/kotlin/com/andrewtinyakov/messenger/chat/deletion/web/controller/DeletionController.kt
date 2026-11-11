@@ -19,8 +19,8 @@ import org.springframework.web.bind.annotation.RestController
 @RestController
 @RequestMapping("/v1/chats/{id}")
 class DeletionController(
-    private val deletions: DeletionService,
-    private val history: MessageHistoryService,
+    private val deletionService: DeletionService,
+    private val messageHistoryService: MessageHistoryService,
 ) {
     @PostMapping("/deletions")
     fun delete(
@@ -28,7 +28,7 @@ class DeletionController(
         @PathVariable id: String,
         @RequestBody input: DeletionRequest,
     ): DeletionResponse =
-        deletions.delete(ChatId.parse(id), session.userId, input.toCommand())
+        deletionService.delete(ChatId.parse(id), session.userId, input.toCommand())
 
     @GetMapping("/deletions/{operationId}")
     fun status(
@@ -36,12 +36,12 @@ class DeletionController(
         @PathVariable id: String,
         @PathVariable operationId: String,
     ): DeletionResponse =
-        deletions.status(ChatId.parse(id), session.userId, RequestId.parse(operationId))
+        deletionService.status(ChatId.parse(id), session.userId, RequestId.parse(operationId))
 
     @GetMapping("/visibility")
     fun visibility(
         session: AuthenticatedSession,
         @PathVariable id: String,
     ): MessageVisibilityResponse =
-        history.visibility(ChatId.parse(id), session.userId)
+        messageHistoryService.visibility(ChatId.parse(id), session.userId)
 }

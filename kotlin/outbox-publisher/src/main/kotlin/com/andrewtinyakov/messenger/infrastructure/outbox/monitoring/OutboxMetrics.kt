@@ -20,7 +20,7 @@ class OutboxMetrics(
     private val clock: Clock,
 ) {
     enum class BatchOutcome(
-        val tag: String,
+        val metricValue: String,
     ) {
         EMPTY("empty"),
         WORK("work"),
@@ -28,7 +28,14 @@ class OutboxMetrics(
     }
 
     enum class PublicationOutcome(
-        val tag: String,
+        val metricValue: String,
+    ) {
+        SUCCESS("success"),
+        FAILURE("failure"),
+    }
+
+    enum class StageOutcome(
+        val metricValue: String,
     ) {
         SUCCESS("success"),
         FAILURE("failure"),
@@ -37,7 +44,7 @@ class OutboxMetrics(
     }
 
     enum class Stage(
-        val tag: String,
+        val metricValue: String,
     ) {
         CLAIM("claim"),
         HYDRATE("hydrate"),
@@ -46,7 +53,7 @@ class OutboxMetrics(
     }
 
     enum class RetentionReason(
-        val tag: String,
+        val metricValue: String,
     ) {
         COMPLETE_FAILURE("complete_failure"),
         INTERRUPTED("interrupted"),
@@ -55,14 +62,14 @@ class OutboxMetrics(
     }
 
     private enum class RoomKind(
-        val tag: String,
+        val metricValue: String,
     ) {
         GROUP("group"),
         USER("user"),
     }
 
     private enum class InvalidAge(
-        val tag: String,
+        val metricValue: String,
     ) {
         MISSING("missing"),
         FUTURE("future"),
@@ -89,34 +96,39 @@ class OutboxMetrics(
         "failure",
     )
     private val retained = RetentionReason.entries.associateWith {
-        registry.describedCounter("messenger.outbox.retained", "Outbox events left pending for retry by reason.", "reason", it.tag)
+        registry.describedCounter("messenger.outbox.retained", "Outbox events left pending for retry by reason.", "reason", it.metricValue)
     }
     private val batches = BatchOutcome.entries.associateWith {
         Timer.builder("messenger.outbox.batch").description("Duration of an outbox publication batch by outcome.")
-            .tag("outcome", it.tag).register(registry)
+            .tag("outcome", it.metricValue).register(registry)
     }
-    private val publications = listOf(PublicationOutcome.SUCCESS, PublicationOutcome.FAILURE).associateWith {
-        registry.histogram("messenger.outbox.publication", "Duration of an outbox transport publication attempt.", "outcome", it.tag)
+    private val publications = PublicationOutcome.entries.associateWith {
+        registry.histogram(
+            "messenger.outbox.publication",
+            "Duration of an outbox transport publication attempt.",
+            "outcome",
+            it.metricValue,
+        )
     }
     private val stages = Stage.entries.flatMap { stage ->
         val outcomes = when (stage) {
-            Stage.PUBLISH -> PublicationOutcome.entries
-            else -> listOf(PublicationOutcome.SUCCESS, PublicationOutcome.FAILURE)
+            Stage.PUBLISH -> StageOutcome.entries
+            else -> listOf(StageOutcome.SUCCESS, StageOutcome.FAILURE)
         }
         outcomes.map { outcome ->
             (stage to outcome) to registry.histogram(
                 "messenger.outbox.stage",
                 "Duration of an outbox publication stage by outcome.",
                 "phase",
-                stage.tag,
+                stage.metricValue,
                 "outcome",
-                outcome.tag,
+                outcome.metricValue,
             )
         }
     }.toMap()
     private val publicationAges = RoomKind.entries.associateWith {
         Timer.builder("messenger.outbox.publication.age").description("Age of an outbox event before a transport publication attempt.")
-            .tag("room_kind", it.tag).serviceLevelObjectives(*PUBLICATION_AGE_BUCKETS).register(registry)
+            .tag("room_kind", it.metricValue).serviceLevelObjectives(*PUBLICATION_AGE_BUCKETS).register(registry)
     }
     private val invalidAges = RoomKind.entries.flatMap { room ->
         InvalidAge.entries.map { reason ->
@@ -124,9 +136,9 @@ class OutboxMetrics(
                 "messenger.outbox.publication.age.invalid",
                 "Outbox publication attempts without a valid creation timestamp.",
                 "room_kind",
-                room.tag,
+                room.metricValue,
                 "reason",
-                reason.tag,
+                reason.metricValue,
             )
         }
     }.toMap()
@@ -162,7 +174,7 @@ class OutboxMetrics(
 
     fun batchFinished(started: Long, outcome: BatchOutcome) = batches.getValue(outcome).recordSince(started)
 
-    fun stageFinished(started: Long, stage: Stage, outcome: PublicationOutcome) = stages.getValue(stage to outcome).recordSince(started)
+    fun stageFinished(started: Long, stage: Stage, outcome: StageOutcome) = stages.getValue(stage to outcome).recordSince(started)
 
     fun published() = published.increment()
 

@@ -15,6 +15,7 @@ import com.andrewtinyakov.messenger.infrastructure.database.observability.observ
 import com.andrewtinyakov.messenger.infrastructure.outbox.model.toOutboxMessage
 import com.andrewtinyakov.messenger.infrastructure.outbox.repository.OutboxRepository
 import com.andrewtinyakov.messenger.message.change.repository.MessageChangeRepository
+import com.andrewtinyakov.messenger.message.model.Message
 import com.andrewtinyakov.messenger.message.model.MessageId
 import com.andrewtinyakov.messenger.message.model.RequestId
 import com.andrewtinyakov.messenger.message.monitoring.MessageEditFailure
@@ -38,26 +39,53 @@ import java.time.OffsetDateTime
 
 @Service
 class MessageMutationService(
-    private val deletions: DeletionService,
-    private val messages: MessageRepository,
-    private val chats: ChatRepository,
-    private val audience: ChatEventAudience,
-    private val changes: MessageChangeRepository,
-    private val outbox: OutboxRepository,
+    private val deletionService: DeletionService,
+    private val messageRepository: MessageRepository,
+    private val chatRepository: ChatRepository,
+    private val chatEventAudience: ChatEventAudience,
+    private val messageChangeRepository: MessageChangeRepository,
+    private val outboxRepository: OutboxRepository,
     private val tx: TransactionTemplate,
     private val mapper: ObjectMapper,
     private val clock: Clock,
     private val metrics: MessageMetrics,
 ) {
-    fun edit(chatId: ChatId, userId: UserId, messageId: MessageId, body: String, expectedVersion: Long): MessageResponse =
-        mutate(chatId, userId, messageId, body, expectedVersion)
+    fun edit(
+        chatId: ChatId,
+        userId: UserId,
+        messageId: MessageId,
+        body: String,
+        expectedVersion: Long,
+    ): MessageResponse {
+        val response = try {
+            tx.observedExecute(DatabaseTransaction.MESSAGE_MUTATE) {
+                val chat = chatRepository.findByIdForUpdate(chatId) ?: notFound()
+                requireEditableMessage(
+                    chatId = chatId,
+                    userId = userId,
+                    messageId = messageId,
+                    expectedVersion = expectedVersion,
+                )
+                requireValidBody(body)
+                val revision = messageChangeRepository.edit(chatId, messageId, body, OffsetDateTime.now(clock))
+                val updated = checkNotNull(messageRepository.findMessage(chatId, userId, messageId))
+                enqueueHistoryChanged(chat, revision)
+                updated.toResponse()
+            }
+        } catch (failure: Exception) {
+            metrics.editFailed(editFailure(failure))
+            throw failure
+        }
+        metrics.edited()
+        return response
+    }
 
     fun delete(chatId: ChatId, userId: UserId, messageId: MessageId, expectedVersion: Long): MessageResponse {
-        val previous = messages.findMessage(chatId, userId, messageId) ?: notFound()
+        val previous = messageRepository.findMessage(chatId, userId, messageId) ?: notFound()
         if (previous.messageVersion != expectedVersion) versionChanged()
-        deletions.delete(
+        deletionService.delete(
             chatId = chatId,
-            actorId = userId,
+            userId = userId,
             command = DeletionCommand(
                 requestId = RequestId(newId()),
                 scope = DeletionScope.EVERYONE,
@@ -75,57 +103,27 @@ class MessageMutationService(
         ).toResponse()
     }
 
-    private fun mutate(
-        chatId: ChatId,
-        userId: UserId,
-        messageId: MessageId,
-        body: String,
-        expectedVersion: Long,
-    ): MessageResponse {
-        val response = try {
-            tx.observedExecute(DatabaseTransaction.MESSAGE_MUTATE) {
-                val chat = chats.findByIdForUpdate(chatId) ?: notFound()
-                requireEditableMessage(
-                    chatId = chatId,
-                    userId = userId,
-                    messageId = messageId,
-                    expectedVersion = expectedVersion,
-                )
-                requireValidBody(body)
-                val revision = changes.mutate(chatId, messageId, body, OffsetDateTime.now(clock))
-                val updated = checkNotNull(messages.findMessage(chatId, userId, messageId))
-                enqueueHistoryChanged(chat, revision)
-                updated.toResponse()
-            }
-        } catch (failure: Exception) {
-            metrics.editFailed(editFailure(failure))
-            throw failure
-        }
-        metrics.edited()
-        return response
-    }
-
     private fun requireEditableMessage(
         chatId: ChatId,
         userId: UserId,
         messageId: MessageId,
         expectedVersion: Long,
     ) {
-        val message = messages.findMessage(chatId, userId, messageId) ?: notFound()
+        val message = messageRepository.findMessage(chatId, userId, messageId) ?: notFound()
         if (message.senderId != userId) forbidden("Only the author can change a message")
         if (message.forwardedFromUserId != null) forbidden("Forwarded messages cannot be edited")
         if (message.deletedAt != null || expectedVersion != message.messageVersion) versionChanged()
     }
 
     private fun requireValidBody(body: String) {
-        if (body.isBlank() || body.codePointCount(0, body.length) !in 1..4000) {
-            badRequest(ApiErrorCode.INVALID_REQUEST, "body must contain 1 to 4000 characters and cannot be blank")
+        if (body.isBlank() || body.codePointCount(0, body.length) !in 1..Message.MAX_BODY_LENGTH) {
+            badRequest(ApiErrorCode.INVALID_REQUEST, "body must contain 1 to ${Message.MAX_BODY_LENGTH} characters and cannot be blank")
         }
     }
 
     private fun enqueueHistoryChanged(chat: Chat, revision: Long) {
-        outbox.enqueue(
-            audience.rooms(chat.id, chat.kind).map { room ->
+        outboxRepository.enqueue(
+            chatEventAudience.rooms(chat.id, chat.kind).map { room ->
                 HistoryChangedEventV1.create(
                     eventId = newId(),
                     room = room,

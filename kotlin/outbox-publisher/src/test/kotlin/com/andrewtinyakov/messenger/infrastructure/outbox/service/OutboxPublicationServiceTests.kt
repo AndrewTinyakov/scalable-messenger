@@ -29,6 +29,7 @@ import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.TransactionStatus
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.Clock
+import java.time.Duration
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
@@ -214,8 +215,8 @@ class OutboxPublicationServiceTests {
         val started = CountDownLatch(2)
         val published = ConcurrentLinkedQueue<OutboxMessage>()
         val service = publicationService(
-            repository = repository,
-            publisher = OutboxEventPublisher { message ->
+            outboxClaimRepository = repository,
+            outboxEventPublisher = OutboxEventPublisher { message ->
                 started.countDown()
                 assertTrue(started.await(1, TimeUnit.SECONDS))
                 published.add(message)
@@ -235,8 +236,8 @@ class OutboxPublicationServiceTests {
         val repository = MemoryOutbox(initial = rows)
         val published = ConcurrentLinkedQueue<OutboxMessage>()
         val service = publicationService(
-            repository = repository,
-            publisher = OutboxEventPublisher { published.add(it) },
+            outboxClaimRepository = repository,
+            outboxEventPublisher = OutboxEventPublisher { published.add(it) },
         )
 
         assertEquals(rows.size, service.publishBatch())
@@ -254,8 +255,8 @@ class OutboxPublicationServiceTests {
         val attempted = ConcurrentLinkedQueue<OutboxMessage>()
         val metrics = SimpleMeterRegistry()
         val service = publicationService(
-            repository = repository,
-            publisher = OutboxEventPublisher { message ->
+            outboxClaimRepository = repository,
+            outboxEventPublisher = OutboxEventPublisher { message ->
                 attempted.add(message)
                 if (message.id == failed.id) error("Publication failed")
             },
@@ -279,8 +280,8 @@ class OutboxPublicationServiceTests {
         val repository = MemoryOutbox(initial = rows)
         val published = ConcurrentLinkedQueue<OutboxMessage>()
         val service = publicationService(
-            repository = repository,
-            publisher = OutboxEventPublisher { published.add(it) },
+            outboxClaimRepository = repository,
+            outboxEventPublisher = OutboxEventPublisher { published.add(it) },
             properties = PublisherProperties(batchBytes = MAX_EVENT_BYTES),
         )
 
@@ -299,8 +300,8 @@ class OutboxPublicationServiceTests {
         val repository = MemoryOutbox(initial = listOf(oversized, later, healthy))
         val published = ConcurrentLinkedQueue<OutboxMessage>()
         val service = publicationService(
-            repository = repository,
-            publisher = OutboxEventPublisher { published.add(it) },
+            outboxClaimRepository = repository,
+            outboxEventPublisher = OutboxEventPublisher { published.add(it) },
         )
 
         assertEquals(1, service.publishBatch())
@@ -449,7 +450,7 @@ class OutboxPublicationServiceTests {
                 attempted.add(it)
                 Thread.sleep(2100)
             },
-            PublisherProperties(leaseSeconds = 5, publishTimeoutMs = 1000),
+            PublisherProperties(lease = Duration.ofSeconds(5), publishTimeout = Duration.ofSeconds(1)),
             metrics,
         )
 
@@ -471,17 +472,17 @@ class OutboxPublicationServiceTests {
     }
 
     private fun publicationService(
-        repository: OutboxClaimRepository,
-        publisher: OutboxEventPublisher,
+        outboxClaimRepository: OutboxClaimRepository,
+        outboxEventPublisher: OutboxEventPublisher,
         properties: PublisherProperties = PublisherProperties(),
         metrics: SimpleMeterRegistry = SimpleMeterRegistry(),
         tx: TransactionTemplate = outboxTransactions(),
         clock: Clock = Clock.systemUTC(),
     ): OutboxPublicationService =
         OutboxPublicationService(
-            repository = repository,
+            outboxClaimRepository = outboxClaimRepository,
             tx = tx,
-            publisher = publisher,
+            outboxEventPublisher = outboxEventPublisher,
             metrics = OutboxMetrics(metrics, clock),
             clock = clock,
             properties = properties,

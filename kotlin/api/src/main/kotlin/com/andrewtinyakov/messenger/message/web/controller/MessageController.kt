@@ -29,7 +29,7 @@ import org.springframework.web.bind.annotation.RestController
 @RequestMapping("/v1/chats")
 class MessageController(
     private val messageHistoryService: MessageHistoryService,
-    private val mutations: MessageMutationService,
+    private val messageMutationService: MessageMutationService,
 ) {
     @PatchMapping("/{id}/messages/{messageId}")
     fun edit(
@@ -37,7 +37,7 @@ class MessageController(
         @PathVariable id: String,
         @PathVariable messageId: String,
         @RequestBody input: EditMessageRequest,
-    ): MessageResponse = mutations.edit(
+    ): MessageResponse = messageMutationService.edit(
         chatId = ChatId.parse(id),
         userId = session.userId,
         messageId = MessageId.parse(messageId),
@@ -51,7 +51,7 @@ class MessageController(
         @PathVariable id: String,
         @PathVariable messageId: String,
         @RequestParam expectedVersion: String,
-    ): MessageResponse = mutations.delete(
+    ): MessageResponse = messageMutationService.delete(
         chatId = ChatId.parse(id),
         userId = session.userId,
         messageId = MessageId.parse(messageId),

@@ -4,6 +4,7 @@ import com.andrewtinyakov.messenger.infrastructure.outbox.monitoring.OutboxMetri
 import com.andrewtinyakov.messenger.infrastructure.outbox.monitoring.OutboxMetrics.PublicationOutcome
 import com.andrewtinyakov.messenger.infrastructure.outbox.monitoring.OutboxMetrics.RetentionReason
 import com.andrewtinyakov.messenger.infrastructure.outbox.monitoring.OutboxMetrics.Stage
+import com.andrewtinyakov.messenger.infrastructure.outbox.monitoring.OutboxMetrics.StageOutcome
 import com.andrewtinyakov.messenger.infrastructure.outbox.outboxEvent
 import io.micrometer.prometheusmetrics.PrometheusConfig
 import io.micrometer.prometheusmetrics.PrometheusMeterRegistry
@@ -100,8 +101,8 @@ class OutboxMetricsTests {
         for (outcome in BatchOutcome.entries) metrics.batchFinished(metrics.started(), outcome)
         for (stage in Stage.entries) {
             val outcomes = when (stage) {
-                Stage.PUBLISH -> PublicationOutcome.entries
-                else -> listOf(PublicationOutcome.SUCCESS, PublicationOutcome.FAILURE)
+                Stage.PUBLISH -> StageOutcome.entries
+                else -> listOf(StageOutcome.SUCCESS, StageOutcome.FAILURE)
             }
             for (outcome in outcomes) metrics.stageFinished(metrics.started(), stage, outcome)
         }

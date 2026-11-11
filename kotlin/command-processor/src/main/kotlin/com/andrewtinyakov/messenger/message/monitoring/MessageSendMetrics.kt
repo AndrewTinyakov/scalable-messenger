@@ -1,7 +1,7 @@
 package com.andrewtinyakov.messenger.message.monitoring
 
 import com.andrewtinyakov.messenger.message.model.CommandResult
-import com.andrewtinyakov.messenger.message.service.MessageSendBatchService
+import com.andrewtinyakov.messenger.message.model.SendBatch
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.DistributionSummary
 import io.micrometer.core.instrument.MeterRegistry
@@ -43,7 +43,7 @@ class MessageSendMetrics(
                 .description("Number of commands in each send batch by transaction completion outcome.")
                 .tag("outcome", outcome.metricValue)
                 .publishPercentileHistogram()
-                .maximumExpectedValue(MessageSendBatchService.MAX_BATCH_SIZE.toDouble())
+                .maximumExpectedValue(SendBatch.MAX_SIZE.toDouble())
                 .register(registry),
         )
     }

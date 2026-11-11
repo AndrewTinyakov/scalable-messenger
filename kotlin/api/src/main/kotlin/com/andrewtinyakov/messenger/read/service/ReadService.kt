@@ -9,6 +9,8 @@ import com.andrewtinyakov.messenger.infrastructure.outbox.model.toOutboxMessage
 import com.andrewtinyakov.messenger.infrastructure.outbox.repository.OutboxRepository
 import com.andrewtinyakov.messenger.infrastructure.redis.RoomAddress
 import com.andrewtinyakov.messenger.message.model.MessageId
+import com.andrewtinyakov.messenger.read.config.ReadProperties
+import com.andrewtinyakov.messenger.read.model.MessageReadTarget
 import com.andrewtinyakov.messenger.read.model.ReadAdvance
 import com.andrewtinyakov.messenger.read.monitoring.ReadMetrics
 import com.andrewtinyakov.messenger.read.repository.ReadRepository
@@ -30,8 +32,9 @@ import java.time.ZoneOffset
 
 @Service
 class ReadService(
-    private val repository: ReadRepository,
-    private val outbox: OutboxRepository,
+    private val readRepository: ReadRepository,
+    private val outboxRepository: OutboxRepository,
+    private val properties: ReadProperties,
     private val mapper: ObjectMapper,
     private val tx: TransactionTemplate,
     private val clock: Clock,
@@ -44,12 +47,12 @@ class ReadService(
 
     fun advance(chatId: ChatId, userId: UserId, throughSequence: Long): ReadProgressResponse {
         val committed = tx.observedExecute(DatabaseTransaction.READ_ADVANCE) {
-            val lastSequence = repository.requireMember(chatId, userId)
+            val lastSequence = readRepository.requireMember(chatId, userId)
             if (throughSequence > lastSequence) badRequest(ApiErrorCode.INVALID_SEQUENCE, "throughSequence exceeds saved history")
-            val advance = repository.advance(chatId, userId, throughSequence)
+            val advance = readRepository.advance(chatId, userId, throughSequence)
             if (!advance.advanced) return@observedExecute CommittedAdvance(advance, notificationCoalesced = false)
-            val sharedRooms = repository.notificationRooms(chatId, advance.progress.readAt!!)
-            if (sharedRooms.isNotEmpty()) repository.completeNotification(chatId, userId)
+            val sharedRooms = readRepository.notificationRooms(chatId, advance.progress.readAt!!)
+            if (sharedRooms.isNotEmpty()) readRepository.completeNotification(chatId, userId)
             publishReadsChanged(chatId, (sharedRooms + RoomAddress.user(userId)).distinct())
             CommittedAdvance(advance, notificationCoalesced = sharedRooms.isEmpty())
         }
@@ -64,14 +67,14 @@ class ReadService(
 
     fun publishPendingNotifications() {
         tx.observedExecute(DatabaseTransaction.READ_ADVANCE) {
-            repository.pendingNotifications(OffsetDateTime.now(clock), 500).forEach { (chatId, rooms) ->
+            readRepository.pendingNotifications(OffsetDateTime.now(clock), properties.notificationBatchSize).forEach { (chatId, rooms) ->
                 publishReadsChanged(chatId, rooms)
             }
         }
     }
 
     fun summary(chatId: ChatId, userId: UserId): ReadSummaryResponse {
-        val summary = repository.summary(chatId, userId) ?: notFound()
+        val summary = readRepository.summary(chatId, userId) ?: notFound()
         return ReadSummaryResponse(
             throughSequence = summary.throughSequence.toString(),
             maxOtherReadSequence = summary.maxOtherReadSequence.toString(),
@@ -80,10 +83,10 @@ class ReadService(
     }
 
     fun readers(chatId: ChatId, userId: UserId, messageId: MessageId, afterUserId: UserId?, limit: Int): MessageReadsResponse {
-        val target = repository.messageTarget(chatId, userId, messageId) ?: notFound()
+        val target = readRepository.messageTarget(chatId, userId, messageId) ?: notFound()
         requirePageLimit(limit)
         val now = OffsetDateTime.now(clock)
-        val expiresAt = target.createdAt.plusDays(7)
+        val expiresAt = target.createdAt.plusDays(MessageReadTarget.DETAILS_RETENTION_DAYS)
         if (target.deleted || target.createdAt.isAfter(now) || !now.isBefore(expiresAt)) {
             metrics.detailsExpired()
             return MessageReadsResponse(
@@ -94,7 +97,7 @@ class ReadService(
                 serverTime = now,
             )
         }
-        val fetched = repository.readers(
+        val fetched = readRepository.readers(
             chatId = chatId,
             userId = userId,
             sequence = target.sequence,
@@ -114,7 +117,7 @@ class ReadService(
     }
 
     private fun publishReadsChanged(chatId: ChatId, rooms: List<String>) {
-        outbox.enqueue(
+        outboxRepository.enqueue(
             rooms.map { room ->
                 ReadsChangedEventV1.create(eventId = newId(), room = room, chatId = chatId.value).toOutboxMessage(mapper)
             },

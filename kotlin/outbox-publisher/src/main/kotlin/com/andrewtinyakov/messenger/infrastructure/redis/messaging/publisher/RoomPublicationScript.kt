@@ -12,6 +12,8 @@ import reactor.core.publisher.Mono
 import tools.jackson.databind.ObjectMapper
 import java.util.UUID
 
+private const val MAX_ROOM_LENGTH = 96
+
 internal class RoomPublicationScript(
     private val redis: ReactiveStringRedisTemplate,
     private val mapper: ObjectMapper,
@@ -25,7 +27,7 @@ internal class RoomPublicationScript(
     private val streamIdPattern = Regex("[0-9]+-[0-9]+")
 
     fun publish(message: OutboxMessage): Mono<String> {
-        require(message.room.length <= 96 && message.room.none { it.isWhitespace() || it == '{' || it == '}' })
+        require(message.room.length <= MAX_ROOM_LENGTH && message.room.none { it.isWhitespace() || it == '{' || it == '}' })
         return appendAndPublish(message, publicationOptions(message)).flatMap { streamId ->
             publishSidebarActivity(message).thenReturn(streamId)
         }

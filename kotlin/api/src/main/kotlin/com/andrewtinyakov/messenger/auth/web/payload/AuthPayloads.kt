@@ -1,6 +1,7 @@
 package com.andrewtinyakov.messenger.auth.web.payload
 
 import com.andrewtinyakov.messenger.auth.model.SessionCredentials
+import com.andrewtinyakov.messenger.auth.model.User
 import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.Size
@@ -8,10 +9,10 @@ import jakarta.validation.constraints.Size
 data class AuthRequest(
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     @field:NotBlank
-    @field:Size(min = 3, max = 40) val username: String,
+    @field:Size(min = User.MIN_USERNAME_LENGTH, max = User.MAX_USERNAME_LENGTH) val username: String,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     @field:NotBlank
-    @field:Size(min = 8, max = 100) val password: String,
+    @field:Size(min = User.MIN_PASSWORD_LENGTH, max = User.MAX_PASSWORD_LENGTH) val password: String,
     val deviceId: String? = null,
 )
 

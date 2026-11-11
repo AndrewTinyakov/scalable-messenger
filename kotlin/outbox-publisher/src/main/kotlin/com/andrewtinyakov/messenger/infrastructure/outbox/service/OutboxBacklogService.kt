@@ -7,18 +7,18 @@ import org.springframework.stereotype.Service
 
 @Service
 class OutboxBacklogService(
-    private val repository: OutboxClaimRepository,
+    private val outboxClaimRepository: OutboxClaimRepository,
     private val metrics: OutboxMetrics,
 ) {
-    private val log = LoggerFactory.getLogger(javaClass)
+    private val logger = LoggerFactory.getLogger(javaClass)
 
     fun sampleBacklog() {
         try {
-            val backlog = repository.backlog()
+            val backlog = outboxClaimRepository.backlog()
             metrics.backlogSampled(backlog.pending, backlog.oldestCreatedAt)
         } catch (error: Exception) {
             metrics.backlogSampleFailed()
-            log.warn("Could not sample outbox backlog", error)
+            logger.warn("Could not sample outbox backlog", error)
         }
     }
 }

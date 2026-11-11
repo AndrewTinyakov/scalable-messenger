@@ -46,7 +46,7 @@ class ChatController(
         val chatId = ChatId.parse(id)
         deletionService.delete(
             chatId = chatId,
-            actorId = session.userId,
+            userId = session.userId,
             command = DeletionCommand(requestId = RequestId(chatId.value), scope = DeletionScope.EVERYONE, target = DeletionTarget.CHAT),
         )
     }
@@ -100,7 +100,7 @@ class ChatController(
         @PathVariable id: String,
         @Valid @RequestBody input: AddGroupMembersRequest,
     ) {
-        chatService.addMembers(chatId = ChatId.parse(id), actorId = session.userId, memberIds = input.memberIds.map(UserId::parse))
+        chatService.addMembers(chatId = ChatId.parse(id), userId = session.userId, memberIds = input.memberIds.map(UserId::parse))
     }
 
     @DeleteMapping("/{id}/members/{userId}")
@@ -110,6 +110,6 @@ class ChatController(
         @PathVariable id: String,
         @PathVariable userId: String,
     ) {
-        chatMembershipService.removeMember(chatId = ChatId.parse(id), actorId = session.userId, memberId = UserId.parse(userId))
+        chatMembershipService.removeMember(chatId = ChatId.parse(id), userId = session.userId, memberId = UserId.parse(userId))
     }
 }

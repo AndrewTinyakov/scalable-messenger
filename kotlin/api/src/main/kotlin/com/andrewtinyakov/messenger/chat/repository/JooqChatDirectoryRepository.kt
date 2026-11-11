@@ -22,6 +22,8 @@ import org.jooq.impl.DSL
 import org.springframework.stereotype.Repository
 import java.time.OffsetDateTime
 
+private const val MEMBER_PREVIEW_LIMIT = 50
+
 @Repository
 class JooqChatDirectoryRepository(
     private val db: DSLContext,
@@ -124,7 +126,7 @@ class JooqChatDirectoryRepository(
             .from(ranked)
             .where(
                 ranked.field(rank)!!
-                    .le(50),
+                    .le(MEMBER_PREVIEW_LIMIT),
             )
             .orderBy(
                 chatId,
@@ -201,7 +203,7 @@ class JooqChatDirectoryRepository(
             .on(USERS.ID.eq(CHAT_MEMBERS.USER_ID))
             .where(CHAT_MEMBERS.CHAT_ID.eq(CHATS.ID))
             .orderBy(CHAT_MEMBERS.USER_ID)
-            .limit(50),
+            .limit(MEMBER_PREVIEW_LIMIT),
     )
         .convertFrom { rows ->
             rows.map {
@@ -211,28 +213,4 @@ class JooqChatDirectoryRepository(
                 )
             }
         }
-
-    override fun findMembers(chatId: ChatId): List<UserSummary> = DatabaseObservation.query(DatabaseOperation.CHAT_FIND_MEMBERS) {
-        val preview = db.select(CHAT_MEMBERS.USER_ID)
-            .from(CHAT_MEMBERS)
-            .where(CHAT_MEMBERS.CHAT_ID.eq(chatId.value))
-            .orderBy(CHAT_MEMBERS.USER_ID)
-            .limit(50)
-            .asTable("preview")
-        val previewUserId = preview.field(CHAT_MEMBERS.USER_ID)!!
-        return db.select(
-            USERS.ID,
-            USERS.USERNAME,
-        )
-            .from(preview)
-            .join(USERS)
-            .on(USERS.ID.eq(previewUserId))
-            .orderBy(previewUserId)
-            .fetch {
-                UserSummary(
-                    id = UserId(it.get(USERS.ID)!!),
-                    username = it.get(USERS.USERNAME)!!,
-                )
-            }
-    }
 }

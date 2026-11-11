@@ -14,7 +14,7 @@ import tools.jackson.databind.ObjectMapper
 
 @Component
 class PublicationHydration(
-    private val messages: MessageRepository,
+    private val messageRepository: MessageRepository,
     private val mapper: ObjectMapper,
     private val metrics: PublicationHydrationMetrics,
 ) {
@@ -40,9 +40,9 @@ class PublicationHydration(
     }.toMap()
 
     private fun findCurrentMessages(references: Collection<Reference>): Map<MessageId, Message> =
-        references.map { it.messageId }.distinct().chunked(100).flatMap { ids ->
+        references.map { it.messageId }.distinct().chunked(Message.MAX_LOOKUP_IDS).flatMap { ids ->
             metrics.batchRequested(ids.size)
-            messages.findMessagesForPublication(ids)
+            messageRepository.findMessagesForPublication(ids)
         }.associateBy { it.id }
 
     private fun hydrate(row: OutboxMessage, reference: Reference, current: Message?): OutboxMessage {

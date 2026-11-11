@@ -10,6 +10,8 @@ import java.security.cert.CertificateParsingException
 import java.security.cert.X509Certificate
 import javax.net.ssl.SSLPeerUnverifiedException
 
+private const val URI_SUBJECT_ALTERNATIVE_NAME = 6
+
 class GrpcClientIdentityInterceptor(
     private val allowedClientIdentity: String,
 ) : ServerInterceptor {
@@ -29,7 +31,7 @@ class GrpcClientIdentityInterceptor(
             null
         }
         val authorized = try {
-            certificate?.subjectAlternativeNames?.any { it[0] == 6 && it[1] == allowedClientIdentity } == true
+            certificate?.subjectAlternativeNames?.any { it[0] == URI_SUBJECT_ALTERNATIVE_NAME && it[1] == allowedClientIdentity } == true
         } catch (_: CertificateParsingException) {
             false
         }

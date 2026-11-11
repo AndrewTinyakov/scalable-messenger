@@ -14,29 +14,32 @@ import com.andrewtinyakov.messenger.infrastructure.outbox.monitoring.OutboxMetri
 import com.andrewtinyakov.messenger.infrastructure.outbox.monitoring.OutboxMetrics.PublicationOutcome
 import com.andrewtinyakov.messenger.infrastructure.outbox.monitoring.OutboxMetrics.RetentionReason
 import com.andrewtinyakov.messenger.infrastructure.outbox.monitoring.OutboxMetrics.Stage
+import com.andrewtinyakov.messenger.infrastructure.outbox.monitoring.OutboxMetrics.StageOutcome
 import com.andrewtinyakov.messenger.infrastructure.outbox.repository.OutboxClaimRepository
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
 import java.nio.charset.StandardCharsets
 import java.time.Clock
+import java.time.Duration
 import java.time.OffsetDateTime
 import java.util.UUID
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
+
+private val MIN_COMPLETION_BUDGET = Duration.ofSeconds(1)
 
 @Service
 class OutboxPublicationService(
-    private val repository: OutboxClaimRepository,
+    private val outboxClaimRepository: OutboxClaimRepository,
     private val tx: TransactionTemplate,
-    private val publisher: OutboxEventPublisher,
+    private val outboxEventPublisher: OutboxEventPublisher,
     private val metrics: OutboxMetrics,
     private val clock: Clock,
     private val properties: PublisherProperties,
 ) {
     private val owner = UUID.randomUUID().toString()
-    private val log = LoggerFactory.getLogger(javaClass)
+    private val logger = LoggerFactory.getLogger(javaClass)
 
     @Synchronized
     fun publishBatch(): Int {
@@ -58,7 +61,7 @@ class OutboxPublicationService(
 
     private data class RoomPublication(
         val published: List<EventId>,
-        val outcome: PublicationOutcome,
+        val outcome: StageOutcome,
     )
 
     private fun publishClaimedBatch(): BatchPublication {
@@ -72,14 +75,13 @@ class OutboxPublicationService(
     }
 
     private fun workDeadline(): Long {
-        val completionBudgetMs = maxOf(1000, properties.publishTimeoutMs * 2)
-        val workBudgetMs = TimeUnit.SECONDS.toMillis(properties.leaseSeconds) - completionBudgetMs
-        return System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(workBudgetMs)
+        val completionBudget = maxOf(MIN_COMPLETION_BUDGET, properties.publishTimeout.multipliedBy(2))
+        return System.nanoTime() + properties.lease.minus(completionBudget).toNanos()
     }
 
     private fun claimRooms(): List<List<OutboxMessage>> {
         val now = OffsetDateTime.now(clock)
-        val leaseUntil = now.plusSeconds(properties.leaseSeconds)
+        val leaseUntil = now.plus(properties.lease)
         val limit = minOf(properties.batchSize, properties.batchBytes / MAX_EVENT_BYTES)
         return observePhase(Stage.CLAIM) {
             tx.observedExecute(DatabaseTransaction.OUTBOX_CLAIM) { claimAnchorsWithGroupTails(now, leaseUntil, limit) }
@@ -87,7 +89,7 @@ class OutboxPublicationService(
     }
 
     private fun claimAnchorsWithGroupTails(now: OffsetDateTime, leaseUntil: OffsetDateTime, limit: Int): List<List<OutboxMessage>> {
-        val anchors = repository.claim(now, minOf(limit, properties.concurrency), owner, leaseUntil)
+        val anchors = outboxClaimRepository.claim(now, minOf(limit, properties.concurrency), owner, leaseUntil)
         var remaining = limit - anchors.size
         return anchors.groupBy { it.room }.values.map { roomAnchors ->
             val tail = claimGroupTail(roomAnchors, remaining, leaseUntil)
@@ -100,7 +102,7 @@ class OutboxPublicationService(
         val anchor = roomAnchors.first()
         val wanted = if (anchor.groupPublicationOrder != null) properties.roomBatchSize - roomAnchors.size else 0
         if (wanted <= 0 || remaining <= 0) return emptyList()
-        return repository.claimGroupTail(anchor, OffsetDateTime.now(clock), minOf(wanted, remaining), owner, leaseUntil)
+        return outboxClaimRepository.claimGroupTail(anchor, OffsetDateTime.now(clock), minOf(wanted, remaining), owner, leaseUntil)
     }
 
     private fun recordClaimed(rooms: List<List<OutboxMessage>>) {
@@ -113,7 +115,7 @@ class OutboxPublicationService(
     }
 
     private fun hydrate(rooms: List<List<OutboxMessage>>): Map<EventId, OutboxMessage> = observePhase(Stage.HYDRATE) {
-        publisher.hydrate(rooms.flatten()).associateBy { it.id }
+        outboxEventPublisher.hydrate(rooms.flatten()).associateBy { it.id }
     }
 
     private fun publishRooms(
@@ -143,14 +145,16 @@ class OutboxPublicationService(
         if (completed.isNotEmpty()) {
             try {
                 observePhase(Stage.COMPLETE) {
-                    tx.observedExecuteWithoutResult(DatabaseTransaction.OUTBOX_COMPLETE) { repository.complete(completed, owner) }
+                    tx.observedExecuteWithoutResult(DatabaseTransaction.OUTBOX_COMPLETE) {
+                        outboxClaimRepository.complete(completed, owner)
+                    }
                 }
             } catch (error: Exception) {
                 metrics.retained(RetentionReason.COMPLETE_FAILURE, completed.size)
                 throw error
             }
         }
-        val failed = result.outcome == PublicationOutcome.FAILURE || result.outcome == PublicationOutcome.CANCELLED
+        val failed = result.outcome == StageOutcome.FAILURE || result.outcome == StageOutcome.CANCELLED
         return BatchPublication(completed.size, if (failed) BatchOutcome.FAILED else BatchOutcome.WORK)
     }
 
@@ -159,11 +163,11 @@ class OutboxPublicationService(
         for (row in rows) {
             if (Thread.currentThread().isInterrupted) {
                 metrics.retained(RetentionReason.INTERRUPTED, rows.size - published.size)
-                return RoomPublication(published, PublicationOutcome.CANCELLED)
+                return RoomPublication(published, StageOutcome.CANCELLED)
             }
-            if (deadline - System.nanoTime() < TimeUnit.MILLISECONDS.toNanos(properties.publishTimeoutMs)) {
+            if (deadline - System.nanoTime() < properties.publishTimeout.toNanos()) {
                 metrics.retained(RetentionReason.DEADLINE, rows.size - published.size)
-                return RoomPublication(published, PublicationOutcome.DEADLINE)
+                return RoomPublication(published, StageOutcome.DEADLINE)
             }
             val publishSample = metrics.started()
             var outcome = PublicationOutcome.FAILURE
@@ -172,29 +176,29 @@ class OutboxPublicationService(
                     "Outbox event exceeds publication byte limit"
                 }
                 metrics.publicationAttempted(row, OffsetDateTime.now(clock))
-                publisher.publish(message = row)
+                outboxEventPublisher.publish(message = row)
                 outcome = PublicationOutcome.SUCCESS
                 published.add(row.id)
                 metrics.published()
             } catch (error: Exception) {
                 metrics.publishFailed()
-                log.error("Outbox publication failed for event {}", row.id, error)
+                logger.error("Outbox publication failed for event {}", row.id, error)
                 metrics.retained(RetentionReason.PUBLISH_FAILURE, rows.size - published.size)
-                return RoomPublication(published, PublicationOutcome.FAILURE)
+                return RoomPublication(published, StageOutcome.FAILURE)
             } finally {
                 metrics.publicationFinished(publishSample, outcome)
             }
         }
-        return RoomPublication(published, PublicationOutcome.SUCCESS)
+        return RoomPublication(published, StageOutcome.SUCCESS)
     }
 
     private inline fun <T> observePhase(
         phase: Stage,
-        outcome: (T) -> PublicationOutcome = { PublicationOutcome.SUCCESS },
+        outcome: (T) -> StageOutcome = { StageOutcome.SUCCESS },
         action: () -> T,
     ): T {
         val sample = metrics.started()
-        var result = PublicationOutcome.FAILURE
+        var result = StageOutcome.FAILURE
         try {
             return action().also { result = outcome(it) }
         } finally {

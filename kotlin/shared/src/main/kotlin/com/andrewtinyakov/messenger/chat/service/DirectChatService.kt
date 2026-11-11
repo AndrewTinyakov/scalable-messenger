@@ -14,17 +14,17 @@ import tools.jackson.databind.ObjectMapper
 
 @Service
 class DirectChatService(
-    private val repository: ChatRepository,
+    private val chatRepository: ChatRepository,
     private val mapper: ObjectMapper,
 ) {
     fun findBetween(userId: UserId, recipientId: UserId): ChatId? =
-        repository.findByDirectKey(key = directPairKey(userId, recipientId))
+        chatRepository.findByDirectKey(key = directPairKey(userId, recipientId))
 
     fun createForFirstMessage(senderId: UserId, recipientId: UserId, requestId: RequestId): ChatId {
         val members = listOf(senderId, recipientId)
         val key = directPairKey(senderId, recipientId)
-        repository.lockDirectPair(key = key)
-        repository.findByDirectKey(key = key)?.let { return it }
+        chatRepository.lockDirectPair(key = key)
+        chatRepository.findByDirectKey(key = key)?.let { return it }
         val id = ChatId(newId())
         val events = members.map { userId ->
             ChatCreatedEventV1.create(
@@ -34,7 +34,7 @@ class DirectChatService(
                 requestId = requestId.value,
             ).toOutboxMessage(mapper)
         }
-        repository.insertDirectWithMembersAndEvents(id = id, key = key, members = members, events = events)
+        chatRepository.insertDirectWithMembersAndEvents(id = id, key = key, members = members, events = events)
         return id
     }
 }

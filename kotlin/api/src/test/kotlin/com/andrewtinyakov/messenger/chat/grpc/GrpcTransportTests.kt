@@ -207,7 +207,7 @@ class GrpcTransportTests : MessengerIntegrationTest() {
             assertEquals(emptyList<String>(), client.authorizeGroups(batch).authorizedChatIdsList)
             chatService.addMembers(
                 chatId = ChatId(unjoined.id),
-                actorId = owner.session.userId,
+                userId = owner.session.userId,
                 memberIds = listOf(member.session.userId.value).map(::UserId),
             )
             assertEquals("group:${unjoined.id}", client.authorizeGroup(single.toBuilder().setChatId(unjoined.id).build()).room)

@@ -6,6 +6,7 @@ import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.auth.model.isValidSessionId
 import com.andrewtinyakov.messenger.auth.repository.SessionRepository
 import com.andrewtinyakov.messenger.chat.grpc.model.GroupAuthorization
+import com.andrewtinyakov.messenger.chat.grpc.model.SidebarChatAuthorization
 import com.andrewtinyakov.messenger.chat.grpc.repository.GroupAuthorizationRepository
 import com.andrewtinyakov.messenger.chat.grpc.repository.PresenceAuthorizationRepository
 import com.andrewtinyakov.messenger.chat.grpc.repository.SidebarAuthorizationRepository
@@ -31,6 +32,8 @@ import org.springframework.stereotype.Component
 import java.time.Clock
 import java.time.OffsetDateTime
 
+private const val MAX_PRESENCE_PEERS = 100
+
 @Component
 class ChatAuthorizationGrpcService(
     private val sessionRepository: SessionRepository,
@@ -44,10 +47,11 @@ class ChatAuthorizationGrpcService(
         responseObserver: StreamObserver<AuthorizeSidebarResponse>,
     ) = respond(responseObserver) {
         val ids = request.chatIdsList
-        if (ids.size > 100 ||
+        if (ids.size > SidebarChatAuthorization.MAX_CHATS ||
             ids.size != ids.toSet().size
         ) {
-            throw Status.INVALID_ARGUMENT.withDescription("Provide at most 100 distinct chats").asRuntimeException()
+            throw Status.INVALID_ARGUMENT.withDescription("Provide at most ${SidebarChatAuthorization.MAX_CHATS} distinct chats")
+                .asRuntimeException()
         }
         val chats =
             sidebarAuthorizationRepository.authorize(
@@ -90,8 +94,9 @@ class ChatAuthorizationGrpcService(
     override fun authorizeGroups(request: AuthorizeGroupsRequest, responseObserver: StreamObserver<AuthorizeGroupsResponse>) =
         respond(responseObserver) {
             val ids = request.chatIdsList
-            if (ids.size !in 1..10 || ids.size != ids.toSet().size) {
-                throw Status.INVALID_ARGUMENT.withDescription("Provide 1 to 10 distinct chat IDs").asRuntimeException()
+            if (ids.size !in 1..GroupAuthorization.MAX_CHATS_PER_REQUEST || ids.size != ids.toSet().size) {
+                throw Status.INVALID_ARGUMENT.withDescription("Provide 1 to ${GroupAuthorization.MAX_CHATS_PER_REQUEST} distinct chat IDs")
+                    .asRuntimeException()
             }
             val chatIds = ids.map(::requireChatId)
             val authorization = requireGroupAuthorization(sessionId = requireSessionId(request.sessionId), chatIds = chatIds)
@@ -102,8 +107,8 @@ class ChatAuthorizationGrpcService(
     override fun authorizePresence(request: AuthorizePresenceRequest, responseObserver: StreamObserver<AuthorizePresenceResponse>) =
         respond(responseObserver) {
             val ids = request.userIdsList
-            if (ids.size !in 1..100 || ids.size != ids.toSet().size) {
-                throw Status.INVALID_ARGUMENT.withDescription("Provide 1 to 100 distinct peers").asRuntimeException()
+            if (ids.size !in 1..MAX_PRESENCE_PEERS || ids.size != ids.toSet().size) {
+                throw Status.INVALID_ARGUMENT.withDescription("Provide 1 to $MAX_PRESENCE_PEERS distinct peers").asRuntimeException()
             }
             val chatId = requireChatId(request.chatId)
             val peers = ids.map(::requireUserId)

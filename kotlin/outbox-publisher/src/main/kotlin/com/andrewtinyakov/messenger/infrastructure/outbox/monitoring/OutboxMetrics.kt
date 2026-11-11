@@ -1,0 +1,199 @@
+package com.andrewtinyakov.messenger.infrastructure.outbox.monitoring
+
+import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxMessage
+import io.micrometer.core.instrument.Counter
+import io.micrometer.core.instrument.Gauge
+import io.micrometer.core.instrument.MeterRegistry
+import io.micrometer.core.instrument.Timer
+import org.springframework.stereotype.Component
+import java.time.Clock
+import java.time.Duration
+import java.time.Instant
+import java.time.OffsetDateTime
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
+
+@Component
+class OutboxMetrics(
+    registry: MeterRegistry,
+    private val clock: Clock,
+) {
+    enum class BatchOutcome(
+        val tag: String,
+    ) {
+        EMPTY("empty"),
+        WORK("work"),
+        FAILED("failed"),
+    }
+
+    enum class PublicationOutcome(
+        val tag: String,
+    ) {
+        SUCCESS("success"),
+        FAILURE("failure"),
+        DEADLINE("deadline"),
+        CANCELLED("cancelled"),
+    }
+
+    enum class Stage(
+        val tag: String,
+    ) {
+        CLAIM("claim"),
+        HYDRATE("hydrate"),
+        PUBLISH("publish"),
+        COMPLETE("complete"),
+    }
+
+    enum class RetentionReason(
+        val tag: String,
+    ) {
+        COMPLETE_FAILURE("complete_failure"),
+        INTERRUPTED("interrupted"),
+        DEADLINE("deadline"),
+        PUBLISH_FAILURE("publish_failure"),
+    }
+
+    private enum class RoomKind(
+        val tag: String,
+    ) {
+        GROUP("group"),
+        USER("user"),
+    }
+
+    private enum class InvalidAge(
+        val tag: String,
+    ) {
+        MISSING("missing"),
+        FUTURE("future"),
+    }
+
+    private val pending = AtomicLong()
+    private val oldestCreatedAt = AtomicLong()
+    private val sampleHealthy = AtomicLong()
+    private val sampleFailures = registry.describedCounter(
+        "messenger.outbox.backlog.sample.failures",
+        "Failed database samples of the pending outbox backlog.",
+    )
+    private val claimed = registry.describedCounter("messenger.outbox.claimed", "Outbox events claimed by committed lease transactions.")
+    private val published = registry.describedCounter(
+        "messenger.outbox.publish",
+        "Outbox transport publication attempts by result.",
+        "result",
+        "success",
+    )
+    private val publishFailures = registry.describedCounter(
+        "messenger.outbox.publish",
+        "Outbox transport publication attempts by result.",
+        "result",
+        "failure",
+    )
+    private val retained = RetentionReason.entries.associateWith {
+        registry.describedCounter("messenger.outbox.retained", "Outbox events left pending for retry by reason.", "reason", it.tag)
+    }
+    private val batches = BatchOutcome.entries.associateWith {
+        Timer.builder("messenger.outbox.batch").description("Duration of an outbox publication batch by outcome.")
+            .tag("outcome", it.tag).register(registry)
+    }
+    private val publications = listOf(PublicationOutcome.SUCCESS, PublicationOutcome.FAILURE).associateWith {
+        registry.histogram("messenger.outbox.publication", "Duration of an outbox transport publication attempt.", "outcome", it.tag)
+    }
+    private val stages = Stage.entries.flatMap { stage ->
+        val outcomes = when (stage) {
+            Stage.PUBLISH -> PublicationOutcome.entries
+            else -> listOf(PublicationOutcome.SUCCESS, PublicationOutcome.FAILURE)
+        }
+        outcomes.map { outcome ->
+            (stage to outcome) to registry.histogram(
+                "messenger.outbox.stage",
+                "Duration of an outbox publication stage by outcome.",
+                "phase",
+                stage.tag,
+                "outcome",
+                outcome.tag,
+            )
+        }
+    }.toMap()
+    private val publicationAges = RoomKind.entries.associateWith {
+        Timer.builder("messenger.outbox.publication.age").description("Age of an outbox event before a transport publication attempt.")
+            .tag("room_kind", it.tag).serviceLevelObjectives(*PUBLICATION_AGE_BUCKETS).register(registry)
+    }
+    private val invalidAges = RoomKind.entries.flatMap { room ->
+        InvalidAge.entries.map { reason ->
+            (room to reason) to registry.describedCounter(
+                "messenger.outbox.publication.age.invalid",
+                "Outbox publication attempts without a valid creation timestamp.",
+                "room_kind",
+                room.tag,
+                "reason",
+                reason.tag,
+            )
+        }
+    }.toMap()
+
+    init {
+        Gauge.builder("messenger.outbox.pending", pending, AtomicLong::toDouble)
+            .description("Pending outbox events at the last successful database sample.").register(registry)
+        Gauge.builder("messenger.outbox.oldest.age.seconds", oldestCreatedAt) { timestamp ->
+            val oldest = timestamp.get()
+            if (oldest == 0L) 0.0 else (Instant.now(clock).epochSecond - oldest).coerceAtLeast(0).toDouble()
+        }.description("Current age of the oldest event from the last successful outbox backlog sample.")
+            .baseUnit("seconds").register(registry)
+        Gauge.builder("messenger.outbox.backlog.sample.healthy", sampleHealthy, AtomicLong::toDouble)
+            .description("Whether the most recent outbox backlog sample succeeded.").register(registry)
+    }
+
+    fun backlogSampled(count: Long, oldest: OffsetDateTime?) {
+        pending.set(count)
+        oldestCreatedAt.set(oldest?.toEpochSecond() ?: 0L)
+        sampleHealthy.set(1)
+    }
+
+    fun backlogSampleFailed() {
+        sampleHealthy.set(0)
+        sampleFailures.increment()
+    }
+
+    fun claimed(count: Int) = claimed.increment(count.toDouble())
+
+    fun retained(reason: RetentionReason, count: Int) = retained.getValue(reason).increment(count.toDouble())
+
+    fun started(): Long = System.nanoTime()
+
+    fun batchFinished(started: Long, outcome: BatchOutcome) = batches.getValue(outcome).recordSince(started)
+
+    fun stageFinished(started: Long, stage: Stage, outcome: PublicationOutcome) = stages.getValue(stage to outcome).recordSince(started)
+
+    fun published() = published.increment()
+
+    fun publishFailed() = publishFailures.increment()
+
+    fun publicationFinished(started: Long, outcome: PublicationOutcome) = publications.getValue(outcome).recordSince(started)
+
+    fun publicationAttempted(row: OutboxMessage, now: OffsetDateTime) {
+        try {
+            val room = if (row.room.startsWith("group:")) RoomKind.GROUP else RoomKind.USER
+            val age = row.createdAt?.let { Duration.between(it, now) }
+            if (age == null || age.isNegative) {
+                invalidAges.getValue(room to if (age == null) InvalidAge.MISSING else InvalidAge.FUTURE).increment()
+            } else {
+                publicationAges.getValue(room).record(age)
+            }
+        } catch (_: RuntimeException) {
+        }
+    }
+
+    private fun Timer.recordSince(started: Long) = record(System.nanoTime() - started, TimeUnit.NANOSECONDS)
+
+    private companion object {
+        val PUBLICATION_AGE_BUCKETS = longArrayOf(1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000)
+            .map(Duration::ofMillis).toTypedArray()
+
+        fun MeterRegistry.describedCounter(name: String, description: String, vararg tags: String): Counter =
+            Counter.builder(name).description(description).tags(*tags).register(this)
+
+        fun MeterRegistry.histogram(name: String, description: String, vararg tags: String): Timer =
+            Timer.builder(name).description(description).tags(*tags)
+                .publishPercentileHistogram().minimumExpectedValue(Duration.ofMillis(1))
+                .maximumExpectedValue(Duration.ofMinutes(2)).register(this)
+    }
+}

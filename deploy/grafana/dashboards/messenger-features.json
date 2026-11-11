@@ -456,9 +456,15 @@
       },
       "targets": [
         {
-          "expr": "sum by(outcome)(rate(messenger_read_requests_total[$__rate_interval]))",
+          "expr": "sum by(outcome)(rate(messenger_read_advances_total[$__rate_interval]))",
           "legendFormat": "{{outcome}}",
           "refId": "A",
+          "instant": false
+        },
+        {
+          "expr": "sum by(status)(rate(http_server_requests_seconds_count{job=\"api\",uri=~\".*/reads\",status=~\"[45]..\"}[$__rate_interval]))",
+          "legendFormat": "HTTP {{status}}",
+          "refId": "B",
           "instant": false
         }
       ]
@@ -466,7 +472,7 @@
     {
       "id": 10,
       "title": "Read request p95 and p99",
-      "description": "Use operation labels to distinguish advance, summary, lazy reader details and cleanup. These durations include the observed use-case work.",
+      "description": "HTTP latency per read route from Spring request metrics, plus the duration of each expired timestamp cleanup batch.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
@@ -504,15 +510,27 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95,sum by(le,operation)(rate(messenger_read_duration_seconds_bucket[$__rate_interval])))",
-          "legendFormat": "{{operation}} p95",
+          "expr": "histogram_quantile(0.95,sum by(le,method,uri)(rate(http_server_requests_seconds_bucket{job=\"api\",uri=~\".*/reads\"}[$__rate_interval])))",
+          "legendFormat": "{{method}} {{uri}} p95",
           "refId": "A",
           "instant": false
         },
         {
-          "expr": "histogram_quantile(0.99,sum by(le,operation)(rate(messenger_read_duration_seconds_bucket[$__rate_interval])))",
-          "legendFormat": "{{operation}} p99",
+          "expr": "histogram_quantile(0.99,sum by(le,method,uri)(rate(http_server_requests_seconds_bucket{job=\"api\",uri=~\".*/reads\"}[$__rate_interval])))",
+          "legendFormat": "{{method}} {{uri}} p99",
           "refId": "B",
+          "instant": false
+        },
+        {
+          "expr": "histogram_quantile(0.95,sum by(le)(rate(messenger_read_cleanup_duration_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "cleanup p95",
+          "refId": "C",
+          "instant": false
+        },
+        {
+          "expr": "histogram_quantile(0.99,sum by(le)(rate(messenger_read_cleanup_duration_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "cleanup p99",
+          "refId": "D",
           "instant": false
         }
       ]
@@ -558,7 +576,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(messenger_read_ranges_total{outcome=\"inserted\"}[$__rate_interval])) / clamp_min(sum(rate(messenger_read_requests_total{outcome=\"advanced\"}[$__rate_interval])),0.000001)",
+          "expr": "sum(rate(messenger_read_ranges_inserted_total[$__rate_interval])) / clamp_min(sum(rate(messenger_read_advances_total{outcome=\"advanced\"}[$__rate_interval])),0.000001)",
           "legendFormat": "range rows / advance",
           "refId": "A",
           "instant": false
@@ -660,8 +678,8 @@
       },
       "targets": [
         {
-          "expr": "sum by(outcome)(rate(messenger_read_cleanup_rows_total[$__rate_interval]))",
-          "legendFormat": "{{outcome}} rows",
+          "expr": "sum by(kind)(rate(messenger_read_cleanup_rows_total[$__rate_interval]))",
+          "legendFormat": "{{kind}} rows",
           "refId": "A",
           "instant": false
         },

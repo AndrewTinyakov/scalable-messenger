@@ -4,9 +4,9 @@ import com.andrewtinyakov.messenger.generated.messaging.event.HistoryChangedEven
 import com.andrewtinyakov.messenger.generated.messaging.event.MessageSavedEventV1
 import com.andrewtinyakov.messenger.generated.messaging.event.RoomEventType
 import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxMessage
+import com.andrewtinyakov.messenger.infrastructure.redis.monitoring.PublicationHydrationMetrics
 import com.andrewtinyakov.messenger.message.repository.MessageRepository
 import com.andrewtinyakov.messenger.shared.id.MessageId
-import io.micrometer.core.instrument.MeterRegistry
 import org.springframework.stereotype.Component
 import tools.jackson.databind.ObjectMapper
 
@@ -14,7 +14,7 @@ import tools.jackson.databind.ObjectMapper
 class PublicationHydration(
     private val messages: MessageRepository,
     private val mapper: ObjectMapper,
-    private val metrics: MeterRegistry,
+    private val metrics: PublicationHydrationMetrics,
 ) {
     fun prepare(rows: List<OutboxMessage>): List<OutboxMessage> {
         val references = rows.mapNotNull { row ->
@@ -29,7 +29,7 @@ class PublicationHydration(
         }.toMap()
         if (references.isEmpty()) return rows
         val current = references.values.map { it.messageId }.distinct().chunked(100).flatMap { ids ->
-            metrics.summary("messenger.outbox.hydration.batch").record(ids.size.toDouble())
+            metrics.batchRequested(ids.size)
             messages.findMessagesForPublication(ids)
         }.associateBy { it.id }
         return rows.map { row ->
@@ -48,10 +48,10 @@ class PublicationHydration(
                 it.chatId.value == reference.chatId && it.sequence.toString() == reference.sequence && it.deletedAt == null
             }
             val live = if (message == null) {
-                metrics.counter("messenger.outbox.hydration", "result", "absent").increment()
+                metrics.absent()
                 hint
             } else {
-                metrics.counter("messenger.outbox.hydration", "result", "saved").increment()
+                metrics.saved()
                 mapper.writeValueAsString(
                     MessageSavedEventV1.create(
                         eventId = row.id.value,

@@ -24,6 +24,7 @@ import com.andrewtinyakov.messenger.message.model.SavedMessage
 import com.andrewtinyakov.messenger.message.model.SendResult
 import com.andrewtinyakov.messenger.message.model.SendResultStatus
 import com.andrewtinyakov.messenger.message.model.asReply
+import com.andrewtinyakov.messenger.message.monitoring.MessageSendMetrics
 import com.andrewtinyakov.messenger.message.repository.MessageRepository
 import com.andrewtinyakov.messenger.shared.id.ChatId
 import com.andrewtinyakov.messenger.shared.id.EventId
@@ -31,7 +32,6 @@ import com.andrewtinyakov.messenger.shared.id.MessageId
 import com.andrewtinyakov.messenger.shared.id.RequestId
 import com.andrewtinyakov.messenger.shared.id.UserId
 import com.andrewtinyakov.messenger.shared.id.newId
-import io.micrometer.core.instrument.MeterRegistry
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionSynchronization
 import org.springframework.transaction.support.TransactionSynchronizationManager
@@ -50,13 +50,11 @@ class MessageSendService(
     private val tx: TransactionTemplate,
     private val mapper: ObjectMapper,
     private val clock: Clock,
-    metrics: MeterRegistry,
+    private val metrics: MessageSendMetrics,
 ) {
-    private val timers = SendTimers(metrics)
-
     fun process(command: SendMessageCommandV1): CommandResult {
         val request = command.toSendRequest()
-        val window = timers.window()
+        val window = metrics.transactionStarted()
         var synchronized = false
         try {
             return tx.observedExecute(DatabaseTransaction.SEND_SINGLE) {
@@ -106,7 +104,7 @@ class MessageSendService(
         if (requests.any { it.recipientId != null }) return commands.map(::process)
         val chatId = requireNotNull(requests.first().chatId)
         require(requests.all { it.chatId == chatId }) { "Send batch must share one chat" }
-        val window = timers.window(requests.size)
+        val window = metrics.transactionStarted(requests.size)
         TransactionSynchronizationManager.registerSynchronization(object : TransactionSynchronization {
             override fun afterCompletion(status: Int) = window.completed()
         })
@@ -117,7 +115,11 @@ class MessageSendService(
         }
     }
 
-    private fun processBatch(chatId: ChatId, requests: List<SendRequest>, window: SendTimers.TransactionWindow): List<CommandResult> {
+    private fun processBatch(
+        chatId: ChatId,
+        requests: List<SendRequest>,
+        window: MessageSendMetrics.TransactionWindow,
+    ): List<CommandResult> {
         val existing = repository.findSendResults(
             requests.groupBy { it.senderId }.mapValues { (_, sends) -> sends.map { it.requestId } },
         ).associateBy { it.senderId to it.requestId }.toMutableMap()
@@ -225,7 +227,7 @@ class MessageSendService(
         SendStageRecorder.requests(SendStage.OUTBOX_WRITTEN, accepted) { it.requestId.value }
     }
 
-    private fun processInTransaction(request: SendRequest, window: SendTimers.TransactionWindow): CommandResult {
+    private fun processInTransaction(request: SendRequest, window: MessageSendMetrics.TransactionWindow): CommandResult {
         repository.lockSend(senderId = request.senderId, requestId = request.requestId)
         SendStageRecorder.record(SendStage.REQUEST_LOCKS_ACQUIRED, requestId = request.requestId.value)
         val existing = repository.findSendResult(senderId = request.senderId, requestId = request.requestId)
@@ -280,7 +282,7 @@ class MessageSendService(
         return CommandResult.SAVED
     }
 
-    private fun lockChat(chatId: ChatId): Chat? = timers.timeChatLock { chatRepository.findByIdForUpdate(chatId = chatId) }
+    private fun lockChat(chatId: ChatId): Chat? = metrics.timeChatLock { chatRepository.findByIdForUpdate(chatId = chatId) }
 
     private fun roomsFor(chat: Chat): List<String> =
         if (chat.kind == ChatKind.GROUP) {

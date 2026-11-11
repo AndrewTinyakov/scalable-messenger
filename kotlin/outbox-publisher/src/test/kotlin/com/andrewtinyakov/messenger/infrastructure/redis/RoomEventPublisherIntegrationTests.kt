@@ -4,6 +4,7 @@ import com.andrewtinyakov.messenger.infrastructure.outbox.MemoryOutbox
 import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxMessage
 import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxPublicationService
 import com.andrewtinyakov.messenger.infrastructure.outbox.PublisherProperties
+import com.andrewtinyakov.messenger.infrastructure.outbox.monitoring.OutboxMetrics
 import com.andrewtinyakov.messenger.infrastructure.outbox.outboxEvent
 import com.andrewtinyakov.messenger.infrastructure.outbox.outboxTransactions
 import com.andrewtinyakov.messenger.shared.id.EventId
@@ -302,7 +303,7 @@ class RoomEventPublisherIntegrationTests {
                 repository = repository,
                 tx = outboxTransactions(),
                 publisher = publisher,
-                metrics = SimpleMeterRegistry(),
+                metrics = OutboxMetrics(SimpleMeterRegistry(), Clock.systemUTC()),
                 clock = Clock.systemUTC(),
                 properties = PublisherProperties(),
             )
@@ -335,7 +336,7 @@ class RoomEventPublisherIntegrationTests {
                 repository = repository,
                 tx = outboxTransactions(),
                 publisher = publisher,
-                metrics = SimpleMeterRegistry(),
+                metrics = OutboxMetrics(SimpleMeterRegistry(), Clock.systemUTC()),
                 clock = Clock.systemUTC(),
                 properties = PublisherProperties(),
             )
@@ -362,7 +363,7 @@ class RoomEventPublisherIntegrationTests {
                 repository = repository,
                 tx = outboxTransactions(),
                 publisher = roomPublisher(redis = ReactiveStringRedisTemplate(factory)),
-                metrics = SimpleMeterRegistry(),
+                metrics = OutboxMetrics(SimpleMeterRegistry(), Clock.systemUTC()),
                 clock = Clock.systemUTC(),
                 properties = PublisherProperties(),
             )
@@ -385,7 +386,7 @@ class RoomEventPublisherIntegrationTests {
                 repository = repository,
                 tx = outboxTransactions(),
                 publisher = roomPublisher(redis = ReactiveStringRedisTemplate(factory)),
-                metrics = SimpleMeterRegistry(),
+                metrics = OutboxMetrics(SimpleMeterRegistry(), Clock.systemUTC()),
                 clock = Clock.systemUTC(),
                 properties = PublisherProperties(),
             )
@@ -405,7 +406,7 @@ class RoomEventPublisherIntegrationTests {
                 repository = repository,
                 tx = outboxTransactions(),
                 publisher = roomPublisher(redis = ReactiveStringRedisTemplate(factory)),
-                metrics = SimpleMeterRegistry(),
+                metrics = OutboxMetrics(SimpleMeterRegistry(), Clock.systemUTC()),
                 clock = Clock.systemUTC(),
                 properties = PublisherProperties(batchBytes = 65536),
             )
@@ -446,7 +447,7 @@ class RoomEventPublisherIntegrationTests {
                 repository = repository,
                 tx = outboxTransactions(),
                 publisher = publisher,
-                metrics = SimpleMeterRegistry(),
+                metrics = OutboxMetrics(SimpleMeterRegistry(), Clock.systemUTC()),
                 clock = Clock.systemUTC(),
                 properties = PublisherProperties(leaseSeconds = 5, publishTimeoutMs = 100),
             )

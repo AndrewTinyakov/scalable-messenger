@@ -3,6 +3,7 @@ package com.andrewtinyakov.messenger.read.service
 import com.andrewtinyakov.messenger.chat.service.ChatService
 import com.andrewtinyakov.messenger.chat.web.payload.CreateGroupChatRequest
 import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxRepository
+import com.andrewtinyakov.messenger.read.monitoring.ReadMetrics
 import com.andrewtinyakov.messenger.read.repository.JooqReadRepository
 import com.andrewtinyakov.messenger.read.web.payload.AdvanceReadRequest
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
@@ -86,13 +87,13 @@ class ReadServiceTests
             return Fixture(owner, members, chat, ids)
         }
 
-        private fun service(clock: Clock): ReadService = ReadService(
+        private fun service(clock: Clock, registry: SimpleMeterRegistry = SimpleMeterRegistry()): ReadService = ReadService(
             JooqReadRepository(jooq, clock),
             outbox,
             mapper,
             tx,
             clock,
-            ReadMetrics(SimpleMeterRegistry()),
+            ReadMetrics(registry),
         )
 
         @Test
@@ -210,11 +211,17 @@ class ReadServiceTests
         @Test
         fun `every advanced read invalidates its account even when group notifications coalesce`() {
             val f = fixture(messages = 2)
-            val reads = service(MutableClock("2026-11-02T12:00:00Z"))
+            val registry = SimpleMeterRegistry()
+            val reads = service(MutableClock("2026-11-02T12:00:00Z"), registry)
             assertEquals(2, chatService.get(f.chat, f.members[0]).unreadCount)
             reads.advance(f.chat, f.members[0], AdvanceReadRequest("2"))
             reads.advance(f.chat, f.members[1], AdvanceReadRequest("2"))
+            reads.advance(f.chat, f.members[1], AdvanceReadRequest("2"))
             assertEquals(0, chatService.get(f.chat, f.members[0]).unreadCount)
+            assertEquals(2.0, registry.get("messenger.read.advances").tag("outcome", "advanced").counter().count())
+            assertEquals(1.0, registry.get("messenger.read.advances").tag("outcome", "unchanged").counter().count())
+            assertEquals(1.0, registry.get("messenger.read.notifications").tag("outcome", "emitted").counter().count())
+            assertEquals(1.0, registry.get("messenger.read.notifications").tag("outcome", "coalesced").counter().count())
             for (member in f.members.take(2)) {
                 assertEquals(
                     1,

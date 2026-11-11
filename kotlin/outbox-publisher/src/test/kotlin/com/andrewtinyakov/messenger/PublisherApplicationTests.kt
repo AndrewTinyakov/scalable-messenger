@@ -1,6 +1,8 @@
 package com.andrewtinyakov.messenger
 
+import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxBacklog
 import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxPublicationService
+import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxRepository
 import com.andrewtinyakov.messenger.message.repository.MessageRepository
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
@@ -21,10 +23,17 @@ class PublisherApplicationTests {
 
     @Autowired private lateinit var messages: MessageRepository
 
+    @Autowired private lateinit var outbox: OutboxRepository
+
     @Test
     fun `publisher starts with its real hydration persistence adapter`() {
         assertNotNull(messages)
         assertEquals(0, publication.publishBatch())
+    }
+
+    @Test
+    fun `backlog sample reads the real outbox table`() {
+        assertEquals(OutboxBacklog(pending = 0, oldestCreatedAt = null), outbox.backlog())
     }
 
     companion object {

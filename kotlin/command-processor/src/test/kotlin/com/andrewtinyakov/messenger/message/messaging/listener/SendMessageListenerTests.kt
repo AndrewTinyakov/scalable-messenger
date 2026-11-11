@@ -1,7 +1,9 @@
 package com.andrewtinyakov.messenger.message.messaging.listener
 
 import com.andrewtinyakov.messenger.generated.messaging.command.SendMessageCommandV1
+import com.andrewtinyakov.messenger.infrastructure.messaging.monitoring.CommandMetrics
 import com.andrewtinyakov.messenger.message.model.CommandResult
+import com.andrewtinyakov.messenger.message.monitoring.MessageSendMetrics
 import com.andrewtinyakov.messenger.message.service.MessageSendBatchService
 import com.andrewtinyakov.messenger.message.service.MessageSendService
 import com.andrewtinyakov.messenger.shared.id.newId
@@ -33,17 +35,21 @@ class SendMessageListenerTests {
     private val mapper = jacksonObjectMapper()
     private val metrics = SimpleMeterRegistry()
     private val transactions = RecordingTransactions()
-    private val batches = MessageSendBatchService(service, TransactionTemplate(transactions), metrics)
-    private val listener = SendMessageListener(service, batches, metrics, mapper)
+    private val batches = MessageSendBatchService(service, TransactionTemplate(transactions), MessageSendMetrics(metrics))
+    private val listener = SendMessageListener(service, batches, CommandMetrics(metrics), mapper)
     private val sender = newId()
     private val chat = newId()
 
     @Test
     fun `acknowledgements happen after one shared commit`() {
         val commands = listOf(command(), command())
-        Mockito.`when`(service.processBatchInTransaction(commands)).thenReturn(List(2) { CommandResult.SAVED })
+        Mockito.`when`(service.processBatchInTransaction(commands)).thenAnswer {
+            assertEquals(0.0, metrics.get("messenger.command.result").tag("result", "saved").counter().count())
+            List(2) { CommandResult.SAVED }
+        }
         Mockito.doAnswer {
             assertEquals(1, transactions.commits)
+            assertEquals(2.0, metrics.get("messenger.command.result").tag("result", "saved").counter().count())
             assertFalse(TransactionSynchronizationManager.isActualTransactionActive())
             null
         }.`when`(channel).basicAck(Mockito.anyLong(), Mockito.eq(false))
@@ -91,6 +97,7 @@ class SendMessageListenerTests {
 
         assertEquals(1, transactions.commits)
         assertEquals(2, transactions.rollbacks)
+        assertEquals(1.0, metrics.get("messenger.command.result").tag("result", "saved").counter().count())
         assertEquals(2L, metrics.get("messenger.send.batch.transaction").tag("outcome", "rolled_back").timer().count())
         Mockito.verify(service).processBatchInTransaction(listOf(valid, failing))
         Mockito.verify(service).processBatchInTransaction(listOf(valid))
@@ -117,9 +124,26 @@ class SendMessageListenerTests {
 
         assertEquals(1, transactions.commits)
         assertEquals(0, transactions.rollbacks)
+        assertEquals(2.0, metrics.get("messenger.command.result").tag("result", "saved").counter().count())
         Mockito.verify(service).processBatchInTransaction(listOf(first, second))
         Mockito.verifyNoMoreInteractions(service)
         Mockito.verify(channel).basicAck(1L, false)
+        Mockito.verifyNoMoreInteractions(channel)
+    }
+
+    @Test
+    fun `commit failure cannot count a successful command result`() {
+        val command = command()
+        Mockito.`when`(service.processBatchInTransaction(listOf(command))).thenReturn(listOf(CommandResult.SAVED))
+        transactions.commitFailure = TransientDataAccessResourceException("commit failed")
+
+        listener.onSendCommand(listOf(message(command, 1L)), channel)
+
+        assertEquals(0, transactions.commits)
+        assertEquals(0.0, metrics.get("messenger.command.result").tag("result", "saved").counter().count())
+        assertEquals(1, transactions.rollbacks)
+        assertEquals(1L, metrics.get("messenger.send.batch.transaction").tag("outcome", "rolled_back").timer().count())
+        Mockito.verify(channel).basicReject(1L, true)
         Mockito.verifyNoMoreInteractions(channel)
     }
 
@@ -175,12 +199,14 @@ class SendMessageListenerTests {
     private class RecordingTransactions : AbstractPlatformTransactionManager() {
         var commits = 0
         var rollbacks = 0
+        var commitFailure: RuntimeException? = null
 
         override fun doGetTransaction(): Any = Any()
 
         override fun doBegin(transaction: Any, definition: TransactionDefinition) {}
 
         override fun doCommit(status: DefaultTransactionStatus) {
+            commitFailure?.let { throw it }
             commits++
         }
 

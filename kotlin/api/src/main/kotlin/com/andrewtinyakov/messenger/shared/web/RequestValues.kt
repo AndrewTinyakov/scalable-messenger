@@ -4,7 +4,15 @@ private const val MAX_PAGE_SIZE = 100
 private val decimalSequence = Regex("0|[1-9][0-9]{0,18}")
 
 fun requirePageLimit(limit: Int) {
-    if (limit !in 1..MAX_PAGE_SIZE) badRequest(ApiErrorCode.INVALID_LIMIT, "limit must be 1 to $MAX_PAGE_SIZE")
+    if (limit !in 1..MAX_PAGE_SIZE) {
+        badRequest(
+            ApiErrorCode.INVALID_LIMIT,
+            "limit must be 1 to $MAX_PAGE_SIZE",
+        )
+    }
 }
 
-fun parseSequence(value: String): Long? = value.takeIf(decimalSequence::matches)?.toLongOrNull()
+fun parseSequence(value: String): Long? =
+    value
+        .takeIf(decimalSequence::matches)
+        ?.toLongOrNull()

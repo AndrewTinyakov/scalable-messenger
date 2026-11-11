@@ -1,5 +1,6 @@
 package com.andrewtinyakov.messenger.infrastructure.outbox
 
+import com.andrewtinyakov.messenger.infrastructure.outbox.monitoring.OutboxMetrics
 import com.andrewtinyakov.messenger.shared.id.newId
 import io.micrometer.core.instrument.Meter
 import io.micrometer.core.instrument.config.MeterFilter
@@ -11,6 +12,7 @@ import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.mockito.ArgumentMatchers.any
+import org.mockito.Mockito.doThrow
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.never
 import org.mockito.Mockito.verify
@@ -73,7 +75,32 @@ class OutboxPublicationServiceTests {
         assertTrue(published.isEmpty())
         verify(manager).rollback(status)
         verify(manager, never()).commit(status)
-        assertEquals(null, metrics.find("messenger.outbox.claimed").counter())
+        assertEquals(0.0, metrics.get("messenger.outbox.claimed").counter().count())
+        assertBatch(metrics, "failed")
+        assertPhase(metrics, "claim", "failure")
+    }
+
+    @Test
+    fun `claim commit failure does not count claimed work or begin publication`() {
+        val row = outboxEvent()
+        val manager = mock(PlatformTransactionManager::class.java)
+        val status = mock(TransactionStatus::class.java)
+        `when`(manager.getTransaction(any())).thenReturn(status)
+        doThrow(IllegalStateException("Commit failed")).`when`(manager).commit(status)
+        val metrics = SimpleMeterRegistry()
+        val published = ConcurrentLinkedQueue<OutboxMessage>()
+        val service = publicationService(
+            MemoryOutbox(listOf(row)),
+            OutboxEventPublisher { published.add(it) },
+            metrics = metrics,
+            tx = TransactionTemplate(manager),
+        )
+
+        assertThrows(IllegalStateException::class.java) { service.publishBatch() }
+
+        assertTrue(published.isEmpty())
+        assertEquals(0.0, metrics.get("messenger.outbox.claimed").counter().count())
+        assertEquals(0.0, metrics.find("messenger.outbox.publish").counters().sumOf { it.count() })
         assertBatch(metrics, "failed")
         assertPhase(metrics, "claim", "failure")
     }
@@ -281,7 +308,7 @@ class OutboxPublicationServiceTests {
         assertEquals(0, service.publishBatch())
         assertBatch(metrics, "empty")
         assertPhase(metrics, "claim", "success")
-        assertEquals(null, metrics.find("messenger.outbox.stage").tag("phase", "publish").timer())
+        assertEquals(0L, metrics.find("messenger.outbox.stage").tag("phase", "publish").timers().sumOf { it.count() })
     }
 
     @Test
@@ -326,7 +353,7 @@ class OutboxPublicationServiceTests {
         assertEquals(2, service.publishBatch())
         assertTrue(storage.remaining().isEmpty())
         assertEquals(2, metrics.find("messenger.outbox.publication.age").timers().size)
-        assertEquals(null, metrics.find("messenger.outbox.publication.age.invalid").counter())
+        assertEquals(0.0, metrics.find("messenger.outbox.publication.age.invalid").counters().sumOf { it.count() })
     }
 
     @Test
@@ -344,7 +371,7 @@ class OutboxPublicationServiceTests {
         assertEquals(2, service.publishBatch())
         assertEquals(rows.toSet(), published.toSet())
         assertTrue(storage.remaining().isEmpty())
-        assertEquals(null, metrics.find("messenger.outbox.publication.age").timer())
+        assertEquals(0L, metrics.find("messenger.outbox.publication.age").timers().sumOf { it.count() })
         assertEquals(
             1.0,
             metrics.get("messenger.outbox.publication.age.invalid").tags("room_kind", "group", "reason", "missing").counter().count(),
@@ -356,17 +383,11 @@ class OutboxPublicationServiceTests {
     }
 
     @Test
-    fun `age metric failures cannot retain successful publications for retry`() {
+    fun `age meters are registered before publication and reused for each attempt`() {
         for (createdAt in listOf(OffsetDateTime.parse("2026-11-03T11:59:59Z"), null)) {
             val row = outboxEvent().copy(createdAt = createdAt)
             val storage = MemoryOutbox(listOf(row))
             val metrics = SimpleMeterRegistry()
-            metrics.config().meterFilter(object : MeterFilter {
-                override fun accept(id: Meter.Id): MeterFilterReply {
-                    if (id.name.startsWith("messenger.outbox.publication.age")) error("Age metric registration failed")
-                    return MeterFilterReply.NEUTRAL
-                }
-            })
             val service = publicationService(
                 storage,
                 OutboxEventPublisher {},
@@ -374,6 +395,12 @@ class OutboxPublicationServiceTests {
                 clock = Clock.fixed(Instant.parse("2026-11-03T12:00:00Z"), ZoneOffset.UTC),
             )
 
+            metrics.config().meterFilter(object : MeterFilter {
+                override fun accept(id: Meter.Id): MeterFilterReply {
+                    if (id.name.startsWith("messenger.outbox.publication.age")) error("Age metric registration failed")
+                    return MeterFilterReply.NEUTRAL
+                }
+            })
             assertEquals(1, service.publishBatch())
             assertTrue(storage.remaining().isEmpty())
             assertEquals(1.0, metrics.get("messenger.outbox.publish").tag("result", "success").counter().count())
@@ -447,7 +474,7 @@ class OutboxPublicationServiceTests {
             repository = repository,
             tx = tx,
             publisher = publisher,
-            metrics = metrics,
+            metrics = OutboxMetrics(metrics, clock),
             clock = clock,
             properties = properties,
         )

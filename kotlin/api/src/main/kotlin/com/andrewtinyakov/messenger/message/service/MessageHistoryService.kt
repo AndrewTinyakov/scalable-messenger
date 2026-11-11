@@ -5,6 +5,8 @@ import com.andrewtinyakov.messenger.infrastructure.database.observability.observ
 import com.andrewtinyakov.messenger.message.change.MessageChangeRepository
 import com.andrewtinyakov.messenger.message.model.SendResult
 import com.andrewtinyakov.messenger.message.model.SendResultStatus
+import com.andrewtinyakov.messenger.message.monitoring.HistoryDirection
+import com.andrewtinyakov.messenger.message.monitoring.MessageMetrics
 import com.andrewtinyakov.messenger.message.repository.MessageRepository
 import com.andrewtinyakov.messenger.message.visibility.VisibilityRepository
 import com.andrewtinyakov.messenger.message.visibility.VisibilitySnapshot
@@ -29,17 +31,14 @@ import com.andrewtinyakov.messenger.shared.web.badRequest
 import com.andrewtinyakov.messenger.shared.web.notFound
 import com.andrewtinyakov.messenger.shared.web.parseSequence
 import com.andrewtinyakov.messenger.shared.web.requirePageLimit
-import io.micrometer.core.instrument.MeterRegistry
-import io.micrometer.core.instrument.Timer
 import org.springframework.stereotype.Service
 import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.support.TransactionTemplate
-import java.time.Duration
 
 @Service
 class MessageHistoryService(
     private val repository: MessageRepository,
-    private val metrics: MeterRegistry,
+    private val metrics: MessageMetrics,
     private val changes: MessageChangeRepository,
     private val visibility: VisibilityRepository,
     private val pages: VisibleHistory,
@@ -50,8 +49,9 @@ class MessageHistoryService(
         isReadOnly = true
     }
 
-    fun messages(chatId: ChatId, userId: UserId, afterSeq: String?, beforeSeq: String?, limit: Int): MessageHistoryResponse =
-        measured(if (afterSeq != null) "after" else "before") {
+    fun messages(chatId: ChatId, userId: UserId, afterSeq: String?, beforeSeq: String?, limit: Int): MessageHistoryResponse {
+        val direction = if (afterSeq != null) HistoryDirection.AFTER else HistoryDirection.BEFORE
+        return metrics.timeMessages(direction) {
             snapshot.observedExecute(DatabaseTransaction.MESSAGE_HISTORY) {
                 val state = state(chatId, userId)
                 requirePageLimit(limit)
@@ -63,15 +63,7 @@ class MessageHistoryService(
                     badRequest(ApiErrorCode.INVALID_SEQUENCE, "afterSeq exceeds saved history")
                 }
                 val page = pages.page(chatId, userId, state, cursor, afterSeq != null, limit)
-                metrics.counter(
-                    "messenger.history.messages",
-                    "direction",
-                    if (afterSeq != null) {
-                        "after"
-                    } else {
-                        "before"
-                    },
-                ).increment(page.messages.size.toDouble())
+                metrics.messagesServed(direction, page.messages.size)
                 MessageHistoryResponse(
                     page.messages.map { it.toResponse() },
                     page.next.toString(),
@@ -86,6 +78,7 @@ class MessageHistoryService(
                 )
             }
         }
+    }
 
     fun around(chatId: ChatId, userId: UserId, messageId: MessageId, limit: Int): MessageAroundResponse = around(
         chatId,
@@ -101,9 +94,7 @@ class MessageHistoryService(
         messageId: MessageId?,
         anchorSequence: String?,
         limit: Int,
-    ): MessageAroundResponse = measured(
-        "around",
-    ) {
+    ): MessageAroundResponse = metrics.timeAround {
         snapshot.observedExecute(DatabaseTransaction.MESSAGE_HISTORY) {
             val state = state(chatId, userId)
             requirePageLimit(limit)
@@ -190,14 +181,14 @@ class MessageHistoryService(
         )
     }
 
-    fun changes(chatId: ChatId, userId: UserId, afterRevision: String, limit: Int): MessageChangesResponse = measured("changes") {
+    fun changes(chatId: ChatId, userId: UserId, afterRevision: String, limit: Int): MessageChangesResponse = metrics.timeChanges {
         snapshot.observedExecute(DatabaseTransaction.MESSAGE_HISTORY) {
             val state = state(chatId, userId)
             val cursor = changes.cursor(chatId, userId) ?: notFound()
             requirePageLimit(limit)
             val after = sequence(afterRevision)
             if (after < cursor.floor || after > cursor.revision) {
-                metrics.counter("messenger.message.changes.resets").increment()
+                metrics.changesReset()
                 return@observedExecute MessageChangesResponse(
                     emptyList(),
                     cursor.revision.toString(),
@@ -249,21 +240,6 @@ class MessageHistoryService(
 
     private fun sequence(value: String, positive: Boolean = false): Long =
         parseSequence(value)?.takeIf { !positive || it > 0 } ?: badRequest(ApiErrorCode.INVALID_SEQUENCE, "Invalid decimal sequence")
-
-    private fun <T> measured(direction: String, action: () -> T): T {
-        val started = System.nanoTime()
-        var outcome = "failed"
-        try {
-            val result = action()
-            outcome = "success"
-            return result
-        } finally {
-            Timer.builder("messenger.history.page").tags("direction", direction, "outcome", outcome).publishPercentileHistogram()
-                .minimumExpectedValue(
-                    Duration.ofMillis(1),
-                ).maximumExpectedValue(Duration.ofMinutes(2)).register(metrics).record(Duration.ofNanos(System.nanoTime() - started))
-        }
-    }
 
     fun status(userId: UserId, requestId: RequestId): SendStatusResponse =
         repository.findSendResult(userId, requestId)?.toStatusResponse() ?: SendStatusResponse(SendLookupStatus.UNKNOWN)

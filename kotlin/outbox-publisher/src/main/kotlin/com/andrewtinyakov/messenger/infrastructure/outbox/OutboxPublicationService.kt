@@ -5,18 +5,19 @@ import com.andrewtinyakov.messenger.infrastructure.database.observability.observ
 import com.andrewtinyakov.messenger.infrastructure.database.observability.observedExecuteWithoutResult
 import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStage
 import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStageRecorder
+import com.andrewtinyakov.messenger.infrastructure.outbox.monitoring.OutboxMetrics
+import com.andrewtinyakov.messenger.infrastructure.outbox.monitoring.OutboxMetrics.BatchOutcome
+import com.andrewtinyakov.messenger.infrastructure.outbox.monitoring.OutboxMetrics.PublicationOutcome
+import com.andrewtinyakov.messenger.infrastructure.outbox.monitoring.OutboxMetrics.RetentionReason
+import com.andrewtinyakov.messenger.infrastructure.outbox.monitoring.OutboxMetrics.Stage
 import com.andrewtinyakov.messenger.shared.id.EventId
-import io.micrometer.core.instrument.MeterRegistry
-import io.micrometer.core.instrument.Timer
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
 import java.nio.charset.StandardCharsets
 import java.time.Clock
-import java.time.Duration
 import java.time.OffsetDateTime
 import java.util.UUID
 import java.util.concurrent.Callable
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
@@ -25,35 +26,34 @@ class OutboxPublicationService(
     private val repository: OutboxRepository,
     private val tx: TransactionTemplate,
     private val publisher: OutboxEventPublisher,
-    private val metrics: MeterRegistry,
+    private val metrics: OutboxMetrics,
     private val clock: Clock,
     private val properties: PublisherProperties,
 ) {
     private val owner = UUID.randomUUID().toString()
     private val log = org.slf4j.LoggerFactory.getLogger(javaClass)
-    private val publicationAgeTimers = ConcurrentHashMap<String, Timer>()
 
     @Synchronized
     fun publishBatch(): Int {
-        val sample = Timer.start(metrics)
-        var outcome = "failed"
+        val sample = metrics.started()
+        var outcome = BatchOutcome.FAILED
         try {
             val result = publishClaimedBatch()
             outcome = result.outcome
             return result.completed
         } finally {
-            sample.stop(metrics.timer("messenger.outbox.batch", "outcome", outcome))
+            metrics.batchFinished(sample, outcome)
         }
     }
 
     private data class BatchPublication(
         val completed: Int,
-        val outcome: String,
+        val outcome: BatchOutcome,
     )
 
     private data class RoomPublication(
         val published: List<EventId>,
-        val outcome: String,
+        val outcome: PublicationOutcome,
     )
 
     private fun publishClaimedBatch(): BatchPublication {
@@ -63,7 +63,7 @@ class OutboxPublicationService(
         val now = OffsetDateTime.now(clock)
         val leaseUntil = now.plusSeconds(properties.leaseSeconds)
         val limit = minOf(properties.batchSize, properties.batchBytes / MAX_EVENT_BYTES)
-        val rooms = observePhase("claim") {
+        val rooms = observePhase(Stage.CLAIM) {
             tx.observedExecute(DatabaseTransaction.OUTBOX_CLAIM) {
                 val anchors = repository.claim(now, minOf(limit, properties.concurrency), owner, leaseUntil)
                 var remaining = limit - anchors.size
@@ -80,14 +80,14 @@ class OutboxPublicationService(
                 }
             }
         }
-        if (rooms.isEmpty()) return BatchPublication(0, "empty")
+        if (rooms.isEmpty()) return BatchPublication(0, BatchOutcome.EMPTY)
         if (SendStageRecorder.isEnabled) {
             rooms.forEach { rows ->
                 rows.forEach { row -> SendStageRecorder.record(SendStage.OUTBOX_CLAIM_COMMITTED, eventId = row.id.value) }
             }
         }
-        metrics.counter("messenger.outbox.claimed").increment(rooms.sumOf { it.size }.toDouble())
-        val prepared = observePhase("hydrate") {
+        metrics.claimed(rooms.sumOf { it.size })
+        val prepared = observePhase(Stage.HYDRATE) {
             publisher.prepare(rooms.flatten()).associateBy { it.id }
         }
         val published = Executors.newVirtualThreadPerTaskExecutor().use { executor ->
@@ -98,105 +98,75 @@ class OutboxPublicationService(
             }
             tasks.map { it.get() }
         }
-        return BatchPublication(published.sumOf { it.completed }, if (published.any { it.outcome == "failed" }) "failed" else "work")
+        val outcome = if (published.any { it.outcome == BatchOutcome.FAILED }) BatchOutcome.FAILED else BatchOutcome.WORK
+        return BatchPublication(published.sumOf { it.completed }, outcome)
     }
 
     private fun publishClaimedRoom(
         rows: List<OutboxMessage>,
         deadline: Long,
     ): BatchPublication {
-        val result = observePhase("publish", { it.outcome }) { publishRoom(rows = rows, deadline = deadline) }
+        val result = observePhase(Stage.PUBLISH, { it.outcome }) { publishRoom(rows = rows, deadline = deadline) }
         val completed = result.published
         if (completed.isNotEmpty()) {
             try {
-                observePhase("complete") {
+                observePhase(Stage.COMPLETE) {
                     tx.observedExecuteWithoutResult(DatabaseTransaction.OUTBOX_COMPLETE) { repository.complete(completed, owner) }
                 }
             } catch (error: Exception) {
-                recordPending("complete_failure", completed.size)
+                metrics.retained(RetentionReason.COMPLETE_FAILURE, completed.size)
                 throw error
             }
         }
-        val failed = result.outcome == "failure" || result.outcome == "cancelled"
-        return BatchPublication(completed.size, if (failed) "failed" else "work")
+        val failed = result.outcome == PublicationOutcome.FAILURE || result.outcome == PublicationOutcome.CANCELLED
+        return BatchPublication(completed.size, if (failed) BatchOutcome.FAILED else BatchOutcome.WORK)
     }
 
     private fun publishRoom(rows: List<OutboxMessage>, deadline: Long): RoomPublication {
         val published = ArrayList<EventId>(rows.size)
         for (row in rows) {
             if (Thread.currentThread().isInterrupted) {
-                recordPending("interrupted", rows.size - published.size)
-                return RoomPublication(published, "cancelled")
+                metrics.retained(RetentionReason.INTERRUPTED, rows.size - published.size)
+                return RoomPublication(published, PublicationOutcome.CANCELLED)
             }
             if (deadline - System.nanoTime() < TimeUnit.MILLISECONDS.toNanos(properties.publishTimeoutMs)) {
-                recordPending("deadline", rows.size - published.size)
-                return RoomPublication(published, "deadline")
+                metrics.retained(RetentionReason.DEADLINE, rows.size - published.size)
+                return RoomPublication(published, PublicationOutcome.DEADLINE)
             }
-            val publishSample = Timer.start(metrics)
-            var outcome = "failure"
+            val publishSample = metrics.started()
+            var outcome = PublicationOutcome.FAILURE
             try {
                 require(row.payload.toByteArray(StandardCharsets.UTF_8).size <= MAX_EVENT_BYTES) {
                     "Outbox event exceeds publication byte limit"
                 }
-                recordPublicationAge(row)
+                metrics.publicationAttempted(row, OffsetDateTime.now(clock))
                 publisher.publish(message = row)
-                outcome = "success"
+                outcome = PublicationOutcome.SUCCESS
                 published.add(row.id)
-                metrics.counter("messenger.outbox.publish", "result", "success").increment()
+                metrics.published()
             } catch (error: Exception) {
-                metrics.counter("messenger.outbox.publish", "result", "failure").increment()
+                metrics.publishFailed()
                 log.error("Outbox publication failed for event {}", row.id, error)
-                recordPending("publish_failure", rows.size - published.size)
-                return RoomPublication(published, "failure")
+                metrics.retained(RetentionReason.PUBLISH_FAILURE, rows.size - published.size)
+                return RoomPublication(published, PublicationOutcome.FAILURE)
             } finally {
-                publishSample.stop(
-                    Timer.builder("messenger.outbox.publication").tag("outcome", outcome)
-                        .publishPercentileHistogram().minimumExpectedValue(java.time.Duration.ofMillis(1))
-                        .maximumExpectedValue(java.time.Duration.ofMinutes(2)).register(metrics),
-                )
+                metrics.publicationFinished(publishSample, outcome)
             }
         }
-        return RoomPublication(published, "success")
+        return RoomPublication(published, PublicationOutcome.SUCCESS)
     }
 
-    private fun recordPending(reason: String, count: Int) {
-        metrics.counter("messenger.outbox.retained", "reason", reason).increment(count.toDouble())
-    }
-
-    private fun recordPublicationAge(row: OutboxMessage) {
-        try {
-            val roomKind = if (row.room.startsWith("group:")) "group" else "user"
-            val createdAt = row.createdAt
-            val age = createdAt?.let { Duration.between(it, OffsetDateTime.now(clock)) }
-            if (age == null || age.isNegative) {
-                val reason = if (age == null) "missing" else "future"
-                metrics.counter("messenger.outbox.publication.age.invalid", "room_kind", roomKind, "reason", reason).increment()
-                return
-            }
-            publicationAgeTimers.computeIfAbsent(roomKind) {
-                Timer.builder("messenger.outbox.publication.age").tag("room_kind", roomKind)
-                    .serviceLevelObjectives(*PUBLICATION_AGE_BUCKETS).register(metrics)
-            }.record(age)
-        } catch (_: RuntimeException) {
-        }
-    }
-
-    private inline fun <T> observePhase(phase: String, outcome: (T) -> String = { "success" }, action: () -> T): T {
-        val sample = Timer.start(metrics)
-        var result = "failure"
+    private inline fun <T> observePhase(
+        phase: Stage,
+        outcome: (T) -> PublicationOutcome = { PublicationOutcome.SUCCESS },
+        action: () -> T,
+    ): T {
+        val sample = metrics.started()
+        var result = PublicationOutcome.FAILURE
         try {
             return action().also { result = outcome(it) }
         } finally {
-            sample.stop(
-                Timer.builder("messenger.outbox.stage").tags("phase", phase, "outcome", result)
-                    .publishPercentileHistogram().minimumExpectedValue(java.time.Duration.ofMillis(1))
-                    .maximumExpectedValue(java.time.Duration.ofMinutes(2)).register(metrics),
-            )
+            metrics.stageFinished(sample, phase, result)
         }
-    }
-
-    companion object {
-        private val PUBLICATION_AGE_BUCKETS = longArrayOf(1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000)
-            .map(Duration::ofMillis).toTypedArray()
     }
 }

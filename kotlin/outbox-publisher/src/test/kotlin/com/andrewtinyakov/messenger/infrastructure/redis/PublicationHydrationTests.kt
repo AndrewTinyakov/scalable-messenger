@@ -2,6 +2,7 @@ package com.andrewtinyakov.messenger.infrastructure.redis
 
 import com.andrewtinyakov.messenger.generated.messaging.event.SavedMessageReferenceV1
 import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxMessage
+import com.andrewtinyakov.messenger.infrastructure.redis.monitoring.PublicationHydrationMetrics
 import com.andrewtinyakov.messenger.message.model.Message
 import com.andrewtinyakov.messenger.message.repository.MessageRepository
 import com.andrewtinyakov.messenger.shared.id.ChatId
@@ -24,7 +25,7 @@ class PublicationHydrationTests {
     private val mapper = JsonMapper.builder()
         .changeDefaultPropertyInclusion { it.withValueInclusion(JsonInclude.Include.NON_NULL) }.build()
     private val repository = mock(MessageRepository::class.java)
-    private val hydration = PublicationHydration(repository, mapper, SimpleMeterRegistry())
+    private val hydration = PublicationHydration(repository, mapper, PublicationHydrationMetrics(SimpleMeterRegistry()))
     private val chat = ChatId(newId())
     private val id = MessageId(newId())
 

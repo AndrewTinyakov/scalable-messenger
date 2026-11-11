@@ -6,7 +6,7 @@ import com.andrewtinyakov.messenger.chat.service.ChatMembershipService
 import com.andrewtinyakov.messenger.chat.service.ChatService
 import com.andrewtinyakov.messenger.chat.web.payload.CreateGroupChatRequest
 import com.andrewtinyakov.messenger.generated.messaging.event.SendRejectionReason
-import com.andrewtinyakov.messenger.message.change.MessageChangeRetention
+import com.andrewtinyakov.messenger.message.change.MessageChangeRetentionService
 import com.andrewtinyakov.messenger.message.change.MessageMutationService
 import com.andrewtinyakov.messenger.message.model.CommandResult
 import com.andrewtinyakov.messenger.message.web.payload.MessageResponse
@@ -40,7 +40,7 @@ class MessageFeatureTests
         private val deletion: ChatDeletionService,
         private val chats: ChatService,
         private val membership: ChatMembershipService,
-        private val retention: MessageChangeRetention,
+        private val retention: MessageChangeRetentionService,
         private val authorizations: GroupAuthorizationRepository,
     ) : MessengerIntegrationTest() {
         @Test
@@ -258,7 +258,7 @@ class MessageFeatureTests
             mutations.edit(ChatId(chat), UserId(owner), MessageId(target.id), "old edit", "1")
             mutations.edit(ChatId(chat), UserId(owner), MessageId(target.id), "recent edit", "2")
             db.update("UPDATE message_changes SET changed_at=now()-interval '8 days' WHERE chat_id=? AND revision=1", chat)
-            retention.clean()
+            retention.pruneExpiredChanges()
             val reset = history.changes(ChatId(chat), UserId(member), "0", 100)
             assertEquals(true, reset.resetRequired)
             assertEquals(emptyList<Any>(), reset.changes)

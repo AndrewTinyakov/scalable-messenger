@@ -1,8 +1,7 @@
 package com.andrewtinyakov.messenger.infrastructure.messaging
 
+import com.andrewtinyakov.messenger.infrastructure.messaging.monitoring.CommandMetrics
 import com.rabbitmq.client.Channel
-import io.micrometer.core.instrument.MeterRegistry
-import io.micrometer.core.instrument.Timer
 import org.slf4j.Logger
 import org.springframework.amqp.core.Message
 import tools.jackson.core.JacksonException
@@ -11,9 +10,9 @@ internal fun consumeMessage(
     message: Message,
     channel: Channel,
     logger: Logger,
-    metrics: MeterRegistry,
+    metrics: CommandMetrics,
     kind: CommandKind,
-    sample: Timer.Sample = Timer.start(metrics),
+    started: Long = metrics.commandProcessingStarted(),
     action: () -> Unit,
 ) {
     val tag = message.messageProperties.deliveryTag
@@ -24,57 +23,35 @@ internal fun consumeMessage(
         } catch (error: Exception) {
             val permanent = error is IllegalArgumentException || error is JacksonException
             val outcome = if (permanent) CommandConsumptionOutcome.PERMANENT_FAILURE else CommandConsumptionOutcome.RETRY
-            metrics.counter(
-                "messenger.command.consumed",
-                "kind",
-                kind.metricValue,
-                "outcome",
-                outcome.metricValue,
-            ).increment()
+            metrics.commandConsumed(kind, outcome)
             logger.error(
                 "Message handling failed: routingKey={}, permanent={}",
                 message.messageProperties.receivedRoutingKey,
                 permanent,
                 error,
             )
-            recordAcknowledgement(metrics, kind, "reject") { channel.basicReject(tag, !permanent) }
+            recordAcknowledgement(metrics, kind, CommandAcknowledgementOperation.REJECT) { channel.basicReject(tag, !permanent) }
             return
         }
-        recordAcknowledgement(metrics, kind, "ack") { channel.basicAck(tag, false) }
-        metrics.counter(
-            "messenger.command.consumed",
-            "kind",
-            kind.metricValue,
-            "outcome",
-            CommandConsumptionOutcome.ACKNOWLEDGED.metricValue,
-        ).increment()
+        recordAcknowledgement(metrics, kind, CommandAcknowledgementOperation.ACK) { channel.basicAck(tag, false) }
+        metrics.commandConsumed(kind, CommandConsumptionOutcome.ACKNOWLEDGED)
         processingOutcome = CommandProcessingOutcome.ACKNOWLEDGED
     } finally {
-        sample.stop(
-            Timer.builder("messenger.command.processing")
-                .description(
-                    "Per-delivery decode start through broker acknowledgement attempt, including subsequent batch sequencing waits",
-                )
-                .tags("kind", kind.metricValue, "outcome", processingOutcome.metricValue)
-                .register(metrics),
-        )
+        metrics.commandProcessingCompleted(kind, processingOutcome, started)
     }
 }
 
-private inline fun recordAcknowledgement(metrics: MeterRegistry, kind: CommandKind, operation: String, action: () -> Unit) {
-    var result = "failure"
+private inline fun recordAcknowledgement(
+    metrics: CommandMetrics,
+    kind: CommandKind,
+    operation: CommandAcknowledgementOperation,
+    action: () -> Unit,
+) {
+    var result = CommandAcknowledgementResult.FAILURE
     try {
         action()
-        result = "success"
+        result = CommandAcknowledgementResult.SUCCESS
     } finally {
-        metrics.counter(
-            "messenger.command.acknowledgement",
-            "kind",
-            kind.metricValue,
-            "operation",
-            operation,
-            "result",
-            result,
-        ).increment()
+        metrics.commandAcknowledgementCompleted(kind, operation, result)
     }
 }

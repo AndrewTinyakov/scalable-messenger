@@ -20,4 +20,6 @@ interface OutboxRepository {
 
     fun enqueue(eventId: EventId, room: String, payload: String) =
         enqueue(messages = listOf(OutboxMessage(id = eventId, room = room, payload = payload)))
+
+    fun backlog(): OutboxBacklog
 }

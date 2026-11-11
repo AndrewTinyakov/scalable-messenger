@@ -12,6 +12,8 @@ import com.andrewtinyakov.messenger.infrastructure.database.observability.observ
 import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxMessage
 import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxRepository
 import com.andrewtinyakov.messenger.infrastructure.redis.RoomAddress
+import com.andrewtinyakov.messenger.message.monitoring.MessageEditFailure
+import com.andrewtinyakov.messenger.message.monitoring.MessageMetrics
 import com.andrewtinyakov.messenger.message.repository.MessageRepository
 import com.andrewtinyakov.messenger.message.web.payload.MessageResponse
 import com.andrewtinyakov.messenger.message.web.payload.toResponse
@@ -25,7 +27,6 @@ import com.andrewtinyakov.messenger.shared.web.ApiException
 import com.andrewtinyakov.messenger.shared.web.badRequest
 import com.andrewtinyakov.messenger.shared.web.notFound
 import com.andrewtinyakov.messenger.shared.web.parseSequence
-import io.micrometer.core.instrument.MeterRegistry
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
@@ -43,7 +44,7 @@ class MessageMutationService(
     private val tx: TransactionTemplate,
     private val mapper: ObjectMapper,
     private val clock: Clock,
-    private val metrics: MeterRegistry,
+    private val metrics: MessageMetrics,
 ) {
     fun edit(chatId: ChatId, userId: UserId, messageId: MessageId, body: String, expectedVersion: String): MessageResponse =
         mutate(chatId, userId, messageId, body, expectedVersion)
@@ -76,22 +77,18 @@ class MessageMutationService(
         body: String,
         expectedVersion: String,
     ): MessageResponse {
-        var outcome = "failed"
-        try {
-            val response = tx.observedExecute(DatabaseTransaction.MESSAGE_MUTATE) {
+        val response = try {
+            tx.observedExecute(DatabaseTransaction.MESSAGE_MUTATE) {
                 val chat = chats.findByIdForUpdate(chatId) ?: notFound()
                 val message = messages.findMessage(chatId, userId, messageId) ?: notFound()
                 if (message.senderId != userId) {
-                    outcome = "forbidden"
                     throw ApiException(HttpStatus.FORBIDDEN, ApiErrorCode.FORBIDDEN, "Only the author can change a message")
                 }
                 if (message.forwardedFromUserId != null) {
-                    outcome = "forbidden"
                     throw ApiException(HttpStatus.FORBIDDEN, ApiErrorCode.FORBIDDEN, "Forwarded messages cannot be edited")
                 }
                 val version = requireVersion(expectedVersion)
                 if (message.deletedAt != null || version != message.messageVersion) {
-                    outcome = "conflict"
                     throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.INVALID_REQUEST, "Message version changed")
                 }
                 if (body.isBlank() || body.codePointCount(0, body.length) !in 1..4000) {
@@ -119,11 +116,18 @@ class MessageMutationService(
                 )
                 updated.toResponse()
             }
-            outcome = "success"
-            return response
-        } finally {
-            metrics.counter("messenger.message.mutations", "kind", "edit", "outcome", outcome).increment()
+        } catch (failure: Exception) {
+            metrics.editFailed(
+                when ((failure as? ApiException)?.status) {
+                    HttpStatus.FORBIDDEN -> MessageEditFailure.FORBIDDEN
+                    HttpStatus.CONFLICT -> MessageEditFailure.CONFLICT
+                    else -> MessageEditFailure.ERROR
+                },
+            )
+            throw failure
         }
+        metrics.edited()
+        return response
     }
 
     private fun requireVersion(value: String): Long =

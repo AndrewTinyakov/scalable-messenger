@@ -1,12 +1,13 @@
 package com.andrewtinyakov.messenger.message.service
 
 import com.andrewtinyakov.messenger.message.model.Message
+import com.andrewtinyakov.messenger.message.monitoring.HistoryDirection
+import com.andrewtinyakov.messenger.message.monitoring.MessageMetrics
 import com.andrewtinyakov.messenger.message.repository.MessageRepository
 import com.andrewtinyakov.messenger.message.visibility.VisibilityRepository
 import com.andrewtinyakov.messenger.message.visibility.VisibilitySnapshot
 import com.andrewtinyakov.messenger.shared.id.ChatId
 import com.andrewtinyakov.messenger.shared.id.UserId
-import io.micrometer.core.instrument.MeterRegistry
 import org.springframework.stereotype.Component
 
 data class VisiblePage(
@@ -21,7 +22,7 @@ data class VisiblePage(
 class VisibleHistory(
     private val messages: MessageRepository,
     private val visibility: VisibilityRepository,
-    private val metrics: MeterRegistry,
+    private val metrics: MessageMetrics,
 ) {
     fun page(chatId: ChatId, userId: UserId, state: VisibilitySnapshot, cursor: Long?, ascending: Boolean, limit: Int): VisiblePage =
         if (ascending) {
@@ -54,7 +55,7 @@ class VisibleHistory(
                 cursor = if (fetched.size > remaining) rows.last().sequence else end
             }
         }
-        if (cursor < high && rows.size < limit) metrics.counter("messenger.history.span.budget.exhausted", "direction", "after").increment()
+        if (cursor < high && rows.size < limit) metrics.spanBudgetExhausted(HistoryDirection.AFTER)
         return VisiblePage(rows, cursor, cursor < high, start, cursor)
     }
 
@@ -75,11 +76,7 @@ class VisibleHistory(
                 cursor = if (fetched.size > remaining) rows.last().sequence - 1 else end
             }
         }
-        if (cursor > state.floor &&
-            rows.size < limit
-        ) {
-            metrics.counter("messenger.history.span.budget.exhausted", "direction", "before").increment()
-        }
+        if (cursor > state.floor && rows.size < limit) metrics.spanBudgetExhausted(HistoryDirection.BEFORE)
         return VisiblePage(rows.asReversed(), cursor + 1, cursor > state.floor, cursor, high)
     }
 }

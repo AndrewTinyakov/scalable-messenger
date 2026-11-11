@@ -5,7 +5,7 @@ import com.andrewtinyakov.messenger.chat.deletion.DeletionScope
 import com.andrewtinyakov.messenger.chat.deletion.DeletionService
 import com.andrewtinyakov.messenger.chat.deletion.DeletionState
 import com.andrewtinyakov.messenger.chat.deletion.DeletionTarget
-import com.andrewtinyakov.messenger.chat.deletion.HistoryPurge
+import com.andrewtinyakov.messenger.chat.deletion.HistoryPurgeService
 import com.andrewtinyakov.messenger.chat.service.ChatService
 import com.andrewtinyakov.messenger.chat.web.payload.CreateGroupChatRequest
 import com.andrewtinyakov.messenger.message.change.MessageMutationService
@@ -37,7 +37,7 @@ class ScopedDeletionTests
         private val sends: MessageSendService,
         private val history: MessageHistoryService,
         private val deletions: DeletionService,
-        private val purge: HistoryPurge,
+        private val purge: HistoryPurgeService,
         private val chats: ChatService,
         private val edits: MessageMutationService,
         private val messages: MessageRepository,

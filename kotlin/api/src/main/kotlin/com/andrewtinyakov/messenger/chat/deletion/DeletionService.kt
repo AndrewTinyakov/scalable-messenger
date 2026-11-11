@@ -1,5 +1,6 @@
 package com.andrewtinyakov.messenger.chat.deletion
 
+import com.andrewtinyakov.messenger.chat.deletion.monitoring.DeletionMetrics
 import com.andrewtinyakov.messenger.chat.model.ChatKind
 import com.andrewtinyakov.messenger.chat.repository.ChatRepository
 import com.andrewtinyakov.messenger.generated.messaging.event.ChatDeletedEventV1
@@ -20,13 +21,10 @@ import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
 import com.andrewtinyakov.messenger.shared.web.ApiException
 import com.andrewtinyakov.messenger.shared.web.badRequest
 import com.andrewtinyakov.messenger.shared.web.notFound
-import io.micrometer.core.instrument.MeterRegistry
-import io.micrometer.core.instrument.Timer
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
 import tools.jackson.databind.ObjectMapper
-import java.time.Duration
 
 @Service
 class DeletionService(
@@ -35,30 +33,22 @@ class DeletionService(
     private val outbox: OutboxRepository,
     private val mapper: ObjectMapper,
     private val tx: TransactionTemplate,
-    private val metrics: MeterRegistry,
+    private val metrics: DeletionMetrics,
 ) {
+    private data class CommittedDeletion(
+        val response: DeletionResponse,
+        val newlyAccepted: Boolean,
+    )
+
     fun delete(
         chatId: ChatId,
         actorId: UserId,
         input: DeletionRequest,
         expectedVersions: Map<MessageId, Long> = emptyMap(),
-    ): DeletionResponse {
-        val sample = Timer.start(metrics)
-        var outcome = "failed"
-        try {
-            val result = executeDeletion(chatId, actorId, input, expectedVersions)
-            outcome = "success"
-            return result
-        } finally {
-            sample.stop(
-                Timer.builder(
-                    "messenger.deletion.acceptance",
-                ).tags("scope", input.scope.name.lowercase(), "target", input.target.name.lowercase(), "outcome", outcome)
-                    .publishPercentileHistogram().minimumExpectedValue(
-                        Duration.ofMillis(1),
-                    ).maximumExpectedValue(Duration.ofSeconds(30)).register(metrics),
-            )
-        }
+    ): DeletionResponse = metrics.timeAcceptance(input.scope, input.target) {
+        val committed = executeDeletion(chatId, actorId, input, expectedVersions)
+        if (committed.newlyAccepted) metrics.accepted(input.scope, input.target)
+        committed.response
     }
 
     private fun executeDeletion(
@@ -66,7 +56,7 @@ class DeletionService(
         actorId: UserId,
         input: DeletionRequest,
         expectedVersions: Map<MessageId, Long>,
-    ): DeletionResponse {
+    ): CommittedDeletion {
         requireId(input.requestId)
         val ids = input.messageIds.orEmpty()
         if (input.target == DeletionTarget.MESSAGES) {
@@ -88,7 +78,7 @@ class DeletionService(
                 ) {
                     throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.INVALID_REQUEST, "Deletion request ID changed")
                 }
-                return@observedExecute existing.response
+                return@observedExecute CommittedDeletion(existing.response, newlyAccepted = false)
             }
             val chat = repository.lockChat(chatId, actorId) ?: notFound()
             if (input.scope == DeletionScope.EVERYONE && input.target != DeletionTarget.MESSAGES && chat.kind == ChatKind.GROUP &&
@@ -100,7 +90,8 @@ class DeletionService(
                 if (input.scope != DeletionScope.EVERYONE || input.target != DeletionTarget.CHAT) notFound()
                 repository.repairClosedPurge(chatId, chat.high)
                 repository.saveOperation(chatId, actorId, input, fingerprint, chat, chat.revision, chat.visibility, 0)
-                return@observedExecute repository.operation(chatId, actorId, input.requestId)!!.response
+                val repaired = repository.operation(chatId, actorId, input.requestId)!!.response
+                return@observedExecute CommittedDeletion(repaired, newlyAccepted = false)
             }
             val targets = if (input.target == DeletionTarget.MESSAGES) {
                 repository.targets(chatId, actorId, ids.map(::MessageId), input.scope)
@@ -189,14 +180,7 @@ class DeletionService(
                     },
                 )
             }
-            metrics.counter(
-                "messenger.deletion.accepted",
-                "scope",
-                input.scope.name.lowercase(),
-                "target",
-                input.target.name.lowercase(),
-            ).increment()
-            repository.operation(chatId, actorId, input.requestId)!!.response
+            CommittedDeletion(repository.operation(chatId, actorId, input.requestId)!!.response, newlyAccepted = true)
         }
     }
 

@@ -4,14 +4,13 @@ import com.andrewtinyakov.messenger.generated.messaging.command.SendMessageComma
 import com.andrewtinyakov.messenger.infrastructure.messaging.CommandKind
 import com.andrewtinyakov.messenger.infrastructure.messaging.CommandTopology
 import com.andrewtinyakov.messenger.infrastructure.messaging.consumeMessage
+import com.andrewtinyakov.messenger.infrastructure.messaging.monitoring.CommandMetrics
 import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStage
 import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStageRecorder
 import com.andrewtinyakov.messenger.message.model.SendTarget
 import com.andrewtinyakov.messenger.message.service.MessageSendBatchService
 import com.andrewtinyakov.messenger.message.service.MessageSendService
 import com.rabbitmq.client.Channel
-import io.micrometer.core.instrument.MeterRegistry
-import io.micrometer.core.instrument.Timer
 import org.slf4j.LoggerFactory
 import org.springframework.amqp.core.Message
 import org.springframework.amqp.rabbit.annotation.RabbitListener
@@ -24,7 +23,7 @@ import java.time.OffsetDateTime
 class SendMessageListener(
     private val service: MessageSendService,
     private val batches: MessageSendBatchService,
-    private val metrics: MeterRegistry,
+    private val metrics: CommandMetrics,
     mapper: ObjectMapper,
 ) {
     private val reader = mapper.readerFor(SendMessageCommandV1::class.java)
@@ -40,20 +39,20 @@ class SendMessageListener(
         val accepted = mutableListOf<PendingSend>()
         for (fragments in deliveries.values) {
             val message = fragments.first()
-            val sample = Timer.start(metrics)
+            val started = metrics.commandProcessingStarted()
             val decoded = runCatching {
                 require(fragments.size == 1) { "Producer command batches are unsupported" }
                 require(message.body.size <= MAX_COMMAND_BYTES) { "Command exceeds wire byte limit" }
                 val command: SendMessageCommandV1 = reader.readValue(message.body)
                 SendStageRecorder.commit(received[message.messageProperties.deliveryTag], command.requestId)
                 val target = SendTarget.from(command)
-                metrics.timer("messenger.command.queue.delay").record(
-                    Duration.between(command.sentAt, OffsetDateTime.now()).coerceAtLeast(Duration.ZERO),
+                metrics.commandDequeued(
+                    Duration.between(command.sentAt, OffsetDateTime.now()),
                 )
-                PendingSend(message, command, target, sample)
+                PendingSend(message, command, target, started)
             }
             val pending = decoded.getOrElse { error ->
-                consumeMessage(message, channel, logger, metrics, CommandKind.SEND, sample) { throw error }
+                consumeMessage(message, channel, logger, metrics, CommandKind.SEND, started) { throw error }
                 null
             }
             if (pending != null) accepted.add(pending)
@@ -67,21 +66,18 @@ class SendMessageListener(
                 }
                 val results = processed.getOrNull()
                 if (results != null) {
-                    chunk.zip(results).forEach { (pending, result) ->
-                        consumeMessage(pending.message, channel, logger, metrics, CommandKind.SEND, pending.sample) {
-                            metrics.counter("messenger.command.result", "result", result.metricValue).increment()
-                        }
+                    chunk.zip(results).forEach { (pending, _) ->
+                        consumeMessage(pending.message, channel, logger, metrics, CommandKind.SEND, pending.started) {}
                     }
                 } else {
                     logger.warn("Send batch failed; resolving {} commands individually", chunk.size, processed.exceptionOrNull())
                     for (pending in chunk) {
-                        consumeMessage(pending.message, channel, logger, metrics, CommandKind.SEND, pending.sample) {
-                            val result = if (chunk.size == 1) {
+                        consumeMessage(pending.message, channel, logger, metrics, CommandKind.SEND, pending.started) {
+                            if (chunk.size == 1) {
                                 throw processed.exceptionOrNull()!!
                             } else {
                                 batches.process(listOf(pending.command)).single()
                             }
-                            metrics.counter("messenger.command.result", "result", result.metricValue).increment()
                         }
                     }
                 }
@@ -106,7 +102,7 @@ class SendMessageListener(
         val message: Message,
         val command: SendMessageCommandV1,
         val target: SendTarget,
-        val sample: Timer.Sample,
+        val started: Long,
     )
 
     companion object {

@@ -72,5 +72,8 @@ internal class MemoryOutbox(
     }
 
     @Synchronized
+    override fun backlog(): OutboxBacklog = OutboxBacklog(rows.size.toLong(), rows.values.mapNotNull { it.createdAt }.minOrNull())
+
+    @Synchronized
     fun remaining(): List<OutboxMessage> = rows.values.toList()
 }

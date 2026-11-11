@@ -118,6 +118,14 @@ class JooqOutboxRepository(
         check(updated == ids.size) { "Expected to complete ${ids.size} outbox events, completed $updated" }
     }
 
+    override fun backlog(): OutboxBacklog = DatabaseObservation.query(DatabaseOperation.OUTBOX_BACKLOG_SAMPLE) {
+        val row = db.select(DSL.count(), DSL.min(MESSENGER_OUTBOX_EVENTS.CREATED_AT))
+            .from(MESSENGER_OUTBOX_EVENTS)
+            .where(MESSENGER_OUTBOX_EVENTS.PUBLISHED_AT.isNull)
+            .fetchSingle()
+        OutboxBacklog(pending = row.value1().toLong(), oldestCreatedAt = row.value2())
+    }
+
     override fun enqueue(messages: Collection<OutboxMessage>) = DatabaseObservation.query(DatabaseOperation.OUTBOX_ENQUEUE) {
         if (messages.isEmpty()) return@query
         messages.chunked(500).forEach { chunk ->

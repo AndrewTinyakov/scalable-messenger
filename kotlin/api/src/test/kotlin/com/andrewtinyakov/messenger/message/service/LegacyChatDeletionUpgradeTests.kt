@@ -6,13 +6,15 @@ import com.andrewtinyakov.messenger.chat.deletion.DeletionScope
 import com.andrewtinyakov.messenger.chat.deletion.DeletionService
 import com.andrewtinyakov.messenger.chat.deletion.DeletionState
 import com.andrewtinyakov.messenger.chat.deletion.DeletionTarget
-import com.andrewtinyakov.messenger.chat.deletion.HistoryPurge
+import com.andrewtinyakov.messenger.chat.deletion.HistoryPurgeService
 import com.andrewtinyakov.messenger.chat.deletion.JooqDeletionRepository
 import com.andrewtinyakov.messenger.chat.deletion.JooqHistoryPurgeRepository
+import com.andrewtinyakov.messenger.chat.deletion.monitoring.DeletionMetrics
 import com.andrewtinyakov.messenger.chat.repository.JooqChatRepository
 import com.andrewtinyakov.messenger.chat.service.DirectChatService
 import com.andrewtinyakov.messenger.infrastructure.outbox.JooqOutboxRepository
 import com.andrewtinyakov.messenger.message.model.CommandResult
+import com.andrewtinyakov.messenger.message.monitoring.MessageSendMetrics
 import com.andrewtinyakov.messenger.message.repository.JooqMessageRepository
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
 import com.andrewtinyakov.messenger.shared.crypto.sha256
@@ -171,10 +173,11 @@ class LegacyChatDeletionUpgradeTests
                         tx,
                         mapper,
                         clock,
-                        metrics,
+                        MessageSendMetrics(metrics),
                     )
-                val deletions = DeletionService(JooqDeletionRepository(jooq, clock), chats, outbox, mapper, tx, metrics)
-                val worker = HistoryPurge(JooqHistoryPurgeRepository(jooq, clock), tx, metrics, clock)
+                val deletionMetrics = DeletionMetrics(metrics, clock)
+                val deletions = DeletionService(JooqDeletionRepository(jooq, clock), chats, outbox, mapper, tx, deletionMetrics)
+                val worker = HistoryPurgeService(JooqHistoryPurgeRepository(jooq, clock), tx, deletionMetrics)
                 assertNull(
                     messages.findMessage(ChatId(closedGroup), UserId(owner), MessageId(messageId)),
                 )

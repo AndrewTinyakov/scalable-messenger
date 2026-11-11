@@ -132,7 +132,7 @@ func TestGroupFeedFailureClosesCurrentPendingAndActiveGrants(t *testing.T) {
 				}
 				closeRecipient(rooms.joins[0].recipient)
 			}
-			if !connection.closed || connection.ctx.Err() == nil || len(rooms.active) != 0 {
+			if connection.state == lifecycleActive || connection.ctx.Err() == nil || len(rooms.active) != 0 {
 				t.Fatal("feed failure did not close the connection and release its rooms")
 			}
 		})
@@ -156,7 +156,7 @@ func TestStaleGroupFeedFailureDoesNotCloseReplacementGrant(t *testing.T) {
 		t.Fatal("group recipient cannot close after a feed continuity failure")
 	}
 	closer.Close()
-	if connection.closed || connection.ctx.Err() != nil || connection.subscriptions.room(items[0].ChatID) == "" {
+	if connection.state == lifecycleClosed || connection.ctx.Err() != nil || connection.subscriptions.room(items[0].ChatID) == "" {
 		t.Fatal("stale feed failure closed a replacement subscription")
 	}
 }

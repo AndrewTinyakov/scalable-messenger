@@ -40,7 +40,7 @@ export function useChatDirectory({
   const appliedSummaryGenerationsRef = useRef(new Map<string, number>())
   const refreshRequestRef = useRef<{
     promise: Promise<Chat[]>
-    invalidated: boolean
+    phase: 'refreshing' | 'invalidated'
     full: boolean
   } | null>(null)
   const refreshSuccessRef = useRef(0)
@@ -166,18 +166,23 @@ export function useChatDirectory({
     (full = false, invalidated = false): Promise<Chat[]> => {
       const current = refreshRequestRef.current
       if (current) {
-        if (invalidated || (full && !current.full)) current.invalidated = true
+        if (invalidated || (full && !current.full)) current.phase = 'invalidated'
         current.full ||= full
         return current.promise
       }
-      const request = { promise: Promise.resolve(chatsRef.current), invalidated: false, full }
+      const request: NonNullable<typeof refreshRequestRef.current> = {
+        promise: Promise.resolve(chatsRef.current),
+        phase: 'refreshing',
+        full,
+      }
+      const needsRefresh = () => request.phase === 'invalidated'
       refreshRequestRef.current = request
       request.promise = (async () => {
         let result: Chat[]
         do {
-          request.invalidated = false
+          request.phase = 'refreshing'
           result = await fetchChats(request.full)
-        } while (refreshRequestRef.current === request && request.invalidated)
+        } while (refreshRequestRef.current === request && needsRefresh())
         return result
       })().finally(() => {
         if (refreshRequestRef.current === request) refreshRequestRef.current = null

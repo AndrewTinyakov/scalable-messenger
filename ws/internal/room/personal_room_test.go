@@ -46,7 +46,7 @@ func TestPersonalRoomReplayOverflowClosesSocket(t *testing.T) {
 	rooms, sink := newPersonalRoom(t)
 	rooms.bufferLimit = 1
 	member := rooms.rooms["user:member"].members[sink]
-	member.catching.Store(true)
+	member.beginCatchup()
 	for _, id := range []string{"2-0", "3-0"} {
 		rooms.dispatch("user:member", protocol.Event{Type: protocol.EventSessionRevoked, EventID: id, Epoch: "epoch", StreamID: id})
 	}

@@ -17,7 +17,7 @@ type leaseCleanup struct {
 	server *Server
 	mu     sync.Mutex
 	jobs   chan leaseRelease
-	closed bool
+	state  lifecycleState
 	wg     sync.WaitGroup
 }
 
@@ -68,7 +68,7 @@ func (s *Server) startRuntime() {
 func (cleanup *leaseCleanup) enqueue(userID, leaseID string) {
 	cleanup.mu.Lock()
 	defer cleanup.mu.Unlock()
-	if cleanup.closed || len(userID)+len(leaseID) > 512 {
+	if cleanup.state == lifecycleClosed || len(userID)+len(leaseID) > 512 {
 		cleanup.server.metrics.LeaseCleanupDropped.Inc()
 		return
 	}
@@ -100,8 +100,8 @@ func (cleanup *leaseCleanup) run() {
 
 func (cleanup *leaseCleanup) close() {
 	cleanup.mu.Lock()
-	if !cleanup.closed {
-		cleanup.closed = true
+	if cleanup.state == lifecycleActive {
+		cleanup.state = lifecycleClosed
 		close(cleanup.jobs)
 	}
 	cleanup.mu.Unlock()

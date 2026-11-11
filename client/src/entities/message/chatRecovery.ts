@@ -25,12 +25,19 @@ const browserStorage: Pick<Storage, 'getItem' | 'setItem'> = {
   setItem: (key, value) => localStorage.setItem(key, value),
 }
 
+type CatchUpRetry = { chatId: string; attempt: number } & (
+  { phase: 'scheduled'; timer: ReturnType<typeof setTimeout> } | { phase: 'retrying' }
+)
+
 export class ChatRecovery {
   private readonly state: RecoveryState
   private readonly batch: RecoveryBatch
   private readonly historyRequests = new HistoryRequests()
   private readonly locations: ReadingLocations
-  private synchronizing = new Map<string, { promise: Promise<void>; again: boolean }>()
+  private synchronizing = new Map<
+    string,
+    { promise: Promise<void>; phase: 'refreshing' | 'invalidated' }
+  >()
   private synchronizationQueue = new Map<string, { promise: Promise<void>; resolve(): void }>()
   private runtime?: RecoveryRuntime
   private catchingUp = new Map<
@@ -68,8 +75,7 @@ export class ChatRecovery {
     string,
     { timer: ReturnType<typeof setTimeout>; release(): void }
   >()
-  private retry: { chatId: string; attempt: number; timer?: ReturnType<typeof setTimeout> } | null =
-    null
+  private retry: CatchUpRetry | null = null
   private catchUpError: { chatId: string; message: string } | null = null
   private subscribedChatId: string | null = null
   private socketGeneration = 0
@@ -201,7 +207,7 @@ export class ChatRecovery {
   }
 
   private cancelRetry(): void {
-    if (this.retry?.timer !== undefined) clearTimeout(this.retry.timer)
+    if (this.retry?.phase === 'scheduled') clearTimeout(this.retry.timer)
     this.retry = null
   }
 
@@ -644,17 +650,17 @@ export class ChatRecovery {
         context.selected &&
         context.connected &&
         !context.removed &&
-        this.retry?.timer === undefined
+        this.retry?.phase !== 'scheduled'
       ) {
         const attempt = this.retry?.chatId === chatId ? this.retry.attempt + 1 : 1
         const timer = setTimeout(() => {
           if (this.retry?.chatId !== chatId) return
-          this.retry.timer = undefined
+          this.retry = { phase: 'retrying', chatId, attempt }
           const current = this.runtime?.context(chatId)
           if (current?.selected && current.connected && !current.removed)
             void this.catchUp(chatId, false, requiredSequence())
         }, reconnectDelay(attempt))
-        this.retry = { chatId, attempt, timer }
+        this.retry = { phase: 'scheduled', chatId, attempt, timer }
       }
     }
   }
@@ -884,7 +890,7 @@ export class ChatRecovery {
       return Promise.resolve()
     const running = this.synchronizing.get(chatId)
     if (running) {
-      running.again = true
+      running.phase = 'invalidated'
       return running.promise
     }
     const queued = this.synchronizationQueue.get(chatId)
@@ -902,7 +908,11 @@ export class ChatRecovery {
       this.synchronizationQueue.set(chatId, { promise, resolve })
       return promise
     }
-    const request = { promise: Promise.resolve(), again: false }
+    const request: {
+      promise: Promise<void>
+      phase: 'refreshing' | 'invalidated'
+    } = { promise: Promise.resolve(), phase: 'refreshing' }
+    const invalidated = () => request.phase === 'invalidated'
     const generation = this.lifecycleGeneration
     const valid = () =>
       !this.disposed &&
@@ -910,7 +920,7 @@ export class ChatRecovery {
       !this.runtime!.context(chatId).removed
     request.promise = (async () => {
       do {
-        request.again = false
+        request.phase = 'refreshing'
         const visibility = await this.runtime!.history.visibility!(chatId)
         if (!valid() || !this.historyRequests.accepts(chatId, visibility)) return
         const previous = this.state.verifiedSnapshot(chatId)
@@ -950,7 +960,7 @@ export class ChatRecovery {
           visibilityRevision: visibility.visibilityRevision,
         })
         this.runtime!.changed()
-      } while (request.again && valid())
+      } while (invalidated() && valid())
     })()
       .catch((cause) => {
         if (valid() && !isWaitingFailure(cause))

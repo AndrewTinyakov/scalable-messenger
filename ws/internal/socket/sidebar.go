@@ -36,7 +36,7 @@ type sidebarCoordinator struct {
 	watches    map[*Connection]*sidebarWatch
 	feeds      map[string]*sidebarFeed
 	references int
-	closed     bool
+	state      lifecycleState
 	wg         sync.WaitGroup
 }
 
@@ -118,7 +118,7 @@ func (p *sidebarCoordinator) authorize(ctx context.Context, c *Connection, ids [
 func (p *sidebarCoordinator) install(c *Connection, expected, watch *sidebarWatch) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.closed || c.ctx.Err() != nil {
+	if p.state == lifecycleClosed || c.ctx.Err() != nil {
 		return context.Canceled
 	}
 	old := p.watches[c]
@@ -231,7 +231,7 @@ func (p *sidebarCoordinator) run() {
 	defer ticker.Stop()
 	defer func() {
 		p.mu.Lock()
-		p.closed = true
+		p.state = lifecycleClosed
 		for c := range p.watches {
 			p.removeLocked(c)
 		}

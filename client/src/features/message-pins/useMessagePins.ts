@@ -18,6 +18,9 @@ interface PinsState {
   next: string | null
 }
 
+type PinRefresh =
+  { phase: 'idle' } | { phase: 'refreshing' | 'invalidated'; promise: Promise<void> }
+
 const REFRESH_DELAY_MS = 250
 
 export function useMessagePins(
@@ -33,22 +36,26 @@ export function useMessagePins(
   const chatRef = useRef(chatId)
   chatRef.current = chatId
   const timer = useRef<ReturnType<typeof setTimeout>>()
-  const running = useRef<Promise<void> | null>(null)
-  const again = useRef(false)
+  const refreshState = useRef<PinRefresh>({ phase: 'idle' })
   const wanted = useRef(0)
 
   const refresh = useCallback(async () => {
     const id = chatRef.current
     if (!id || id.startsWith('draft:')) return
-    if (running.current) {
-      again.current = true
-      return running.current
+    if (refreshState.current.phase !== 'idle') {
+      refreshState.current.phase = 'invalidated'
+      return refreshState.current.promise
     }
     const current = generation.current
-    running.current = (async () => {
+    const operation: Exclude<PinRefresh, { phase: 'idle' }> = {
+      phase: 'refreshing',
+      promise: Promise.resolve(),
+    }
+    refreshState.current = operation
+    operation.promise = (async () => {
       try {
         do {
-          again.current = false
+          operation.phase = 'refreshing'
           let page = await sessionApi.pinnedMessages(id)
           if (current !== generation.current) return
           const ids = page.pinnedMessageIds.join()
@@ -65,7 +72,7 @@ export function useMessagePins(
             )
           }
           if (!consistent) {
-            again.current = true
+            operation.phase = 'invalidated'
             continue
           }
           setState({
@@ -76,13 +83,13 @@ export function useMessagePins(
             next: page.nextBeforeSequence,
           })
           if (pins.length >= wanted.current || !page.nextBeforeSequence) setLoadingOlder(false)
-        } while (again.current && current === generation.current)
+        } while (operation.phase === 'invalidated' && current === generation.current)
       } catch {
       } finally {
-        running.current = null
+        if (refreshState.current === operation) refreshState.current = { phase: 'idle' }
       }
     })()
-    return running.current
+    return operation.promise
   }, [sessionApi])
 
   const schedule = useCallback(() => {
@@ -92,7 +99,7 @@ export function useMessagePins(
 
   useEffect(() => {
     generation.current += 1
-    running.current = null
+    refreshState.current = { phase: 'idle' }
     wanted.current = 0
     setState(null)
     setLoadingOlder(false)

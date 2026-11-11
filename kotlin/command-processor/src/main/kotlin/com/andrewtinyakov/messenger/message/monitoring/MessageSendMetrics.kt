@@ -72,21 +72,32 @@ class MessageSendMetrics(
         private val requests: Int,
     ) {
         private val started = System.nanoTime()
-        private var locked: Long? = null
-        private var callbackFinished: Long? = null
-        private var observed = false
+        private var state: TransactionWindowState = TransactionWindowState.Executing()
 
         fun chatLocked() {
-            locked = System.nanoTime()
+            if (state is TransactionWindowState.Executing) {
+                state = TransactionWindowState.Executing(System.nanoTime())
+            }
         }
 
         fun callbackFinished() {
-            callbackFinished = System.nanoTime()
+            state = when (val current = state) {
+                is TransactionWindowState.Executing -> TransactionWindowState.CallbackFinished(current.locked, System.nanoTime())
+                is TransactionWindowState.CallbackFinished -> current.copy(finished = System.nanoTime())
+                TransactionWindowState.Observed -> return
+            }
         }
 
         fun completed() {
-            if (observed) return
-            observed = true
+            val current = state
+            if (current == TransactionWindowState.Observed) return
+            state = TransactionWindowState.Observed
+            val locked = when (current) {
+                is TransactionWindowState.Executing -> current.locked
+                is TransactionWindowState.CallbackFinished -> current.locked
+                TransactionWindowState.Observed -> return
+            }
+            val callbackFinished = (current as? TransactionWindowState.CallbackFinished)?.finished
             val finished = System.nanoTime()
             repeat(requests) {
                 transaction.record(Duration.ofNanos(finished - started))
@@ -94,6 +105,19 @@ class MessageSendMetrics(
                 callbackFinished?.let { completion.record(Duration.ofNanos(finished - it)) }
             }
         }
+    }
+
+    private sealed interface TransactionWindowState {
+        data class Executing(
+            val locked: Long? = null,
+        ) : TransactionWindowState
+
+        data class CallbackFinished(
+            val locked: Long?,
+            val finished: Long,
+        ) : TransactionWindowState
+
+        data object Observed : TransactionWindowState
     }
 
     private fun histogram(registry: MeterRegistry, name: String, description: String): Timer =

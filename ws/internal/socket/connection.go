@@ -35,15 +35,14 @@ type Connection struct {
 	mu                sync.Mutex
 	queuedBytes       int
 	queuedItems       int
-	closed            bool
+	state             lifecycleState
 	subscriptions     *chatSubscriptions
 	acks              *ackTracker
 	once              sync.Once
 	expiry            *time.Timer
 	commands          []queuedCommand
 	commandBytes      int
-	commandRunning    bool
-	commandScheduled  bool
+	commandState      commandState
 	nextLeaseRenewal  time.Time
 	sidebarSerial     atomic.Uint64
 	presenceSerial    atomic.Uint64
@@ -154,14 +153,14 @@ func (c *Connection) enqueueFrame(frame *protocol.EventFrame, grants frameGrants
 	if roomname.IsGroup(event.Room) && !terminalChat {
 		grant = c.subscriptions.groupGrantLocked(event.ChatID)
 		if grant == nil || event.Room != roomname.Group(event.ChatID) {
-			if pending := c.subscriptions.groups[event.ChatID]; pending != nil && !pending.authorized && event.Type != protocol.EventSubscribed {
-				pending.missed = true
+			if pending := c.subscriptions.groups[event.ChatID]; pending != nil && !pending.authorized() && event.Type != protocol.EventSubscribed {
+				pending.miss()
 			}
 			c.mu.Unlock()
 			return true
 		}
 	}
-	if c.closed {
+	if c.state == lifecycleClosed {
 		c.mu.Unlock()
 		return false
 	}
@@ -213,7 +212,7 @@ func (c *Connection) Close() {
 		if !c.opened.IsZero() {
 			c.server.metrics.ConnectionLifetime.Observe(time.Since(c.opened).Seconds())
 		}
-		c.closed = true
+		c.state = lifecycleClosed
 		c.clearCommandsLocked()
 		grants := c.subscriptions.closeLocked()
 		c.server.metrics.QueuedBytes.Sub(float64(c.queuedBytes))
@@ -243,14 +242,9 @@ func (c *Connection) writeLoop() {
 	defer c.Close()
 	pingTicker := time.NewTicker(jitteredFirstTick(c.server.config.PingInterval))
 	defer pingTicker.Stop()
-	pingSteady := false
-	var ackTimer *time.Timer
-	defer func() {
-		if ackTimer != nil {
-			ackTimer.Stop()
-		}
-	}()
-	var armedDeadline time.Time
+	pingState := pingJittered
+	var ackTimer deadlineTimer
+	defer ackTimer.stop()
 	for {
 		deadline := c.acks.nextDeadline()
 		if !deadline.IsZero() && !time.Now().Before(deadline) {
@@ -258,36 +252,20 @@ func (c *Connection) writeLoop() {
 			c.closeForRecovery()
 			return
 		}
-		var ackTick <-chan time.Time
-		if deadline.IsZero() {
-			if ackTimer != nil {
-				ackTimer.Stop()
-			}
-			armedDeadline = time.Time{}
-		} else {
-			if ackTimer == nil {
-				ackTimer = time.NewTimer(time.Until(deadline))
-				armedDeadline = deadline
-			}
-			if !deadline.Equal(armedDeadline) {
-				ackTimer.Reset(time.Until(deadline))
-				armedDeadline = deadline
-			}
-			ackTick = ackTimer.C
-		}
+		ackTick := ackTimer.arm(deadline)
 		select {
 		case <-c.ctx.Done():
 			c.noteClose(1001, "context_done")
 			return
 		case next := <-c.out:
 			c.mu.Lock()
-			if !c.closed {
+			if c.state == lifecycleActive {
 				c.queuedBytes -= next.frame.Size()
 				c.queuedItems--
 				c.server.metrics.QueuedItems.Dec()
 				c.server.metrics.QueuedBytes.Sub(float64(next.frame.Size()))
 			}
-			allowed := !c.closed && (next.groupGrant == nil || next.groupGrant == c.subscriptions.groupGrantLocked(next.frame.Event().ChatID))
+			allowed := c.state == lifecycleActive && (next.groupGrant == nil || next.groupGrant == c.subscriptions.groupGrantLocked(next.frame.Event().ChatID))
 			c.mu.Unlock()
 			if next.presenceWatch != nil && (c.server.presence == nil || !c.server.presence.current(c, next.presenceWatch)) {
 				allowed = false
@@ -313,12 +291,12 @@ func (c *Connection) writeLoop() {
 			c.server.metrics.Messages.WithLabelValues("outbound").Inc()
 			c.server.metrics.MessageBytes.WithLabelValues("outbound").Add(float64(next.frame.Size()))
 		case <-ackTick:
-			armedDeadline = time.Time{}
+			ackTimer.stop()
 		case <-c.acks.changed:
 		case <-pingTicker.C:
-			if !pingSteady {
+			if pingState == pingJittered {
 				pingTicker.Reset(c.server.config.PingInterval)
-				pingSteady = true
+				pingState = pingSteady
 			}
 			ping := time.Now().UnixNano()
 			c.lastPing.Store(ping)

@@ -2,11 +2,12 @@ import type { SnapshotMetadata } from './historySnapshot'
 import { MAX_CATCH_UP_MESSAGES } from './historyWindow'
 import { mergeMessages, type Message } from './model'
 
+type RequestState =
+  { phase: 'pending'; messages: Message[] } | { phase: 'overflowed' | 'cancelled' | 'completed' }
+
 type Request = {
   chatId: string
-  messages: Message[]
-  cancelled: boolean
-  overflow: boolean
+  state: RequestState
   fence: { mutationRevision: string; visibilityRevision: string }
 }
 
@@ -34,10 +35,11 @@ export class HistoryRequests {
     for (const request of this.pending)
       if (request.chatId === chatId) {
         if (
-          BigInt(observed.mutationRevision) > BigInt(request.fence.mutationRevision) ||
-          BigInt(observed.visibilityRevision) > BigInt(request.fence.visibilityRevision)
+          request.state.phase === 'pending' &&
+          (BigInt(observed.mutationRevision) > BigInt(request.fence.mutationRevision) ||
+            BigInt(observed.visibilityRevision) > BigInt(request.fence.visibilityRevision))
         )
-          request.messages = request.messages.map((message) =>
+          request.state.messages = request.state.messages.map((message) =>
             message.replyToMessageId
               ? {
                   ...message,
@@ -99,9 +101,7 @@ export class HistoryRequests {
     if (this.pending.size >= 16) return undefined
     const request: Request = {
       chatId,
-      messages: [],
-      cancelled: false,
-      overflow: false,
+      state: { phase: 'pending', messages: [] },
       fence: {
         ...(this.revisions.get(chatId) ?? { mutationRevision: '0', visibilityRevision: '0' }),
       },
@@ -110,7 +110,7 @@ export class HistoryRequests {
     try {
       const page = await fetch()
       if (
-        request.cancelled ||
+        request.state.phase === 'cancelled' ||
         !this.accepts(chatId, page) ||
         (page.mutationRevision !== undefined &&
           BigInt(page.mutationRevision) < BigInt(request.fence.mutationRevision)) ||
@@ -118,26 +118,29 @@ export class HistoryRequests {
           BigInt(page.visibilityRevision) < BigInt(request.fence.visibilityRevision))
       )
         return undefined
-      if (request.overflow) throw new Error('History changed too much while loading. Try again.')
+      if (request.state.phase === 'overflowed')
+        throw new Error('History changed too much while loading. Try again.')
+      if (request.state.phase !== 'pending') return undefined
       this.observe(chatId, page)
       return install(
-        page.messages ? { ...page, messages: this.merge(page.messages, request.messages) } : page,
+        page.messages
+          ? { ...page, messages: this.merge(page.messages, request.state.messages) }
+          : page,
       )
     } finally {
       this.pending.delete(request)
       this.releaseCapacity()
-      request.messages = []
+      request.state = { phase: 'completed' }
     }
   }
 
   patch(chatId: string, messages: Message[]): void {
     for (const request of this.pending) {
-      if (request.chatId !== chatId || request.overflow) continue
-      const merged = mergeMessages(request.messages, messages)
+      if (request.chatId !== chatId || request.state.phase !== 'pending') continue
+      const merged = mergeMessages(request.state.messages, messages)
       if (merged.length > MAX_CATCH_UP_MESSAGES) {
-        request.overflow = true
-        request.messages = []
-      } else request.messages = merged
+        request.state = { phase: 'overflowed' }
+      } else request.state.messages = merged
     }
   }
 
@@ -145,8 +148,9 @@ export class HistoryRequests {
     let protectedMessage = message
     for (const request of this.pending) {
       if (request.chatId !== message.chatId) continue
-      if (request.overflow) return undefined
-      protectedMessage = this.merge([protectedMessage], request.messages)[0]
+      if (request.state.phase === 'overflowed') return undefined
+      if (request.state.phase !== 'pending') continue
+      protectedMessage = this.merge([protectedMessage], request.state.messages)[0]
     }
     return protectedMessage
   }
@@ -173,8 +177,7 @@ export class HistoryRequests {
   cancel(chatId?: string): void {
     for (const request of this.pending) {
       if (chatId !== undefined && request.chatId !== chatId) continue
-      request.cancelled = true
-      request.messages = []
+      request.state = { phase: 'cancelled' }
       this.pending.delete(request)
     }
     this.releaseCapacity()

@@ -6,28 +6,40 @@ import { MessengerPage } from '../pages/messenger/MessengerPage'
 import { api, ApiError } from '../shared/api/http'
 import { isNetworkOnline, subscribeNetwork } from '../shared/lib/network'
 
+type SessionLifecycle =
+  | { phase: 'restoring'; session: Session | null }
+  | { phase: 'anonymous' }
+  | { phase: 'authenticated'; session: Session }
+  | { phase: 'failed'; session: Session | null; message: string }
+
+function sessionOf(state: SessionLifecycle): Session | null {
+  return 'session' in state ? state.session : null
+}
+
+function clearRestoreError(state: SessionLifecycle): SessionLifecycle {
+  if (state.phase !== 'failed') return state
+  return state.session ? { phase: 'authenticated', session: state.session } : { phase: 'anonymous' }
+}
+
 export function App() {
   const online = useSyncExternalStore(subscribeNetwork, isNetworkOnline)
-  const [session, setSession] = useState<Session | null>(null)
-  const [restoring, setRestoring] = useState(true)
-  const [restoreError, setRestoreError] = useState<string | null>(null)
+  const [state, setState] = useState<SessionLifecycle>({ phase: 'restoring', session: null })
+  const session = sessionOf(state)
+  const restoring = state.phase === 'restoring'
+  const restoreError = state.phase === 'failed' ? state.message : null
   const [signOutError, setSignOutError] = useState<string | null>(null)
   const revision = useRef(0)
   const restoreRequest = useRef<{ revision: number; promise: Promise<void> } | null>(null)
 
   const clearSession = useCallback(() => {
     revision.current += 1
-    setSession(null)
-    setRestoring(false)
-    setRestoreError(null)
+    setState({ phase: 'anonymous' })
     setSignOutError(null)
   }, [])
 
   function acceptSession(next: Session) {
     revision.current += 1
-    setSession(next)
-    setRestoring(false)
-    setRestoreError(null)
+    setState({ phase: 'authenticated', session: next })
     setSignOutError(null)
   }
 
@@ -36,30 +48,46 @@ export function App() {
     if (!options.forceFresh && restoreRequest.current?.revision === revision.current)
       return restoreRequest.current.promise
     const currentRevision = ++revision.current
-    setRestoreError(null)
+    setState(clearRestoreError)
     const request = { revision: currentRevision, promise: Promise.resolve() }
     restoreRequest.current = request
     request.promise = (async () => {
       try {
         const current = await api.session()
         if (revision.current !== currentRevision) return
-        setSession((previous) =>
-          previous?.user.id === current.userId &&
-          previous.deviceId === current.deviceId &&
-          previous.user.username === current.username
-            ? previous
-            : {
-                user: { id: current.userId, username: current.username },
-                deviceId: current.deviceId,
-              },
-        )
+        setState((previous) => {
+          const retained = sessionOf(previous)
+          return {
+            phase: 'authenticated',
+            session:
+              retained?.user.id === current.userId &&
+              retained.deviceId === current.deviceId &&
+              retained.user.username === current.username
+                ? retained
+                : {
+                    user: { id: current.userId, username: current.username },
+                    deviceId: current.deviceId,
+                  },
+          }
+        })
       } catch (error) {
         if (revision.current !== currentRevision) return
-        if (error instanceof ApiError && error.status === 401) setSession(null)
+        if (error instanceof ApiError && error.status === 401) setState({ phase: 'anonymous' })
         else if (isNetworkOnline())
-          setRestoreError('Could not check your session. Please try again.')
+          setState((previous) => ({
+            phase: 'failed',
+            session: sessionOf(previous),
+            message: 'Could not check your session. Please try again.',
+          }))
       } finally {
-        if (revision.current === currentRevision) setRestoring(false)
+        if (revision.current === currentRevision)
+          setState((previous) =>
+            previous.phase === 'restoring'
+              ? previous.session
+                ? { phase: 'authenticated', session: previous.session }
+                : { phase: 'anonymous' }
+              : previous,
+          )
       }
     })().finally(() => {
       if (restoreRequest.current === request) restoreRequest.current = null
@@ -69,8 +97,7 @@ export function App() {
 
   const restoreRevokedSession = useCallback(() => {
     revision.current += 1
-    setSession(null)
-    setRestoring(true)
+    setState({ phase: 'restoring', session: null })
     void restoreSession()
   }, [restoreSession])
 
@@ -101,11 +128,11 @@ export function App() {
   }, [restoreSession])
 
   useEffect(() => {
-    setRestoring(true)
+    setState((previous) => ({ phase: 'restoring', session: sessionOf(previous) }))
     if (online) void restoreSession()
     else {
       revision.current += 1
-      setRestoreError(null)
+      setState(clearRestoreError)
       setSignOutError(null)
     }
   }, [online, restoreSession])
@@ -139,7 +166,7 @@ export function App() {
           <button
             className="button button-primary"
             onClick={() => {
-              setRestoring(true)
+              setState((previous) => ({ phase: 'restoring', session: sessionOf(previous) }))
               void restoreSession()
             }}
           >
@@ -165,7 +192,7 @@ export function App() {
           <button
             onClick={() => {
               setSignOutError(null)
-              setRestoreError(null)
+              setState(clearRestoreError)
             }}
             aria-label="Dismiss"
           >

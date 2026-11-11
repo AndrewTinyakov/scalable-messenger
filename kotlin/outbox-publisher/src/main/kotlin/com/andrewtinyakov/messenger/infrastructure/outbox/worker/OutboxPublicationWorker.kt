@@ -22,23 +22,44 @@ class OutboxPublicationWorker(
     private val logger = LoggerFactory.getLogger(javaClass)
 
     @Volatile
-    private var running = false
+    private var state: WorkerState = WorkerState.Stopped
 
-    private var worker: Thread? = null
+    private val running: Boolean
+        get() = (state as? WorkerState.Running)?.thread === Thread.currentThread()
 
     @EventListener(ApplicationReadyEvent::class)
+    @Synchronized
     fun start() {
-        running = true
-        worker = Thread.ofPlatform().name("outbox-publisher").start { run() }
+        if (state != WorkerState.Stopped) return
+        val thread = Thread.ofPlatform().name("outbox-publisher").unstarted {
+            try {
+                run()
+            } finally {
+                synchronized(this) { state = WorkerState.Stopped }
+            }
+        }
+        state = WorkerState.Running(thread)
+        try {
+            thread.start()
+        } catch (error: Throwable) {
+            state = WorkerState.Stopped
+            throw error
+        }
     }
 
     @PreDestroy
     fun stop() {
-        running = false
-        worker?.join(properties.workerJoinTimeout)
-        if (worker?.isAlive == true) {
-            worker?.interrupt()
-            worker?.join(properties.workerJoinTimeout)
+        val thread = synchronized(this) {
+            when (val current = state) {
+                WorkerState.Stopped -> return
+                is WorkerState.Running -> current.thread.also { state = WorkerState.Stopping(it) }
+                is WorkerState.Stopping -> current.thread
+            }
+        }
+        thread.join(properties.workerJoinTimeout)
+        if (thread.isAlive) {
+            thread.interrupt()
+            thread.join(properties.workerJoinTimeout)
         }
     }
 
@@ -71,6 +92,18 @@ class OutboxPublicationWorker(
                 }
             }
         }
+    }
+
+    private sealed interface WorkerState {
+        data object Stopped : WorkerState
+
+        data class Running(
+            val thread: Thread,
+        ) : WorkerState
+
+        data class Stopping(
+            val thread: Thread,
+        ) : WorkerState
     }
 
     private fun listen(connection: Connection) {

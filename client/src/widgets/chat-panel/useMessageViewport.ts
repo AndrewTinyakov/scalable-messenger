@@ -25,6 +25,11 @@ interface Options {
   locationRevision?: number
   onLocationChange?: (chatId: string, location: ReadingLocation) => void
 }
+type ViewRestoration =
+  | { phase: 'settled' }
+  | { phase: 'pending'; location: ReadingLocation }
+  | { phase: 'anchored'; id: string; offset: number }
+
 const BOTTOM_THRESHOLD = 48
 
 function distanceToBottom(scroller: HTMLElement): number {
@@ -55,7 +60,7 @@ export function useMessageViewport({
   const scrollRef = useRef<HTMLDivElement>(null)
   const [highlight, setHighlight] = useState<string | null>(null)
   const anchorRef = useRef<{ id: string; top: number } | null>(null)
-  const restoredAnchor = useRef<{ id: string; offset: number } | null>(null)
+  const restoration = useRef<ViewRestoration>({ phase: 'settled' })
   const atBottomRef = useRef(true)
   const scrollInputUntil = useRef(0)
   const lastScrollTop = useRef(0)
@@ -64,7 +69,6 @@ export function useMessageViewport({
     jumpRevision: number
     locationRevision: number
   }>({ chatId: undefined, jumpRevision, locationRevision })
-  const pendingRestore = useRef<ReadingLocation | null>(null)
   const autoPageRef = useRef<
     Partial<Record<'older' | 'newer', { anchor: string; at: number; attempts: number }>>
   >({})
@@ -103,7 +107,7 @@ export function useMessageViewport({
   function captureLocation() {
     const scroller = scrollRef.current
     const current = options.current
-    if (!scroller || !current.chatId || pendingRestore.current) return
+    if (!scroller || !current.chatId || restoration.current.phase === 'pending') return
     lastScrollTop.current = scroller.scrollTop
     const bounds = scroller.getBoundingClientRect()
     const target = [...scroller.querySelectorAll<HTMLElement>('[data-message-id]')].find((row) => {
@@ -142,7 +146,7 @@ export function useMessageViewport({
     const target = direction === 'older' ? visible[0] : visible.at(-1)
     if (target?.dataset.messageId)
       anchorRef.current = { id: target.dataset.messageId, top: target.getBoundingClientRect().top }
-    restoredAnchor.current = null
+    restoration.current = { phase: 'settled' }
   }
 
   useLayoutEffect(() => {
@@ -156,11 +160,14 @@ export function useMessageViewport({
     if (switched || jumped || locationChanged) {
       scrollInputUntil.current = 0
       anchorRef.current = null
-      restoredAnchor.current = null
+      restoration.current = { phase: 'settled' }
       autoPageRef.current = {}
       failedUntil.current = {}
-      pendingRestore.current = readingLocation && !jumped ? readingLocation : null
-      if (!pendingRestore.current) {
+      restoration.current =
+        readingLocation && !jumped
+          ? { phase: 'pending', location: readingLocation }
+          : { phase: 'settled' }
+      if (restoration.current.phase !== 'pending') {
         pinToBottom(scroller)
         atBottomRef.current = true
         onViewPositionChange(!hasNewer)
@@ -168,11 +175,12 @@ export function useMessageViewport({
         return
       }
     }
-    const location = pendingRestore.current
+    const location = restoration.current.phase === 'pending' ? restoration.current.location : null
     if (location) {
       if (location.atLatest) {
         pinToBottom(scroller)
         atBottomRef.current = true
+        restoration.current = { phase: 'settled' }
       } else {
         const rows = [...scroller.querySelectorAll<HTMLElement>('[data-message-id]')]
         const target = rows.find((row) => row.dataset.messageId === location.messageId)
@@ -181,10 +189,13 @@ export function useMessageViewport({
           target.getBoundingClientRect().top -
           scroller.getBoundingClientRect().top -
           location.offsetPx
-        restoredAnchor.current = { id: target.dataset.messageId!, offset: location.offsetPx }
+        restoration.current = {
+          phase: 'anchored',
+          id: target.dataset.messageId!,
+          offset: location.offsetPx,
+        }
         atBottomRef.current = false
       }
-      pendingRestore.current = null
       onViewPositionChange(atBottomRef.current && !hasNewer)
       captureLocation()
       return
@@ -208,8 +219,7 @@ export function useMessageViewport({
     if (!scroller) return
     const intentional = () => {
       scrollInputUntil.current = Date.now() + 1500
-      restoredAnchor.current = null
-      pendingRestore.current = null
+      restoration.current = { phase: 'settled' }
       scroller.dispatchEvent(new Event('reading-settled'))
     }
     const dragging = (event: PointerEvent) => {
@@ -222,11 +232,15 @@ export function useMessageViewport({
     const resize =
       typeof ResizeObserver !== 'undefined'
         ? new ResizeObserver(() => {
-            if (atBottomRef.current && !options.current.hasNewer && !pendingRestore.current) {
+            if (
+              atBottomRef.current &&
+              !options.current.hasNewer &&
+              restoration.current.phase !== 'pending'
+            ) {
               pinToBottom(scroller)
               return
             }
-            const anchor = restoredAnchor.current
+            const anchor = restoration.current.phase === 'anchored' ? restoration.current : null
             if (!anchor) return
             const target = [...scroller.querySelectorAll<HTMLElement>('[data-message-id]')].find(
               (row) => row.dataset.messageId === anchor.id,
@@ -267,8 +281,7 @@ export function useMessageViewport({
       (element) => element.dataset.messageId === command.messageId,
     )
     if (!scroller || !target) return
-    pendingRestore.current = null
-    restoredAnchor.current = null
+    restoration.current = { phase: 'settled' }
     const rowBounds = target.getBoundingClientRect()
     const viewBounds = scroller.getBoundingClientRect()
     scroller.scrollTop +=
@@ -290,22 +303,21 @@ export function useMessageViewport({
     chatId,
     throughSequence ?? '0',
     onRead,
-    () => !pendingRestore.current,
+    () => restoration.current.phase !== 'pending',
   )
 
   function stickToLatest() {
     const scroller = scrollRef.current
     if (!scroller) return
-    pendingRestore.current = null
+    restoration.current = { phase: 'settled' }
     anchorRef.current = null
-    restoredAnchor.current = null
     atBottomRef.current = true
     pinToBottom(scroller)
   }
 
   function handleScroll() {
     const scroller = scrollRef.current
-    if (!scroller || pendingRestore.current) return
+    if (!scroller || restoration.current.phase === 'pending') return
     const atBottom = distanceToBottom(scroller) < BOTTOM_THRESHOLD
     const userMoved =
       Date.now() <= scrollInputUntil.current &&
@@ -321,7 +333,12 @@ export function useMessageViewport({
   function autoPage() {
     clearTimeout(pageTimer.current)
     const scroller = scrollRef.current
-    if (!scroller || pendingRestore.current || document.visibilityState !== 'visible') return
+    if (
+      !scroller ||
+      restoration.current.phase === 'pending' ||
+      document.visibilityState !== 'visible'
+    )
+      return
     if (loadingOlder || loadingNewer) return
     const direction =
       hasNewer && distanceToBottom(scroller) < 120

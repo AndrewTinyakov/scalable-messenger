@@ -62,7 +62,7 @@ func (c *Connection) enqueueCommand(frame protocol.Frame, bytes int) error {
 	command := queuedCommand{frame: frame, bytes: bytes, deadline: time.Now().Add(timeout), admitted: time.Now()}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.closed {
+	if c.state == lifecycleClosed {
 		return context.Canceled
 	}
 	itemLimit := c.server.config.ConnectionCommandItems
@@ -74,7 +74,7 @@ func (c *Connection) enqueueCommand(frame protocol.Frame, bytes int) error {
 		byteLimit = 131072
 	}
 	items := len(c.commands)
-	if c.commandRunning {
+	if c.commandState == commandRunning {
 		items++
 	}
 	if items >= itemLimit || bytes > byteLimit-c.commandBytes || !c.server.commands.reserve(bytes) {
@@ -82,8 +82,8 @@ func (c *Connection) enqueueCommand(frame protocol.Frame, bytes int) error {
 	}
 	c.commands = append(c.commands, command)
 	c.commandBytes += bytes
-	if !c.commandScheduled {
-		c.commandScheduled = true
+	if c.commandState == commandIdle {
+		c.commandState = commandQueued
 		c.server.commands.ready <- c
 	}
 	return nil
@@ -96,15 +96,15 @@ func (queue *commandQueue) run() {
 			return
 		case connection := <-queue.ready:
 			connection.mu.Lock()
-			if connection.closed || len(connection.commands) == 0 {
-				connection.commandScheduled = false
+			if connection.state == lifecycleClosed || len(connection.commands) == 0 {
+				connection.commandState = commandIdle
 				connection.mu.Unlock()
 				continue
 			}
 			command := connection.commands[0]
 			connection.commands[0] = queuedCommand{}
 			connection.commands = connection.commands[1:]
-			connection.commandRunning = true
+			connection.commandState = commandRunning
 			connection.mu.Unlock()
 			started := time.Now()
 			kind := monitoring.CommandKind(command.frame.Type)
@@ -126,13 +126,13 @@ func (queue *commandQueue) run() {
 				connection.handleError(err, command.frame.RequestID)
 			}
 			connection.mu.Lock()
-			connection.commandRunning = false
 			connection.commandBytes -= command.bytes
 			queue.release(command.bytes)
-			if !connection.closed && len(connection.commands) > 0 {
+			if connection.state == lifecycleActive && len(connection.commands) > 0 {
+				connection.commandState = commandQueued
 				queue.ready <- connection
 			} else {
-				connection.commandScheduled = false
+				connection.commandState = commandIdle
 			}
 			connection.mu.Unlock()
 		}

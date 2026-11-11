@@ -39,7 +39,7 @@ func (r *Rooms) dispatch(name string, event protocol.Event) {
 func (r *Rooms) dispatchRoom(entry *localRoom, event protocol.Event) int {
 	started := time.Now()
 	entry.mu.Lock()
-	if entry.retired || (entry.epoch == event.Epoch && entry.lastID != "" && !streamAfter(event.StreamID, entry.lastID)) {
+	if entry.state == roomRetired || (entry.epoch == event.Epoch && entry.lastID != "" && !streamAfter(event.StreamID, entry.lastID)) {
 		entry.mu.Unlock()
 		return 0
 	}
@@ -59,7 +59,7 @@ func (r *Rooms) dispatchRoom(entry *localRoom, event protocol.Event) int {
 	}
 	r.metrics.FanoutRecipients.Observe(float64(len(recipients)))
 	for _, recipient := range recipients {
-		if recipient.member.left.Load() {
+		if recipient.member.hasLeft() {
 			continue
 		}
 		if needsRecovery {
@@ -86,7 +86,7 @@ func (r *Rooms) dispatchRoom(entry *localRoom, event protocol.Event) int {
 
 func (r *Rooms) finishMember(connection Recipient, entry *localRoom, member *roomMember, replay []protocol.Event) {
 	entry.mu.Lock()
-	if entry.retired || entry.members[connection] != member {
+	if entry.state == roomRetired || entry.members[connection] != member {
 		entry.mu.Unlock()
 		return
 	}
@@ -124,7 +124,7 @@ func (r *Rooms) failRoom(name string) {
 
 func (r *Rooms) failRoomEntry(entry *localRoom) {
 	entry.mu.Lock()
-	if entry.retired {
+	if entry.state == roomRetired {
 		entry.mu.Unlock()
 		return
 	}
@@ -132,7 +132,7 @@ func (r *Rooms) failRoomEntry(entry *localRoom) {
 	entry.mu.Unlock()
 	r.metrics.StaleRooms.Inc()
 	for _, target := range targets {
-		if !target.member.left.Load() {
+		if !target.member.hasLeft() {
 			r.failRecipient(target.connection, entry.name, target.ids)
 		}
 	}

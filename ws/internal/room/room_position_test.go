@@ -52,7 +52,7 @@ func addPositionRoom(rooms *Rooms, name string, sink *positionSink) {
 	ready := make(chan struct{})
 	close(ready)
 	member := newRoomMember()
-	member.catching.Store(false)
+	member.finishCatchup()
 	member.chatIDs["chat"] = true
 	rooms.rooms[name] = &localRoom{name: name, ready: ready, epoch: "epoch", lastID: "1-0", members: map[Recipient]*roomMember{sink: member}}
 }
@@ -346,7 +346,7 @@ func TestContinuityReplayMetricsSeparateRoomWorkFromRecipientQueues(t *testing.T
 	first, second := &positionSink{}, &positionSink{}
 	addPositionRoom(rooms, "group:chat", first)
 	member := newRoomMember()
-	member.catching.Store(false)
+	member.finishCatchup()
 	rooms.rooms["group:chat"].members[second] = member
 	rooms.handleLive(context.Background(), "group:chat", positionLive("3-0", "2-0"))
 	if len(first.events) != 2 || len(second.events) != 2 {

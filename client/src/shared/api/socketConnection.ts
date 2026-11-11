@@ -18,80 +18,89 @@ export interface SocketConnectionOptions {
 
 export type SocketConnection = (() => void) & { retryNow(): void }
 
-export function connectSocket(options: SocketConnectionOptions): SocketConnection {
-  let disposed = false
-  let socket: WebSocket | null = null
-  let ticket: { token: string; expiresAt: number } | null = null
-  let reconnectTimer: ReturnType<typeof setTimeout> | undefined
-  let handshakeTimer: ReturnType<typeof setTimeout> | undefined
-  let stableTimer: ReturnType<typeof setTimeout> | undefined
-  let attempts = 0
-  let generation = 0
-  let ticketController: AbortController | undefined
-  let connecting = false
-  let revoked = false
+type ConnectionLifecycle =
+  | { phase: 'idle' | 'offline' | 'revoked' | 'disposed' }
+  | { phase: 'ticket'; controller: AbortController }
+  | { phase: 'waiting'; timer: ReturnType<typeof setTimeout> }
+  | { phase: 'handshake'; socket: WebSocket; timer: ReturnType<typeof setTimeout> }
+  | { phase: 'connected'; socket: WebSocket; timer: ReturnType<typeof setTimeout> }
 
-  function clearTimers(): void {
-    clearTimeout(reconnectTimer)
-    clearTimeout(handshakeTimer)
-    clearTimeout(stableTimer)
-    reconnectTimer = undefined
-    options.onRetryScheduled?.(null)
+export function connectSocket(options: SocketConnectionOptions): SocketConnection {
+  let lifecycle: ConnectionLifecycle = { phase: 'idle' }
+  let ticket: { token: string; expiresAt: number } | null = null
+  let attempts = 0
+
+  function transition(next: ConnectionLifecycle): void {
+    if ('timer' in lifecycle) clearTimeout(lifecycle.timer)
+    if (lifecycle.phase === 'waiting') options.onRetryScheduled?.(null)
+    lifecycle = next
   }
 
   function revokeSession(): void {
-    revoked = true
+    transition({ phase: 'revoked' })
     options.onSessionRevoked()
   }
 
   function retry(): void {
-    if (disposed || revoked || !isNetworkOnline() || reconnectTimer !== undefined) return
+    if (
+      lifecycle.phase === 'disposed' ||
+      lifecycle.phase === 'revoked' ||
+      lifecycle.phase === 'waiting' ||
+      !isNetworkOnline()
+    )
+      return
     options.onState('offline')
     const delay = reconnectDelay(++attempts)
     options.onRetryScheduled?.(Date.now() + delay)
-    reconnectTimer = setTimeout(() => {
-      reconnectTimer = undefined
-      options.onRetryScheduled?.(null)
-      void connect()
-    }, delay)
+    transition({
+      phase: 'waiting',
+      timer: setTimeout(() => {
+        transition({ phase: 'idle' })
+        void connect()
+      }, delay),
+    })
   }
 
   async function connect(): Promise<void> {
-    if (disposed || revoked || connecting || socket || !isNetworkOnline()) return
-    ticketController = new AbortController()
-    connecting = true
-    const current = ++generation
-    const currentAttempt = () => !disposed && current === generation
+    if (!['idle', 'offline'].includes(lifecycle.phase) || !isNetworkOnline()) return
+    const request: ConnectionLifecycle = { phase: 'ticket', controller: new AbortController() }
+    transition(request)
     options.onState('connecting')
     try {
       const freshTicket =
         !ticket || ticket.expiresAt <= Date.now() / 1000 + 60
-          ? await options.ticket(ticketController.signal)
+          ? await options.ticket(request.controller.signal)
           : ticket
-      if (!currentAttempt() || !isNetworkOnline()) return
+      if (lifecycle !== request || !isNetworkOnline()) return
       ticket = freshTicket
       const active = new WebSocket(options.url, ['messenger', `messenger-ticket.${ticket.token}`])
-      socket = active
-      const owned = () => !disposed && socket === active
+      const owned = () =>
+        (lifecycle.phase === 'handshake' || lifecycle.phase === 'connected') &&
+        lifecycle.socket === active
       const closed = (revoked = false) => {
         if (!owned()) return
-        socket = null
-        clearTimeout(handshakeTimer)
-        clearTimeout(stableTimer)
+        transition({ phase: 'idle' })
         options.onClose()
         if (revoked) revokeSession()
         else retry()
       }
-      handshakeTimer = setTimeout(() => {
-        closed()
-        active.close()
-      }, 15000)
+      transition({
+        phase: 'handshake',
+        socket: active,
+        timer: setTimeout(() => {
+          closed()
+          active.close()
+        }, 15000),
+      })
       active.onopen = () => {
         if (!owned()) return
-        clearTimeout(handshakeTimer)
-        stableTimer = setTimeout(() => {
-          attempts = 0
-        }, 30000)
+        transition({
+          phase: 'connected',
+          socket: active,
+          timer: setTimeout(() => {
+            attempts = 0
+          }, 30000),
+        })
         options.onState('connected')
         options.onOpen(active)
       }
@@ -107,47 +116,45 @@ export function connectSocket(options: SocketConnectionOptions): SocketConnectio
         if (owned()) active.close()
       }
     } catch (error) {
-      if (!currentAttempt()) return
+      if (lifecycle !== request) return
       if (error instanceof ApiError && error.status === 401) revokeSession()
       else retry()
-    } finally {
-      if (currentAttempt()) connecting = false
     }
   }
 
   const unsubscribe = subscribeNetwork(() => {
-    if (disposed || revoked) return
+    if (lifecycle.phase === 'disposed' || lifecycle.phase === 'revoked') return
     if (isNetworkOnline()) {
-      if (!socket && !connecting) retry()
+      if (lifecycle.phase === 'idle' || lifecycle.phase === 'offline') retry()
       return
     }
-    ticketController?.abort()
-    generation += 1
-    connecting = false
-    clearTimers()
-    const previous = socket
-    socket = null
+    if (lifecycle.phase === 'ticket') lifecycle.controller.abort()
+    const previous = 'socket' in lifecycle ? lifecycle.socket : null
+    transition({ phase: 'offline' })
+    options.onRetryScheduled?.(null)
     previous?.close()
     if (previous) options.onClose()
     options.onState('offline')
   })
   if (isNetworkOnline()) void connect()
-  else options.onState('offline')
+  else {
+    transition({ phase: 'offline' })
+    options.onState('offline')
+  }
   const close = () => {
-    if (disposed) return
-    ticketController?.abort()
-    disposed = true
+    if (lifecycle.phase === 'disposed') return
+    if (lifecycle.phase === 'ticket') lifecycle.controller.abort()
+    const previous = 'socket' in lifecycle ? lifecycle.socket : null
+    transition({ phase: 'disposed' })
     unsubscribe()
-    clearTimers()
-    socket?.close()
-    socket = null
+    options.onRetryScheduled?.(null)
+    previous?.close()
     options.onClose()
   }
   return Object.assign(close, {
     retryNow() {
-      if (disposed || revoked || socket || connecting || !isNetworkOnline()) return
-      clearTimeout(reconnectTimer)
-      reconnectTimer = undefined
+      if (!['idle', 'offline', 'waiting'].includes(lifecycle.phase) || !isNetworkOnline()) return
+      transition({ phase: 'idle' })
       options.onRetryScheduled?.(null)
       void connect()
     },

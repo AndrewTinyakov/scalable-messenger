@@ -5,37 +5,53 @@ const NONE: ReadonlySet<string> = new Set()
 
 export interface EntryKey {
   key: string
-  saved: boolean
+  sequence?: string
 }
 
 interface Rendered {
   chatId?: string
   keys: ReadonlySet<string>
-  lastSaved?: string
+  newestSaved: bigint
   settled: boolean
+  latest: boolean
+}
+
+function newestSaved(entries: EntryKey[], floor: bigint): bigint {
+  return entries.reduce(
+    (newest, entry) =>
+      entry.sequence !== undefined && BigInt(entry.sequence) > newest
+        ? BigInt(entry.sequence)
+        : newest,
+    floor,
+  )
 }
 
 export function useEnteringEntries(
   chatId: string | undefined,
   entries: EntryKey[],
-  knownEmpty: boolean,
+  { knownEmpty, latest }: { knownEmpty: boolean; latest: boolean },
 ): ReadonlySet<string> {
-  const rendered = useRef<Rendered>({ keys: NONE, settled: false })
+  const rendered = useRef<Rendered>({ keys: NONE, newestSaved: 0n, settled: false, latest })
   useEffect(() => {
-    const lastSaved = entries.filter((entry) => entry.saved).at(-1)?.key
-    const sameChat = rendered.current.chatId === chatId
+    const previous = rendered.current
+    const sameChat = previous.chatId === chatId
+    const newest = newestSaved(entries, sameChat ? previous.newestSaved : 0n)
     rendered.current = {
       chatId,
       keys: new Set(entries.map((entry) => entry.key)),
-      lastSaved,
-      settled: lastSaved !== undefined || knownEmpty || (sameChat && rendered.current.settled),
+      newestSaved: newest,
+      settled: newest > 0n || knownEmpty || (sameChat && previous.settled),
+      latest,
     }
   })
   const previous = rendered.current
-  if (previous.chatId !== chatId || !previous.settled) return NONE
-  const keys = entries.map((entry) => entry.key)
-  const after = previous.lastSaved === undefined ? 0 : keys.indexOf(previous.lastSaved) + 1
-  if (after === 0 && previous.lastSaved !== undefined) return NONE
-  const added = keys.slice(after).filter((key) => !previous.keys.has(key))
-  return added.length > 0 && added.length <= MAX_ANIMATED ? new Set(added) : NONE
+  if (previous.chatId !== chatId || !previous.settled || !previous.latest || !latest) return NONE
+  const added = entries.filter(
+    (entry) =>
+      !previous.keys.has(entry.key) &&
+      (entry.sequence === undefined || BigInt(entry.sequence) > previous.newestSaved),
+  )
+  return added.length > 0 && added.length <= MAX_ANIMATED
+    ? new Set(added.map((entry) => entry.key))
+    : NONE
 }

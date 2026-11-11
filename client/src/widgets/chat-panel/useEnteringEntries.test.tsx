@@ -67,6 +67,17 @@ describe('entering message entries', () => {
     expect(await show('a', ['1', '2', 'pending-a'])).toEqual(['2'])
   })
 
+  it('keeps animating arrivals after only pending sends remain', async () => {
+    await show('a', ['1', 'pending-a'])
+    await show('a', ['pending-a'])
+    expect(await show('a', ['2', 'pending-a'])).toEqual(['2'])
+
+    await show('draft', [], true)
+    await show('draft', ['pending-a'], true)
+    await show('draft', ['pending-a'])
+    expect(await show('draft', ['pending-a', 'pending-b'])).toEqual(['pending-b'])
+  })
+
   it('does not animate a chat switch or a page of history', async () => {
     await show('a', ['1'])
     expect(await show('b', ['x', 'y'])).toEqual([])

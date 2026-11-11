@@ -23,11 +23,12 @@ export function useEnteringEntries(
   const rendered = useRef<Rendered>({ keys: NONE, settled: false })
   useEffect(() => {
     const lastSaved = entries.filter((entry) => entry.saved).at(-1)?.key
+    const sameChat = rendered.current.chatId === chatId
     rendered.current = {
       chatId,
       keys: new Set(entries.map((entry) => entry.key)),
       lastSaved,
-      settled: lastSaved !== undefined || knownEmpty,
+      settled: lastSaved !== undefined || knownEmpty || (sameChat && rendered.current.settled),
     }
   })
   const previous = rendered.current

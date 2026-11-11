@@ -5,13 +5,11 @@
   display: grid;
   padding: 16px;
   place-items: center;
-  background: rgb(4 7 12 / 56%);
-  -webkit-backdrop-filter: blur(3px);
-  backdrop-filter: blur(3px);
+  background: rgb(0 0 0 / 62%);
   animation: fade 200ms ease backwards;
 }
 .create-dialog {
-  --dialog-bg: #151d29;
+  --dialog-bg: #111216;
   position: relative;
   display: flex;
   width: min(100%, 420px);
@@ -22,13 +20,9 @@
   gap: 16px;
   border: 1px solid var(--line-strong);
   border-radius: 24px;
-  background:
-    radial-gradient(420px 180px at 100% 0%, rgb(79 142 255 / 9%), transparent 70%), var(--dialog-bg);
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 6%),
-    0 30px 80px -20px rgb(0 0 0 / 80%),
-    0 8px 24px rgb(0 0 0 / 35%);
-  animation: dialog-in 320ms var(--spring) backwards;
+  background: var(--dialog-bg);
+  box-shadow: 0 24px 64px rgb(0 0 0 / 60%);
+  animation: dialog-in 320ms var(--ease) backwards;
 }
 .feature-dialog {
   overflow-y: auto;
@@ -71,7 +65,7 @@
   -webkit-line-clamp: 3;
   border-left: 3px solid var(--accent);
   border-radius: 10px;
-  background: rgb(79 142 255 / 8%);
+  background: rgb(255 255 255 / 4%);
   color: var(--text);
   font-size: 14px;
   line-height: 1.45;
@@ -176,7 +170,6 @@
   width: calc(50% - 6px);
   border-radius: 10px;
   background: var(--bg-active);
-  box-shadow: 0 2px 8px rgb(0 0 0 / 30%);
   content: '';
   transition: transform 320ms var(--spring);
 }
@@ -227,7 +220,6 @@
 }
 .dialog-group-name input:focus {
   border-color: var(--line-focus);
-  box-shadow: 0 0 0 4px rgb(79 142 255 / 12%);
   outline: none;
 }
 .dialog-search {
@@ -248,7 +240,6 @@
 }
 .dialog-search:focus-within {
   border-color: var(--line-focus);
-  box-shadow: 0 0 0 4px rgb(79 142 255 / 12%);
   color: var(--accent-text);
 }
 .dialog-search input {
@@ -280,7 +271,7 @@
   animation: pop-in 260ms var(--ease) backwards;
 }
 .selected-people button:hover {
-  background: rgb(79 142 255 / 24%);
+  background: rgb(74 116 232 / 22%);
 }
 .people-results {
   min-height: 180px;
@@ -412,7 +403,7 @@
   transition: background 140ms;
 }
 .group-member-row:hover {
-  --avatar-ring: #1b2432;
+  --avatar-ring: #16171b;
   background: rgb(255 255 255 / 4%);
 }
 .group-member-main {

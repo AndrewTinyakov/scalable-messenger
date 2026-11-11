@@ -77,7 +77,7 @@
     border-radius: 3px 3px 0 0;
     background: var(--accent);
     content: '';
-    animation: tab-in 260ms var(--spring) backwards;
+    animation: tab-in 260ms var(--ease) backwards;
   }
   .sidebar {
     order: 3;

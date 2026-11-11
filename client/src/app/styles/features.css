@@ -54,7 +54,7 @@
   align-items: center;
   gap: 8px;
   border-bottom: 1px solid var(--line);
-  background: rgb(17 24 35 / 90%);
+  background: var(--bg-sidebar);
   animation: expand-in 260ms var(--ease) backwards;
 }
 .pinned-bar-main {
@@ -129,10 +129,8 @@
   place-items: center;
   border: 0;
   border-radius: 50%;
-  background: rgb(10 15 23 / 55%);
+  background: var(--bg-raised);
   color: var(--text-2);
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
   transition:
     background 140ms,
     color 140ms,
@@ -153,9 +151,7 @@
   align-items: center;
   justify-content: center;
   border-top: 1px solid var(--line);
-  background: rgb(17 24 35 / 82%);
-  -webkit-backdrop-filter: blur(18px);
-  backdrop-filter: blur(18px);
+  background: var(--bg-sidebar);
 }
 .pinned-unpin-all {
   padding: 10px 20px;

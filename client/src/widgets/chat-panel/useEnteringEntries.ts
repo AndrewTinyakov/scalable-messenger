@@ -22,11 +22,12 @@ export function useEnteringEntries(
 ): ReadonlySet<string> {
   const rendered = useRef<Rendered>({ keys: NONE, settled: false })
   useEffect(() => {
+    const lastSaved = entries.filter((entry) => entry.saved).at(-1)?.key
     rendered.current = {
       chatId,
       keys: new Set(entries.map((entry) => entry.key)),
-      lastSaved: entries.filter((entry) => entry.saved).at(-1)?.key,
-      settled: entries.length > 0 || knownEmpty,
+      lastSaved,
+      settled: lastSaved !== undefined || knownEmpty,
     }
   })
   const previous = rendered.current

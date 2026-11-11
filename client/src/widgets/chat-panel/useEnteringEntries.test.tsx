@@ -78,5 +78,7 @@ describe('entering message entries', () => {
     expect(await show('a', ['1'], true)).toEqual(['1'])
     await show('b', [])
     expect(await show('b', ['1', '2'])).toEqual([])
+    await show('c', ['pending-c'])
+    expect(await show('c', ['1', '2', 'pending-c'])).toEqual([])
   })
 })

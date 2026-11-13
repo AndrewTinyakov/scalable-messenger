@@ -9,7 +9,7 @@
   animation: fade 200ms ease backwards;
 }
 .create-dialog {
-  --dialog-bg: #141210;
+  --dialog-bg: var(--bg-dialog);
   position: relative;
   display: flex;
   width: min(100%, 420px);
@@ -297,7 +297,7 @@
   animation: pop-in 260ms var(--ease) backwards;
 }
 .selected-people button:hover {
-  background: rgb(80 113 189 / 22%);
+  background: var(--accent-soft-strong);
 }
 .people-results {
   min-height: 180px;
@@ -429,7 +429,7 @@
   transition: background 140ms;
 }
 .group-member-row:hover {
-  --avatar-ring: #191715;
+  --avatar-ring: var(--bg-dialog-hover);
   background: rgb(255 255 255 / 4%);
 }
 .group-member-main {

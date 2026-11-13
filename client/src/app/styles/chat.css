@@ -111,7 +111,7 @@
 .message-day-label span {
   padding: 4px 12px;
   border-radius: 999px;
-  background: rgb(26 24 21 / 92%);
+  background: var(--bg-chip);
   color: var(--text);
   font-size: 12.5px;
   font-weight: 550;
@@ -305,7 +305,7 @@
 }
 .message-row.mine .send-state.rejected,
 .message-row.mine .send-state.retryable {
-  color: #ffc9c9;
+  color: var(--failed-text);
 }
 .message-deleted {
   color: var(--text-3) !important;
@@ -345,7 +345,7 @@
   margin: 3px 0 0;
   padding: 0 8px;
   border-radius: 10px;
-  background: rgb(35 32 28 / 94%);
+  background: var(--bg-chip-strong);
   color: var(--text);
 }
 

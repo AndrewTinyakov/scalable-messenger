@@ -26,7 +26,7 @@
   align-items: center;
   border: 1px solid var(--line-strong);
   border-radius: 28px;
-  background: #13110f;
+  background: var(--bg-dialog);
   text-align: center;
   animation: rise 520ms var(--ease) backwards;
 }
@@ -80,7 +80,7 @@
   font-weight: 600;
   text-decoration: underline;
   text-underline-offset: 3px;
-  text-decoration-color: rgb(154 180 235 / 35%);
+  text-decoration-color: var(--accent-text-faint);
   transition: text-decoration-color 160ms;
 }
 .auth-switch button:hover {

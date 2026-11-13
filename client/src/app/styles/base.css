@@ -40,13 +40,13 @@
   --text: #ededef;
   --text-2: #a1a1a7;
   --text-3: #808087;
-  --accent: #4c7ee0;
-  --accent-strong: #4370cc;
-  --accent-soft: rgb(76 126 224 / 15%);
+  --accent: #4172d2;
+  --accent-strong: #3864bf;
+  --accent-soft: rgb(65 114 210 / 15%);
   --accent-text: #94b4f5;
   --accent-text-faint: rgb(148 180 245 / 35%);
-  --accent-soft-strong: rgb(76 126 224 / 24%);
-  --accent-selection: rgb(76 126 224 / 40%);
+  --accent-soft-strong: rgb(65 114 210 / 24%);
+  --accent-selection: rgb(65 114 210 / 40%);
   --selected: #1d2435;
   --online: #57bc80;
   --danger: #e66e68;

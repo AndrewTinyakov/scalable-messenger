@@ -32,6 +32,22 @@ function clamp(value: number, size: number, limit: number): number {
   return Math.max(EDGE, Math.min(value, limit - size - EDGE))
 }
 
+function swallowNextClick() {
+  const swallow = (event: Event) => {
+    event.preventDefault()
+    event.stopPropagation()
+    release()
+  }
+  const release = () => {
+    document.removeEventListener('click', swallow, true)
+    document.removeEventListener('pointerdown', release, true)
+    document.removeEventListener('keydown', release, true)
+  }
+  document.addEventListener('click', swallow, true)
+  document.addEventListener('pointerdown', release, true)
+  document.addEventListener('keydown', release, true)
+}
+
 function placement(
   size: { width: number; height: number },
   anchor: DOMRect,
@@ -101,8 +117,11 @@ export function Menu({
 
   useEffect(() => {
     const dismiss = (event: PointerEvent) => {
-      if (!ref.current?.contains(event.target as Node) && !anchor.contains(event.target as Node))
-        close.current()
+      if (ref.current?.contains(event.target as Node)) return
+      event.preventDefault()
+      event.stopPropagation()
+      if (event.button === 0) swallowNextClick()
+      close.current()
     }
     const scroll = (event: Event) => {
       if (!ref.current?.contains(event.target as Node)) close.current()
@@ -113,15 +132,15 @@ export function Menu({
       event.stopPropagation()
       close.current()
     }
-    document.addEventListener('pointerdown', dismiss)
+    document.addEventListener('pointerdown', dismiss, true)
     document.addEventListener('scroll', scroll, true)
     document.addEventListener('keydown', escape, true)
     return () => {
-      document.removeEventListener('pointerdown', dismiss)
+      document.removeEventListener('pointerdown', dismiss, true)
       document.removeEventListener('scroll', scroll, true)
       document.removeEventListener('keydown', escape, true)
     }
-  }, [anchor])
+  }, [])
 
   return createPortal(
     <div
@@ -129,6 +148,15 @@ export function Menu({
       className="menu"
       style={{ top: position.top, left: position.left, transformOrigin: position.origin }}
       onContextMenu={(event) => event.preventDefault()}
+      onPointerMove={(event) => {
+        const item = (event.target as HTMLElement).closest<HTMLElement>('[role^="menuitem"]')
+        if (
+          item &&
+          item !== document.activeElement &&
+          ref.current?.contains(document.activeElement)
+        )
+          item.focus({ preventScroll: true })
+      }}
       onKeyDown={(event) => {
         if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
         const items = [...(ref.current?.querySelectorAll<HTMLElement>('[role^="menuitem"]') ?? [])]

@@ -107,4 +107,41 @@ describe('floating menu placement', () => {
     })
     expect(close).toHaveBeenCalledTimes(2)
   })
+
+  it('treats a press outside the menu, including on its anchor, as dismissal only', async () => {
+    const { close } = await open(rect(100, 100, 40, 40), {})
+    const anchor = document.querySelector<HTMLButtonElement>('body > button')!
+    const clicked = vi.fn()
+    anchor.addEventListener('click', clicked)
+    container.addEventListener('click', clicked)
+    const press = new dom.window.MouseEvent('pointerdown', { bubbles: true, cancelable: true })
+    await act(async () => anchor.dispatchEvent(press))
+    expect(press.defaultPrevented).toBe(true)
+    expect(close).toHaveBeenCalledTimes(1)
+    anchor.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
+    expect(clicked).not.toHaveBeenCalled()
+    await act(async () => root.render(null))
+    container.dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true }))
+    container.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
+    expect(clicked).toHaveBeenCalledTimes(1)
+  })
+
+  it('moves keyboard focus to the item under the pointer so only one item is highlighted', async () => {
+    const anchor = document.createElement('button')
+    document.body.append(anchor)
+    await act(async () =>
+      root.render(
+        <Menu label="Options" anchor={anchor} keyboard onClose={() => {}}>
+          <MenuItem icon={null}>Pin</MenuItem>
+          <MenuItem icon={null}>Delete chat</MenuItem>
+        </Menu>,
+      ),
+    )
+    const [pin, remove] = document.querySelectorAll<HTMLElement>('[role="menuitem"]')
+    expect(document.activeElement).toBe(pin)
+    await act(async () =>
+      remove.dispatchEvent(new dom.window.MouseEvent('pointermove', { bubbles: true })),
+    )
+    expect(document.activeElement).toBe(remove)
+  })
 })

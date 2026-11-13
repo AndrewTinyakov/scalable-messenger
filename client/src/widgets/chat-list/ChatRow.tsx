@@ -137,7 +137,8 @@ export const ChatRow = memo(function ChatRow({
       }}
       onContextMenu={(event) => {
         event.preventDefault()
-        onMenu(chat, event.currentTarget, event.detail === 0, {
+        const pointer = (event.nativeEvent as Partial<PointerEvent>).pointerType
+        onMenu(chat, event.currentTarget, pointer === '', {
           x: event.clientX,
           y: event.clientY,
         })

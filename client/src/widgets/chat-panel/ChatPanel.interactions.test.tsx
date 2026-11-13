@@ -178,6 +178,13 @@ function button(text: string) {
   expect(found, `button ${text}`).toBeDefined()
   return found!
 }
+function dialogButton(text: string) {
+  const found = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(
+    (entry) => entry.textContent === text,
+  )
+  expect(found, `dialog button ${text}`).toBeDefined()
+  return found!
+}
 async function rightClick(target: HTMLElement) {
   await act(async () =>
     target.dispatchEvent(
@@ -253,10 +260,10 @@ describe('message actions and scoped deletion', () => {
     expect(document.querySelector('[role="menu"]')?.textContent).toBe('ReplyCopy textSelectDelete')
     expect(features.readers).not.toHaveBeenCalled()
     await click(button('Delete'))
-    expect((document.querySelector('input[value="SELF"]') as HTMLInputElement).checked).toBe(true)
+    expect(document.querySelector<HTMLInputElement>('input[value="EVERYONE"]')!.checked).toBe(false)
     expect(features.deleteMessages).not.toHaveBeenCalled()
     await click(document.querySelector<HTMLInputElement>('input[value="EVERYONE"]')!)
-    await click(button('Delete for everyone'))
+    await click(dialogButton('Delete'))
     expect(features.deleteMessages).toHaveBeenCalledExactlyOnceWith(messages, 'EVERYONE')
     expect(document.querySelector('[role="dialog"]')).toBeNull()
   })
@@ -266,12 +273,12 @@ describe('message actions and scoped deletion', () => {
     await click(container.querySelector('[aria-label="Chat actions"]')!)
     await click(button('Clear history'))
     expect(document.querySelector('input[value="EVERYONE"]')).toBeNull()
-    await click(button('Clear for me'))
+    await click(dialogButton('Clear'))
     expect(features.clearHistory).toHaveBeenCalledExactlyOnceWith('SELF')
     await click(container.querySelector('[aria-label="Chat actions"]')!)
     await click(button('Delete chat'))
     expect(document.querySelector('input[value="EVERYONE"]')).toBeNull()
-    await click(button('Delete for me'))
+    await click(dialogButton('Delete'))
     expect(features.deleteChat).toHaveBeenCalledExactlyOnceWith('SELF')
     await select()
     await click(button('Delete'))
@@ -568,7 +575,7 @@ describe('list selection', () => {
       '100 messages',
     )
     await click(button('Delete'))
-    await click(button('Delete for me'))
+    await click(dialogButton('Delete'))
     expect(features.deleteMessages).toHaveBeenCalledWith(
       expect.arrayContaining([expect.objectContaining({ id: 'chat-a-100' })]),
       'SELF',

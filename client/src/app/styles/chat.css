@@ -66,13 +66,18 @@
   white-space: nowrap;
 }
 .chat-header-info p {
+  min-height: 1.3em;
   margin-top: 2px;
   overflow: hidden;
   color: var(--text-3);
   font-size: 13px;
   text-overflow: ellipsis;
+  line-height: 1.3;
   white-space: nowrap;
-  animation: fade 260ms ease backwards;
+  animation: fade 220ms ease backwards;
+}
+.chat-header-info p:empty {
+  animation: none;
 }
 .chat-header-info p.online {
   color: var(--accent-text);
@@ -349,10 +354,9 @@
   width: 100%;
   min-width: 140px;
   margin: 2px 0 6px;
-  padding: 5px 10px 6px 10px;
+  padding: 6px 10px;
   border: 0;
-  border-left: 3px solid var(--peer, var(--accent));
-  border-radius: 6px;
+  border-radius: 8px;
   background: color-mix(in srgb, var(--peer, var(--accent)) 12%, transparent);
   font-size: 13.5px;
   line-height: 1.3;
@@ -526,9 +530,10 @@
 }
 .composer-mode > div {
   min-width: 0;
-  padding: 2px 0 2px 10px;
+  padding: 6px 10px;
   flex: 1;
-  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  background: var(--accent-soft);
   line-height: 1.3;
 }
 .composer-mode strong {

@@ -9,12 +9,19 @@
   align-items: center;
   gap: 12px;
   border: 1px solid var(--line-strong);
-  border-left: 3px solid var(--danger);
   border-radius: 16px;
   background: var(--bg-menu);
   box-shadow: var(--shadow-pop);
   font-size: 14px;
   animation: toast-in 380ms var(--ease) backwards;
+}
+.toast::before {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--danger);
+  content: '';
 }
 .toast button {
   width: 28px;
@@ -113,7 +120,6 @@
 @keyframes header-in {
   from {
     opacity: 0;
-    transform: translateY(4px);
   }
 }
 @keyframes bubble-in {

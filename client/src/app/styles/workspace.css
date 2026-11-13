@@ -68,36 +68,23 @@
   }
 }
 .rail-folder.active {
-  color: var(--text);
+  color: var(--accent-text);
 }
 .rail-folder-icon {
   position: relative;
   display: grid;
-  width: 50px;
-  height: 32px;
+  width: 32px;
+  height: 30px;
   place-items: center;
-  border-radius: 12px;
-  transition:
-    background 220ms var(--ease),
-    color 220ms,
-    transform 220ms var(--ease);
-}
-@media (hover: hover) {
-  .rail-folder:hover .rail-folder-icon {
-    background: rgb(255 255 255 / 6%);
-  }
+  transition: transform 220ms var(--ease);
 }
 .rail-folder:active .rail-folder-icon {
-  transform: scale(0.94);
-}
-.rail-folder.active .rail-folder-icon {
-  background: var(--accent-soft);
-  color: var(--accent-text);
+  transform: scale(0.92);
 }
 .rail-folder-icon b {
   position: absolute;
-  top: -5px;
-  left: 31px;
+  top: -6px;
+  left: 20px;
   display: grid;
   min-width: 18px;
   height: 18px;

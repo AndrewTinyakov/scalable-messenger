@@ -69,22 +69,6 @@
   color: inherit;
   text-align: left;
 }
-.pinned-segments {
-  display: flex;
-  height: 36px;
-  width: 3px;
-  flex-direction: column;
-  gap: 2px;
-}
-.pinned-segments i {
-  flex: 1;
-  border-radius: 2px;
-  background: color-mix(in srgb, var(--accent) 32%, transparent);
-  transition: background 220ms;
-}
-.pinned-segments i.active {
-  background: var(--accent);
-}
 .pinned-bar-copy {
   display: flex;
   min-width: 0;
@@ -188,18 +172,11 @@
 .dialog-check {
   display: flex;
   margin: 0;
-  padding: 12px 14px;
+  padding: 4px 0;
   align-items: center;
-  gap: 12px;
-  border-radius: 14px;
-  background: rgb(255 255 255 / 3%);
+  gap: 14px;
   color: var(--text);
-  font-weight: 500;
   cursor: pointer;
-  transition: background 160ms;
-}
-.dialog-check:hover {
-  background: rgb(255 255 255 / 6%);
 }
 .forward-search {
   flex: none;

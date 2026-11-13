@@ -9,6 +9,7 @@ export type DeletionTarget =
 interface Props {
   target: DeletionTarget
   canDeleteEveryone: boolean
+  peerName?: string
   busy: boolean
   error: string | null
   onCancel(): void
@@ -17,73 +18,45 @@ interface Props {
 export function DeleteConfirmation({
   target,
   canDeleteEveryone,
+  peerName,
   busy,
   error,
   onCancel,
   onConfirm,
 }: Props) {
-  const [scope, setScope] = useState<DeleteScope>('SELF')
+  const [everyone, setEveryone] = useState(false)
+  const verb = target.kind === 'history' ? 'clear' : 'delete'
   const noun =
     target.kind === 'chat'
-      ? 'chat'
+      ? 'this chat'
       : target.kind === 'history'
-        ? 'history'
+        ? 'the history of this chat'
         : target.messages.length === 1
-          ? 'message'
-          : `${target.messages.length} messages`
-  const title =
-    target.kind === 'history'
-      ? 'Clear this history?'
-      : `Delete ${target.kind === 'messages' && target.messages.length > 1 ? 'these' : 'this'} ${noun}?`
+          ? 'this message'
+          : `these ${target.messages.length} messages`
+  const title = `Do you want to ${verb} ${noun}?`
+  const audience = peerName
+    ? `Also ${verb} for ${peerName}`
+    : `${verb === 'clear' ? 'Clear' : 'Delete'} for all members`
   return (
-    <Dialog title={title} onClose={onCancel} busy={busy}>
-      <p className="dialog-description">
-        {scope === 'EVERYONE'
-          ? target.kind === 'chat'
-            ? 'Permanently remove this chat and its messages for every member.'
-            : target.kind === 'history'
-              ? 'Permanently remove the current messages for every member. The chat stays available for new messages.'
-              : 'Permanently remove the selected messages for every member.'
-          : target.kind === 'chat'
-            ? 'Remove this chat and its current history from your account on every device. A new message will bring the chat back.'
-            : target.kind === 'history'
-              ? 'Hide the current messages from your account on every device. The empty chat stays in your list.'
-              : 'Hide the selected messages from your account on every device. Other members keep their copies.'}
-      </p>
-      {target.kind === 'messages' && target.messages.length === 1 && (
-        <blockquote className="delete-preview">{target.messages[0].body}</blockquote>
-      )}
-      <fieldset className="deletion-scopes" disabled={busy}>
-        <legend>Delete for</legend>
-        <label>
+    <Dialog title={title} onClose={onCancel} busy={busy} compact>
+      {canDeleteEveryone && (
+        <label className="dialog-check">
           <input
-            type="radio"
-            name="deletion-scope"
-            value="SELF"
-            checked={scope === 'SELF'}
-            onChange={() => setScope('SELF')}
+            type="checkbox"
+            value="EVERYONE"
+            checked={everyone}
+            disabled={busy}
+            onChange={(event) => setEveryone(event.target.checked)}
           />
-          Only me
+          {audience}
         </label>
-        {canDeleteEveryone && (
-          <label>
-            <input
-              type="radio"
-              name="deletion-scope"
-              value="EVERYONE"
-              checked={scope === 'EVERYONE'}
-              onChange={() => setScope('EVERYONE')}
-            />
-            Everyone
-          </label>
-        )}
-      </fieldset>
+      )}
       {error && (
         <p className="form-error" role="alert">
           {error}
         </p>
       )}
-      {busy && <p role="status">Deleting…</p>}
       <div className="dialog-actions">
         <button className="button button-ghost" disabled={busy} onClick={onCancel}>
           Cancel
@@ -91,11 +64,15 @@ export function DeleteConfirmation({
         <button
           className="button button-danger-ghost"
           disabled={busy}
-          onClick={() => onConfirm(canDeleteEveryone ? scope : 'SELF')}
+          onClick={() => onConfirm(canDeleteEveryone && everyone ? 'EVERYONE' : 'SELF')}
         >
           {busy
-            ? 'Deleting…'
-            : `${target.kind === 'history' ? 'Clear' : 'Delete'} for ${scope === 'EVERYONE' && canDeleteEveryone ? 'everyone' : 'me'}`}
+            ? verb === 'clear'
+              ? 'Clearing…'
+              : 'Deleting…'
+            : verb === 'clear'
+              ? 'Clear'
+              : 'Delete'}
         </button>
       </div>
     </Dialog>

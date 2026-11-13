@@ -615,6 +615,7 @@ export function ChatPanel({
             (confirm.kind === 'messages' &&
               confirm.messages.every((message) => message.senderId === currentUser.id))
           }
+          peerName={chat.kind === ChatKind.DIRECT ? senderName(recipient ?? '') : undefined}
           busy={busy}
           error={actionError}
           onCancel={() => setConfirm(null)}

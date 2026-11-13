@@ -170,11 +170,12 @@ export function PinnedMessagesView({
         </Menu>
       )}
       {confirm && (
-        <Dialog title="Unpin all messages?" onClose={() => setConfirm(false)} busy={busy}>
-          <p className="dialog-description">
-            Remove all {total} pinned {total === 1 ? 'message' : 'messages'} from the top of this
-            chat.
-          </p>
+        <Dialog
+          title={`Do you want to unpin all ${total} ${total === 1 ? 'message' : 'messages'}?`}
+          onClose={() => setConfirm(false)}
+          busy={busy}
+          compact
+        >
           {error && (
             <p className="form-error" role="alert">
               {error}

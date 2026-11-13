@@ -53,22 +53,22 @@
   --rail-width: 80px;
   --sidebar-width: 372px;
 
-  --tone-0: #eea099;
-  --tone-1: #dfad73;
-  --tone-2: #bbacee;
-  --tone-3: #7fcaa3;
-  --tone-4: #65c9d4;
-  --tone-5: #88bcf2;
-  --tone-6: #e1a0cb;
-  --tone-7: #b5bf77;
-  --tone-0-bg: #84504c;
-  --tone-1-bg: #7a5932;
-  --tone-2-bg: #635884;
-  --tone-3-bg: #3a6d53;
-  --tone-4-bg: #246c73;
-  --tone-5-bg: #416387;
-  --tone-6-bg: #7b506d;
-  --tone-7-bg: #5f6535;
+  --tone-0: #f8a49d;
+  --tone-1: #f2ac81;
+  --tone-2: #c7aff5;
+  --tone-3: #8ed09c;
+  --tone-4: #71cfd9;
+  --tone-5: #8cc3fc;
+  --tone-6: #efa3c7;
+  --tone-7: #abb9fe;
+  --tone-0-bg: #a85550;
+  --tone-1-bg: #c26d32;
+  --tone-2-bg: #7c61a8;
+  --tone-3-bg: #3b834e;
+  --tone-4-bg: #208089;
+  --tone-5-bg: #3a75af;
+  --tone-6-bg: #a0557b;
+  --tone-7-bg: #5f6bb1;
 }
 
 * {

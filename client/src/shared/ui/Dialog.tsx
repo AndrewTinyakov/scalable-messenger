@@ -7,8 +7,9 @@ interface Props {
   children: ReactNode
   onClose(): void
   busy?: boolean
+  compact?: boolean
 }
-export function Dialog({ title, children, onClose, busy = false }: Props) {
+export function Dialog({ title, children, onClose, busy = false, compact = false }: Props) {
   const ref = useRef<HTMLElement>(null)
   const backdrop = useRef<HTMLDivElement>(null)
   useExitAnimation(backdrop, fadeOutDialog)
@@ -51,7 +52,7 @@ export function Dialog({ title, children, onClose, busy = false }: Props) {
     >
       <section
         ref={ref}
-        className="create-dialog feature-dialog"
+        className={`create-dialog feature-dialog${compact ? ' dialog-compact' : ''}`}
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -59,14 +60,16 @@ export function Dialog({ title, children, onClose, busy = false }: Props) {
       >
         <div className="dialog-head">
           <h2>{title}</h2>
-          <button
-            className="icon-button"
-            onClick={onClose}
-            disabled={busy}
-            aria-label={`Close ${title.toLowerCase()}`}
-          >
-            <X size={20} />
-          </button>
+          {!compact && (
+            <button
+              className="icon-button"
+              onClick={onClose}
+              disabled={busy}
+              aria-label={`Close ${title.toLowerCase()}`}
+            >
+              <X size={20} />
+            </button>
+          )}
         </div>
         {children}
       </section>

@@ -4,9 +4,11 @@ import type { ChatRecovery } from '../../entities/message/chatRecovery'
 import type { DeleteScope, DeleteTarget } from '../../entities/message/historySnapshot'
 import { isContiguous } from '../../entities/message/historyWindow'
 import { type Message } from '../../entities/message/model'
+import { ChatKind } from '../../shared/api/generated/socket-vocabulary'
 import type { api } from '../../shared/api/http'
 import type { OutgoingSocketFrame, PresenceStatus, SocketEvent } from '../../shared/api/socket'
 import { createUlid } from '../../shared/lib/id'
+import { isId } from '../../shared/lib/validation'
 import { MutationRecovery } from './mutationRecovery'
 
 type SessionApi = ReturnType<typeof api.forSession>
@@ -23,6 +25,7 @@ interface Options {
   onReadCommitted?(chatId: string, through: string): void
   onReadFailed?(chatId: string): void
   fail(message: string): void
+  sharedPresence?: Record<string, PresenceStatus['state']>
 }
 
 export function useConversationFeatures(options: Options) {
@@ -150,6 +153,10 @@ export function useConversationFeatures(options: Options) {
       .join(',') ??
     ''
   watchedRef.current = memberKey ? memberKey.split(',') : []
+  const sharesPresence =
+    options.sharedPresence !== undefined &&
+    options.chat?.kind === ChatKind.DIRECT &&
+    isId(options.chat.id)
   useEffect(() => {
     scope.current += 1
     readPending.current = '0'
@@ -186,13 +193,15 @@ export function useConversationFeatures(options: Options) {
         Object.entries(previous).filter(([id]) => watchedRef.current.includes(id)),
       ),
     )
-    const watch = () =>
+    const watch = () => {
+      if (sharesPresence) return
       optionsRef.current.send({
         type: 'watch_presence',
         version: 1,
         chatId,
         userIds: memberKey ? memberKey.split(',') : [],
       })
+    }
     const refresh = () => {
       watch()
       void refreshReads()
@@ -211,9 +220,9 @@ export function useConversationFeatures(options: Options) {
       window.clearInterval(timer)
       window.removeEventListener('focus', focus)
       document.removeEventListener('visibilitychange', focus)
-      optionsRef.current.send({ type: 'unwatch_presence', version: 1 })
+      if (!sharesPresence) optionsRef.current.send({ type: 'unwatch_presence', version: 1 })
     }
-  }, [chatId, memberKey, options.connected, refreshReads, flushRead])
+  }, [chatId, memberKey, sharesPresence, options.connected, refreshReads, flushRead])
   const onEvent = useCallback(
     (event: SocketEvent): boolean => {
       const current = optionsRef.current
@@ -404,7 +413,7 @@ export function useConversationFeatures(options: Options) {
     ),
     clearHistory,
     deleteMessages,
-    presence: options.connected ? presence : {},
+    presence: !options.connected ? {} : sharesPresence ? (options.sharedPresence ?? {}) : presence,
     watchMembers: useCallback(
       (ids: string[] | null) =>
         setWatchTargets(ids ? [...new Set(ids)].slice(0, 100).sort() : null),

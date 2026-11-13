@@ -215,6 +215,7 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     connectionGeneration,
     connected: connection === 'connected',
     userId: session.user.id,
+    selectedChatId: selectedId,
     listChats,
     send: sendConnectedFrame,
   })
@@ -233,6 +234,7 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     onReadCommitted: settleRead,
     onReadFailed: settleRead,
     fail: setError,
+    sharedPresence: sidebar.sidebarPresence,
   })
   const pins = useMessagePins(
     selectedId && !selectedId.startsWith('draft:') ? selectedId : undefined,

@@ -29,6 +29,13 @@ export function formatChatTime(timestamp?: string, now = new Date()): string {
   return shortDate.format(date)
 }
 
+export function formatReadTime(timestamp: string, now = new Date()): string {
+  const date = new Date(timestamp)
+  const age = daysAgo(date, now)
+  const day = age <= 0 ? 'today' : age === 1 ? 'yesterday' : shortDate.format(date)
+  return `${day} at ${clock.format(date)}`
+}
+
 export function formatDayLabel(timestamp: string, now = new Date()): string {
   const date = new Date(timestamp)
   const age = daysAgo(date, now)

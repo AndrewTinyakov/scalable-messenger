@@ -629,6 +629,7 @@ export function ChatPanel({
           point={popup.point}
           keyboard={popup.keyboard}
           mine={popupMessage.senderId === currentUser.id}
+          group={chat.kind === ChatKind.GROUP}
           readers={features.readers}
           onReply={() => beginReply(popupMessage)}
           onEdit={

@@ -39,7 +39,7 @@ class DatabaseQueryListener(
         val outcome = if (state.failed || ctx.exception() != null || ctx.sqlException() != null) "failure" else "success"
         finishStatement(state, outcome)
         finishFetch(state, outcome)
-        metrics.record("messenger.database.query", state.operation.label, outcome, System.nanoTime() - state.started)
+        metrics.record("messenger.database.query", state.operation.metricValue, outcome, System.nanoTime() - state.started)
     }
 
     private fun state(ctx: ExecuteContext): QueryState? = ctx.data(STATE) as? QueryState
@@ -47,13 +47,13 @@ class DatabaseQueryListener(
     private fun finishStatement(state: QueryState, outcome: String) {
         val started = state.statementStarted ?: return
         state.statementStarted = null
-        metrics.record("messenger.database.statement", state.operation.label, outcome, System.nanoTime() - started)
+        metrics.record("messenger.database.statement", state.operation.metricValue, outcome, System.nanoTime() - started)
     }
 
     private fun finishFetch(state: QueryState, outcome: String) {
         val started = state.fetchStarted ?: return
         state.fetchStarted = null
-        metrics.record("messenger.database.fetch", state.operation.label, outcome, System.nanoTime() - started)
+        metrics.record("messenger.database.fetch", state.operation.metricValue, outcome, System.nanoTime() - started)
     }
 
     private class QueryState(

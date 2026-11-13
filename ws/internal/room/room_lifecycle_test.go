@@ -127,7 +127,7 @@ func TestWaitingJoinCannotExposeAnUnprotectedSubscription(t *testing.T) {
 	deadline := time.Now().Add(100 * time.Millisecond)
 	for time.Now().Before(deadline) {
 		entry.mu.Lock()
-		exposed = member.chatIDs["next-chat"] && !member.catching.Load()
+		exposed = member.chatIDs["next-chat"] && !member.isCatchingUp()
 		entry.mu.Unlock()
 		if exposed {
 			break

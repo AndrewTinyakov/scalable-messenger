@@ -46,14 +46,13 @@ type Server struct {
 	pendingUpgrades  int
 	upgradeWG        sync.WaitGroup
 	leaseCleanupCtx  context.Context
-	closing          bool
+	state            serverState
 	wg               sync.WaitGroup
 	writeBuffers     sync.Pool
 	runtimeOnce      sync.Once
 	closeOnce        sync.Once
 	commands         *commandQueue
 	cleanup          *leaseCleanup
-	draining         bool
 	presence         *presenceCoordinator
 	sidebar          *sidebarCoordinator
 }
@@ -194,7 +193,7 @@ func (s *Server) close(base context.Context) {
 	cleanupCtx, cancel := context.WithTimeout(base, cleanupTimeout)
 	defer cancel()
 	s.mu.Lock()
-	s.closing = true
+	s.state = serverClosing
 	s.leaseCleanupCtx = cleanupCtx
 	connections := make([]*Connection, 0, len(s.connections))
 	for c := range s.connections {

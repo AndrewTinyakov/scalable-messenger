@@ -2,6 +2,9 @@ package com.andrewtinyakov.messenger.message.web.payload
 
 import com.andrewtinyakov.messenger.generated.messaging.event.SendRejectionReason
 import com.andrewtinyakov.messenger.message.model.Message
+import com.andrewtinyakov.messenger.message.model.MessageId
+import com.andrewtinyakov.messenger.message.model.SendResult
+import com.andrewtinyakov.messenger.message.visibility.model.VisibilitySnapshot
 import com.andrewtinyakov.messenger.shared.web.StrictStringDeserializer
 import com.fasterxml.jackson.annotation.JsonInclude
 import io.swagger.v3.oas.annotations.media.Schema
@@ -88,7 +91,7 @@ data class SendStatusResponse(
 )
 
 data class SendStatusesRequest(
-    @field:Size(min = 1, max = 100)
+    @field:Size(min = 1, max = SendResult.MAX_LOOKUP_REQUEST_IDS)
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val requestIds: List<String>,
 )
@@ -233,3 +236,85 @@ data class MessageVisibilityResponse(
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val hidden: Boolean,
 )
+
+fun VisibilitySnapshot.toVisibilityResponse(): MessageVisibilityResponse = MessageVisibilityResponse(
+    snapshotSequence = snapshotSequence.toString(),
+    mutationRevision = mutationRevision.toString(),
+    visibilityRevision = visibilityRevision.toString(),
+    clearedThroughSequence = clearedThroughSequence.toString(),
+    globalClearedThroughSequence = globalClearedThroughSequence.toString(),
+    hidden = hidden,
+)
+
+fun VisibilitySnapshot.toHistoryResponse(
+    messages: List<Message>,
+    nextSequence: Long,
+    hasMore: Boolean,
+    coverageAfterSequence: Long,
+    coverageThroughSequence: Long,
+): MessageHistoryResponse = toVisibilityResponse().let { visibility ->
+    MessageHistoryResponse(
+        messages = messages.map { it.toResponse() },
+        nextSequence = nextSequence.toString(),
+        hasMore = hasMore,
+        mutationRevision = visibility.mutationRevision,
+        snapshotSequence = visibility.snapshotSequence,
+        visibilityRevision = visibility.visibilityRevision,
+        clearedThroughSequence = visibility.clearedThroughSequence,
+        globalClearedThroughSequence = visibility.globalClearedThroughSequence,
+        coverageAfterSequence = coverageAfterSequence.toString(),
+        coverageThroughSequence = coverageThroughSequence.toString(),
+    )
+}
+
+fun VisibilitySnapshot.toAroundResponse(
+    anchorMessageId: MessageId?,
+    messages: List<Message>,
+    hasOlder: Boolean,
+    hasNewer: Boolean,
+    coverageAfterSequence: Long,
+    coverageThroughSequence: Long,
+): MessageAroundResponse = toVisibilityResponse().let { visibility ->
+    MessageAroundResponse(
+        anchorMessageId = anchorMessageId?.value,
+        messages = messages.map { it.toResponse() },
+        hasOlder = hasOlder,
+        hasNewer = hasNewer,
+        mutationRevision = visibility.mutationRevision,
+        snapshotSequence = visibility.snapshotSequence,
+        visibilityRevision = visibility.visibilityRevision,
+        clearedThroughSequence = visibility.clearedThroughSequence,
+        globalClearedThroughSequence = visibility.globalClearedThroughSequence,
+        coverageAfterSequence = coverageAfterSequence.toString(),
+        coverageThroughSequence = coverageThroughSequence.toString(),
+    )
+}
+
+fun VisibilitySnapshot.toResolveResponse(messages: List<Message>): MessageResolveResponse = toVisibilityResponse().let { visibility ->
+    MessageResolveResponse(
+        messages = messages.map { it.toResponse() },
+        snapshotSequence = visibility.snapshotSequence,
+        mutationRevision = visibility.mutationRevision,
+        visibilityRevision = visibility.visibilityRevision,
+        clearedThroughSequence = visibility.clearedThroughSequence,
+        globalClearedThroughSequence = visibility.globalClearedThroughSequence,
+    )
+}
+
+fun VisibilitySnapshot.toChangesResponse(
+    changes: List<MessageChangeResponse>,
+    lastRevision: Long,
+    nextRevision: Long,
+    resetRequired: Boolean,
+): MessageChangesResponse = toVisibilityResponse().let { visibility ->
+    MessageChangesResponse(
+        changes = changes,
+        lastRevision = lastRevision.toString(),
+        nextRevision = nextRevision.toString(),
+        resetRequired = resetRequired,
+        snapshotSequence = visibility.snapshotSequence,
+        visibilityRevision = visibility.visibilityRevision,
+        clearedThroughSequence = visibility.clearedThroughSequence,
+        globalClearedThroughSequence = visibility.globalClearedThroughSequence,
+    )
+}

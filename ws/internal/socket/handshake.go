@@ -21,13 +21,29 @@ const (
 	maxTicketBytes       = 4096
 )
 
+type upgradeReservationState uint8
+
+const (
+	upgradeUnreserved upgradeReservationState = iota
+	upgradeReserved
+	upgradeReleased
+)
+
+type handshakeLeaseState uint8
+
+const (
+	handshakeLeaseUnowned handshakeLeaseState = iota
+	handshakeLeaseOwned
+	handshakeLeaseTransferred
+)
+
 type handshake struct {
-	server        *Server
-	setup         monitoring.HandshakeSetup
-	identity      ticket.Identity
-	leaseID       string
-	leaseAttached bool
-	reserved      bool
+	server      *Server
+	setup       monitoring.HandshakeSetup
+	identity    ticket.Identity
+	leaseID     string
+	leaseState  handshakeLeaseState
+	reservation upgradeReservationState
 }
 
 func (s *Server) upgrade(w http.ResponseWriter, r *http.Request) {
@@ -40,7 +56,7 @@ func (s *Server) upgrade(w http.ResponseWriter, r *http.Request) {
 		h.reject(w, monitoring.HandshakeCapacity, http.StatusServiceUnavailable, "capacity reached")
 		return
 	}
-	h.reserved = true
+	h.reservation = upgradeReserved
 	defer h.release()
 	if !h.admit(w, r) {
 		return
@@ -59,7 +75,7 @@ func (s *Server) upgrade(w http.ResponseWriter, r *http.Request) {
 	}
 	h.setup.CompleteStage()
 	c := newConnection(s, ws, h.identity, h.leaseID)
-	h.leaseAttached = true
+	h.leaseState = handshakeLeaseTransferred
 	if !s.register(c) {
 		c.Close()
 		return
@@ -131,12 +147,16 @@ func (h *handshake) admit(w http.ResponseWriter, r *http.Request) bool {
 	leaseID, allowed, err := s.connectionLeases.AcquireConnectionLease(ctx, h.identity.UserID)
 	cancel()
 	h.leaseID = leaseID
+	if leaseID != "" {
+		h.leaseState = handshakeLeaseOwned
+	}
 	if err != nil {
 		h.reject(w, monitoring.HandshakeLeaseUnavailable, http.StatusServiceUnavailable, "connection admission unavailable")
 		return false
 	}
 	if !allowed {
 		h.leaseID = ""
+		h.leaseState = handshakeLeaseUnowned
 		h.reject(w, monitoring.HandshakeUserCapacity, http.StatusTooManyRequests, "too many connections")
 		return false
 	}
@@ -211,8 +231,8 @@ func (h *handshake) activate(c *Connection) bool {
 	s.mu.Lock()
 	s.pendingUpgrades--
 	s.metrics.PendingUpgrades.Dec()
-	h.reserved = false
-	if s.closing || s.draining || c.ctx.Err() != nil {
+	h.reservation = upgradeReleased
+	if s.state != serverAccepting || c.ctx.Err() != nil {
 		s.mu.Unlock()
 		c.Close()
 		s.upgradeWG.Done()
@@ -225,11 +245,13 @@ func (h *handshake) activate(c *Connection) bool {
 }
 
 func (h *handshake) release() {
-	if h.leaseID != "" && !h.leaseAttached {
+	if h.leaseState == handshakeLeaseOwned {
 		h.server.releaseConnectionLease(h.identity.UserID, h.leaseID)
+		h.leaseState = handshakeLeaseUnowned
 	}
-	if h.reserved {
+	if h.reservation == upgradeReserved {
 		h.server.releaseUpgrade()
+		h.reservation = upgradeReleased
 	}
 }
 
@@ -252,7 +274,7 @@ func (s *Server) register(c *Connection) bool {
 	defer s.mu.Unlock()
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if s.closing || s.draining || c.closed {
+	if s.state != serverAccepting || c.state == lifecycleClosed {
 		return false
 	}
 	s.connections[c] = struct{}{}
@@ -264,7 +286,7 @@ func (s *Server) register(c *Connection) bool {
 func (s *Server) reserveUpgrade() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.closing || s.draining || len(s.connections)+s.pendingUpgrades >= s.config.MaxConnections ||
+	if s.state != serverAccepting || len(s.connections)+s.pendingUpgrades >= s.config.MaxConnections ||
 		(s.config.MaxPendingUpgrades > 0 && s.pendingUpgrades >= s.config.MaxPendingUpgrades) {
 		return false
 	}

@@ -1,7 +1,7 @@
 package com.andrewtinyakov.messenger.infrastructure.database.observability
 
 enum class DatabaseOperation(
-    val label: String,
+    val metricValue: String,
 ) {
     CHAT_ALLOCATE_SEQUENCES_FOR_MEMBERS("chat.allocate_sequences_for_members"),
     CHAT_ALLOCATE_SEQUENCE_FOR_MEMBER("chat.allocate_sequence_for_member"),
@@ -21,7 +21,6 @@ enum class DatabaseOperation(
     CHAT_INSERT_DIRECT_WITH_MEMBERS_AND_EVENTS("chat.insert_direct_with_members_and_events"),
     CHAT_INSERT_GROUP_WITH_MEMBERS_AND_EVENTS("chat.insert_group_with_members_and_events"),
     CHAT_INSERT_MEMBERS_AND_INCREMENT_COUNT("chat.insert_members_and_increment_count"),
-    CHAT_IS_GROUP_MEMBER("chat.is_group_member"),
     CHAT_IS_MEMBER("chat.is_member"),
     CHAT_LOCK_DIRECT_PAIR("chat.lock_direct_pair"),
     CHAT_LOCK_USERS("chat.lock_users"),
@@ -43,13 +42,13 @@ enum class DatabaseOperation(
     SESSION_DELETE_SESSION("session.delete_session"),
     SESSION_FIND("session.find"),
     SESSION_INSERT_SESSION("session.insert_session"),
-    USER_COUNT_EXISTING("user.count_existing"),
     USER_EXISTS_BY_ID("user.exists_by_id"),
     USER_FIND_SUMMARY("user.find_summary"),
     USER_FIND_USER_BY_USERNAME("user.find_user_by_username"),
     USER_INSERT_USER("user.insert_user"),
     USER_SEARCH("user.search"),
     MESSAGE_FIND_MESSAGE("message.find_message"),
+    MESSAGE_FIND_MESSAGES_BY_IDS("message.find_messages_by_ids"),
     MESSAGE_CHANGE_CURSOR("message.change_cursor"),
     MESSAGE_CHANGE_PAGE("message.change_page"),
     MESSAGE_MUTATE("message.mutate"),
@@ -64,6 +63,7 @@ enum class DatabaseOperation(
     READ_CLEANUP("read.cleanup"),
     READ_BACKLOG("read.backlog"),
     PRESENCE_AUTHORIZE("presence.authorize"),
+    SIDEBAR_AUTHORIZE("sidebar.authorize"),
     VISIBILITY_SNAPSHOT("visibility.snapshot"),
     VISIBILITY_INTERVAL_SEEK("visibility.interval_seek"),
     MESSAGE_VISIBLE_SPAN("message.visible_span"),

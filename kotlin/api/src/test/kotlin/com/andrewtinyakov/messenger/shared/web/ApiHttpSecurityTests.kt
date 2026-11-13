@@ -1,9 +1,9 @@
 package com.andrewtinyakov.messenger.shared.web
 
 import com.andrewtinyakov.messenger.ApiApplication
+import com.andrewtinyakov.messenger.auth.model.SessionToken
 import com.andrewtinyakov.messenger.auth.service.AuthenticationService
 import com.andrewtinyakov.messenger.auth.web.payload.AuthRequest
-import com.andrewtinyakov.messenger.shared.id.SessionToken
 import com.andrewtinyakov.messenger.shared.id.newId
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse

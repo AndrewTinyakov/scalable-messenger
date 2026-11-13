@@ -213,6 +213,9 @@ func TestJoinRequestsSQLRecoveryWhenRestartHasNoRetainedHistory(t *testing.T) {
 			t.Fatalf("outage event = %q, want recovery_failed", event.Type)
 		}
 	}
+	entry, _, _ := rooms.roomPosition("group:chat")
+	entry.positionMu.Lock()
+	defer entry.positionMu.Unlock()
 	if _, _, last := rooms.roomPosition("group:chat"); last != "3-0" {
 		t.Fatalf("room position = %q, want 3-0", last)
 	}

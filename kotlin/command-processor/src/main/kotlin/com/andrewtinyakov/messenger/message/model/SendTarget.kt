@@ -1,9 +1,9 @@
 package com.andrewtinyakov.messenger.message.model
 
-import com.andrewtinyakov.messenger.generated.messaging.command.SendMessageCommandV1
-import com.andrewtinyakov.messenger.shared.id.ChatId
-import com.andrewtinyakov.messenger.shared.id.RequestId
-import com.andrewtinyakov.messenger.shared.id.UserId
+import com.andrewtinyakov.messenger.auth.model.UserId
+import com.andrewtinyakov.messenger.chat.model.ChatId
+import com.andrewtinyakov.messenger.chat.model.orderedDirectPair
+import com.andrewtinyakov.messenger.message.service.SendRequest
 
 sealed interface SendTarget {
     data class ExistingChat(
@@ -16,15 +16,10 @@ sealed interface SendTarget {
     ) : SendTarget
 
     companion object {
-        fun from(command: SendMessageCommandV1): SendTarget {
-            require(command.version == 1) { "Unsupported command version" }
-            require((command.chatId == null) != (command.recipientId == null)) { "Exactly one chat target is required" }
-            RequestId(command.requestId)
-            val sender = UserId(command.senderId)
-            return command.chatId?.let { ExistingChat(ChatId(it)) } ?: run {
-                val recipient = UserId(command.recipientId!!)
-                if (sender.value <= recipient.value) DirectPair(sender, recipient) else DirectPair(recipient, sender)
-            }
-        }
+        internal fun from(request: SendRequest): SendTarget =
+            request.chatId?.let(::ExistingChat)
+                ?: orderedDirectPair(request.senderId, checkNotNull(request.recipientId)).let { (first, second) ->
+                    DirectPair(first, second)
+                }
     }
 }

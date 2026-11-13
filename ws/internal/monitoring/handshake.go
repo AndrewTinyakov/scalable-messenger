@@ -32,12 +32,20 @@ func NewHandshakeMetrics(registry *prometheus.Registry) *HandshakeMetrics {
 	return m
 }
 
+type handshakeSetupState uint8
+
+const (
+	handshakeStageActive handshakeSetupState = iota
+	handshakeStageComplete
+	handshakeSetupFinished
+)
+
 type HandshakeSetup struct {
 	metrics      *HandshakeMetrics
 	started      time.Time
 	stageStarted time.Time
 	stage        HandshakeStage
-	finished     bool
+	state        handshakeSetupState
 }
 
 func (m *HandshakeMetrics) BeginHandshake() HandshakeSetup {
@@ -46,12 +54,13 @@ func (m *HandshakeMetrics) BeginHandshake() HandshakeSetup {
 }
 
 func (setup *HandshakeSetup) NextStage(stage HandshakeStage) {
-	if setup.finished {
+	if setup.state == handshakeSetupFinished {
 		return
 	}
 	setup.CompleteStage()
 	setup.stage = stage
 	setup.stageStarted = time.Now()
+	setup.state = handshakeStageActive
 }
 
 func (setup *HandshakeSetup) CompleteStage() {
@@ -59,18 +68,18 @@ func (setup *HandshakeSetup) CompleteStage() {
 }
 
 func (setup *HandshakeSetup) Finish(outcome HandshakeOutcome) {
-	if setup.finished {
+	if setup.state == handshakeSetupFinished {
 		return
 	}
 	now := time.Now()
 	result := handshakeResult(outcome)
 	setup.observeStage(result, now)
 	setup.metrics.setupSeconds.WithLabelValues(result).Observe(now.Sub(setup.started).Seconds())
-	setup.finished = true
+	setup.state = handshakeSetupFinished
 }
 
 func (setup *HandshakeSetup) observeStage(result string, now time.Time) {
-	if setup.finished || setup.stage == "" {
+	if setup.state != handshakeStageActive {
 		return
 	}
 	stage := setup.stage
@@ -80,7 +89,7 @@ func (setup *HandshakeSetup) observeStage(result string, now time.Time) {
 		stage = "other"
 	}
 	setup.metrics.stageSeconds.WithLabelValues(string(stage), result).Observe(now.Sub(setup.stageStarted).Seconds())
-	setup.stage = ""
+	setup.state = handshakeStageComplete
 }
 
 func handshakeResult(outcome HandshakeOutcome) string {

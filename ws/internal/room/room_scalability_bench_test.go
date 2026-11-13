@@ -30,7 +30,7 @@ func BenchmarkSharedFrameFanout(b *testing.B) {
 			for range recipients {
 				member := newRoomMember()
 				member.chatIDs["chat"] = true
-				member.catching.Store(false)
+				member.finishCatchup()
 				entry.members[&benchmarkFrameSink{}] = member
 			}
 			event := protocol.Event{Type: protocol.EventMessageSaved, Version: 1, Room: entry.name, ChatID: "chat", Epoch: "epoch", Body: "group message"}

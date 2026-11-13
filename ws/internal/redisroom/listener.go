@@ -6,6 +6,14 @@ const roomEventBufferLimit = 256
 
 const roomEventBufferByteLimit = 1 << 20
 
+type listenerState uint8
+
+const (
+	listenerSubscribing listenerState = iota
+	listenerReady
+	listenerStopped
+)
+
 type Listener struct {
 	group       *subscriptionGroup
 	room        string
@@ -17,7 +25,7 @@ type Listener struct {
 	wake        chan struct{}
 	ready       chan struct{}
 	done        chan struct{}
-	readyClosed bool  // guarded by group.mu
+	state       listenerState
 	readyErr    error // guarded by group.mu until ready closes
 	terminalErr error // guarded by group.mu until done closes
 }
@@ -61,7 +69,7 @@ func (listener *Listener) enqueue(live Live, size int) bool {
 func (listener *Listener) Receive(ctx context.Context) (Live, error) {
 	for {
 		listener.group.mu.Lock()
-		if listener.terminalErr != nil {
+		if listener.state == listenerStopped {
 			err := listener.terminalErr
 			listener.group.mu.Unlock()
 			return Live{}, err
@@ -102,9 +110,9 @@ func (listener *Listener) Close() error {
 }
 
 func (listener *Listener) signalReady(err error) {
-	if !listener.readyClosed {
+	if listener.state == listenerSubscribing {
 		listener.readyErr = err
-		listener.readyClosed = true
+		listener.state = listenerReady
 		close(listener.ready)
 	}
 }
@@ -112,6 +120,7 @@ func (listener *Listener) signalReady(err error) {
 func (listener *Listener) stop(err error) {
 	listener.signalReady(err)
 	listener.terminalErr = err
+	listener.state = listenerStopped
 	listener.inline[0] = Live{}
 	listener.pending = nil
 	listener.head = 0

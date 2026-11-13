@@ -18,47 +18,42 @@ class DatabaseTransactionListener(
     override fun afterBegin(transaction: TransactionExecution, beginFailure: Throwable?) {
         val state = transactions.get()?.get(transaction) ?: return
         phase(state, "begin", state.started, beginFailure)
-        if (beginFailure != null) finish(transaction, "begin_failed") else state.activeStarted = System.nanoTime()
+        if (beginFailure != null) finish(transaction, "begin_failed") else state.phase = Phase.Active(System.nanoTime())
     }
 
-    override fun beforeCommit(transaction: TransactionExecution) = beforeCompletion(transaction, "commit")
+    override fun beforeCommit(transaction: TransactionExecution) = beforeCompletion(transaction, CompletionPhase.COMMIT)
 
-    override fun beforeRollback(transaction: TransactionExecution) = beforeCompletion(transaction, "rollback")
+    override fun beforeRollback(transaction: TransactionExecution) = beforeCompletion(transaction, CompletionPhase.ROLLBACK)
 
     override fun afterCommit(transaction: TransactionExecution, commitFailure: Throwable?) {
-        afterCompletion(transaction, "commit", commitFailure, if (commitFailure == null) "committed" else "failed")
+        afterCompletion(transaction, commitFailure, if (commitFailure == null) "committed" else "failed")
     }
 
     override fun afterRollback(transaction: TransactionExecution, rollbackFailure: Throwable?) {
-        afterCompletion(transaction, "rollback", rollbackFailure, if (rollbackFailure == null) "rolled_back" else "failed")
+        afterCompletion(transaction, rollbackFailure, if (rollbackFailure == null) "rolled_back" else "failed")
     }
 
-    private fun beforeCompletion(transaction: TransactionExecution, phase: String) {
+    private fun beforeCompletion(transaction: TransactionExecution, completion: CompletionPhase) {
         val state = transactions.get()?.get(transaction) ?: return
-        finishActive(state)
-        state.completionPhase = phase
-        state.completionStarted = System.nanoTime()
+        val active = state.phase as? Phase.Active
+        active?.let { phase(state, "active", it.started, null) }
+        state.phase = Phase.Completing(completion, System.nanoTime())
     }
 
-    private fun afterCompletion(transaction: TransactionExecution, name: String, failure: Throwable?, outcome: String) {
+    private fun afterCompletion(transaction: TransactionExecution, failure: Throwable?, outcome: String) {
         val state = transactions.get()?.get(transaction) ?: return
-        finishActive(state)
-        state.completionStarted?.let {
-            phase(state, state.completionPhase ?: name, it, failure)
+        when (val current = state.phase) {
+            Phase.Beginning -> Unit
+            is Phase.Active -> phase(state, "active", current.started, null)
+            is Phase.Completing -> phase(state, current.completion.metricValue, current.started, failure)
         }
         finish(transaction, outcome)
-    }
-
-    private fun finishActive(state: State) {
-        val started = state.activeStarted ?: return
-        state.activeStarted = null
-        phase(state, "active", started, null)
     }
 
     private fun phase(state: State, name: String, started: Long, failure: Throwable?) {
         metrics.record(
             "messenger.database.transaction.phase",
-            state.operation.label,
+            state.operation.metricValue,
             if (failure == null) "success" else "failure",
             System.nanoTime() - started,
             name,
@@ -69,15 +64,33 @@ class DatabaseTransactionListener(
         val states = transactions.get() ?: return
         val state = states.remove(transaction) ?: return
         if (states.isEmpty()) transactions.remove()
-        metrics.record("messenger.database.transaction", state.operation.label, outcome, System.nanoTime() - state.started)
+        metrics.record("messenger.database.transaction", state.operation.metricValue, outcome, System.nanoTime() - state.started)
+    }
+
+    private enum class CompletionPhase(
+        val metricValue: String,
+    ) {
+        COMMIT("commit"),
+        ROLLBACK("rollback"),
+    }
+
+    private sealed interface Phase {
+        data object Beginning : Phase
+
+        data class Active(
+            val started: Long,
+        ) : Phase
+
+        data class Completing(
+            val completion: CompletionPhase,
+            val started: Long,
+        ) : Phase
     }
 
     private class State(
         val operation: DatabaseTransaction,
     ) {
         val started = System.nanoTime()
-        var activeStarted: Long? = null
-        var completionStarted: Long? = null
-        var completionPhase: String? = null
+        var phase: Phase = Phase.Beginning
     }
 }

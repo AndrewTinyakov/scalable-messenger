@@ -1,7 +1,12 @@
 package com.andrewtinyakov.messenger.chat.web.controller
 
 import com.andrewtinyakov.messenger.auth.model.AuthenticatedSession
-import com.andrewtinyakov.messenger.chat.service.ChatDeletionService
+import com.andrewtinyakov.messenger.auth.model.UserId
+import com.andrewtinyakov.messenger.chat.deletion.model.DeletionCommand
+import com.andrewtinyakov.messenger.chat.deletion.model.DeletionScope
+import com.andrewtinyakov.messenger.chat.deletion.model.DeletionTarget
+import com.andrewtinyakov.messenger.chat.deletion.service.DeletionService
+import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.service.ChatMembershipService
 import com.andrewtinyakov.messenger.chat.service.ChatService
 import com.andrewtinyakov.messenger.chat.service.DirectChatLookupService
@@ -11,8 +16,7 @@ import com.andrewtinyakov.messenger.chat.web.payload.ChatResponse
 import com.andrewtinyakov.messenger.chat.web.payload.CreateGroupChatRequest
 import com.andrewtinyakov.messenger.chat.web.payload.DirectChatResponse
 import com.andrewtinyakov.messenger.chat.web.payload.GroupMemberPageResponse
-import com.andrewtinyakov.messenger.shared.id.ChatId
-import com.andrewtinyakov.messenger.shared.id.UserId
+import com.andrewtinyakov.messenger.message.model.RequestId
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.DeleteMapping
@@ -29,7 +33,7 @@ import org.springframework.web.bind.annotation.RestController
 @RequestMapping("/v1/chats")
 class ChatController(
     private val chatService: ChatService,
-    private val chatDeletionService: ChatDeletionService,
+    private val deletionService: DeletionService,
     private val chatMembershipService: ChatMembershipService,
     private val directChatLookupService: DirectChatLookupService,
 ) {
@@ -39,7 +43,12 @@ class ChatController(
         session: AuthenticatedSession,
         @PathVariable id: String,
     ) {
-        chatDeletionService.delete(ChatId.parse(id), session.userId)
+        val chatId = ChatId.parse(id)
+        deletionService.delete(
+            chatId = chatId,
+            userId = session.userId,
+            command = DeletionCommand(requestId = RequestId(chatId.value), scope = DeletionScope.EVERYONE, target = DeletionTarget.CHAT),
+        )
     }
 
     @GetMapping
@@ -68,7 +77,7 @@ class ChatController(
         session: AuthenticatedSession,
         @Valid @RequestBody input: CreateGroupChatRequest,
     ): ChatResponse =
-        chatService.createGroup(userId = session.userId, input = input)
+        chatService.createGroup(userId = session.userId, name = input.name, memberIds = input.memberIds.map(UserId::parse))
 
     @GetMapping("/{id}/members")
     fun members(
@@ -91,7 +100,7 @@ class ChatController(
         @PathVariable id: String,
         @Valid @RequestBody input: AddGroupMembersRequest,
     ) {
-        chatService.addMembers(chatId = ChatId.parse(id), actorId = session.userId, input = input)
+        chatService.addMembers(chatId = ChatId.parse(id), userId = session.userId, memberIds = input.memberIds.map(UserId::parse))
     }
 
     @DeleteMapping("/{id}/members/{userId}")
@@ -101,6 +110,6 @@ class ChatController(
         @PathVariable id: String,
         @PathVariable userId: String,
     ) {
-        chatMembershipService.removeMember(chatId = ChatId.parse(id), actorId = session.userId, memberId = UserId.parse(userId))
+        chatMembershipService.removeMember(chatId = ChatId.parse(id), userId = session.userId, memberId = UserId.parse(userId))
     }
 }

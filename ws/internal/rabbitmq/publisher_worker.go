@@ -13,18 +13,34 @@ import (
 	"messenger/ws/internal/monitoring"
 )
 
+type confirmationState uint8
+
+const (
+	confirmationPending confirmationState = iota
+	confirmationReturned
+)
+
+type channelState uint8
+
+const (
+	channelDisconnected channelState = iota
+	channelConnected
+)
+
 type outstandingPublish struct {
 	request     *publishRequest
 	correlation string
 	deadline    time.Time
 	started     time.Time
-	rejected    error
+	state       confirmationState
+	rejection   error
 }
 
 type publishWorker struct {
 	publisher     *Publisher
 	jobs          chan *publishRequest
 	slot          *publishChannel
+	state         channelState
 	pending       map[uint64]*outstandingPublish
 	byCorrelation map[string]*outstandingPublish
 	stopTransport func()
@@ -35,7 +51,7 @@ func (worker *publishWorker) run() {
 	defer p.owned.Done()
 	worker.pending = make(map[uint64]*outstandingPublish)
 	worker.byCorrelation = make(map[string]*outstandingPublish)
-	if worker.slot != nil {
+	if worker.state == channelConnected {
 		worker.stopTransport = interruptTransport(p.ctx, worker.slot.transport)
 	}
 	defer worker.shutdown()
@@ -45,7 +61,7 @@ func (worker *publishWorker) run() {
 		var confirms <-chan amqp.Confirmation
 		var returns <-chan amqp.Return
 		var closed <-chan *amqp.Error
-		if worker.slot != nil {
+		if worker.state == channelConnected {
 			confirms, returns, closed = worker.slot.confirms, worker.slot.returns, worker.slot.closed
 		}
 		select {
@@ -95,7 +111,7 @@ func (worker *publishWorker) accept(request *publishRequest) {
 		return
 	}
 	p.observeQueueWait(request, monitoring.PublishStageReady)
-	if worker.slot == nil {
+	if worker.state == channelDisconnected {
 		setupCtx, cancel := context.WithTimeout(p.ctx, p.confirmTimeout)
 		slot, err := p.newChannel(setupCtx)
 		cancel()
@@ -103,7 +119,7 @@ func (worker *publishWorker) accept(request *publishRequest) {
 			p.finish(request, err)
 			return
 		}
-		worker.slot = slot
+		worker.connect(slot)
 		worker.stopTransport = interruptTransport(p.ctx, slot.transport)
 	}
 	if !request.state.CompareAndSwap(requestQueued, requestPublishing) {
@@ -137,7 +153,10 @@ func (worker *publishWorker) confirm(confirmation amqp.Confirmation) {
 	if publish == nil {
 		return
 	}
-	err := publish.rejected
+	var err error
+	if publish.state == confirmationReturned {
+		err = publish.rejection
+	}
 	if !confirmation.Ack {
 		err = ErrRejected
 	}
@@ -148,7 +167,8 @@ func (worker *publishWorker) confirm(confirmation amqp.Confirmation) {
 
 func (worker *publishWorker) recordReturn(returned amqp.Return) {
 	if publish := worker.byCorrelation[returned.CorrelationId]; publish != nil {
-		publish.rejected = fmt.Errorf("%w: unroutable %d %s", ErrRejected, returned.ReplyCode, returned.ReplyText)
+		publish.state = confirmationReturned
+		publish.rejection = fmt.Errorf("%w: unroutable %d %s", ErrRejected, returned.ReplyCode, returned.ReplyText)
 	}
 }
 
@@ -191,7 +211,7 @@ func (worker *publishWorker) finish(publish *outstandingPublish, err error) {
 
 func (worker *publishWorker) fail(err error) {
 	p := worker.publisher
-	if worker.slot != nil && p.ctx.Err() == nil {
+	if worker.state == channelConnected && p.ctx.Err() == nil {
 		p.recordBroker("rabbit_channel_failed")
 	}
 	if worker.stopTransport != nil {
@@ -200,9 +220,15 @@ func (worker *publishWorker) fail(err error) {
 	}
 	worker.slot.close()
 	worker.slot = nil
+	worker.state = channelDisconnected
 	for _, publish := range worker.pending {
 		worker.finish(publish, err)
 	}
 	clear(worker.pending)
 	clear(worker.byCorrelation)
+}
+
+func (worker *publishWorker) connect(slot *publishChannel) {
+	worker.slot = slot
+	worker.state = channelConnected
 }

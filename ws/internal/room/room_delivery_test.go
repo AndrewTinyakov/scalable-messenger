@@ -93,3 +93,33 @@ func TestCatchupBufferRejectsByteOverflow(t *testing.T) {
 		t.Fatalf("overflow retained %d events and %d bytes", len(m.buffer), m.bufferBytes)
 	}
 }
+
+func TestCatchupDrainCannotRestoreDepartedMember(t *testing.T) {
+	member := newRoomMember()
+	sink := &blockingSink{blocked: make(chan struct{}), release: make(chan struct{})}
+	member.deliver(sink, protocol.Event{Type: protocol.EventMessageSaved, EventID: "buffered"}, 8, 4096)
+	done := make(chan struct{})
+	go func() {
+		member.finish(sink, "group:room", []string{"chat"}, nil)
+		close(done)
+	}()
+	select {
+	case <-sink.blocked:
+	case <-time.After(time.Second):
+		t.Fatal("catch-up drain did not start")
+	}
+	member.leave()
+	close(sink.release)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("catch-up drain did not finish")
+	}
+	member.beginCatchup()
+	member.deliver(sink, protocol.Event{Type: protocol.EventMessageSaved, EventID: "late"}, 8, 4096)
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	if len(sink.events) != 1 || sink.events[0].EventID != "buffered" {
+		t.Fatalf("departed member received %+v", sink.events)
+	}
+}

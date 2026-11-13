@@ -12,6 +12,14 @@ import (
 
 const maxLiveEventBytes = 64 << 10
 
+type subscriptionGroupState uint8
+
+const (
+	subscriptionIdle subscriptionGroupState = iota
+	subscriptionReading
+	subscriptionClosed
+)
+
 type subscriptionGroup struct {
 	hub           *subscriptionHub
 	address       string
@@ -25,15 +33,14 @@ type subscriptionGroup struct {
 	listeners     map[string]*Listener
 	unsubscribing map[string]chan struct{} // per-channel unsubscribe completion, guarded by mu
 	unsubscribe   func(context.Context, string) error
-	started       bool
-	closed        bool
+	state         subscriptionGroupState
 }
 
 func (group *subscriptionGroup) add(ctx context.Context, room string) (*Listener, error) {
 	channel := Channel(room)
 	for {
 		group.mu.Lock()
-		if group.closed {
+		if group.state == subscriptionClosed {
 			group.mu.Unlock()
 			return nil, errSubscriptionClosed
 		}
@@ -62,14 +69,14 @@ func (group *subscriptionGroup) add(ctx context.Context, room string) (*Listener
 		group.fail(fmt.Errorf("subscribe room %s: %w", room, err))
 		return nil, err
 	}
-	if !group.started {
+	if group.state == subscriptionIdle {
 		group.hub.mu.Lock()
-		if group.hub.closed {
+		if group.hub.state == subscriptionHubClosed {
 			group.hub.mu.Unlock()
 			group.mu.Unlock()
 			return nil, errSubscriptionClosed
 		}
-		group.started = true
+		group.state = subscriptionReading
 		if group.hub.owner.metrics != nil {
 			group.hub.owner.metrics.BrokerEvents.WithLabelValues("feed_started").Inc()
 		}
@@ -160,7 +167,7 @@ func (group *subscriptionGroup) remove(listener *Listener, reason error) {
 	listener.stop(reason)
 	last := len(group.listeners) == 0
 	if last {
-		group.closed = true
+		group.state = subscriptionClosed
 	} else {
 		group.unsubscribing[channel] = make(chan struct{})
 	}
@@ -185,11 +192,11 @@ func (group *subscriptionGroup) remove(listener *Listener, reason error) {
 
 func (group *subscriptionGroup) fail(err error) {
 	group.mu.Lock()
-	if group.closed {
+	if group.state == subscriptionClosed {
 		group.mu.Unlock()
 		return
 	}
-	group.closed = true
+	group.state = subscriptionClosed
 	if group.hub.owner.metrics != nil && group.ctx.Err() == nil {
 		group.hub.owner.metrics.BrokerEvents.WithLabelValues("redis_feed_failed").Inc()
 	}

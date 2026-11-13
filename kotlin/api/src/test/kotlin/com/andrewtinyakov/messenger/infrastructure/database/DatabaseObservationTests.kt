@@ -1,6 +1,7 @@
 package com.andrewtinyakov.messenger.infrastructure.database
 
 import com.andrewtinyakov.messenger.auth.model.User
+import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.auth.repository.UserRepository
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseMetrics
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseObservation
@@ -9,10 +10,9 @@ import com.andrewtinyakov.messenger.infrastructure.database.observability.Databa
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseTransaction
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseTransactionListener
 import com.andrewtinyakov.messenger.infrastructure.database.observability.observedExecute
+import com.andrewtinyakov.messenger.message.model.RequestId
 import com.andrewtinyakov.messenger.message.repository.MessageRepository
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
-import com.andrewtinyakov.messenger.shared.id.RequestId
-import com.andrewtinyakov.messenger.shared.id.UserId
 import com.andrewtinyakov.messenger.shared.id.newId
 import io.micrometer.core.instrument.Meter
 import io.micrometer.core.instrument.MeterRegistry

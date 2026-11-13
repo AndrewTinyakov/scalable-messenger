@@ -1,12 +1,12 @@
 package com.andrewtinyakov.messenger.message.repository
 
+import com.andrewtinyakov.messenger.auth.model.UserId
+import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.message.model.Message
+import com.andrewtinyakov.messenger.message.model.MessageId
+import com.andrewtinyakov.messenger.message.model.RequestId
 import com.andrewtinyakov.messenger.message.model.SavedMessage
 import com.andrewtinyakov.messenger.message.model.SendResult
-import com.andrewtinyakov.messenger.shared.id.ChatId
-import com.andrewtinyakov.messenger.shared.id.MessageId
-import com.andrewtinyakov.messenger.shared.id.RequestId
-import com.andrewtinyakov.messenger.shared.id.UserId
 
 interface MessageRepository {
     fun findMessagesForPublication(messageIds: List<MessageId>): List<Message>

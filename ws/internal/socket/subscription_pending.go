@@ -113,7 +113,7 @@ func (subscriptions *chatSubscriptions) commitGroupBatch(base context.Context, g
 	if err := connection.admissionError(); err != nil {
 		return err
 	}
-	if connection.closed {
+	if connection.state == lifecycleClosed {
 		return context.Canceled
 	}
 	for chatID, grant := range grants {
@@ -122,7 +122,7 @@ func (subscriptions *chatSubscriptions) commitGroupBatch(base context.Context, g
 		}
 	}
 	for chatID, grant := range grants {
-		grant.authorized = true
+		grant.authorize()
 		subscriptions.rooms[chatID] = roomname.Group(chatID)
 		subscriptions.renewGroupLocked(chatID)
 	}

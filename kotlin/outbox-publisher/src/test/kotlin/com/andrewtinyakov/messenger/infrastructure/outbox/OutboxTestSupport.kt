@@ -1,6 +1,10 @@
 package com.andrewtinyakov.messenger.infrastructure.outbox
 
-import com.andrewtinyakov.messenger.shared.id.EventId
+import com.andrewtinyakov.messenger.generated.messaging.event.RoomEventType
+import com.andrewtinyakov.messenger.infrastructure.outbox.model.EventId
+import com.andrewtinyakov.messenger.infrastructure.outbox.model.OutboxBacklog
+import com.andrewtinyakov.messenger.infrastructure.outbox.model.OutboxMessage
+import com.andrewtinyakov.messenger.infrastructure.outbox.repository.OutboxClaimRepository
 import com.andrewtinyakov.messenger.shared.id.newId
 import org.mockito.ArgumentMatchers.any
 import org.mockito.Mockito.mock
@@ -28,7 +32,7 @@ internal fun outboxTransactions(): TransactionTemplate {
 
 internal class MemoryOutbox(
     initial: List<OutboxMessage>,
-) : OutboxRepository {
+) : OutboxClaimRepository {
     private val rows = initial.associateByTo(linkedMapOf()) { it.id }
     private val owners = mutableMapOf<EventId, String>()
 
@@ -67,9 +71,7 @@ internal class MemoryOutbox(
     }
 
     @Synchronized
-    override fun enqueue(messages: Collection<OutboxMessage>) {
-        messages.forEach { rows[it.id] = it }
-    }
+    override fun backlog(): OutboxBacklog = OutboxBacklog(rows.size.toLong(), rows.values.mapNotNull { it.createdAt }.minOrNull())
 
     @Synchronized
     fun remaining(): List<OutboxMessage> = rows.values.toList()

@@ -1,13 +1,13 @@
 package com.andrewtinyakov.messenger.chat.grpc
 
+import com.andrewtinyakov.messenger.auth.model.SessionId
+import com.andrewtinyakov.messenger.auth.model.UserId
+import com.andrewtinyakov.messenger.chat.grpc.repository.SidebarAuthorizationRepository
+import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.service.ChatMembershipService
 import com.andrewtinyakov.messenger.chat.service.ChatService
-import com.andrewtinyakov.messenger.chat.web.payload.CreateGroupChatRequest
 import com.andrewtinyakov.messenger.message.service.MessageSendService
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
-import com.andrewtinyakov.messenger.shared.id.ChatId
-import com.andrewtinyakov.messenger.shared.id.SessionId
-import com.andrewtinyakov.messenger.shared.id.UserId
 import com.andrewtinyakov.messenger.shared.id.newId
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
@@ -29,8 +29,8 @@ class SidebarAuthorizationTests
             val owner = user("sidebar-owner")
             val peer = user("sidebar-peer")
             val stranger = user("sidebar-stranger")
-            val group = chats.createGroup(UserId(owner), CreateGroupChatRequest("Sidebar", listOf(peer)))
-            val foreign = chats.createGroup(UserId(stranger), CreateGroupChatRequest("Foreign", listOf(peer)))
+            val group = chats.createGroup(UserId(owner), "Sidebar", listOf(peer).map(::UserId))
+            val foreign = chats.createGroup(UserId(stranger), "Foreign", listOf(peer).map(::UserId))
             val request = newId()
             sends.process(command(owner, request, "Direct", recipient = peer))
             val direct = db.queryForObject(

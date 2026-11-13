@@ -92,35 +92,45 @@ export function useMessengerSocket({
   const createdChatRef = useRef<string | null>(null)
 
   useEffect(() => {
-    let disposed = false
+    let summary:
+      | { phase: 'idle' | 'refreshing' | 'closed' }
+      | {
+          phase: 'scheduled'
+          timer: ReturnType<typeof setTimeout>
+        } = { phase: 'idle' }
+    const disposed = () => summary.phase === 'closed'
     const summaryChats = new Set<string>()
-    let summaryTimer: ReturnType<typeof setTimeout> | undefined
-    let summaryRunning = false
     const refreshSummaries = async () => {
-      summaryTimer = undefined
-      if (disposed || summaryRunning) return
-      summaryRunning = true
+      if (disposed() || summary.phase === 'refreshing') return
+      summary = { phase: 'refreshing' }
       const batch = [...summaryChats].slice(0, 10)
       for (const id of batch) summaryChats.delete(id)
       await Promise.all(
         batch.map(async (id) => {
           try {
-            if (!disposed) await refreshChatSummary(id)
+            if (!disposed()) await refreshChatSummary(id)
           } catch {}
         }),
       )
-      summaryRunning = false
-      if (!disposed && summaryChats.size)
-        summaryTimer = setTimeout(() => void refreshSummaries(), 500 + Math.random() * 1500)
+      if (disposed()) return
+      summary = summaryChats.size
+        ? {
+            phase: 'scheduled',
+            timer: setTimeout(() => void refreshSummaries(), 500 + Math.random() * 1500),
+          }
+        : { phase: 'idle' }
     }
     const invalidateSummary = (id: string, jitter = false) => {
-      if (summaryChats.size >= 100 && !summaryChats.has(id)) return
+      if (disposed() || (summaryChats.size >= 100 && !summaryChats.has(id))) return
       summaryChats.add(id)
-      if (summaryTimer === undefined && !summaryRunning)
-        summaryTimer = setTimeout(
-          () => void refreshSummaries(),
-          500 + (jitter ? Math.random() * 1500 : 0),
-        )
+      if (summary.phase === 'idle')
+        summary = {
+          phase: 'scheduled',
+          timer: setTimeout(
+            () => void refreshSummaries(),
+            500 + (jitter ? Math.random() * 1500 : 0),
+          ),
+        }
     }
     const close = connectSocket({
       url: websocketUrl(),
@@ -160,7 +170,7 @@ export function useMessengerSocket({
         } else if (frame.type === EventType.CHAT_CREATED) {
           if (frame.chatId === selectedRef.current) createdChatRef.current = frame.chatId
           void refreshChats(false, true).then((list) => {
-            if (disposed || socketRef.current !== socket) return
+            if (disposed() || socketRef.current !== socket) return
             const created = createdChatRef.current
             createdChatRef.current = null
             if (created && list.some((chat) => chat.id === created)) {
@@ -179,7 +189,7 @@ export function useMessengerSocket({
             )
               createdChatRef.current = frame.chatId
             void refreshChats(false, true).then((list) => {
-              if (disposed || socketRef.current !== socket) return
+              if (disposed() || socketRef.current !== socket) return
               const created = createdChatRef.current
               createdChatRef.current = null
               if (created && list.some((chat) => chat.id === created))
@@ -203,7 +213,8 @@ export function useMessengerSocket({
               forwardedFromUserId: frame.forwardedFromUserId,
             },
             frame.room,
-            () => !disposed && socketRef.current === socket && socket.readyState === WebSocket.OPEN,
+            () =>
+              !disposed() && socketRef.current === socket && socket.readyState === WebSocket.OPEN,
             frame.epoch,
             frame.streamId,
           )
@@ -283,8 +294,8 @@ export function useMessengerSocket({
     retryNowRef.current = close.retryNow
     return () => {
       retryNowRef.current = () => {}
-      disposed = true
-      clearTimeout(summaryTimer)
+      if (summary.phase === 'scheduled') clearTimeout(summary.timer)
+      summary = { phase: 'closed' }
       summaryChats.clear()
       close()
     }

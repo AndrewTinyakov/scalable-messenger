@@ -28,7 +28,7 @@ func TestDrainStopsAdmissionAndSpreadsExistingCloses(t *testing.T) {
 	deadline := time.Now().Add(time.Second)
 	for {
 		server.mu.Lock()
-		draining := server.draining
+		draining := server.state == serverDraining
 		server.mu.Unlock()
 		if draining {
 			break

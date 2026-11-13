@@ -1,5 +1,7 @@
 package com.andrewtinyakov.messenger.message.repository
 
+import com.andrewtinyakov.messenger.auth.model.UserId
+import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.generated.messaging.event.SendRejectionReason
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Routines
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHATS
@@ -10,15 +12,14 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.rec
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseObservation
 import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseOperation
 import com.andrewtinyakov.messenger.message.model.Message
+import com.andrewtinyakov.messenger.message.model.MessageId
+import com.andrewtinyakov.messenger.message.model.RequestId
 import com.andrewtinyakov.messenger.message.model.SavedMessage
+import com.andrewtinyakov.messenger.message.model.SendBatch
 import com.andrewtinyakov.messenger.message.model.SendResult
 import com.andrewtinyakov.messenger.message.model.SendResultStatus
 import com.andrewtinyakov.messenger.message.model.asReply
-import com.andrewtinyakov.messenger.message.visibility.visibleMessage
-import com.andrewtinyakov.messenger.shared.id.ChatId
-import com.andrewtinyakov.messenger.shared.id.MessageId
-import com.andrewtinyakov.messenger.shared.id.RequestId
-import com.andrewtinyakov.messenger.shared.id.UserId
+import com.andrewtinyakov.messenger.message.visibility.repository.visibleMessage
 import org.jooq.DSLContext
 import org.jooq.impl.DSL
 import org.springframework.stereotype.Repository
@@ -32,7 +33,7 @@ class JooqMessageRepository(
     override fun findMessagesForPublication(
         messageIds: List<MessageId>,
     ): List<Message> = DatabaseObservation.query(DatabaseOperation.MESSAGE_PUBLICATION_HYDRATE) {
-        require(messageIds.size <= 100)
+        require(messageIds.size <= Message.MAX_LOOKUP_IDS)
         if (messageIds.isEmpty()) return@query emptyList()
         return@query db.select(MESSAGES.asterisk()).from(MESSAGES).join(CHATS).on(CHATS.ID.eq(MESSAGES.CHAT_ID))
             .where(
@@ -93,7 +94,7 @@ class JooqMessageRepository(
     }
 
     override fun insertSendResult(result: SendResult) = DatabaseObservation.query(DatabaseOperation.MESSAGE_INSERT_SEND_RESULT) {
-        check(sendResultInsert(result).execute() == 1)
+        check(sendResultsInsert(listOf(result)).execute() == 1)
     }
 
     override fun findSendResults(requests: Map<UserId, List<RequestId>>): List<SendResult> = DatabaseObservation.query(
@@ -112,16 +113,32 @@ class JooqMessageRepository(
             .fetch { it.toSendResult() }
     }
 
-    private fun sendResultInsert(result: SendResult) = db.insertInto(SEND_REQUESTS)
-        .set(SEND_REQUESTS.SENDER_ID, result.senderId.value)
-        .set(SEND_REQUESTS.REQUEST_ID, result.requestId.value)
-        .set(SEND_REQUESTS.CHAT_ID, result.chatId?.value)
-        .set(SEND_REQUESTS.RECIPIENT_ID, result.recipientId?.value)
-        .set(SEND_REQUESTS.FINGERPRINT, result.fingerprint)
-        .set(SEND_REQUESTS.STATUS, DbSendResultStatus.valueOf(result.status.name))
-        .set(SEND_REQUESTS.MESSAGE_ID, result.messageId?.value)
-        .set(SEND_REQUESTS.SEQUENCE, result.sequence)
-        .set(SEND_REQUESTS.REASON, result.reason?.let { DbSendRejectionReason.valueOf(it.name) })
+    private fun sendResultsInsert(results: List<SendResult>) = results.fold(
+        db.insertInto(
+            SEND_REQUESTS,
+            SEND_REQUESTS.SENDER_ID,
+            SEND_REQUESTS.REQUEST_ID,
+            SEND_REQUESTS.CHAT_ID,
+            SEND_REQUESTS.RECIPIENT_ID,
+            SEND_REQUESTS.FINGERPRINT,
+            SEND_REQUESTS.STATUS,
+            SEND_REQUESTS.MESSAGE_ID,
+            SEND_REQUESTS.SEQUENCE,
+            SEND_REQUESTS.REASON,
+        ),
+    ) { insert, result ->
+        insert.values(
+            result.senderId.value,
+            result.requestId.value,
+            result.chatId?.value,
+            result.recipientId?.value,
+            result.fingerprint,
+            DbSendResultStatus.valueOf(result.status.name),
+            result.messageId?.value,
+            result.sequence,
+            result.reason?.let { DbSendRejectionReason.valueOf(it.name) },
+        )
+    }
 
     override fun insertSavedMessage(message: Message, result: SendResult) = DatabaseObservation.query(
         DatabaseOperation.MESSAGE_INSERT_SAVED_MESSAGE,
@@ -133,7 +150,7 @@ class JooqMessageRepository(
         DatabaseOperation.MESSAGE_INSERT_SAVED_MESSAGES,
     ) {
         if (messages.isEmpty()) return@query
-        require(messages.size <= 16) { "Saved message batch must contain at most sixteen messages" }
+        require(messages.size <= SendBatch.MAX_SIZE) { "Saved message batch must contain at most ${SendBatch.MAX_SIZE} messages" }
         val messageInsert = db.insertInto(
             MESSAGES,
             MESSAGES.ID,
@@ -145,19 +162,7 @@ class JooqMessageRepository(
             MESSAGES.REPLY_TO_MESSAGE_ID,
             MESSAGES.FORWARDED_FROM_USER_ID,
         )
-        val resultInsert = db.insertInto(
-            SEND_REQUESTS,
-            SEND_REQUESTS.SENDER_ID,
-            SEND_REQUESTS.REQUEST_ID,
-            SEND_REQUESTS.CHAT_ID,
-            SEND_REQUESTS.RECIPIENT_ID,
-            SEND_REQUESTS.FINGERPRINT,
-            SEND_REQUESTS.STATUS,
-            SEND_REQUESTS.MESSAGE_ID,
-            SEND_REQUESTS.SEQUENCE,
-            SEND_REQUESTS.REASON,
-        )
-        for ((message, result) in messages) {
+        for ((message, _) in messages) {
             messageInsert.values(
                 message.id.value,
                 message.chatId.value,
@@ -168,18 +173,8 @@ class JooqMessageRepository(
                 message.reply?.messageId?.value,
                 message.forwardedFromUserId?.value,
             )
-            resultInsert.values(
-                result.senderId.value,
-                result.requestId.value,
-                result.chatId?.value,
-                result.recipientId?.value,
-                result.fingerprint,
-                DbSendResultStatus.valueOf(result.status.name),
-                result.messageId?.value,
-                result.sequence,
-                result.reason?.let { DbSendRejectionReason.valueOf(it.name) },
-            )
         }
+        val resultInsert = sendResultsInsert(messages.map { it.result })
         check(db.batch(messageInsert, resultInsert).execute().all { it == messages.size })
     }
 
@@ -221,8 +216,8 @@ class JooqMessageRepository(
     private fun visibleToMember(chatId: ChatId, userId: UserId) = visibleMessage(chatId, userId, MESSAGES.SEQUENCE)
 
     override fun findMessagesByIds(chatId: ChatId, userId: UserId, messageIds: List<MessageId>): List<Message> =
-        DatabaseObservation.query(DatabaseOperation.MESSAGE_FIND_MESSAGE) {
-            require(messageIds.size <= 100)
+        DatabaseObservation.query(DatabaseOperation.MESSAGE_FIND_MESSAGES_BY_IDS) {
+            require(messageIds.size <= Message.MAX_LOOKUP_IDS)
             if (messageIds.isEmpty()) return@query emptyList()
             db.selectFrom(MESSAGES)
                 .where(MESSAGES.CHAT_ID.eq(chatId.value), MESSAGES.ID.`in`(messageIds.map { it.value }), visibleToMember(chatId, userId))

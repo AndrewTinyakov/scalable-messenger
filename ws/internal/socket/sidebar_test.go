@@ -53,7 +53,7 @@ func newSidebarTestServer(t *testing.T) (*Server, *sidebarTestDependencies) {
 	s.sidebar = newSidebarCoordinator(s)
 	t.Cleanup(func() {
 		s.sidebar.mu.Lock()
-		s.sidebar.closed = true
+		s.sidebar.state = lifecycleClosed
 		for c := range s.sidebar.watches {
 			s.sidebar.removeLocked(c)
 		}

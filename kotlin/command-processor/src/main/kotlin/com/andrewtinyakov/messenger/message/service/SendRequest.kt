@@ -1,14 +1,13 @@
 package com.andrewtinyakov.messenger.message.service
 
+import com.andrewtinyakov.messenger.auth.model.UserId
+import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.generated.messaging.command.SendMessageCommandV1
 import com.andrewtinyakov.messenger.generated.messaging.event.SendRejectionReason
+import com.andrewtinyakov.messenger.message.model.Message
+import com.andrewtinyakov.messenger.message.model.MessageId
+import com.andrewtinyakov.messenger.message.model.RequestId
 import com.andrewtinyakov.messenger.shared.crypto.sha256
-import com.andrewtinyakov.messenger.shared.id.ChatId
-import com.andrewtinyakov.messenger.shared.id.MessageId
-import com.andrewtinyakov.messenger.shared.id.RequestId
-import com.andrewtinyakov.messenger.shared.id.UserId
-
-private const val MAX_BODY_CODE_POINTS = 4000
 
 internal data class SendRequest(
     val chatId: ChatId?,
@@ -34,10 +33,18 @@ internal data class SendRequest(
         }
     }
 
+    val draftReferenceRejection: SendRejectionReason?
+        get() = when {
+            recipientId == null -> null
+            replyToMessageId != null -> SendRejectionReason.INVALID_REPLY_TARGET
+            forwardSource != null -> SendRejectionReason.INVALID_FORWARD_SOURCE
+            else -> null
+        }
+
     val bodyRejection: SendRejectionReason?
         get() = when {
             body.isBlank() -> SendRejectionReason.EMPTY_BODY
-            body.codePointCount(0, body.length) > MAX_BODY_CODE_POINTS -> SendRejectionReason.BODY_TOO_LONG
+            body.codePointCount(0, body.length) > Message.MAX_BODY_LENGTH -> SendRejectionReason.BODY_TOO_LONG
             else -> null
         }
 }

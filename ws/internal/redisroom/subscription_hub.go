@@ -10,6 +10,13 @@ import (
 
 var errSubscriptionClosed = errors.New("Redis room subscription closed")
 
+type subscriptionHubState uint8
+
+const (
+	subscriptionHubOpen subscriptionHubState = iota
+	subscriptionHubClosed
+)
+
 // One PubSub connection handles all locally active channels on each Redis primary.
 // Redis Cluster requires a channel's SSUBSCRIBE to run on its slot owner.
 type subscriptionHub struct {
@@ -17,7 +24,7 @@ type subscriptionHub struct {
 	mu     sync.Mutex
 	groups map[string]*subscriptionGroup
 	slots  []slotOwner
-	closed bool
+	state  subscriptionHubState
 	wg     sync.WaitGroup
 }
 
@@ -48,7 +55,7 @@ func (h *subscriptionHub) Subscribe(ctx context.Context, room string) (*Listener
 func (h *subscriptionHub) group(ctx context.Context, room string) (*subscriptionGroup, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.closed {
+	if h.state == subscriptionHubClosed {
 		return nil, errSubscriptionClosed
 	}
 	address, err := h.address(ctx, room)
@@ -79,7 +86,7 @@ func (h *subscriptionHub) group(ctx context.Context, room string) (*subscription
 
 func (h *subscriptionHub) Close() {
 	h.mu.Lock()
-	h.closed = true
+	h.state = subscriptionHubClosed
 	groups := make([]*subscriptionGroup, 0, len(h.groups))
 	for _, group := range h.groups {
 		groups = append(groups, group)

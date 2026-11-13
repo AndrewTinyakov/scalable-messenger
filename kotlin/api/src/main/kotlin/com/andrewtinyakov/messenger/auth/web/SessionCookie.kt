@@ -2,15 +2,14 @@ package com.andrewtinyakov.messenger.auth.web
 
 import com.andrewtinyakov.messenger.auth.config.AuthProperties
 import com.andrewtinyakov.messenger.auth.model.SessionCredentials
-import com.andrewtinyakov.messenger.shared.id.SessionToken
-import com.andrewtinyakov.messenger.shared.id.isValidSessionToken
+import com.andrewtinyakov.messenger.auth.model.SessionToken
+import com.andrewtinyakov.messenger.auth.model.isValidSessionToken
 import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
-import com.andrewtinyakov.messenger.shared.web.ApiException
+import com.andrewtinyakov.messenger.shared.web.unauthorized
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
 import org.springframework.boot.webmvc.autoconfigure.WebMvcProperties
 import org.springframework.http.HttpHeaders
-import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseCookie
 import org.springframework.stereotype.Component
 import java.time.Clock
@@ -26,7 +25,7 @@ class SessionCookie(
         val values = request.cookies.orEmpty().filter { it.name == NAME }.map { it.value }
         if (values.isEmpty()) return null
         if (values.size != 1 || !isValidSessionToken(values.single())) {
-            throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.UNAUTHORIZED, "Invalid session cookie")
+            unauthorized(ApiErrorCode.UNAUTHORIZED, "Invalid session cookie")
         }
         return SessionToken(values.single())
     }

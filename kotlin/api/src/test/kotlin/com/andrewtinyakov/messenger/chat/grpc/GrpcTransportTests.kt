@@ -1,17 +1,19 @@
 package com.andrewtinyakov.messenger.chat.grpc
 
+import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.auth.service.AuthenticationService
 import com.andrewtinyakov.messenger.auth.web.payload.AuthRequest
+import com.andrewtinyakov.messenger.chat.grpc.config.GrpcProperties
+import com.andrewtinyakov.messenger.chat.grpc.config.GrpcServerLifecycle
+import com.andrewtinyakov.messenger.chat.grpc.service.ChatAuthorizationGrpcService
+import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.service.ChatMembershipService
 import com.andrewtinyakov.messenger.chat.service.ChatService
-import com.andrewtinyakov.messenger.chat.web.payload.AddGroupMembersRequest
-import com.andrewtinyakov.messenger.chat.web.payload.CreateGroupChatRequest
 import com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupRequest
 import com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupsRequest
 import com.andrewtinyakov.messenger.generated.grpc.ChatAuthorizationGrpc
 import com.andrewtinyakov.messenger.generated.grpc.ValidateSessionRequest
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
-import com.andrewtinyakov.messenger.shared.id.ChatId
 import com.andrewtinyakov.messenger.shared.id.newId
 import io.grpc.Status
 import io.grpc.StatusRuntimeException
@@ -181,8 +183,8 @@ class GrpcTransportTests : MessengerIntegrationTest() {
         val owner = authenticationService.register(AuthRequest("owner_$suffix", "test-password"))
         val member = authenticationService.register(AuthRequest("member_$suffix", "test-password"))
         val other = authenticationService.register(AuthRequest("other_$suffix", "test-password"))
-        val joined = chatService.createGroup(owner.session.userId, CreateGroupChatRequest("Joined", listOf(member.session.userId.value)))
-        val unjoined = chatService.createGroup(owner.session.userId, CreateGroupChatRequest("Unjoined", listOf(other.session.userId.value)))
+        val joined = chatService.createGroup(owner.session.userId, "Joined", listOf(member.session.userId.value).map(::UserId))
+        val unjoined = chatService.createGroup(owner.session.userId, "Unjoined", listOf(other.session.userId.value).map(::UserId))
         val single = AuthorizeGroupRequest.newBuilder().setSessionId(member.session.sessionId.value).setChatId(joined.id).build()
         val batch = AuthorizeGroupsRequest.newBuilder().setSessionId(
             member.session.sessionId.value,
@@ -205,8 +207,8 @@ class GrpcTransportTests : MessengerIntegrationTest() {
             assertEquals(emptyList<String>(), client.authorizeGroups(batch).authorizedChatIdsList)
             chatService.addMembers(
                 chatId = ChatId(unjoined.id),
-                actorId = owner.session.userId,
-                input = AddGroupMembersRequest(memberIds = listOf(member.session.userId.value)),
+                userId = owner.session.userId,
+                memberIds = listOf(member.session.userId.value).map(::UserId),
             )
             assertEquals("group:${unjoined.id}", client.authorizeGroup(single.toBuilder().setChatId(unjoined.id).build()).room)
             assertEquals(listOf(unjoined.id), client.authorizeGroups(batch).authorizedChatIdsList)

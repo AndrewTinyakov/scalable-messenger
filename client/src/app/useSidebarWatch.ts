@@ -8,7 +8,7 @@ interface Options {
   connectionGeneration: number
   connected: boolean
   userId: string
-  selectedChatId?: string | null
+  selectedChat?: Chat
   listChats(): Chat[]
   send(frame: OutgoingSocketFrame): void
 }
@@ -22,7 +22,7 @@ export function useSidebarWatch(options: Options) {
   const observedAt = useRef(0)
   const expiry = useRef<ReturnType<typeof setTimeout>>()
   const watchSidebarPeers = useCallback((chatIds: string[]) => setVisible(chatIds), [])
-  const selected = options.selectedChatId
+  const selected = options.selectedChat?.id
   const key = useMemo(
     () =>
       [...new Set([...(selected ? [selected] : []), ...visible].filter(isId))]
@@ -34,8 +34,7 @@ export function useSidebarWatch(options: Options) {
   const watchedIds = new Set(key ? key.split(',') : [])
   const peerKey = [
     ...new Set(
-      options
-        .listChats()
+      [...options.listChats(), ...(options.selectedChat ? [options.selectedChat] : [])]
         .filter((chat) => watchedIds.has(chat.id) && chat.kind === ChatKind.DIRECT)
         .flatMap((chat) => chat.members.map((member) => member.id))
         .filter((id) => id !== options.userId),

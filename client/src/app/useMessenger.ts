@@ -211,18 +211,19 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     },
     [removeChat, leaveHistory, closeChat],
   )
+  const selectedChat =
+    chats.find((chat) => chat.id === selectedId) ??
+    (draftChat?.id === selectedId ? draftChat : undefined)
   const sidebar = useSidebarWatch({
     connectionGeneration,
     connected: connection === 'connected',
     userId: session.user.id,
-    selectedChatId: selectedId,
+    selectedChat,
     listChats,
     send: sendConnectedFrame,
   })
   const features = useConversationFeatures({
-    chat:
-      chats.find((chat) => chat.id === selectedId) ??
-      (draftChat?.id === selectedId ? draftChat : undefined),
+    chat: selectedChat,
     connected: connection === 'connected',
     recovery,
     sessionApi,

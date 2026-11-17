@@ -13,11 +13,11 @@ import com.andrewtinyakov.messenger.auth.repository.SessionRepository
 import com.andrewtinyakov.messenger.auth.repository.UserRepository
 import com.andrewtinyakov.messenger.auth.web.payload.AuthRequest
 import com.andrewtinyakov.messenger.generated.messaging.event.SessionRevokedEventV1
-import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseTransaction
-import com.andrewtinyakov.messenger.infrastructure.database.observability.observedExecute
-import com.andrewtinyakov.messenger.infrastructure.database.observability.observedExecuteWithoutResult
-import com.andrewtinyakov.messenger.infrastructure.outbox.model.toOutboxMessage
-import com.andrewtinyakov.messenger.infrastructure.outbox.repository.OutboxRepository
+import com.andrewtinyakov.messenger.infrastructure.database.DatabaseTransaction
+import com.andrewtinyakov.messenger.infrastructure.database.observedExecute
+import com.andrewtinyakov.messenger.infrastructure.database.observedExecuteWithoutResult
+import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxRepository
+import com.andrewtinyakov.messenger.infrastructure.outbox.toOutboxMessage
 import com.andrewtinyakov.messenger.infrastructure.redis.RoomAddress
 import com.andrewtinyakov.messenger.shared.crypto.sha256
 import com.andrewtinyakov.messenger.shared.id.newId

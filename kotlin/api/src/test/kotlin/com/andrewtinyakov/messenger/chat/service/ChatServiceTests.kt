@@ -8,8 +8,8 @@ import com.andrewtinyakov.messenger.chat.repository.ChatDirectoryRepository
 import com.andrewtinyakov.messenger.chat.repository.ChatRepository
 import com.andrewtinyakov.messenger.chat.repository.GroupMembershipRepository
 import com.andrewtinyakov.messenger.generated.messaging.event.SendRejectionReason
-import com.andrewtinyakov.messenger.infrastructure.outbox.model.OutboxMessage
-import com.andrewtinyakov.messenger.infrastructure.outbox.repository.OutboxRepository
+import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxMessage
+import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxRepository
 import com.andrewtinyakov.messenger.message.model.CommandResult
 import com.andrewtinyakov.messenger.message.model.RequestId
 import com.andrewtinyakov.messenger.message.service.MessageSendService

@@ -3,7 +3,7 @@ package com.andrewtinyakov.messenger.chat.repository
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.Chat
 import com.andrewtinyakov.messenger.chat.model.ChatId
-import com.andrewtinyakov.messenger.infrastructure.outbox.model.OutboxMessage
+import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxMessage
 
 interface ChatRepository {
     fun existingMemberIds(chatId: ChatId, userIds: List<UserId>): Set<UserId>

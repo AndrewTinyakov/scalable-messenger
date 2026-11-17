@@ -7,11 +7,11 @@ import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.model.ChatKind
 import com.andrewtinyakov.messenger.chat.model.MemberChat
 import com.andrewtinyakov.messenger.chat.model.MemberChatDetails
+import com.andrewtinyakov.messenger.infrastructure.database.DatabaseObservation
+import com.andrewtinyakov.messenger.infrastructure.database.DatabaseOperation
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHATS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHAT_MEMBERS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.USERS
-import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseObservation
-import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseOperation
 import org.jooq.Condition
 import org.jooq.DSLContext
 import org.jooq.Field

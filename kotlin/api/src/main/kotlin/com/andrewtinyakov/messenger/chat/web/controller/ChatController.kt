@@ -2,10 +2,6 @@ package com.andrewtinyakov.messenger.chat.web.controller
 
 import com.andrewtinyakov.messenger.auth.model.AuthenticatedSession
 import com.andrewtinyakov.messenger.auth.model.UserId
-import com.andrewtinyakov.messenger.chat.deletion.model.DeletionCommand
-import com.andrewtinyakov.messenger.chat.deletion.model.DeletionScope
-import com.andrewtinyakov.messenger.chat.deletion.model.DeletionTarget
-import com.andrewtinyakov.messenger.chat.deletion.service.DeletionService
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.service.ChatMembershipService
 import com.andrewtinyakov.messenger.chat.service.ChatService
@@ -16,6 +12,8 @@ import com.andrewtinyakov.messenger.chat.web.payload.ChatResponse
 import com.andrewtinyakov.messenger.chat.web.payload.CreateGroupChatRequest
 import com.andrewtinyakov.messenger.chat.web.payload.DirectChatResponse
 import com.andrewtinyakov.messenger.chat.web.payload.GroupMemberPageResponse
+import com.andrewtinyakov.messenger.deletion.model.DeletionScope
+import com.andrewtinyakov.messenger.deletion.service.DeletionService
 import com.andrewtinyakov.messenger.message.model.RequestId
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
@@ -44,10 +42,11 @@ class ChatController(
         @PathVariable id: String,
     ) {
         val chatId = ChatId.parse(id)
-        deletionService.delete(
+        deletionService.deleteChat(
             chatId = chatId,
             userId = session.userId,
-            command = DeletionCommand(requestId = RequestId(chatId.value), scope = DeletionScope.EVERYONE, target = DeletionTarget.CHAT),
+            requestId = RequestId(chatId.value),
+            scope = DeletionScope.EVERYONE,
         )
     }
 

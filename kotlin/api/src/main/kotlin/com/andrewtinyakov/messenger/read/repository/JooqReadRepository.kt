@@ -2,6 +2,8 @@ package com.andrewtinyakov.messenger.read.repository
 
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.ChatId
+import com.andrewtinyakov.messenger.infrastructure.database.DatabaseObservation
+import com.andrewtinyakov.messenger.infrastructure.database.DatabaseOperation
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHATS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHAT_MEMBERS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHAT_READ_NOTIFICATIONS
@@ -11,11 +13,9 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MES
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.PENDING_READ_NOTIFICATIONS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.USERS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.enums.ChatKind
-import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseObservation
-import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseOperation
 import com.andrewtinyakov.messenger.infrastructure.redis.RoomAddress
 import com.andrewtinyakov.messenger.message.model.MessageId
-import com.andrewtinyakov.messenger.message.visibility.repository.visibleMessage
+import com.andrewtinyakov.messenger.message.repository.visibleMessage
 import com.andrewtinyakov.messenger.read.model.MessageReadTarget
 import com.andrewtinyakov.messenger.read.model.MessageReader
 import com.andrewtinyakov.messenger.read.model.ReadAdvance

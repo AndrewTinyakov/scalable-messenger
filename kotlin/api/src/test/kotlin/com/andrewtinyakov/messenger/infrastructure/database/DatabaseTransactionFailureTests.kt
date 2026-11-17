@@ -1,9 +1,5 @@
 package com.andrewtinyakov.messenger.infrastructure.database
 
-import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseMetrics
-import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseTransaction
-import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseTransactionListener
-import com.andrewtinyakov.messenger.infrastructure.database.observability.observedExecute
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows

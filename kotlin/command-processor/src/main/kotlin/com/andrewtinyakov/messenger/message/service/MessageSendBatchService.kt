@@ -1,8 +1,8 @@
 package com.andrewtinyakov.messenger.message.service
 
 import com.andrewtinyakov.messenger.generated.messaging.command.SendMessageCommandV1
-import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseTransaction
-import com.andrewtinyakov.messenger.infrastructure.database.observability.observedExecute
+import com.andrewtinyakov.messenger.infrastructure.database.DatabaseTransaction
+import com.andrewtinyakov.messenger.infrastructure.database.observedExecute
 import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStage
 import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStageRecorder
 import com.andrewtinyakov.messenger.message.model.CommandResult

@@ -1,7 +1,7 @@
 package com.andrewtinyakov.messenger
 
-import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseObservationConfiguration
-import com.andrewtinyakov.messenger.infrastructure.outbox.config.PublisherProperties
+import com.andrewtinyakov.messenger.infrastructure.database.DatabaseObservationConfiguration
+import com.andrewtinyakov.messenger.infrastructure.outbox.PublisherProperties
 import com.andrewtinyakov.messenger.message.repository.JooqMessageRepository
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.context.properties.EnableConfigurationProperties

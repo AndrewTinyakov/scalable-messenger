@@ -3,10 +3,10 @@ package com.andrewtinyakov.messenger.read.service
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.generated.messaging.event.ReadsChangedEventV1
-import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseTransaction
-import com.andrewtinyakov.messenger.infrastructure.database.observability.observedExecute
-import com.andrewtinyakov.messenger.infrastructure.outbox.model.toOutboxMessage
-import com.andrewtinyakov.messenger.infrastructure.outbox.repository.OutboxRepository
+import com.andrewtinyakov.messenger.infrastructure.database.DatabaseTransaction
+import com.andrewtinyakov.messenger.infrastructure.database.observedExecute
+import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxRepository
+import com.andrewtinyakov.messenger.infrastructure.outbox.toOutboxMessage
 import com.andrewtinyakov.messenger.infrastructure.redis.RoomAddress
 import com.andrewtinyakov.messenger.message.model.MessageId
 import com.andrewtinyakov.messenger.read.config.ReadProperties

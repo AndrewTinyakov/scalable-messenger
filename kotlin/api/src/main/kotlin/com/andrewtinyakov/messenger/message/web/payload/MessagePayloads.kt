@@ -4,7 +4,7 @@ import com.andrewtinyakov.messenger.generated.messaging.event.SendRejectionReaso
 import com.andrewtinyakov.messenger.message.model.Message
 import com.andrewtinyakov.messenger.message.model.MessageId
 import com.andrewtinyakov.messenger.message.model.SendResult
-import com.andrewtinyakov.messenger.message.visibility.model.VisibilitySnapshot
+import com.andrewtinyakov.messenger.message.model.VisibilitySnapshot
 import com.andrewtinyakov.messenger.shared.web.StrictStringDeserializer
 import com.fasterxml.jackson.annotation.JsonInclude
 import io.swagger.v3.oas.annotations.media.Schema

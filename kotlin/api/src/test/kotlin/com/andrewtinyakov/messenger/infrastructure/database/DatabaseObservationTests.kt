@@ -3,13 +3,6 @@ package com.andrewtinyakov.messenger.infrastructure.database
 import com.andrewtinyakov.messenger.auth.model.User
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.auth.repository.UserRepository
-import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseMetrics
-import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseObservation
-import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseOperation
-import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseQueryListener
-import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseTransaction
-import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseTransactionListener
-import com.andrewtinyakov.messenger.infrastructure.database.observability.observedExecute
 import com.andrewtinyakov.messenger.message.model.RequestId
 import com.andrewtinyakov.messenger.message.repository.MessageRepository
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest

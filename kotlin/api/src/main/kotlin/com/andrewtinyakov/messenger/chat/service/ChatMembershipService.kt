@@ -9,10 +9,10 @@ import com.andrewtinyakov.messenger.chat.repository.ChatRepository
 import com.andrewtinyakov.messenger.chat.repository.GroupMembershipRepository
 import com.andrewtinyakov.messenger.chat.web.payload.GroupMemberPageResponse
 import com.andrewtinyakov.messenger.generated.messaging.event.MemberRemovedEventV1
-import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseTransaction
-import com.andrewtinyakov.messenger.infrastructure.database.observability.observedExecuteWithoutResult
-import com.andrewtinyakov.messenger.infrastructure.outbox.model.toOutboxMessage
-import com.andrewtinyakov.messenger.infrastructure.outbox.repository.OutboxRepository
+import com.andrewtinyakov.messenger.infrastructure.database.DatabaseTransaction
+import com.andrewtinyakov.messenger.infrastructure.database.observedExecuteWithoutResult
+import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxRepository
+import com.andrewtinyakov.messenger.infrastructure.outbox.toOutboxMessage
 import com.andrewtinyakov.messenger.infrastructure.redis.RoomAddress
 import com.andrewtinyakov.messenger.shared.id.newId
 import com.andrewtinyakov.messenger.shared.web.ApiErrorCode

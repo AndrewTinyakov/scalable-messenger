@@ -2,19 +2,19 @@ package com.andrewtinyakov.messenger.message.service
 
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.ChatId
-import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseTransaction
-import com.andrewtinyakov.messenger.infrastructure.database.observability.observedExecute
-import com.andrewtinyakov.messenger.message.change.model.MessageChange
-import com.andrewtinyakov.messenger.message.change.model.MessageChangeKind
-import com.andrewtinyakov.messenger.message.change.model.MutationCursor
-import com.andrewtinyakov.messenger.message.change.repository.MessageChangeRepository
+import com.andrewtinyakov.messenger.infrastructure.database.DatabaseTransaction
+import com.andrewtinyakov.messenger.infrastructure.database.observedExecute
 import com.andrewtinyakov.messenger.message.model.Message
+import com.andrewtinyakov.messenger.message.model.MessageChange
+import com.andrewtinyakov.messenger.message.model.MessageChangeKind
 import com.andrewtinyakov.messenger.message.model.MessageId
+import com.andrewtinyakov.messenger.message.model.MutationCursor
+import com.andrewtinyakov.messenger.message.model.VisibilitySnapshot
 import com.andrewtinyakov.messenger.message.monitoring.HistoryDirection
 import com.andrewtinyakov.messenger.message.monitoring.MessageMetrics
+import com.andrewtinyakov.messenger.message.repository.MessageChangeRepository
 import com.andrewtinyakov.messenger.message.repository.MessageRepository
-import com.andrewtinyakov.messenger.message.visibility.model.VisibilitySnapshot
-import com.andrewtinyakov.messenger.message.visibility.repository.VisibilityRepository
+import com.andrewtinyakov.messenger.message.repository.VisibilityRepository
 import com.andrewtinyakov.messenger.message.web.payload.MessageAroundResponse
 import com.andrewtinyakov.messenger.message.web.payload.MessageChangeResponse
 import com.andrewtinyakov.messenger.message.web.payload.MessageChangesResponse

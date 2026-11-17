@@ -3,9 +3,9 @@ package com.andrewtinyakov.messenger.auth.repository
 import com.andrewtinyakov.messenger.auth.model.User
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.auth.model.UserSummary
+import com.andrewtinyakov.messenger.infrastructure.database.DatabaseObservation
+import com.andrewtinyakov.messenger.infrastructure.database.DatabaseOperation
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.USERS
-import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseObservation
-import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseOperation
 import org.jooq.DSLContext
 import org.jooq.Record2
 import org.springframework.stereotype.Repository

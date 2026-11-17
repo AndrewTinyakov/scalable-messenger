@@ -3,7 +3,7 @@ package com.andrewtinyakov.messenger.read.service
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.service.ChatService
-import com.andrewtinyakov.messenger.infrastructure.outbox.repository.OutboxRepository
+import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxRepository
 import com.andrewtinyakov.messenger.message.model.MessageId
 import com.andrewtinyakov.messenger.read.config.ReadProperties
 import com.andrewtinyakov.messenger.read.monitoring.ReadMetrics

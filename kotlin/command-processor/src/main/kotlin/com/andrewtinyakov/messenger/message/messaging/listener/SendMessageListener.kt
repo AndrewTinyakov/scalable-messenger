@@ -1,10 +1,10 @@
 package com.andrewtinyakov.messenger.message.messaging.listener
 
 import com.andrewtinyakov.messenger.generated.messaging.command.SendMessageCommandV1
-import com.andrewtinyakov.messenger.infrastructure.messaging.config.CommandTopology
-import com.andrewtinyakov.messenger.infrastructure.messaging.listener.consumeMessage
-import com.andrewtinyakov.messenger.infrastructure.messaging.model.CommandKind
-import com.andrewtinyakov.messenger.infrastructure.messaging.monitoring.CommandMetrics
+import com.andrewtinyakov.messenger.infrastructure.messaging.CommandKind
+import com.andrewtinyakov.messenger.infrastructure.messaging.CommandMetrics
+import com.andrewtinyakov.messenger.infrastructure.messaging.CommandTopology
+import com.andrewtinyakov.messenger.infrastructure.messaging.consumeMessage
 import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStage
 import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStageEvent
 import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStageRecorder

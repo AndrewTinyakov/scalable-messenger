@@ -4,7 +4,7 @@ import com.andrewtinyakov.messenger.ApiApplication
 import com.andrewtinyakov.messenger.auth.model.ExpectedSessionIdentity
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.auth.web.payload.AuthRequest
-import com.andrewtinyakov.messenger.chat.grpc.service.ChatAuthorizationGrpcService
+import com.andrewtinyakov.messenger.chat.grpc.ChatAuthorizationGrpcService
 import com.andrewtinyakov.messenger.chat.service.ChatService
 import com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupRequest
 import com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupResponse

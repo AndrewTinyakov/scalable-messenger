@@ -2,9 +2,9 @@ package com.andrewtinyakov.messenger.message.web.controller
 
 import com.andrewtinyakov.messenger.auth.model.AuthenticatedSession
 import com.andrewtinyakov.messenger.chat.model.ChatId
-import com.andrewtinyakov.messenger.message.change.service.MessageMutationService
 import com.andrewtinyakov.messenger.message.model.MessageId
 import com.andrewtinyakov.messenger.message.service.MessageHistoryService
+import com.andrewtinyakov.messenger.message.service.MessageMutationService
 import com.andrewtinyakov.messenger.message.web.payload.EditMessageRequest
 import com.andrewtinyakov.messenger.message.web.payload.MessageAroundResponse
 import com.andrewtinyakov.messenger.message.web.payload.MessageChangesResponse

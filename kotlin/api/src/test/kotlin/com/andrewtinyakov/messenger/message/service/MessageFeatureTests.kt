@@ -2,18 +2,15 @@ package com.andrewtinyakov.messenger.message.service
 
 import com.andrewtinyakov.messenger.auth.model.SessionId
 import com.andrewtinyakov.messenger.auth.model.UserId
-import com.andrewtinyakov.messenger.chat.deletion.model.DeletionCommand
-import com.andrewtinyakov.messenger.chat.deletion.model.DeletionScope
-import com.andrewtinyakov.messenger.chat.deletion.model.DeletionTarget
-import com.andrewtinyakov.messenger.chat.deletion.service.DeletionService
-import com.andrewtinyakov.messenger.chat.grpc.repository.GroupAuthorizationRepository
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.repository.ChatRepository
+import com.andrewtinyakov.messenger.chat.repository.GroupAuthorizationRepository
 import com.andrewtinyakov.messenger.chat.service.ChatMembershipService
 import com.andrewtinyakov.messenger.chat.service.ChatService
+import com.andrewtinyakov.messenger.deletion.model.DeletionScope
+import com.andrewtinyakov.messenger.deletion.model.DeletionTarget
+import com.andrewtinyakov.messenger.deletion.service.DeletionService
 import com.andrewtinyakov.messenger.generated.messaging.event.SendRejectionReason
-import com.andrewtinyakov.messenger.message.change.service.MessageChangeRetentionService
-import com.andrewtinyakov.messenger.message.change.service.MessageMutationService
 import com.andrewtinyakov.messenger.message.model.CommandResult
 import com.andrewtinyakov.messenger.message.model.MessageId
 import com.andrewtinyakov.messenger.message.model.RequestId
@@ -344,18 +341,14 @@ class MessageFeatureTests
             )
             try {
                 assertThrows(RuntimeException::class.java) {
-                    deletion.delete(
-                        ChatId(chat),
-                        UserId(owner),
-                        DeletionCommand(RequestId(chat), DeletionScope.EVERYONE, DeletionTarget.CHAT),
-                    )
+                    deletion.deleteChat(ChatId(chat), UserId(owner), RequestId(chat), DeletionScope.EVERYONE)
                 }
                 assertEquals("kept", history.messages(ChatId(chat), UserId(member), null, null, 10).messages.single().body)
                 assertEquals(chat, chats.get(ChatId(chat), UserId(member)).id)
             } finally {
                 db.execute("ALTER TABLE messenger_outbox_events DROP CONSTRAINT \"$constraint\"")
             }
-            deletion.delete(ChatId(chat), UserId(owner), DeletionCommand(RequestId(chat), DeletionScope.EVERYONE, DeletionTarget.CHAT))
+            deletion.deleteChat(ChatId(chat), UserId(owner), RequestId(chat), DeletionScope.EVERYONE)
             assertThrows(ApiException::class.java) { chats.get(ChatId(chat), UserId(member)) }
         }
 
@@ -366,8 +359,8 @@ class MessageFeatureTests
             val first = command(sender, newId(), "old conversation", recipient = recipient)
             sends.process(first)
             val old = sendStatusService.status(UserId(sender), RequestId(first.requestId)).chatId!!
-            deletion.delete(ChatId(old), UserId(recipient), DeletionCommand(RequestId(old), DeletionScope.EVERYONE, DeletionTarget.CHAT))
-            deletion.delete(ChatId(old), UserId(sender), DeletionCommand(RequestId(old), DeletionScope.EVERYONE, DeletionTarget.CHAT))
+            deletion.deleteChat(ChatId(old), UserId(recipient), RequestId(old), DeletionScope.EVERYONE)
+            deletion.deleteChat(ChatId(old), UserId(sender), RequestId(old), DeletionScope.EVERYONE)
             assertThrows(ApiException::class.java) { history.messages(ChatId(old), UserId(sender), null, null, 10) }
             assertEquals(CommandResult.DUPLICATE, sends.process(first))
             assertEquals(old, sendStatusService.status(UserId(sender), RequestId(first.requestId)).chatId)
@@ -398,11 +391,7 @@ class MessageFeatureTests
             assertEquals(
                 HttpStatus.FORBIDDEN,
                 assertThrows(ApiException::class.java) {
-                    deletion.delete(
-                        ChatId(chat),
-                        UserId(member),
-                        DeletionCommand(RequestId(chat), DeletionScope.EVERYONE, DeletionTarget.CHAT),
-                    )
+                    deletion.deleteChat(ChatId(chat), UserId(member), RequestId(chat), DeletionScope.EVERYONE)
                 }.status,
             )
             val session = sha256(owner)
@@ -416,7 +405,7 @@ class MessageFeatureTests
                 setOf(ChatId(chat)),
                 authorizations.findAuthorization(SessionId(session), OffsetDateTime.now(), listOf(ChatId(chat)))!!.authorizedChatIds,
             )
-            deletion.delete(ChatId(chat), UserId(owner), DeletionCommand(RequestId(chat), DeletionScope.EVERYONE, DeletionTarget.CHAT))
+            deletion.deleteChat(ChatId(chat), UserId(owner), RequestId(chat), DeletionScope.EVERYONE)
             assertEquals(
                 emptySet<ChatId>(),
                 authorizations.findAuthorization(SessionId(session), OffsetDateTime.now(), listOf(ChatId(chat)))!!.authorizedChatIds,

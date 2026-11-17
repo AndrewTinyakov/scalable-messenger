@@ -3,14 +3,14 @@ package com.andrewtinyakov.messenger.message.repository
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.generated.messaging.event.SendRejectionReason
+import com.andrewtinyakov.messenger.infrastructure.database.DatabaseObservation
+import com.andrewtinyakov.messenger.infrastructure.database.DatabaseOperation
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Routines
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHATS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSAGES
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.SEND_REQUESTS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.MessagesRecord
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.SendRequestsRecord
-import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseObservation
-import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseOperation
 import com.andrewtinyakov.messenger.message.model.Message
 import com.andrewtinyakov.messenger.message.model.MessageId
 import com.andrewtinyakov.messenger.message.model.RequestId
@@ -19,7 +19,6 @@ import com.andrewtinyakov.messenger.message.model.SendBatch
 import com.andrewtinyakov.messenger.message.model.SendResult
 import com.andrewtinyakov.messenger.message.model.SendResultStatus
 import com.andrewtinyakov.messenger.message.model.asReply
-import com.andrewtinyakov.messenger.message.visibility.repository.visibleMessage
 import org.jooq.DSLContext
 import org.jooq.impl.DSL
 import org.springframework.stereotype.Repository

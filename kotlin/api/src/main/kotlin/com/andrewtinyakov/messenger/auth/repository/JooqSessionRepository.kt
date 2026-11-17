@@ -4,10 +4,10 @@ import com.andrewtinyakov.messenger.auth.model.AuthenticatedSession
 import com.andrewtinyakov.messenger.auth.model.DeviceId
 import com.andrewtinyakov.messenger.auth.model.SessionId
 import com.andrewtinyakov.messenger.auth.model.UserId
+import com.andrewtinyakov.messenger.infrastructure.database.DatabaseObservation
+import com.andrewtinyakov.messenger.infrastructure.database.DatabaseOperation
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.SESSIONS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.SessionsRecord
-import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseObservation
-import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseOperation
 import org.jooq.DSLContext
 import org.springframework.stereotype.Repository
 import java.time.OffsetDateTime

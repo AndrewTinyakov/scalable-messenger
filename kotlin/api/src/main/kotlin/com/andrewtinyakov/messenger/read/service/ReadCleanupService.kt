@@ -1,7 +1,7 @@
 package com.andrewtinyakov.messenger.read.service
 
-import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseTransaction
-import com.andrewtinyakov.messenger.infrastructure.database.observability.observedExecute
+import com.andrewtinyakov.messenger.infrastructure.database.DatabaseTransaction
+import com.andrewtinyakov.messenger.infrastructure.database.observedExecute
 import com.andrewtinyakov.messenger.read.config.ReadProperties
 import com.andrewtinyakov.messenger.read.model.ReadCleanup
 import com.andrewtinyakov.messenger.read.monitoring.ReadMetrics

@@ -1,8 +1,5 @@
 package com.andrewtinyakov.messenger.infrastructure.outbox.publication
 
-import com.andrewtinyakov.messenger.infrastructure.database.DatabaseTransaction
-import com.andrewtinyakov.messenger.infrastructure.database.observedExecute
-import com.andrewtinyakov.messenger.infrastructure.database.observedExecuteWithoutResult
 import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStage
 import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStageRecorder
 import com.andrewtinyakov.messenger.infrastructure.outbox.EventId
@@ -74,7 +71,7 @@ class OutboxPublicationService(
         val leaseUntil = now.plus(properties.lease)
         val limit = minOf(properties.batchSize, properties.batchBytes / MAX_EVENT_BYTES)
         return observePhase(OutboxStage.CLAIM) {
-            tx.observedExecute(DatabaseTransaction.OUTBOX_CLAIM) { claimAnchorsWithGroupTails(now, leaseUntil, limit) }
+            tx.execute { claimAnchorsWithGroupTails(now, leaseUntil, limit) }
         }
     }
 
@@ -112,7 +109,9 @@ class OutboxPublicationService(
         rooms: List<List<OutboxMessage>>,
         prepared: Map<EventId, OutboxMessage>,
         deadline: Long,
-    ): List<BatchPublication> = Executors.newVirtualThreadPerTaskExecutor().use { executor ->
+    ): List<BatchPublication> = Executors.newThreadPerTaskExecutor(
+        Thread.ofVirtual().name("outbox-publication").factory(),
+    ).use { executor ->
         val tasks = rooms.map { roomRows ->
             executor.submit(
                 Callable { publishClaimedRoom(roomRows.map { checkNotNull(prepared[it.id]) }, deadline) },
@@ -135,7 +134,7 @@ class OutboxPublicationService(
         if (completed.isNotEmpty()) {
             try {
                 observePhase(OutboxStage.COMPLETE) {
-                    tx.observedExecuteWithoutResult(DatabaseTransaction.OUTBOX_COMPLETE) {
+                    tx.executeWithoutResult {
                         outboxClaimRepository.complete(completed, owner)
                     }
                 }

@@ -9,8 +9,6 @@ import com.andrewtinyakov.messenger.chat.model.MemberChat
 import com.andrewtinyakov.messenger.chat.model.MemberChatDetails
 import com.andrewtinyakov.messenger.chat.repository.preferences.ChatPreferenceFields
 import com.andrewtinyakov.messenger.chat.repository.toModel
-import com.andrewtinyakov.messenger.infrastructure.database.DatabaseObservation
-import com.andrewtinyakov.messenger.infrastructure.database.DatabaseOperation
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHATS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHAT_MEMBERS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.USERS
@@ -36,11 +34,11 @@ class JooqChatDirectoryRepository(
         beforeChatId: ChatId?,
         limit: Int,
         pinned: Boolean,
-    ): List<MemberChat> = DatabaseObservation.query(DatabaseOperation.CHAT_FIND_BY_MEMBER) {
+    ): List<MemberChat> {
         val summary = chatSummary(userId)
         val activityAt = DSL.coalesce(CHATS.LAST_ACTIVITY_AT, CHAT_MEMBERS.JOINED_AT)
         val preferences = ChatPreferenceFields(CHAT_MEMBERS)
-        db.select(
+        return db.select(
             listOf(
                 activityAt,
                 summary,
@@ -107,9 +105,7 @@ class JooqChatDirectoryRepository(
         activityAt = get(activityAt)!!,
     )
 
-    override fun findMembersByChatIds(chatIds: List<ChatId>): Map<ChatId, List<UserSummary>> = DatabaseObservation.query(
-        DatabaseOperation.CHAT_FIND_MEMBERS_BY_CHAT_IDS,
-    ) {
+    override fun findMembersByChatIds(chatIds: List<ChatId>): Map<ChatId, List<UserSummary>> {
         if (chatIds.isEmpty()) return emptyMap()
         val rank = DSL.rowNumber()
             .over()
@@ -158,17 +154,16 @@ class JooqChatDirectoryRepository(
         .where(CHAT_MEMBERS.CHAT_ID.`in`(chatIds.map(ChatId::value)))
         .asTable("ranked")
 
-    override fun findById(chatId: ChatId): Chat? = DatabaseObservation.query(DatabaseOperation.CHAT_FIND_BY_ID) {
+    override fun findById(chatId: ChatId): Chat? =
         db.selectFrom(CHATS)
             .where(CHATS.ID.eq(chatId.value), CHATS.DELETED_AT.isNull)
             .fetchOne()
             ?.toModel()
-    }
 
     override fun findMemberDetails(
         chatId: ChatId,
         userId: UserId,
-    ): MemberChatDetails? = DatabaseObservation.query(DatabaseOperation.CHAT_FIND_MEMBER_DETAILS) {
+    ): MemberChatDetails? {
         val members = memberPreview()
         val summary = chatSummary(userId)
         val viewer = CHAT_MEMBERS.`as`("viewer")

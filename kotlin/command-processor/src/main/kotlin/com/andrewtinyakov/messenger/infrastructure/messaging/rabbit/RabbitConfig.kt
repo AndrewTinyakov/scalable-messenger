@@ -10,8 +10,11 @@ import org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFacto
 import org.springframework.amqp.rabbit.connection.ConnectionFactory
 import org.springframework.boot.amqp.autoconfigure.SimpleRabbitListenerContainerFactoryConfigurer
 import org.springframework.boot.context.properties.EnableConfigurationProperties
+import org.springframework.boot.thread.Threading
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.core.env.Environment
+import org.springframework.core.task.SimpleAsyncTaskExecutor
 
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(RabbitProperties::class)
@@ -21,8 +24,12 @@ class RabbitConfig {
         configurer: SimpleRabbitListenerContainerFactoryConfigurer,
         connectionFactory: ConnectionFactory,
         properties: RabbitProperties,
+        environment: Environment,
     ): SimpleRabbitListenerContainerFactory = SimpleRabbitListenerContainerFactory().apply {
         configurer.configure(this, connectionFactory)
+        setTaskExecutor(
+            SimpleAsyncTaskExecutor("send-commands-").apply { setVirtualThreads(Threading.VIRTUAL.isActive(environment)) },
+        )
         setAcknowledgeMode(AcknowledgeMode.MANUAL)
         setConsumerBatchEnabled(true)
         setBatchSize(properties.sendBatchSize)

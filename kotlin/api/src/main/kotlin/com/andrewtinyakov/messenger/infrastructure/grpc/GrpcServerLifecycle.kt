@@ -4,6 +4,8 @@ import com.andrewtinyakov.messenger.ws.grpc.ChatAuthorizationGrpcService
 import io.grpc.netty.shaded.io.grpc.netty.GrpcSslContexts
 import io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder
 import io.grpc.netty.shaded.io.netty.handler.ssl.ClientAuth
+import io.micrometer.core.instrument.binder.grpc.ObservationGrpcServerInterceptor
+import io.micrometer.observation.ObservationRegistry
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.context.SmartLifecycle
 import org.springframework.stereotype.Component
@@ -16,6 +18,7 @@ import java.util.concurrent.TimeUnit
 class GrpcServerLifecycle(
     private val chatAuthorizationGrpcService: ChatAuthorizationGrpcService,
     private val properties: GrpcProperties,
+    private val observations: ObservationRegistry,
 ) : SmartLifecycle {
     @Volatile
     private var state: GrpcServerState = GrpcServerState.Stopped
@@ -37,6 +40,7 @@ class GrpcServerLifecycle(
         val server = NettyServerBuilder.forAddress(InetSocketAddress(properties.bindAddress, properties.port))
             .sslContext(tls)
             .intercept(GrpcClientIdentityInterceptor(properties.allowedClientIdentity))
+            .intercept(ObservationGrpcServerInterceptor(observations))
             .maxInboundMessageSize(properties.maxInboundMessageBytes)
             .addService(chatAuthorizationGrpcService)
             .build().start()

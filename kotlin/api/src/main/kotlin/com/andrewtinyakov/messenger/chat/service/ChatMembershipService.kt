@@ -9,8 +9,6 @@ import com.andrewtinyakov.messenger.chat.model.ChatKind
 import com.andrewtinyakov.messenger.chat.repository.ChatRepository
 import com.andrewtinyakov.messenger.chat.repository.membership.GroupMembershipRepository
 import com.andrewtinyakov.messenger.chat.web.payload.GroupMemberPageResponse
-import com.andrewtinyakov.messenger.infrastructure.database.DatabaseTransaction
-import com.andrewtinyakov.messenger.infrastructure.database.observedExecuteWithoutResult
 import com.andrewtinyakov.messenger.shared.web.forbidden
 import com.andrewtinyakov.messenger.shared.web.invalidInput
 import com.andrewtinyakov.messenger.shared.web.notFound
@@ -36,7 +34,7 @@ class ChatMembershipService(
     }
 
     fun removeMember(chatId: ChatId, userId: UserId, memberId: UserId) {
-        tx.observedExecuteWithoutResult(DatabaseTransaction.CHAT_REMOVE_MEMBER) {
+        tx.executeWithoutResult {
             val owner = chatRepository.findByIdForUpdate(chatId = chatId)?.takeIf { it.kind == ChatKind.GROUP }?.ownerId ?: notFound()
             if (owner != userId) forbidden("Only the group owner can remove members")
             if (memberId == owner) invalidInput("userId", "The group owner cannot be removed")

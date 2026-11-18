@@ -4,8 +4,6 @@ import com.andrewtinyakov.messenger.auth.config.AuthProperties
 import com.andrewtinyakov.messenger.auth.model.LoginAttempt
 import com.andrewtinyakov.messenger.auth.model.LoginThrottle
 import com.andrewtinyakov.messenger.auth.repository.LoginThrottleRepository
-import com.andrewtinyakov.messenger.infrastructure.database.DatabaseTransaction
-import com.andrewtinyakov.messenger.infrastructure.database.observedExecute
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
@@ -27,12 +25,12 @@ class LoginThrottleService(
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
-    fun reserveAttempt(username: String, clientIp: String?): LoginAttempt = tx.observedExecute(DatabaseTransaction.AUTH_LOGIN_THROTTLE) {
+    fun reserveAttempt(username: String, clientIp: String?): LoginAttempt = tx.execute {
         val policy = properties.loginThrottle
         val key = throttleKey(username = username, clientIp = clientIp)
         val current = repository.lockThrottle(key = key, now = OffsetDateTime.now(clock))
         val now = OffsetDateTime.now(clock)
-        if (current.blockedUntil.isAfter(now)) return@observedExecute LoginAttempt.Blocked(Duration.between(now, current.blockedUntil))
+        if (current.blockedUntil.isAfter(now)) return@execute LoginAttempt.Blocked(Duration.between(now, current.blockedUntil))
         val attempts = if (current.lastAttemptAt.isAfter(now.minus(policy.resetAfter))) current.attemptCount + 1 else 1
         repository.saveThrottle(
             key = key,

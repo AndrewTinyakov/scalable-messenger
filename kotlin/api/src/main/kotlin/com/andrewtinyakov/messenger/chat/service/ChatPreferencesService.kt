@@ -9,8 +9,6 @@ import com.andrewtinyakov.messenger.chat.repository.preferences.ChatPreferencesR
 import com.andrewtinyakov.messenger.chat.web.payload.ChatPreferencesResponse
 import com.andrewtinyakov.messenger.chat.web.payload.PinnedChatsResponse
 import com.andrewtinyakov.messenger.chat.web.payload.toResponse
-import com.andrewtinyakov.messenger.infrastructure.database.DatabaseTransaction
-import com.andrewtinyakov.messenger.infrastructure.database.observedExecute
 import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
 import com.andrewtinyakov.messenger.shared.web.conflict
 import com.andrewtinyakov.messenger.shared.web.invalidInput
@@ -76,14 +74,14 @@ class ChatPreferencesService(
     }
 
     private fun change(chatId: ChatId, userId: UserId, update: () -> Boolean): ChatPreferencesResponse =
-        tx.observedExecute(DatabaseTransaction.CHAT_PREFERENCES) {
+        tx.execute {
             if (!update()) notFound()
             chatOutbox.enqueuePreferencesChanged(userId, listOf(chatId))
             checkNotNull(chatPreferencesRepository.find(chatId, userId)).toResponse(chatId.value)
         }
 
     private fun changePins(userId: UserId, change: (List<ChatId>) -> List<ChatId>): PinnedChatsResponse =
-        tx.observedExecute(DatabaseTransaction.CHAT_PREFERENCES) {
+        tx.execute {
             chatPreferencesRepository.lockPins(userId)
             val current = chatPreferencesRepository.pinnedChatIds(userId)
             val next = change(current)

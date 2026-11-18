@@ -6,9 +6,6 @@ import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.model.ChatKind
 import com.andrewtinyakov.messenger.chat.repository.ChatRepository
 import com.andrewtinyakov.messenger.chat.repository.directory.ChatDirectoryRepository
-import com.andrewtinyakov.messenger.infrastructure.database.DatabaseTransaction
-import com.andrewtinyakov.messenger.infrastructure.database.observedExecute
-import com.andrewtinyakov.messenger.infrastructure.database.observedExecuteWithoutResult
 import com.andrewtinyakov.messenger.message.messaging.MessageOutbox
 import com.andrewtinyakov.messenger.message.model.Message
 import com.andrewtinyakov.messenger.message.model.MessageId
@@ -36,7 +33,7 @@ class MessagePinService(
     private val tx: TransactionTemplate,
 ) {
     fun list(chatId: ChatId, userId: UserId, beforeSequence: Long?, limit: Int): PinnedMessagePageResponse =
-        tx.observedExecute(DatabaseTransaction.MESSAGE_PIN) {
+        tx.execute {
             if (!chatRepository.isMember(chatId, userId)) notFound()
             val fetched = messagePinRepository.page(chatId, userId, beforeSequence, limit + 1)
             val pinnedIds = messagePinRepository.visibleIds(chatId, userId)
@@ -50,29 +47,27 @@ class MessagePinService(
             )
         }
 
-    fun pin(chatId: ChatId, userId: UserId, messageId: MessageId, scope: PinScope) = tx.observedExecuteWithoutResult(
-        DatabaseTransaction.MESSAGE_PIN,
-    ) {
+    fun pin(chatId: ChatId, userId: UserId, messageId: MessageId, scope: PinScope) = tx.executeWithoutResult {
         val (chat, message) = target(chatId, userId, messageId)
         if (scope == PinScope.SELF && chat.kind != ChatKind.DIRECT) {
             invalidInput("scope", "Messages can be pinned only for everyone in groups")
         }
         val viewer = userId.takeIf { scope == PinScope.SELF }
         messagePinRepository.lock(chatId)
-        if (messagePinRepository.exists(chatId, message.sequence, viewer)) return@observedExecuteWithoutResult
+        if (messagePinRepository.exists(chatId, message.sequence, viewer)) return@executeWithoutResult
         if (messagePinRepository.count(chatId, viewer) >= PinnedMessage.MAX_PER_SCOPE) {
             conflict(ApiErrorCode.PIN_LIMIT, "A chat can have up to ${PinnedMessage.MAX_PER_SCOPE} pinned messages")
         }
         if (messagePinRepository.pin(chatId, message.sequence, viewer)) messageOutbox.enqueuePinsChanged(chat, viewer)
     }
 
-    fun unpin(chatId: ChatId, userId: UserId, messageId: MessageId) = tx.observedExecuteWithoutResult(DatabaseTransaction.MESSAGE_PIN) {
+    fun unpin(chatId: ChatId, userId: UserId, messageId: MessageId) = tx.executeWithoutResult {
         val (chat, message) = target(chatId, userId, messageId)
         messagePinRepository.lock(chatId)
         notifyRemoved(chat, userId, messagePinRepository.unpin(chatId, message.sequence, userId))
     }
 
-    fun unpinAll(chatId: ChatId, userId: UserId) = tx.observedExecuteWithoutResult(DatabaseTransaction.MESSAGE_PIN) {
+    fun unpinAll(chatId: ChatId, userId: UserId) = tx.executeWithoutResult {
         val chat = chatDirectoryRepository.findById(chatId)?.takeIf { chatRepository.isMember(chatId, userId) } ?: notFound()
         messagePinRepository.lock(chatId)
         notifyRemoved(chat, userId, messagePinRepository.unpinAll(chatId, userId))

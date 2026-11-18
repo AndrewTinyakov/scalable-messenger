@@ -5,8 +5,6 @@ import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.model.ChatPreferences
 import com.andrewtinyakov.messenger.chat.model.MuteEnd
 import com.andrewtinyakov.messenger.chat.repository.directory.notHidden
-import com.andrewtinyakov.messenger.infrastructure.database.DatabaseObservation
-import com.andrewtinyakov.messenger.infrastructure.database.DatabaseOperation
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Routines
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHATS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHAT_MEMBERS
@@ -24,36 +22,29 @@ import java.time.OffsetDateTime
 class JooqChatPreferencesRepository(
     private val db: DSLContext,
 ) : ChatPreferencesRepository {
-    override fun lockPins(userId: UserId) = DatabaseObservation.query(DatabaseOperation.CHAT_PREFERENCES_LOCK) {
+    override fun lockPins(userId: UserId) =
         Routines.acquireTransactionLock(db.configuration(), "chat-pins:${userId.value}")
-    }
 
-    override fun isVisibleMember(chatId: ChatId, userId: UserId): Boolean = DatabaseObservation.query(
-        DatabaseOperation.CHAT_PREFERENCES_FIND,
-    ) {
+    override fun isVisibleMember(chatId: ChatId, userId: UserId): Boolean =
         db.fetchExists(
             db.selectOne().from(CHAT_MEMBERS).join(CHATS).on(CHATS.ID.eq(CHAT_MEMBERS.CHAT_ID))
                 .where(CHAT_MEMBERS.CHAT_ID.eq(chatId.value), CHAT_MEMBERS.USER_ID.eq(userId.value), visibleInDirectory()),
         )
-    }
 
-    override fun pinnedChatIds(userId: UserId): List<ChatId> = DatabaseObservation.query(DatabaseOperation.CHAT_PREFERENCES_PINNED) {
+    override fun pinnedChatIds(userId: UserId): List<ChatId> =
         db.select(CHAT_MEMBERS.CHAT_ID).from(CHAT_MEMBERS).join(CHATS).on(CHATS.ID.eq(CHAT_MEMBERS.CHAT_ID))
             .where(CHAT_MEMBERS.USER_ID.eq(userId.value), CHAT_MEMBERS.PINNED_RANK.isNotNull, visibleInDirectory())
             .orderBy(CHAT_MEMBERS.PINNED_RANK, CHAT_MEMBERS.CHAT_ID.desc())
             .fetch(CHAT_MEMBERS.CHAT_ID)
             .map { ChatId(it!!) }
-    }
 
-    override fun replacePinnedOrder(userId: UserId, order: List<ChatId>) = DatabaseObservation.query(
-        DatabaseOperation.CHAT_PREFERENCES_WRITE,
-    ) {
+    override fun replacePinnedOrder(userId: UserId, order: List<ChatId>) {
         require(order.size <= ChatPreferences.MAX_PINNED_CHATS && order.distinct() == order)
         db.update(CHAT_MEMBERS).set(CHAT_MEMBERS.PINNED_RANK, DSL.inline(null, CHAT_MEMBERS.PINNED_RANK))
             .where(CHAT_MEMBERS.USER_ID.eq(userId.value), CHAT_MEMBERS.PINNED_RANK.isNotNull)
             .and(CHAT_MEMBERS.CHAT_ID.notIn(order.map(ChatId::value)))
             .execute()
-        if (order.isEmpty()) return@query
+        if (order.isEmpty()) return
         val ranks = order.mapIndexed { index, chatId ->
             db.update(CHAT_MEMBERS).set(CHAT_MEMBERS.PINNED_RANK, (index + 1).toShort())
                 .where(CHAT_MEMBERS.USER_ID.eq(userId.value), CHAT_MEMBERS.CHAT_ID.eq(chatId.value))
@@ -61,28 +52,21 @@ class JooqChatPreferencesRepository(
         check(db.batch(ranks).execute().all { it == 1 }) { "Pinned chat membership changed during reordering" }
     }
 
-    override fun mute(chatId: ChatId, userId: UserId, end: MuteEnd?): Boolean = DatabaseObservation.query(
-        DatabaseOperation.CHAT_PREFERENCES_WRITE,
-    ) {
+    override fun mute(chatId: ChatId, userId: UserId, end: MuteEnd?): Boolean {
         val until: Field<OffsetDateTime> = when (end) {
             null -> DSL.inline(null, CHAT_MEMBERS.MUTED_UNTIL)
             MuteEnd.Forever -> PERMANENT_MUTE
             is MuteEnd.At -> DSL.`val`(end.until)
         }
-        updateActiveMember(chatId, userId) { it.set(CHAT_MEMBERS.MUTED_UNTIL, until) }
+        return updateActiveMember(chatId, userId) { it.set(CHAT_MEMBERS.MUTED_UNTIL, until) }
     }
 
-    override fun markUnread(chatId: ChatId, userId: UserId, at: OffsetDateTime?): Boolean = DatabaseObservation.query(
-        DatabaseOperation.CHAT_PREFERENCES_WRITE,
-    ) {
+    override fun markUnread(chatId: ChatId, userId: UserId, at: OffsetDateTime?): Boolean =
         updateActiveMember(chatId, userId) { it.set(CHAT_MEMBERS.MARKED_UNREAD_AT, at) }
-    }
 
-    override fun find(chatId: ChatId, userId: UserId): ChatPreferences? = DatabaseObservation.query(
-        DatabaseOperation.CHAT_PREFERENCES_FIND,
-    ) {
+    override fun find(chatId: ChatId, userId: UserId): ChatPreferences? {
         val fields = ChatPreferenceFields(CHAT_MEMBERS)
-        db.select(fields.all).from(CHAT_MEMBERS).join(CHATS).on(CHATS.ID.eq(CHAT_MEMBERS.CHAT_ID))
+        return db.select(fields.all).from(CHAT_MEMBERS).join(CHATS).on(CHATS.ID.eq(CHAT_MEMBERS.CHAT_ID))
             .where(CHAT_MEMBERS.CHAT_ID.eq(chatId.value), CHAT_MEMBERS.USER_ID.eq(userId.value), CHATS.DELETED_AT.isNull)
             .fetchOne { fields.read(it) }
     }

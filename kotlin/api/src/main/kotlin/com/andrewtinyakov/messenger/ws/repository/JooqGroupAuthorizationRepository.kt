@@ -2,8 +2,6 @@ package com.andrewtinyakov.messenger.ws.repository
 
 import com.andrewtinyakov.messenger.auth.model.SessionId
 import com.andrewtinyakov.messenger.chat.model.ChatId
-import com.andrewtinyakov.messenger.infrastructure.database.DatabaseObservation
-import com.andrewtinyakov.messenger.infrastructure.database.DatabaseOperation
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHATS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHAT_MEMBERS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.SESSIONS
@@ -21,7 +19,7 @@ class JooqGroupAuthorizationRepository(
         sessionId: SessionId,
         now: OffsetDateTime,
         chatIds: List<ChatId>,
-    ): GroupAuthorization? = DatabaseObservation.query(DatabaseOperation.GROUP_AUTHORIZATION_FIND_AUTHORIZATION) {
+    ): GroupAuthorization? {
         val rows = db.select(SESSIONS.TOKEN_HASH, CHATS.ID)
             .from(SESSIONS)
             .leftJoin(CHAT_MEMBERS).on(

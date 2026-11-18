@@ -2,6 +2,7 @@ package com.andrewtinyakov.messenger.infrastructure.grpc
 
 import com.andrewtinyakov.messenger.ws.grpc.ChatAuthorizationGrpcService
 import io.grpc.ServerServiceDefinition
+import io.micrometer.observation.ObservationRegistry
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -26,6 +27,7 @@ class GrpcServerLifecycleTests {
                 keyFile = fixture("api-key.pem").path,
                 allowedClientIdentity = "spiffe://messenger/ws",
             ),
+            ObservationRegistry.NOOP,
         )
         assertFalse(server.isRunning)
         assertThrows(IllegalStateException::class.java) { server.boundPort }

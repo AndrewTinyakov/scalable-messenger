@@ -1,8 +1,6 @@
 package com.andrewtinyakov.messenger.deletion.repository
 
 import com.andrewtinyakov.messenger.deletion.model.PurgeBacklog
-import com.andrewtinyakov.messenger.infrastructure.database.DatabaseObservation
-import com.andrewtinyakov.messenger.infrastructure.database.DatabaseOperation
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHATS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.HIDDEN_MESSAGE_RANGES
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.HISTORY_PURGE_JOBS
@@ -21,16 +19,16 @@ class JooqHistoryPurgeRepository(
     private val db: DSLContext,
     private val clock: Clock,
 ) : HistoryPurgeRepository {
-    override fun purge(limit: Int): Int? = DatabaseObservation.query(DatabaseOperation.DELETION_PURGE_BATCH) {
+    override fun purge(limit: Int): Int? {
         require(limit in 1..1000)
-        val chatId = lockNextPurgeChat() ?: return@query null
+        val chatId = lockNextPurgeChat() ?: return null
         val through = purgeThrough(chatId)
         val candidates = purgeCandidates(chatId = chatId, through = through, limit = limit)
         val removed = removeCandidates(chatId, candidates)
         val obsolete = removeObsoleteHiddenRanges(chatId = chatId, through = through, limit = limit)
         if (candidates.size < limit) raisePurgedThrough(chatId, through)
         completeOrDeferPurgeJob(chatId, complete = candidates.size < limit && obsolete < limit)
-        return@query removed
+        return removed
     }
 
     private fun lockNextPurgeChat(): String? =
@@ -90,13 +88,13 @@ class JooqHistoryPurgeRepository(
         }
     }
 
-    override fun cleanupPersonal(limit: Int): Int? = DatabaseObservation.query(DatabaseOperation.DELETION_PERSONAL_CLEANUP) {
+    override fun cleanupPersonal(limit: Int): Int? {
         require(limit in 1..1000)
         val job =
             db.selectFrom(
                 VISIBILITY_CLEANUP_JOBS,
             ).orderBy(VISIBILITY_CLEANUP_JOBS.UPDATED_AT, VISIBILITY_CLEANUP_JOBS.CHAT_ID, VISIBILITY_CLEANUP_JOBS.USER_ID)
-                .limit(1).forUpdate().skipLocked().fetchOne() ?: return@query null
+                .limit(1).forUpdate().skipLocked().fetchOne() ?: return null
         val candidates = db.select(HIDDEN_MESSAGE_RANGES.AFTER_SEQUENCE).from(HIDDEN_MESSAGE_RANGES)
             .where(
                 HIDDEN_MESSAGE_RANGES.CHAT_ID.eq(job.chatId),
@@ -123,14 +121,14 @@ class JooqHistoryPurgeRepository(
             db.update(VISIBILITY_CLEANUP_JOBS).set(VISIBILITY_CLEANUP_JOBS.UPDATED_AT, OffsetDateTime.now(clock))
                 .where(VISIBILITY_CLEANUP_JOBS.CHAT_ID.eq(job.chatId), VISIBILITY_CLEANUP_JOBS.USER_ID.eq(job.userId)).execute()
         }
-        return@query removed
+        return removed
     }
 
-    override fun backlog(): PurgeBacklog = DatabaseObservation.query(DatabaseOperation.DELETION_PURGE_BACKLOG) {
+    override fun backlog(): PurgeBacklog {
         val rows = db.select(
             HISTORY_PURGE_JOBS.CREATED_AT,
         ).from(HISTORY_PURGE_JOBS).orderBy(HISTORY_PURGE_JOBS.CREATED_AT, HISTORY_PURGE_JOBS.CHAT_ID)
             .limit(PurgeBacklog.SAMPLE_CAP + 1).fetch(HISTORY_PURGE_JOBS.CREATED_AT)
-        return@query PurgeBacklog(rows.size, rows.firstOrNull())
+        return PurgeBacklog(rows.size, rows.firstOrNull())
     }
 }

@@ -1061,8 +1061,8 @@
       },
       "targets": [
         {
-          "expr": "sum by(operation,outcome)(rate(messenger_database_transaction_seconds_count{operation=~\"read.*|message.*|chat.delete\"}[$__rate_interval]))",
-          "legendFormat": "{{operation}} {{outcome}}",
+          "expr": "sum by(entrypoint,outcome)(rate(messenger_database_transaction_seconds_count{entrypoint=~\"(GET|POST|PUT|PATCH|DELETE) /v1/chats/\\\\{id\\\\}(/(messages|reads|pins|deletions|visibility).*)?|Read.*|MessageChange.*|HistoryPurge.*|.*/AuthorizePresence\"}[$__rate_interval]))",
+          "legendFormat": "{{entrypoint}} {{outcome}}",
           "refId": "A",
           "instant": false
         }
@@ -1137,7 +1137,7 @@
     {
       "id": 24,
       "title": "Feature database query p99",
-      "description": "Fixed operation labels locate SQL costs for read authorization, frontier updates, detail seeks, mutations and presence authorization. Open Database operations for query timing and waits.",
+      "description": "Entry-point labels (chat routes, read and history jobs, presence authorization RPC) locate SQL costs for read authorization, frontier updates, detail seeks and mutations. Open Database operations for query timing and waits.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
@@ -1175,8 +1175,8 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.99,sum by(le,operation)(rate(messenger_database_query_seconds_bucket{operation=~\"read.*|message.*|presence.*|chat.delete\"}[$__rate_interval])))",
-          "legendFormat": "{{operation}}",
+          "expr": "histogram_quantile(0.99,sum by(le,entrypoint)(rate(messenger_database_query_seconds_bucket{entrypoint=~\"(GET|POST|PUT|PATCH|DELETE) /v1/chats/\\\\{id\\\\}(/(messages|reads|pins|deletions|visibility).*)?|Read.*|MessageChange.*|HistoryPurge.*|.*/AuthorizePresence\"}[$__rate_interval])))",
+          "legendFormat": "{{entrypoint}}",
           "refId": "A",
           "instant": false
         }

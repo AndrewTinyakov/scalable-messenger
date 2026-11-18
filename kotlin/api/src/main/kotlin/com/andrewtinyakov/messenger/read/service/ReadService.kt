@@ -2,8 +2,6 @@ package com.andrewtinyakov.messenger.read.service
 
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.ChatId
-import com.andrewtinyakov.messenger.infrastructure.database.DatabaseTransaction
-import com.andrewtinyakov.messenger.infrastructure.database.observedExecute
 import com.andrewtinyakov.messenger.infrastructure.redis.RoomAddress
 import com.andrewtinyakov.messenger.message.model.MessageId
 import com.andrewtinyakov.messenger.read.config.ReadProperties
@@ -35,11 +33,11 @@ class ReadService(
     private val metrics: ReadMetrics,
 ) {
     fun advance(chatId: ChatId, userId: UserId, throughSequence: Long): ReadProgressResponse {
-        val committed = tx.observedExecute(DatabaseTransaction.READ_ADVANCE) {
+        val committed = tx.execute {
             val lastSequence = readRepository.requireMember(chatId, userId)
             if (throughSequence > lastSequence) invalidInput("throughSequence", "throughSequence exceeds saved history")
             val advance = readRepository.advance(chatId, userId, throughSequence)
-            if (!advance.advanced) return@observedExecute CommittedAdvance(advance, notificationCoalesced = false)
+            if (!advance.advanced) return@execute CommittedAdvance(advance, notificationCoalesced = false)
             val sharedRooms = readRepository.notificationRooms(chatId, advance.progress.readAt!!)
             if (sharedRooms.isNotEmpty()) readRepository.completeNotification(chatId, userId)
             readOutbox.enqueueReadsChanged(chatId, (sharedRooms + RoomAddress.user(userId)).distinct())
@@ -55,7 +53,7 @@ class ReadService(
     }
 
     fun publishPendingNotifications() {
-        tx.observedExecute(DatabaseTransaction.READ_ADVANCE) {
+        tx.execute {
             readRepository.pendingNotifications(OffsetDateTime.now(clock), properties.notificationBatchSize).forEach { (chatId, rooms) ->
                 readOutbox.enqueueReadsChanged(chatId, rooms)
             }

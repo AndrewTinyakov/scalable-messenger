@@ -13,9 +13,6 @@ import com.andrewtinyakov.messenger.chat.repository.membership.GroupMembershipRe
 import com.andrewtinyakov.messenger.chat.web.payload.ChatPageResponse
 import com.andrewtinyakov.messenger.chat.web.payload.ChatResponse
 import com.andrewtinyakov.messenger.chat.web.payload.toResponse
-import com.andrewtinyakov.messenger.infrastructure.database.DatabaseTransaction
-import com.andrewtinyakov.messenger.infrastructure.database.observedExecute
-import com.andrewtinyakov.messenger.infrastructure.database.observedExecuteWithoutResult
 import com.andrewtinyakov.messenger.shared.id.newId
 import com.andrewtinyakov.messenger.shared.web.forbidden
 import com.andrewtinyakov.messenger.shared.web.invalidInput
@@ -92,7 +89,7 @@ class ChatService(
         if (members.size !in 2..Chat.MAX_INITIAL_GROUP_MEMBERS) {
             invalidInput("memberIds", "Initial group needs 2 to ${Chat.MAX_INITIAL_GROUP_MEMBERS} members")
         }
-        return tx.observedExecute(DatabaseTransaction.CHAT_CREATE_GROUP) {
+        return tx.execute {
             requireUsersAndLock(members)
             requireGroupCapacity(members)
             val chat = Chat(
@@ -131,7 +128,7 @@ class ChatService(
         memberIds: List<UserId>,
     ) {
         val requested = memberIds.distinct()
-        tx.observedExecuteWithoutResult(DatabaseTransaction.CHAT_ADD_MEMBERS) {
+        tx.executeWithoutResult {
             val chat = lockOwnedGroup(chatId, userId)
             requireUsersAndLock(requested)
             val additions = newMembers(chatId, requested)

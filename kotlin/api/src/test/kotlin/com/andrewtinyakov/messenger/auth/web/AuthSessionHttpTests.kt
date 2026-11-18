@@ -3,6 +3,7 @@ package com.andrewtinyakov.messenger.auth.web
 import com.andrewtinyakov.messenger.ApiApplication
 import com.andrewtinyakov.messenger.shared.crypto.sha256
 import com.andrewtinyakov.messenger.shared.id.newId
+import io.micrometer.core.instrument.MeterRegistry
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -74,6 +75,8 @@ class AuthSessionHttpTests {
 
     @Autowired private lateinit var db: JdbcTemplate
 
+    @Autowired private lateinit var metrics: MeterRegistry
+
     @MockitoSpyBean private lateinit var passwordEncoder: PasswordEncoder
 
     private val http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()
@@ -82,6 +85,17 @@ class AuthSessionHttpTests {
     @BeforeEach
     fun forgetEncoderCalls() {
         clearInvocations(passwordEncoder)
+    }
+
+    @Test
+    fun `database work is attributed to the matched route without per call names`() {
+        val account = register()
+        val route = {
+            metrics.find("messenger.database.query").tags("entrypoint_kind", "route", "entrypoint", "GET /v1/auth/sessions").timers()
+        }
+        val before = route().sumOf { it.count() }
+        assertEquals(200, send(authenticated(get("/api/v1/auth/sessions"), account)).statusCode())
+        assertTrue(route().sumOf { it.count() } >= before + 2, "session lookup and listing both count toward the route")
     }
 
     @Test

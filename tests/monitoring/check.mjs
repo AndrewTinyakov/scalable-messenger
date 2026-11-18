@@ -108,33 +108,26 @@ for (const metric of [
 const customQueryHealth = await query('pg_exporter_last_scrape_error{job="postgres"}');
 assert.ok(customQueryHealth.length > 0 && customQueryHealth.every((sample) => Number(sample.value[1]) === 0), 'PostgreSQL custom query scrape failed or is missing');
 
-const observationDirectory = join(import.meta.dirname, '..', '..', 'kotlin', 'shared', 'src', 'main', 'kotlin', 'com', 'andrewtinyakov', 'messenger', 'infrastructure', 'database', 'observability');
-const operationLabels = async (name) => new Set([...((await readFile(join(observationDirectory, name), 'utf8')).matchAll(/[A-Z_]+\("([^"\n]+)"\)/g))].map((match) => match[1]));
-const queryOperations = await operationLabels('DatabaseOperation.kt');
-const transactionOperations = await operationLabels('DatabaseObservation.kt');
-assert.ok(queryOperations.size > 1 && transactionOperations.size > 1, 'Database operation allowlists were not loaded');
-for (const [name, operations, outcomes] of [
-  ['query', queryOperations, ['success', 'failure']],
-  ['statement', queryOperations, ['success', 'failure']],
-  ['fetch', queryOperations, ['success', 'failure']],
-  ['transaction', transactionOperations, ['committed', 'rolled_back', 'failed', 'begin_failed']],
-  ['transaction_phase', transactionOperations, ['success', 'failure']],
+const entryPointKinds = ['route', 'job', 'rpc', 'thread'];
+const requestData = /[0-7][0-9A-HJKMNP-TV-Z]{25}|[0-9a-f]{8}-[0-9a-f]{4}-|\d{4,}/i;
+for (const [name, outcomes] of [
+  ['query', ['success', 'failure']],
+  ['transaction', ['committed', 'rolled_back', 'failed', 'begin_failed']],
+  ['transaction_phase', ['success', 'failure']],
 ]) {
   const series = await query(`{__name__=~"messenger_database_${name}_seconds_(count|sum|bucket)",${kotlinSelector}}`);
-  const allowedLabels = new Set(['__name__', 'job', 'instance', 'operation', 'outcome', 'le', ...(name === 'transaction_phase' ? ['phase'] : [])]);
+  const allowedLabels = new Set(['__name__', 'job', 'instance', 'entrypoint_kind', 'entrypoint', 'outcome', 'le', ...(name === 'transaction_phase' ? ['phase'] : [])]);
   for (const { metric: labels } of series) {
-    assert.ok(operations.has(labels.operation), `${name}: unrecognized operation ${labels.operation}`);
+    assert.ok(entryPointKinds.includes(labels.entrypoint_kind), `${name}: unrecognized entry point kind ${labels.entrypoint_kind}`);
+    assert.ok(labels.entrypoint && !requestData.test(labels.entrypoint), `${name}: entry point looks like request data: ${labels.entrypoint}`);
     assert.ok(outcomes.includes(labels.outcome), `${name}: unrecognized outcome ${labels.outcome}`);
     assert.ok(Object.keys(labels).every((label) => allowedLabels.has(label)), `${name}: unexpected metric label`);
     if (name === 'transaction_phase') assert.ok(['begin', 'active', 'commit', 'rollback'].includes(labels.phase), `Unrecognized transaction phase ${labels.phase}`);
   }
-  if (['query', 'statement', 'transaction', 'transaction_phase'].includes(name)) {
-    for (const target of kotlinTargets.filter(({ metric }) => metric.job === 'outbox-publisher')) {
-      assert.ok(series.some(({ metric, value }) => metric.__name__.endsWith('_count') && metric.job === target.metric.job && metric.instance === target.metric.instance && Number(value[1]) > 0), `${name}: publisher polling has no observations on ${target.metric.instance}`);
-    }
+  for (const target of kotlinTargets.filter(({ metric }) => metric.job === 'outbox-publisher')) {
+    assert.ok(series.some(({ metric, value }) => metric.__name__.endsWith('_count') && metric.job === target.metric.job && metric.instance === target.metric.instance && metric.entrypoint_kind === 'thread' && metric.entrypoint === 'outbox-publisher' && Number(value[1]) > 0), `${name}: publisher polling has no outbox-publisher observations on ${target.metric.instance}`);
   }
 }
-
 const digests = await query('pg_stat_statements_calls_total{job="postgres"}');
 assert.ok(digests.length > 0 && digests.length <= 25, 'Statement collector must expose a nonempty subset of at most 25 entries');
 for (const { metric: labels } of digests) {
@@ -160,7 +153,7 @@ for (const name of dashboardNames) {
     const references = (panel.targets ?? []).map((target) => target.refId);
     assert.equal(new Set(references).size, references.length, `${name}: ${panel.title} has duplicate query references`);
     for (const target of panel.targets ?? []) {
-      const expression = target.expr.replaceAll('$__rate_interval', '5m').replaceAll('$__range', '1h').replaceAll('$project', 'messenger.*').replaceAll('$service', 'api|command-processor|outbox-publisher').replaceAll('$operation', '.*');
+      const expression = target.expr.replaceAll('$__rate_interval', '5m').replaceAll('$__range', '1h').replaceAll('$project', 'messenger.*').replaceAll('$service', 'api|command-processor|outbox-publisher').replaceAll('$entrypoint', '.*');
       const url = new URL('/api/v1/query', prometheus);
       url.searchParams.set('query', expression);
       const result = await getJson(url);

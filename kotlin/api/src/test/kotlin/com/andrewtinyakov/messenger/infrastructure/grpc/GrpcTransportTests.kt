@@ -17,6 +17,8 @@ import io.grpc.Status
 import io.grpc.StatusRuntimeException
 import io.grpc.netty.shaded.io.grpc.netty.GrpcSslContexts
 import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder
+import io.micrometer.core.instrument.MeterRegistry
+import io.micrometer.observation.ObservationRegistry
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -32,6 +34,12 @@ import java.util.concurrent.TimeUnit
 class GrpcTransportTests : MessengerIntegrationTest() {
     @Autowired
     private lateinit var chatAuthorizationGrpcService: ChatAuthorizationGrpcService
+
+    @Autowired
+    private lateinit var observations: ObservationRegistry
+
+    @Autowired
+    private lateinit var metrics: MeterRegistry
 
     @Autowired
     private lateinit var authenticationService: AuthenticationService
@@ -56,6 +64,7 @@ class GrpcTransportTests : MessengerIntegrationTest() {
                 keyFile = fixture("api-key.pem").path,
                 allowedClientIdentity = "spiffe://messenger/ws",
             ),
+            observations = observations,
         )
         server.start()
     }
@@ -73,10 +82,13 @@ class GrpcTransportTests : MessengerIntegrationTest() {
             "tls-device",
         )
 
+        val rpcQueries = { rpcQueryCount("messenger.authorization.v1.ChatAuthorization/ValidateSession") }
+        val queriesBefore = rpcQueries()
         withClient { client ->
             val response = client.validateSession(
                 ValidateSessionRequest.newBuilder().setSessionId(credentials.session.sessionId.value).build(),
             )
+            assertTrue(rpcQueries() > queriesBefore, "database work is attributed to the RPC method")
             assertEquals(credentials.session.userId.value, response.userId)
             assertEquals("tls-device", response.deviceId)
             assertEquals(credentials.session.sessionId.value, response.sessionId)
@@ -290,4 +302,7 @@ class GrpcTransportTests : MessengerIntegrationTest() {
     }
 
     private fun fixture(name: String): File = File(requireNotNull(javaClass.getResource("/grpc-tls/$name")).toURI())
+
+    private fun rpcQueryCount(method: String): Long =
+        metrics.find("messenger.database.query").tags("entrypoint_kind", "rpc", "entrypoint", method).timers().sumOf { it.count() }
 }

@@ -1,7 +1,5 @@
 package com.andrewtinyakov.messenger.infrastructure.outbox
 
-import com.andrewtinyakov.messenger.infrastructure.database.DatabaseObservation
-import com.andrewtinyakov.messenger.infrastructure.database.DatabaseOperation
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSENGER_OUTBOX_EVENTS
 import org.jooq.DSLContext
 import org.jooq.JSONB
@@ -13,8 +11,8 @@ private const val INSERT_CHUNK_SIZE = 500
 class JooqOutboxRepository(
     private val db: DSLContext,
 ) : OutboxRepository {
-    override fun enqueue(messages: Collection<OutboxMessage>) = DatabaseObservation.query(DatabaseOperation.OUTBOX_ENQUEUE) {
-        if (messages.isEmpty()) return@query
+    override fun enqueue(messages: Collection<OutboxMessage>) {
+        if (messages.isEmpty()) return
         messages.chunked(INSERT_CHUNK_SIZE).forEach { chunk ->
             val insert = db.insertInto(
                 MESSENGER_OUTBOX_EVENTS,

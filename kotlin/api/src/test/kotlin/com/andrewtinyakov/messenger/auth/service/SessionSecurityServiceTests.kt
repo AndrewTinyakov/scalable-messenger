@@ -461,7 +461,7 @@ class SessionSecurityServiceTests : MessengerIntegrationTest() {
         val owner = Thread.currentThread()
         val listener = object : ExecuteListener {
             override fun executeStart(ctx: ExecuteContext) {
-                if (Thread.currentThread() == owner) statements.add(requireNotNull(ctx.sql()))
+                if (Thread.currentThread() == owner) statements.add(requireNotNull(ctx.sql()).substringAfter("*/ "))
             }
         }
         val configuration = jooq.configuration()

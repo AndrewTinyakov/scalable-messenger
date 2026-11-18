@@ -3,8 +3,6 @@ package com.andrewtinyakov.messenger.chat.repository.membership
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.auth.model.UserSummary
 import com.andrewtinyakov.messenger.chat.model.ChatId
-import com.andrewtinyakov.messenger.infrastructure.database.DatabaseObservation
-import com.andrewtinyakov.messenger.infrastructure.database.DatabaseOperation
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHATS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHAT_MEMBERS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.USERS
@@ -19,7 +17,7 @@ private const val INSERT_CHUNK_SIZE = 500
 class JooqGroupMembershipRepository(
     private val db: DSLContext,
 ) : GroupMembershipRepository {
-    override fun lockUsers(userIds: List<UserId>): Set<UserId> = DatabaseObservation.query(DatabaseOperation.CHAT_LOCK_USERS) {
+    override fun lockUsers(userIds: List<UserId>): Set<UserId> =
         db.select(USERS.ID)
             .from(USERS)
             .where(USERS.ID.`in`(userIds.map(UserId::value)))
@@ -28,11 +26,8 @@ class JooqGroupMembershipRepository(
             .fetch(USERS.ID)
             .map { UserId(requireNotNull(it)) }
             .toSet()
-    }
 
-    override fun groupCountsByUser(userIds: List<UserId>): Map<UserId, Int> = DatabaseObservation.query(
-        DatabaseOperation.CHAT_GROUP_COUNTS_BY_USER,
-    ) {
+    override fun groupCountsByUser(userIds: List<UserId>): Map<UserId, Int> =
         db.select(
             CHAT_MEMBERS.USER_ID,
             DSL.count(),
@@ -51,13 +46,12 @@ class JooqGroupMembershipRepository(
                 DSL.count(),
             )
             .mapKeys { (userId, _) -> UserId(userId!!) }
-    }
 
     override fun insertMembersAndIncrementCount(
         chatId: ChatId,
         userIds: List<UserId>,
-    ) = DatabaseObservation.query(DatabaseOperation.CHAT_INSERT_MEMBERS_AND_INCREMENT_COUNT) {
-        if (userIds.isEmpty()) return@query
+    ) {
+        if (userIds.isEmpty()) return
         userIds.chunked(INSERT_CHUNK_SIZE)
             .forEach { chunk ->
                 val insert = db.insertInto(
@@ -88,7 +82,7 @@ class JooqGroupMembershipRepository(
         viewerId: UserId,
         afterUserId: UserId?,
         limit: Int,
-    ): List<UserSummary>? = DatabaseObservation.query(DatabaseOperation.CHAT_FIND_GROUP_MEMBER_PAGE) {
+    ): List<UserSummary>? {
         val members = DSL.multiset(
             DSL.select(USERS.ID, USERS.USERNAME)
                 .from(CHAT_MEMBERS)
@@ -120,7 +114,7 @@ class JooqGroupMembershipRepository(
     override fun deleteMemberAndDecrementCount(
         chatId: ChatId,
         userId: UserId,
-    ): Boolean = DatabaseObservation.query(DatabaseOperation.CHAT_DELETE_MEMBER_AND_DECREMENT_COUNT) {
+    ): Boolean {
         val removed = DSL.name("removed")
             .`as`(
                 db.deleteFrom(CHAT_MEMBERS)

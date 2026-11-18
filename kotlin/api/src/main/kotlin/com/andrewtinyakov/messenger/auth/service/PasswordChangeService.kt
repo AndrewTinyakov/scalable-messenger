@@ -10,8 +10,6 @@ import com.andrewtinyakov.messenger.auth.model.User
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.auth.repository.SessionRepository
 import com.andrewtinyakov.messenger.auth.repository.UserRepository
-import com.andrewtinyakov.messenger.infrastructure.database.DatabaseTransaction
-import com.andrewtinyakov.messenger.infrastructure.database.observedExecute
 import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
 import com.andrewtinyakov.messenger.shared.web.ApiException
 import com.andrewtinyakov.messenger.shared.web.conflict
@@ -61,7 +59,7 @@ class PasswordChangeService(
             throw ApiException(HttpStatus.FORBIDDEN, ApiErrorCode.INVALID_CREDENTIALS, "Current password is incorrect")
         }
         val newHash = requireNotNull(passwordEncoder.encode(newPassword))
-        val change = tx.observedExecute(DatabaseTransaction.AUTH_CHANGE_PASSWORD) {
+        val change = tx.execute {
             if (!userRepository.replacePasswordHash(userId = user.id, expectedHash = user.passwordHash, newHash = newHash)) {
                 conflict(ApiErrorCode.PASSWORD_CHANGED, "Your password was changed elsewhere. Try again.")
             }

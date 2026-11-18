@@ -1,7 +1,5 @@
 package com.andrewtinyakov.messenger.message.service
 
-import com.andrewtinyakov.messenger.infrastructure.database.DatabaseTransaction
-import com.andrewtinyakov.messenger.infrastructure.database.observedExecute
 import com.andrewtinyakov.messenger.message.config.MessageChangeRetentionProperties
 import com.andrewtinyakov.messenger.message.monitoring.MessageMetrics
 import com.andrewtinyakov.messenger.message.repository.MessageChangeRepository
@@ -19,7 +17,7 @@ class MessageChangeRetentionService(
     private val metrics: MessageMetrics,
 ) {
     fun pruneExpiredChanges() {
-        val removed = tx.observedExecute(DatabaseTransaction.MESSAGE_CHANGE_RETENTION) {
+        val removed = tx.execute {
             messageChangeRepository.prune(OffsetDateTime.now(clock).minus(properties.retention), properties.pruneBatchSize)
         }
         metrics.changesPruned(removed)

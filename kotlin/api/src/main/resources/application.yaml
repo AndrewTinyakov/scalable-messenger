@@ -37,6 +37,10 @@ spring:
     hikari:
       data-source-properties:
         ApplicationName: messenger-api
+        # Each entry point tags its statements, so one query shape can appear with a few
+        # different comments. Keep enough server-prepared statements cached for all of them.
+        preparedStatementCacheQueries: 1024
+        preparedStatementCacheSizeMiB: 16
   flyway:
     enabled: true
   jooq:

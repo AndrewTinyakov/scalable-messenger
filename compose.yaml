@@ -113,7 +113,15 @@ services:
       - -c
       - track_wal_io_timing=on
       - -c
-      - shared_preload_libraries=pg_stat_statements
+      - shared_preload_libraries=pg_stat_statements,auto_explain
+      - -c
+      # Slow-plan logging is off unless explicitly enabled for diagnosis on an isolated dataset:
+      # plans and statement text can contain inlined values.
+      - auto_explain.log_min_duration=${POSTGRES_SLOW_PLAN_MS:--1}
+      - -c
+      - auto_explain.log_parameter_max_length=0
+      - -c
+      - auto_explain.log_nested_statements=on
       - -c
       - pg_stat_statements.max=5000
       - -c

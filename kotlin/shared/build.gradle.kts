@@ -25,6 +25,7 @@ dependencies {
     api("com.github.f4b6a3:ulid-creator:5.2.4")
     api("org.postgresql:postgresql")
     implementation("org.springframework:spring-web")
+    compileOnly("jakarta.servlet:jakarta.servlet-api")
     implementation("io.micrometer:micrometer-core")
     jooqCodegen("org.postgresql:postgresql")
 }

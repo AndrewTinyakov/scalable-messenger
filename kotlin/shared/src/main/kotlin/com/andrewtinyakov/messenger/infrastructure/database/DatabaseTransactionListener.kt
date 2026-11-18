@@ -6,13 +6,14 @@ import java.util.IdentityHashMap
 
 class DatabaseTransactionListener(
     private val metrics: DatabaseMetrics,
+    private val entryPoints: EntryPointResolver,
 ) : TransactionExecutionListener {
     private val transactions = ThreadLocal<IdentityHashMap<TransactionExecution, TransactionState>>()
 
     override fun beforeBegin(transaction: TransactionExecution) {
         if (!transaction.isNewTransaction || transaction.isNested) return
         val states = transactions.get() ?: IdentityHashMap<TransactionExecution, TransactionState>().also(transactions::set)
-        states[transaction] = TransactionState(DatabaseObservation.transactionOperation.get() ?: DatabaseTransaction.OTHER)
+        states[transaction] = TransactionState(entryPoints.current())
     }
 
     override fun afterBegin(transaction: TransactionExecution, beginFailure: Throwable?) {
@@ -53,7 +54,7 @@ class DatabaseTransactionListener(
     private fun phase(state: TransactionState, name: String, started: Long, failure: Throwable?) {
         metrics.record(
             "messenger.database.transaction.phase",
-            state.operation.metricValue,
+            state.entryPoint,
             if (failure == null) "success" else "failure",
             System.nanoTime() - started,
             name,
@@ -64,6 +65,6 @@ class DatabaseTransactionListener(
         val states = transactions.get() ?: return
         val state = states.remove(transaction) ?: return
         if (states.isEmpty()) transactions.remove()
-        metrics.record("messenger.database.transaction", state.operation.metricValue, outcome, System.nanoTime() - state.started)
+        metrics.record("messenger.database.transaction", state.entryPoint, outcome, System.nanoTime() - state.started)
     }
 }

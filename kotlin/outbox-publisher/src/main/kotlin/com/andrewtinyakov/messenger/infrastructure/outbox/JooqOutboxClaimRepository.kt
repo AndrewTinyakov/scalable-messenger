@@ -1,7 +1,5 @@
 package com.andrewtinyakov.messenger.infrastructure.outbox
 
-import com.andrewtinyakov.messenger.infrastructure.database.DatabaseObservation
-import com.andrewtinyakov.messenger.infrastructure.database.DatabaseOperation
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSENGER_OUTBOX_EVENTS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.enums.RoomKind
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.MessengerOutboxEventsRecord
@@ -22,7 +20,7 @@ class JooqOutboxClaimRepository(
         limit: Int,
         owner: String,
         leaseUntil: OffsetDateTime,
-    ): List<OutboxMessage> = DatabaseObservation.query(DatabaseOperation.OUTBOX_CLAIM_ROOMS) {
+    ): List<OutboxMessage> {
         val earlier = MESSENGER_OUTBOX_EVENTS.`as`("earlier")
         val nextGroupEvent = DSL.notExists(
             DSL.selectOne().from(earlier).where(
@@ -51,7 +49,7 @@ class JooqOutboxClaimRepository(
         limit: Int,
         owner: String,
         leaseUntil: OffsetDateTime,
-    ): List<OutboxMessage> = DatabaseObservation.query(DatabaseOperation.OUTBOX_CLAIM_GROUP_TAIL) {
+    ): List<OutboxMessage> {
         if (limit <= 0 || anchor.groupPublicationOrder == null) return emptyList()
         val head = db.selectFrom(MESSENGER_OUTBOX_EVENTS)
             .where(MESSENGER_OUTBOX_EVENTS.ROOM.eq(anchor.room), MESSENGER_OUTBOX_EVENTS.PUBLISHED_AT.isNull)
@@ -106,8 +104,8 @@ class JooqOutboxClaimRepository(
             )
             .fetch()
 
-    override fun complete(ids: Collection<EventId>, owner: String) = DatabaseObservation.query(DatabaseOperation.OUTBOX_COMPLETE) {
-        if (ids.isEmpty()) return@query
+    override fun complete(ids: Collection<EventId>, owner: String) {
+        if (ids.isEmpty()) return
         val updated = db.deleteFrom(MESSENGER_OUTBOX_EVENTS)
             .where(
                 MESSENGER_OUTBOX_EVENTS.ID.`in`(ids.map(EventId::value)),
@@ -117,12 +115,12 @@ class JooqOutboxClaimRepository(
         check(updated == ids.size) { "Expected to complete ${ids.size} outbox events, completed $updated" }
     }
 
-    override fun backlog(): OutboxBacklog = DatabaseObservation.query(DatabaseOperation.OUTBOX_BACKLOG_SAMPLE) {
+    override fun backlog(): OutboxBacklog {
         val row = db.select(DSL.count(), DSL.min(MESSENGER_OUTBOX_EVENTS.CREATED_AT))
             .from(MESSENGER_OUTBOX_EVENTS)
             .where(MESSENGER_OUTBOX_EVENTS.PUBLISHED_AT.isNull)
             .fetchSingle()
-        OutboxBacklog(pending = row.value1().toLong(), oldestCreatedAt = row.value2())
+        return OutboxBacklog(pending = row.value1().toLong(), oldestCreatedAt = row.value2())
     }
 }
 

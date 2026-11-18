@@ -3,8 +3,6 @@ package com.andrewtinyakov.messenger.deletion.service
 import com.andrewtinyakov.messenger.deletion.config.HistoryPurgeProperties
 import com.andrewtinyakov.messenger.deletion.monitoring.DeletionMetrics
 import com.andrewtinyakov.messenger.deletion.repository.HistoryPurgeRepository
-import com.andrewtinyakov.messenger.infrastructure.database.DatabaseTransaction
-import com.andrewtinyakov.messenger.infrastructure.database.observedExecute
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
@@ -19,7 +17,7 @@ class HistoryPurgeService(
     private val logger = LoggerFactory.getLogger(javaClass)
 
     fun runBatch(): Int? = metrics.timePurgeBatch {
-        tx.observedExecute(DatabaseTransaction.DELETION_PURGE) { historyPurgeRepository.purge(properties.batchSize) }
+        tx.execute { historyPurgeRepository.purge(properties.batchSize) }
     }
 
     fun purgeDeletedHistory() {
@@ -28,7 +26,7 @@ class HistoryPurgeService(
                 if (runBatch() == null) break
             }
             repeat(properties.personalCleanupBatchesPerRun) {
-                tx.observedExecute(DatabaseTransaction.DELETION_VISIBILITY_CLEANUP) {
+                tx.execute {
                     historyPurgeRepository.cleanupPersonal(properties.personalCleanupBatchSize)
                 }
             }

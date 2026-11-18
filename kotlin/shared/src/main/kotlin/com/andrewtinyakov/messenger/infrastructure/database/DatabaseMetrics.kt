@@ -18,10 +18,11 @@ class DatabaseMetrics(
         safely { Gauge.builder("messenger.database.instrumentation.failures", failures, AtomicLong::toDouble).register(registry) }
     }
 
-    fun record(name: String, operation: String, outcome: String, nanos: Long, phase: String? = null) {
+    fun record(name: String, entryPoint: EntryPoint, outcome: String, nanos: Long, phase: String? = null) {
         safely {
-            val timer = timers.computeIfAbsent(listOf(name, operation, outcome, phase.orEmpty())) {
-                val builder = Timer.builder(name).tags("operation", operation, "outcome", outcome)
+            val timer = timers.computeIfAbsent(listOf(name, entryPoint.kind, entryPoint.name, outcome, phase.orEmpty())) {
+                val builder = Timer.builder(name)
+                    .tags("entrypoint_kind", entryPoint.kind, "entrypoint", entryPoint.name, "outcome", outcome)
                     .serviceLevelObjectives(*BUCKETS)
                 if (phase != null) builder.tag("phase", phase)
                 builder.register(registry)

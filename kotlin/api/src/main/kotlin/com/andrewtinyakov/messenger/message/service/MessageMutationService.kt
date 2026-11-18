@@ -5,8 +5,6 @@ import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.repository.ChatRepository
 import com.andrewtinyakov.messenger.deletion.model.DeletionScope
 import com.andrewtinyakov.messenger.deletion.service.DeletionService
-import com.andrewtinyakov.messenger.infrastructure.database.DatabaseTransaction
-import com.andrewtinyakov.messenger.infrastructure.database.observedExecute
 import com.andrewtinyakov.messenger.message.messaging.MessageOutbox
 import com.andrewtinyakov.messenger.message.model.Message
 import com.andrewtinyakov.messenger.message.model.MessageId
@@ -49,7 +47,7 @@ class MessageMutationService(
         expectedVersion: Long,
     ): MessageResponse {
         val response = try {
-            tx.observedExecute(DatabaseTransaction.MESSAGE_MUTATE) {
+            tx.execute {
                 val chat = chatRepository.findByIdForUpdate(chatId) ?: notFound()
                 requireEditableMessage(
                     chatId = chatId,

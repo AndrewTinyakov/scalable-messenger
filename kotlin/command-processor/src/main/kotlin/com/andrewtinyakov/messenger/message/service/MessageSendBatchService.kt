@@ -1,8 +1,6 @@
 package com.andrewtinyakov.messenger.message.service
 
 import com.andrewtinyakov.messenger.generated.messaging.command.SendMessageCommandV1
-import com.andrewtinyakov.messenger.infrastructure.database.DatabaseTransaction
-import com.andrewtinyakov.messenger.infrastructure.database.observedExecute
 import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStage
 import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStageRecorder
 import com.andrewtinyakov.messenger.message.model.CommandResult
@@ -38,7 +36,7 @@ class MessageSendBatchService(
     private fun processInOwnTransaction(commands: List<SendMessageCommandV1>): List<CommandResult> {
         val started = System.nanoTime()
         var callbackFinished = started
-        return tx.observedExecute(DatabaseTransaction.SEND_BATCH) {
+        return tx.execute {
             SendTransactionCompletion.onCompletion { completion ->
                 SendStageRecorder.requests(completion.stage, commands) { it.requestId }
                 val finished = System.nanoTime()

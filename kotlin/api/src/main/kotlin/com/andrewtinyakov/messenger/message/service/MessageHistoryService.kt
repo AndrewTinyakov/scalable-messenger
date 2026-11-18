@@ -2,8 +2,6 @@ package com.andrewtinyakov.messenger.message.service
 
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.ChatId
-import com.andrewtinyakov.messenger.infrastructure.database.DatabaseTransaction
-import com.andrewtinyakov.messenger.infrastructure.database.observedExecute
 import com.andrewtinyakov.messenger.message.model.AnchorNeighbours
 import com.andrewtinyakov.messenger.message.model.AnchorWindow
 import com.andrewtinyakov.messenger.message.model.Message
@@ -55,7 +53,7 @@ class MessageHistoryService(
         require(afterSeq == null || beforeSeq == null)
         val direction = if (afterSeq != null) HistoryDirection.AFTER else HistoryDirection.BEFORE
         return metrics.timeMessages(direction) {
-            snapshot.observedExecute(DatabaseTransaction.MESSAGE_HISTORY) {
+            snapshot.execute {
                 val state = state(chatId, userId)
                 requirePageLimit(limit)
                 if (afterSeq != null && afterSeq > state.snapshotSequence) {
@@ -88,7 +86,7 @@ class MessageHistoryService(
         anchorSequence: Long?,
         limit: Int,
     ): MessageAroundResponse = metrics.timeAround {
-        snapshot.observedExecute(DatabaseTransaction.MESSAGE_HISTORY) {
+        snapshot.execute {
             val state = state(chatId, userId)
             requirePageLimit(limit)
             requireAnchorReference(messageId, anchorSequence)
@@ -97,15 +95,13 @@ class MessageHistoryService(
             val neighbours = readNeighbours(chatId, userId, state, anchorAt)
             val anchor = requested
                 ?: neighbours.closestTo(anchorAt)
-                ?: return@observedExecute emptyAround(state, neighbours)
+                ?: return@execute emptyAround(state, neighbours)
             val window = readWindow(chatId, userId, state, anchor, limit)
             trimWindow(state, anchor, window, limit)
         }
     }
 
-    fun resolve(chatId: ChatId, userId: UserId, ids: List<MessageId>): MessageResolveResponse = snapshot.observedExecute(
-        DatabaseTransaction.MESSAGE_HISTORY,
-    ) {
+    fun resolve(chatId: ChatId, userId: UserId, ids: List<MessageId>): MessageResolveResponse = snapshot.execute {
         val state = state(chatId, userId)
         if (ids.size !in 1..Message.MAX_LOOKUP_IDS ||
             ids.distinct().size != ids.size
@@ -118,11 +114,11 @@ class MessageHistoryService(
     fun visibility(chatId: ChatId, userId: UserId): MessageVisibilityResponse = state(chatId, userId).toVisibilityResponse()
 
     fun changes(chatId: ChatId, userId: UserId, after: Long, limit: Int): MessageChangesResponse = metrics.timeChanges {
-        snapshot.observedExecute(DatabaseTransaction.MESSAGE_HISTORY) {
+        snapshot.execute {
             val state = state(chatId, userId)
             val cursor = messageChangeRepository.cursor(chatId, userId) ?: notFound()
             requirePageLimit(limit)
-            if (after < cursor.floor || after > cursor.revision) return@observedExecute resetChanges(state, cursor)
+            if (after < cursor.floor || after > cursor.revision) return@execute resetChanges(state, cursor)
             val page = messageChangeRepository.page(chatId, after, cursor.revision, limit)
             val current = findCurrentMessages(chatId, userId, page)
             state.toChangesResponse(

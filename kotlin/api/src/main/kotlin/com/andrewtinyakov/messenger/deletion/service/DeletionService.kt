@@ -17,8 +17,6 @@ import com.andrewtinyakov.messenger.deletion.monitoring.DeletionMetrics
 import com.andrewtinyakov.messenger.deletion.repository.DeletionRepository
 import com.andrewtinyakov.messenger.deletion.web.payload.DeletionResponse
 import com.andrewtinyakov.messenger.deletion.web.payload.toResponse
-import com.andrewtinyakov.messenger.infrastructure.database.DatabaseTransaction
-import com.andrewtinyakov.messenger.infrastructure.database.observedExecute
 import com.andrewtinyakov.messenger.message.model.MessageId
 import com.andrewtinyakov.messenger.message.model.RequestId
 import com.andrewtinyakov.messenger.shared.crypto.sha256
@@ -101,12 +99,12 @@ class DeletionService(
         applyDeletion: (DeletionChat) -> AppliedDeletion,
     ): DeletionResponse = metrics.timeAcceptance(scope, target) {
         val fingerprint = fingerprint(chatId, scope, target, messageIds)
-        val committed = tx.observedExecute(DatabaseTransaction.DELETION_ACCEPT) {
+        val committed = tx.execute {
             deletionRepository.lockRequest(userId, requestId)
-            replayExistingOperation(chatId, userId, requestId, fingerprint)?.let { return@observedExecute it }
+            replayExistingOperation(chatId, userId, requestId, fingerprint)?.let { return@execute it }
             val chat = deletionRepository.lockChat(chatId, userId) ?: notFound()
             requireChatDeletionAllowed(chat, userId, scope, target)
-            if (chat.deleted) return@observedExecute repairClosedChat(chatId, userId, requestId, scope, target, fingerprint, chat)
+            if (chat.deleted) return@execute repairClosedChat(chatId, userId, requestId, scope, target, fingerprint, chat)
             val applied = applyDeletion(chat)
             deletionRepository.saveOperation(
                 chatId = chatId,

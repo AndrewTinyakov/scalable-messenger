@@ -1,6 +1,7 @@
 package com.andrewtinyakov.messenger.infrastructure.database
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
+import io.micrometer.observation.ObservationRegistry
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
@@ -13,24 +14,24 @@ class DatabaseTransactionFailureTests {
         for (failure in listOf("begin", "commit", "rollback")) {
             SimpleMeterRegistry().let { registry ->
                 val manager = FailingTransactionManager(failure).apply {
-                    addListener(DatabaseTransactionListener(DatabaseMetrics(registry)))
+                    addListener(DatabaseTransactionListener(DatabaseMetrics(registry), EntryPointResolver(ObservationRegistry.NOOP)))
                 }
                 val tx = TransactionTemplate(manager)
                 assertThrows(TransactionSystemException::class.java) {
-                    tx.observedExecute(DatabaseTransaction.SEND_BATCH) {
+                    tx.execute {
                         if (failure == "rollback") it.setRollbackOnly()
                     }
                 }
                 val outcome = if (failure == "begin") "begin_failed" else "failed"
                 assertEquals(
                     1,
-                    registry.get("messenger.database.transaction").tags("operation", "send.batch", "outcome", outcome).timer().count(),
+                    registry.get("messenger.database.transaction").tags("outcome", outcome).timer().count(),
                 )
                 manager.failure = null
-                tx.observedExecute(DatabaseTransaction.AUTH_LOGOUT) { }
+                tx.execute { }
                 assertEquals(
                     1,
-                    registry.get("messenger.database.transaction").tags("operation", "auth.logout", "outcome", "committed").timer().count(),
+                    registry.get("messenger.database.transaction").tags("outcome", "committed").timer().count(),
                 )
                 assertEquals(2, registry.find("messenger.database.transaction").timers().sumOf { it.count() })
             }

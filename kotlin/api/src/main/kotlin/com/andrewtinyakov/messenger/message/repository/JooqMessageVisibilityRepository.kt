@@ -2,8 +2,6 @@ package com.andrewtinyakov.messenger.message.repository
 
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.ChatId
-import com.andrewtinyakov.messenger.infrastructure.database.DatabaseObservation
-import com.andrewtinyakov.messenger.infrastructure.database.DatabaseOperation
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHATS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHAT_MEMBERS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.HIDDEN_MESSAGE_RANGES
@@ -19,7 +17,7 @@ class JooqMessageVisibilityRepository(
     override fun snapshot(
         chatId: ChatId,
         userId: UserId,
-    ): VisibilitySnapshot? = DatabaseObservation.query(DatabaseOperation.VISIBILITY_SNAPSHOT) {
+    ): VisibilitySnapshot? =
         db.select(
             CHATS.NEXT_SEQUENCE,
             CHATS.MUTATION_REVISION,
@@ -40,11 +38,8 @@ class JooqMessageVisibilityRepository(
                     it.value6()?.let { cutoff -> snapshotSequence <= cutoff } == true,
                 )
             }
-    }
 
-    override fun containing(chatId: ChatId, userId: UserId, sequence: Long): HiddenRange? = DatabaseObservation.query(
-        DatabaseOperation.VISIBILITY_INTERVAL_SEEK,
-    ) {
+    override fun containing(chatId: ChatId, userId: UserId, sequence: Long): HiddenRange? =
         db.selectFrom(HIDDEN_MESSAGE_RANGES)
             .where(
                 HIDDEN_MESSAGE_RANGES.CHAT_ID.eq(chatId.value),
@@ -53,11 +48,8 @@ class JooqMessageVisibilityRepository(
             )
             .orderBy(HIDDEN_MESSAGE_RANGES.AFTER_SEQUENCE.desc()).limit(1)
             .fetchOne()?.takeIf { it.throughSequence!! >= sequence }?.let { HiddenRange(it.afterSequence!!, it.throughSequence!!) }
-    }
 
-    override fun next(chatId: ChatId, userId: UserId, after: Long): HiddenRange? = DatabaseObservation.query(
-        DatabaseOperation.VISIBILITY_INTERVAL_SEEK,
-    ) {
+    override fun next(chatId: ChatId, userId: UserId, after: Long): HiddenRange? =
         db.selectFrom(HIDDEN_MESSAGE_RANGES)
             .where(
                 HIDDEN_MESSAGE_RANGES.CHAT_ID.eq(chatId.value),
@@ -67,11 +59,8 @@ class JooqMessageVisibilityRepository(
             .orderBy(HIDDEN_MESSAGE_RANGES.AFTER_SEQUENCE).limit(1).fetchOne()?.let {
                 HiddenRange(it.afterSequence!!, it.throughSequence!!)
             }
-    }
 
-    override fun previous(chatId: ChatId, userId: UserId, before: Long): HiddenRange? = DatabaseObservation.query(
-        DatabaseOperation.VISIBILITY_INTERVAL_SEEK,
-    ) {
+    override fun previous(chatId: ChatId, userId: UserId, before: Long): HiddenRange? =
         db.selectFrom(HIDDEN_MESSAGE_RANGES)
             .where(
                 HIDDEN_MESSAGE_RANGES.CHAT_ID.eq(chatId.value),
@@ -81,5 +70,4 @@ class JooqMessageVisibilityRepository(
             .orderBy(HIDDEN_MESSAGE_RANGES.THROUGH_SEQUENCE.desc()).limit(1).fetchOne()?.let {
                 HiddenRange(it.afterSequence!!, it.throughSequence!!)
             }
-    }
 }

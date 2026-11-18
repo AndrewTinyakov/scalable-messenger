@@ -8,9 +8,6 @@ import com.andrewtinyakov.messenger.chat.repository.ChatRepository
 import com.andrewtinyakov.messenger.chat.service.DirectChatService
 import com.andrewtinyakov.messenger.generated.messaging.command.SendMessageCommandV1
 import com.andrewtinyakov.messenger.generated.messaging.event.SendRejectionReason
-import com.andrewtinyakov.messenger.infrastructure.database.DatabaseTransaction
-import com.andrewtinyakov.messenger.infrastructure.database.observedExecute
-import com.andrewtinyakov.messenger.infrastructure.database.observedExecuteWithoutResult
 import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStage
 import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStageRecorder
 import com.andrewtinyakov.messenger.message.messaging.MessageSendOutbox
@@ -61,7 +58,7 @@ class MessageSendService(
 
     fun rejectExhausted(command: SendMessageCommandV1) {
         val request = command.toSendRequest()
-        tx.observedExecuteWithoutResult(DatabaseTransaction.SEND_REJECT_EXHAUSTED) {
+        tx.executeWithoutResult {
             messageRepository.lockSend(senderId = request.senderId, requestId = request.requestId)
             if (messageRepository.findSendResult(senderId = request.senderId, requestId = request.requestId) == null) {
                 val result = rejected(request, SendRejectionReason.PROCESSING_FAILED)
@@ -88,7 +85,7 @@ class MessageSendService(
         val window = metrics.transactionStarted()
         var synchronized = false
         try {
-            return tx.observedExecute(DatabaseTransaction.SEND_SINGLE) {
+            return tx.execute {
                 SendTransactionCompletion.onCompletion { completion ->
                     SendStageRecorder.record(completion.stage, requestId = request.requestId.value)
                     window.completed()

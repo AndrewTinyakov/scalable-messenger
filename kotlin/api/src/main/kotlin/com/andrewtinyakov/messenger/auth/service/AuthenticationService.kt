@@ -12,9 +12,6 @@ import com.andrewtinyakov.messenger.auth.model.User
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.auth.repository.SessionRepository
 import com.andrewtinyakov.messenger.auth.repository.UserRepository
-import com.andrewtinyakov.messenger.infrastructure.database.DatabaseTransaction
-import com.andrewtinyakov.messenger.infrastructure.database.observedExecute
-import com.andrewtinyakov.messenger.infrastructure.database.observedExecuteWithoutResult
 import com.andrewtinyakov.messenger.shared.id.newId
 import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
 import com.andrewtinyakov.messenger.shared.web.conflict
@@ -54,7 +51,7 @@ class AuthenticationService(
             passwordHash = requireNotNull(passwordEncoder.encode(password)),
         )
         try {
-            return tx.observedExecute(DatabaseTransaction.AUTH_REGISTER) {
+            return tx.execute {
                 userRepository.insertUser(user = user)
                 sessionIssuanceService.issue(user = user, requestedDeviceId = device, deviceLabel = DeviceLabel.fromUserAgent(userAgent))
             }
@@ -80,7 +77,7 @@ class AuthenticationService(
             unauthorized(ApiErrorCode.INVALID_CREDENTIALS, "Invalid username or password")
         }
         val upgradedHash = if (passwordEncoder.upgradeEncoding(user.passwordHash)) passwordEncoder.encode(password) else null
-        val credentials = tx.observedExecute(DatabaseTransaction.AUTH_LOGIN) {
+        val credentials = tx.execute {
             if (userRepository.lockPasswordHash(userId = user.id) != user.passwordHash) {
                 unauthorized(ApiErrorCode.INVALID_CREDENTIALS, "Invalid username or password")
             }
@@ -100,8 +97,8 @@ class AuthenticationService(
     fun logout(token: SessionToken?, expectedIdentity: ExpectedSessionIdentity = ExpectedSessionIdentity()) {
         if (token == null) return
         val sessionId = token.sessionId()
-        tx.observedExecuteWithoutResult(DatabaseTransaction.AUTH_LOGOUT) {
-            val session = sessionRepository.deleteSession(sessionId = sessionId) ?: return@observedExecuteWithoutResult
+        tx.executeWithoutResult {
+            val session = sessionRepository.deleteSession(sessionId = sessionId) ?: return@executeWithoutResult
             if (session.expiresAt > clock.instant()) requireExpectedIdentity(expectedIdentity = expectedIdentity, session = session)
             sessionOutbox.enqueueRevoked(userId = session.userId, sessionIds = listOf(sessionId))
         }

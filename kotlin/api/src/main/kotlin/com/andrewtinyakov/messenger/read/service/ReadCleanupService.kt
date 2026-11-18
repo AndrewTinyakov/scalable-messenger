@@ -1,7 +1,5 @@
 package com.andrewtinyakov.messenger.read.service
 
-import com.andrewtinyakov.messenger.infrastructure.database.DatabaseTransaction
-import com.andrewtinyakov.messenger.infrastructure.database.observedExecute
 import com.andrewtinyakov.messenger.read.config.ReadProperties
 import com.andrewtinyakov.messenger.read.model.ReadCleanup
 import com.andrewtinyakov.messenger.read.monitoring.ReadMetrics
@@ -23,7 +21,7 @@ class ReadCleanupService(
     fun cleanup(limit: Int = properties.cleanupBatchSize): ReadCleanup? = metrics.timeCleanup {
         val now = OffsetDateTime.now(clock)
         val result = try {
-            tx.observedExecute(DatabaseTransaction.READ_CLEANUP) { readRepository.cleanup(now, limit) }
+            tx.execute { readRepository.cleanup(now, limit) }
         } catch (failure: Exception) {
             metrics.cleanupFailed()
             throw failure

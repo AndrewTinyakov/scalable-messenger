@@ -8,8 +8,8 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.Routines
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSAGES
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSAGE_PINS
 import com.andrewtinyakov.messenger.message.model.MessageId
-import com.andrewtinyakov.messenger.message.model.PinScope
-import com.andrewtinyakov.messenger.message.model.PinnedMessage
+import com.andrewtinyakov.messenger.message.model.pin.PinScope
+import com.andrewtinyakov.messenger.message.model.pin.PinnedMessage
 import org.jooq.Condition
 import org.jooq.DSLContext
 import org.jooq.impl.DSL

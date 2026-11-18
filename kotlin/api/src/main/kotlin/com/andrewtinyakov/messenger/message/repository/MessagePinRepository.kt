@@ -3,8 +3,8 @@ package com.andrewtinyakov.messenger.message.repository
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.message.model.MessageId
-import com.andrewtinyakov.messenger.message.model.PinScope
-import com.andrewtinyakov.messenger.message.model.PinnedMessage
+import com.andrewtinyakov.messenger.message.model.pin.PinScope
+import com.andrewtinyakov.messenger.message.model.pin.PinnedMessage
 
 interface MessagePinRepository {
     fun lock(chatId: ChatId)

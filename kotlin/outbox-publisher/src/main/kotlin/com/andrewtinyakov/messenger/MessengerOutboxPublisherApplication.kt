@@ -1,7 +1,7 @@
 package com.andrewtinyakov.messenger
 
 import com.andrewtinyakov.messenger.infrastructure.database.DatabaseObservationConfiguration
-import com.andrewtinyakov.messenger.infrastructure.outbox.PublisherProperties
+import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxPublisherProperties
 import com.andrewtinyakov.messenger.message.repository.JooqMessageRepository
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.context.properties.EnableConfigurationProperties
@@ -11,7 +11,7 @@ import org.springframework.scheduling.annotation.EnableScheduling
 
 @Import(DatabaseObservationConfiguration::class, JooqMessageRepository::class)
 @EnableScheduling
-@EnableConfigurationProperties(PublisherProperties::class)
+@EnableConfigurationProperties(OutboxPublisherProperties::class)
 @SpringBootApplication(
     scanBasePackages = [
         "com.andrewtinyakov.messenger.infrastructure.outbox",

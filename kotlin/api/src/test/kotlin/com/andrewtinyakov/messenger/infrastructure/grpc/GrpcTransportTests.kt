@@ -3,7 +3,6 @@ package com.andrewtinyakov.messenger.infrastructure.grpc
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.auth.service.AuthenticationService
 import com.andrewtinyakov.messenger.auth.web.payload.AuthRequest
-import com.andrewtinyakov.messenger.chat.grpc.ChatAuthorizationGrpcService
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.service.ChatMembershipService
 import com.andrewtinyakov.messenger.chat.service.ChatService
@@ -13,6 +12,7 @@ import com.andrewtinyakov.messenger.generated.grpc.ChatAuthorizationGrpc
 import com.andrewtinyakov.messenger.generated.grpc.ValidateSessionRequest
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
 import com.andrewtinyakov.messenger.shared.id.newId
+import com.andrewtinyakov.messenger.ws.grpc.ChatAuthorizationGrpcService
 import io.grpc.Status
 import io.grpc.StatusRuntimeException
 import io.grpc.netty.shaded.io.grpc.netty.GrpcSslContexts

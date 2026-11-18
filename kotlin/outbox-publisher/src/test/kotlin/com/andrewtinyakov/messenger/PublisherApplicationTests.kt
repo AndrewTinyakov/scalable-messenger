@@ -1,8 +1,8 @@
 package com.andrewtinyakov.messenger
 
-import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxBacklog
 import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxClaimRepository
-import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxPublicationService
+import com.andrewtinyakov.messenger.infrastructure.outbox.backlog.OutboxBacklog
+import com.andrewtinyakov.messenger.infrastructure.outbox.publication.OutboxPublicationService
 import com.andrewtinyakov.messenger.message.repository.MessageRepository
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull

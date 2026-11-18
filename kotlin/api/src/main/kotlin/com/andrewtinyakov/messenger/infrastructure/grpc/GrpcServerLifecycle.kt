@@ -1,7 +1,6 @@
 package com.andrewtinyakov.messenger.infrastructure.grpc
 
-import com.andrewtinyakov.messenger.chat.grpc.ChatAuthorizationGrpcService
-import io.grpc.Server
+import com.andrewtinyakov.messenger.ws.grpc.ChatAuthorizationGrpcService
 import io.grpc.netty.shaded.io.grpc.netty.GrpcSslContexts
 import io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder
 import io.grpc.netty.shaded.io.netty.handler.ssl.ClientAuth
@@ -19,18 +18,18 @@ class GrpcServerLifecycle(
     private val properties: GrpcProperties,
 ) : SmartLifecycle {
     @Volatile
-    private var state: ServerState = ServerState.Stopped
+    private var state: GrpcServerState = GrpcServerState.Stopped
 
     internal val boundPort: Int
         get() = when (val current = state) {
-            ServerState.Stopped -> error("Authorization server is stopped")
-            is ServerState.Running -> current.server.port
-            is ServerState.Stopping -> current.server.port
+            GrpcServerState.Stopped -> error("Authorization server is stopped")
+            is GrpcServerState.Running -> current.server.port
+            is GrpcServerState.Stopping -> current.server.port
         }
 
     @Synchronized
     override fun start() {
-        if (state != ServerState.Stopped) return
+        if (state != GrpcServerState.Stopped) return
         val tls = GrpcSslContexts.forServer(File(properties.certFile), File(properties.keyFile))
             .trustManager(File(properties.caFile))
             .clientAuth(ClientAuth.REQUIRE)
@@ -41,15 +40,15 @@ class GrpcServerLifecycle(
             .maxInboundMessageSize(properties.maxInboundMessageBytes)
             .addService(chatAuthorizationGrpcService)
             .build().start()
-        state = ServerState.Running(server)
+        state = GrpcServerState.Running(server)
     }
 
     @Synchronized
     override fun stop() {
         val stopping = when (val current = state) {
-            ServerState.Stopped -> return
-            is ServerState.Running -> current.server.also { state = ServerState.Stopping(it) }
-            is ServerState.Stopping -> current.server
+            GrpcServerState.Stopped -> return
+            is GrpcServerState.Running -> current.server.also { state = GrpcServerState.Stopping(it) }
+            is GrpcServerState.Stopping -> current.server
         }
         stopping.shutdown()
         try {
@@ -72,21 +71,9 @@ class GrpcServerLifecycle(
             }
             throw error
         } finally {
-            if (stopping.isTerminated) state = ServerState.Stopped
+            if (stopping.isTerminated) state = GrpcServerState.Stopped
         }
     }
 
-    override fun isRunning(): Boolean = state is ServerState.Running
-
-    private sealed interface ServerState {
-        data object Stopped : ServerState
-
-        data class Running(
-            val server: Server,
-        ) : ServerState
-
-        data class Stopping(
-            val server: Server,
-        ) : ServerState
-    }
+    override fun isRunning(): Boolean = state is GrpcServerState.Running
 }

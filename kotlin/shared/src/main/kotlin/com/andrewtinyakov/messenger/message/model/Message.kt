@@ -35,14 +35,6 @@ data class Message(
     }
 }
 
-data class MessageReply(
-    val messageId: MessageId,
-    val senderId: UserId,
-    val body: String,
-    val deleted: Boolean,
-    val version: Long,
-)
-
 fun Message.asReply(): MessageReply = MessageReply(
     messageId = id,
     senderId = senderId,

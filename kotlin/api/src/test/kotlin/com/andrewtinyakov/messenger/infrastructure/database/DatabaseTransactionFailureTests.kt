@@ -4,10 +4,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
-import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.TransactionSystemException
-import org.springframework.transaction.support.AbstractPlatformTransactionManager
-import org.springframework.transaction.support.DefaultTransactionStatus
 import org.springframework.transaction.support.TransactionTemplate
 
 class DatabaseTransactionFailureTests {
@@ -15,7 +12,9 @@ class DatabaseTransactionFailureTests {
     fun `begin commit and rollback failures are distinct and leave no stale state`() {
         for (failure in listOf("begin", "commit", "rollback")) {
             SimpleMeterRegistry().let { registry ->
-                val manager = FailingManager(failure).apply { addListener(DatabaseTransactionListener(DatabaseMetrics(registry))) }
+                val manager = FailingTransactionManager(failure).apply {
+                    addListener(DatabaseTransactionListener(DatabaseMetrics(registry)))
+                }
                 val tx = TransactionTemplate(manager)
                 assertThrows(TransactionSystemException::class.java) {
                     tx.observedExecute(DatabaseTransaction.SEND_BATCH) {
@@ -35,22 +34,6 @@ class DatabaseTransactionFailureTests {
                 )
                 assertEquals(2, registry.find("messenger.database.transaction").timers().sumOf { it.count() })
             }
-        }
-    }
-
-    private class FailingManager(
-        var failure: String?,
-    ) : AbstractPlatformTransactionManager() {
-        override fun doGetTransaction(): Any = Any()
-
-        override fun doBegin(transaction: Any, definition: TransactionDefinition) = fail("begin")
-
-        override fun doCommit(status: DefaultTransactionStatus) = fail("commit")
-
-        override fun doRollback(status: DefaultTransactionStatus) = fail("rollback")
-
-        private fun fail(phase: String) {
-            if (failure == phase) throw TransactionSystemException("controlled $phase failure")
         }
     }
 }

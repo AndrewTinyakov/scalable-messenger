@@ -1,5 +1,6 @@
 package com.andrewtinyakov.messenger.infrastructure.outbox
 
+import com.andrewtinyakov.messenger.infrastructure.outbox.backlog.OutboxBacklog
 import java.time.OffsetDateTime
 
 interface OutboxClaimRepository {

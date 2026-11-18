@@ -8,10 +8,10 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHA
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHAT_MEMBERS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSAGES
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSAGE_CHANGES
-import com.andrewtinyakov.messenger.message.model.MessageChange
-import com.andrewtinyakov.messenger.message.model.MessageChangeKind
 import com.andrewtinyakov.messenger.message.model.MessageId
-import com.andrewtinyakov.messenger.message.model.MutationCursor
+import com.andrewtinyakov.messenger.message.model.change.MessageChange
+import com.andrewtinyakov.messenger.message.model.change.MessageChangeKind
+import com.andrewtinyakov.messenger.message.model.change.MutationCursor
 import org.jooq.DSLContext
 import org.jooq.impl.DSL
 import org.springframework.stereotype.Repository

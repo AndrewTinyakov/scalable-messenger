@@ -36,8 +36,13 @@ ij_kotlin_allow_trailing_comma = true
 ij_kotlin_allow_trailing_comma_on_call_site = true
 ij_kotlin_else_on_new_line = false
 ij_continuation_indent_size = 4
+ij_kotlin_name_count_to_use_star_import = 2147483647
+ij_kotlin_name_count_to_use_star_import_for_members = 2147483647
+ij_kotlin_packages_to_use_import_on_demand = unset
 
 [*.java]
+ij_java_class_count_to_use_import_on_demand = 2147483647
+ij_java_names_count_to_use_import_on_demand = 2147483647
 ij_java_method_call_chain_wrap = split_into_lines
 ij_java_wrap_first_method_in_call_chain = false
 ij_java_continuation_indent_for_chained_calls = true

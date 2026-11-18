@@ -5,6 +5,7 @@ import com.andrewtinyakov.messenger.infrastructure.database.DatabaseOperation
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSENGER_OUTBOX_EVENTS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.enums.RoomKind
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.MessengerOutboxEventsRecord
+import com.andrewtinyakov.messenger.infrastructure.outbox.backlog.OutboxBacklog
 import org.jooq.CommonTableExpression
 import org.jooq.DSLContext
 import org.jooq.Record1

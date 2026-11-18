@@ -552,7 +552,7 @@ paths:
   /v1/sends/status:
     post:
       tags:
-      - send-status-controller
+      - message-send-status-controller
       operationId: statuses
       parameters:
       - name: X-Messenger-CSRF
@@ -1042,7 +1042,7 @@ paths:
   /v1/auth/ws-ticket:
     post:
       tags:
-      - auth-controller
+      - ws-ticket-controller
       operationId: wsTicket
       parameters:
       - name: X-Messenger-CSRF
@@ -1482,7 +1482,7 @@ paths:
   /v1/sends/{requestId}:
     get:
       tags:
-      - send-status-controller
+      - message-send-status-controller
       operationId: status
       parameters:
       - name: requestId

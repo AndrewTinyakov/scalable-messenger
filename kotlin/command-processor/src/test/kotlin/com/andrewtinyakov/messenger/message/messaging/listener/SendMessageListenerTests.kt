@@ -1,7 +1,7 @@
 package com.andrewtinyakov.messenger.message.messaging.listener
 
 import com.andrewtinyakov.messenger.generated.messaging.command.SendMessageCommandV1
-import com.andrewtinyakov.messenger.infrastructure.messaging.CommandMetrics
+import com.andrewtinyakov.messenger.infrastructure.messaging.consumption.CommandMetrics
 import com.andrewtinyakov.messenger.message.model.CommandResult
 import com.andrewtinyakov.messenger.message.monitoring.MessageSendMetrics
 import com.andrewtinyakov.messenger.message.service.MessageSendBatchService
@@ -19,9 +19,6 @@ import org.mockito.Mockito
 import org.springframework.amqp.core.Message
 import org.springframework.amqp.core.MessageProperties
 import org.springframework.dao.TransientDataAccessResourceException
-import org.springframework.transaction.TransactionDefinition
-import org.springframework.transaction.support.AbstractPlatformTransactionManager
-import org.springframework.transaction.support.DefaultTransactionStatus
 import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate
 import tools.jackson.module.kotlin.jacksonObjectMapper
@@ -195,23 +192,4 @@ class SendMessageListenerTests {
         mapper.writeValueAsBytes(command),
         MessageProperties().apply { deliveryTag = tag },
     )
-
-    private class RecordingTransactions : AbstractPlatformTransactionManager() {
-        var commits = 0
-        var rollbacks = 0
-        var commitFailure: RuntimeException? = null
-
-        override fun doGetTransaction(): Any = Any()
-
-        override fun doBegin(transaction: Any, definition: TransactionDefinition) {}
-
-        override fun doCommit(status: DefaultTransactionStatus) {
-            commitFailure?.let { throw it }
-            commits++
-        }
-
-        override fun doRollback(status: DefaultTransactionStatus) {
-            rollbacks++
-        }
-    }
 }

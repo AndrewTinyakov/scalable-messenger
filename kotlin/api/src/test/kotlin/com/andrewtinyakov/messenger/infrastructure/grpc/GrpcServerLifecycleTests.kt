@@ -1,6 +1,6 @@
 package com.andrewtinyakov.messenger.infrastructure.grpc
 
-import com.andrewtinyakov.messenger.chat.grpc.ChatAuthorizationGrpcService
+import com.andrewtinyakov.messenger.ws.grpc.ChatAuthorizationGrpcService
 import io.grpc.ServerServiceDefinition
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse

@@ -55,9 +55,10 @@ messenger:
     cert-file: ${MESSENGER_GRPC_CERT_FILE:}
     key-file: ${MESSENGER_GRPC_KEY_FILE:}
     allowed-client-identity: ${MESSENGER_GRPC_ALLOWED_CLIENT_IDENTITY:spiffe://messenger/ws}
+  ws:
+    ticket-secret: ${WS_TICKET_SECRET}
   auth:
     cookie-secure: ${SESSION_COOKIE_SECURE:true}
-    ws-ticket-secret: ${WS_TICKET_SECRET}
     password:
       id-for-encode: pbkdf2-sha256-600000
       pbkdf2:

@@ -10,8 +10,8 @@ import com.andrewtinyakov.messenger.infrastructure.outbox.toOutboxMessage
 import com.andrewtinyakov.messenger.infrastructure.redis.RoomAddress
 import com.andrewtinyakov.messenger.message.model.MessageId
 import com.andrewtinyakov.messenger.read.config.ReadProperties
+import com.andrewtinyakov.messenger.read.model.CommittedAdvance
 import com.andrewtinyakov.messenger.read.model.MessageReadTarget
-import com.andrewtinyakov.messenger.read.model.ReadAdvance
 import com.andrewtinyakov.messenger.read.monitoring.ReadMetrics
 import com.andrewtinyakov.messenger.read.repository.ReadRepository
 import com.andrewtinyakov.messenger.read.web.payload.MessageReaderResponse
@@ -40,11 +40,6 @@ class ReadService(
     private val clock: Clock,
     private val metrics: ReadMetrics,
 ) {
-    private data class CommittedAdvance(
-        val advance: ReadAdvance,
-        val notificationCoalesced: Boolean,
-    )
-
     fun advance(chatId: ChatId, userId: UserId, throughSequence: Long): ReadProgressResponse {
         val committed = tx.observedExecute(DatabaseTransaction.READ_ADVANCE) {
             val lastSequence = readRepository.requireMember(chatId, userId)

@@ -4,16 +4,16 @@ import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.Chat
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.model.MemberChatDetails
-import com.andrewtinyakov.messenger.chat.repository.ChatDirectoryRepository
 import com.andrewtinyakov.messenger.chat.repository.ChatRepository
-import com.andrewtinyakov.messenger.chat.repository.GroupMembershipRepository
+import com.andrewtinyakov.messenger.chat.repository.directory.ChatDirectoryRepository
+import com.andrewtinyakov.messenger.chat.repository.membership.GroupMembershipRepository
 import com.andrewtinyakov.messenger.generated.messaging.event.SendRejectionReason
 import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxMessage
 import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxRepository
 import com.andrewtinyakov.messenger.message.model.CommandResult
 import com.andrewtinyakov.messenger.message.model.RequestId
 import com.andrewtinyakov.messenger.message.service.MessageSendService
-import com.andrewtinyakov.messenger.message.service.SendStatusService
+import com.andrewtinyakov.messenger.message.service.MessageSendStatusService
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
 import com.andrewtinyakov.messenger.shared.id.newId
 import com.andrewtinyakov.messenger.shared.web.ApiException
@@ -42,7 +42,7 @@ class ChatServiceTests
         private val mapper: ObjectMapper,
         private val tx: TransactionTemplate,
         private val messageSendService: MessageSendService,
-        private val sendStatusService: SendStatusService,
+        private val messageSendStatusService: MessageSendStatusService,
     ) : MessengerIntegrationTest() {
         @Test
         fun `activity uses acceptance time rather than an earlier transaction start`() {
@@ -487,7 +487,7 @@ class ChatServiceTests
                 release.countDown()
             }
 
-            assertEquals(SendRejectionReason.NOT_A_MEMBER, sendStatusService.status(UserId(member), RequestId(request)).reason)
+            assertEquals(SendRejectionReason.NOT_A_MEMBER, messageSendStatusService.status(UserId(member), RequestId(request)).reason)
             assertEquals(0L, chatDirectoryRepository.findById(ChatId(chat.id))!!.lastSequence)
         }
 

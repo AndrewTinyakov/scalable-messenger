@@ -4,17 +4,19 @@ import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.infrastructure.database.DatabaseTransaction
 import com.andrewtinyakov.messenger.infrastructure.database.observedExecute
+import com.andrewtinyakov.messenger.message.model.AnchorNeighbours
+import com.andrewtinyakov.messenger.message.model.AnchorWindow
 import com.andrewtinyakov.messenger.message.model.Message
-import com.andrewtinyakov.messenger.message.model.MessageChange
-import com.andrewtinyakov.messenger.message.model.MessageChangeKind
 import com.andrewtinyakov.messenger.message.model.MessageId
-import com.andrewtinyakov.messenger.message.model.MutationCursor
-import com.andrewtinyakov.messenger.message.model.VisibilitySnapshot
+import com.andrewtinyakov.messenger.message.model.change.MessageChange
+import com.andrewtinyakov.messenger.message.model.change.MessageChangeKind
+import com.andrewtinyakov.messenger.message.model.change.MutationCursor
+import com.andrewtinyakov.messenger.message.model.visibility.VisibilitySnapshot
 import com.andrewtinyakov.messenger.message.monitoring.HistoryDirection
 import com.andrewtinyakov.messenger.message.monitoring.MessageMetrics
 import com.andrewtinyakov.messenger.message.repository.MessageChangeRepository
 import com.andrewtinyakov.messenger.message.repository.MessageRepository
-import com.andrewtinyakov.messenger.message.repository.VisibilityRepository
+import com.andrewtinyakov.messenger.message.repository.MessageVisibilityRepository
 import com.andrewtinyakov.messenger.message.web.payload.MessageAroundResponse
 import com.andrewtinyakov.messenger.message.web.payload.MessageChangeResponse
 import com.andrewtinyakov.messenger.message.web.payload.MessageChangesResponse
@@ -34,7 +36,6 @@ import com.andrewtinyakov.messenger.shared.web.requirePageLimit
 import org.springframework.stereotype.Service
 import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.support.TransactionTemplate
-import kotlin.math.abs
 import com.andrewtinyakov.messenger.message.web.payload.MessageChangeKind as MessageChangeKindResponse
 
 @Service
@@ -42,7 +43,7 @@ class MessageHistoryService(
     private val messageRepository: MessageRepository,
     private val metrics: MessageMetrics,
     private val messageChangeRepository: MessageChangeRepository,
-    private val visibilityRepository: VisibilityRepository,
+    private val messageVisibilityRepository: MessageVisibilityRepository,
     private val visibleHistory: VisibleHistory,
     tx: TransactionTemplate,
 ) {
@@ -248,18 +249,6 @@ class MessageHistoryService(
         )
     }
 
-    private fun state(chatId: ChatId, userId: UserId): VisibilitySnapshot = visibilityRepository.snapshot(chatId, userId) ?: notFound()
-
-    private data class AnchorNeighbours(
-        val before: VisiblePage,
-        val after: VisiblePage,
-    ) {
-        fun closestTo(anchorAt: Long): Message? =
-            listOfNotNull(before.messages.lastOrNull(), after.messages.firstOrNull()).minByOrNull { abs(it.sequence - anchorAt) }
-    }
-
-    private data class AnchorWindow(
-        val older: VisiblePage,
-        val newer: VisiblePage,
-    )
+    private fun state(chatId: ChatId, userId: UserId): VisibilitySnapshot =
+        messageVisibilityRepository.snapshot(chatId, userId) ?: notFound()
 }

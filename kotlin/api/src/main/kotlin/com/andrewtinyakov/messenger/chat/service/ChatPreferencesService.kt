@@ -4,7 +4,7 @@ import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.model.ChatPreferences
 import com.andrewtinyakov.messenger.chat.model.MuteEnd
-import com.andrewtinyakov.messenger.chat.repository.ChatPreferencesRepository
+import com.andrewtinyakov.messenger.chat.repository.preferences.ChatPreferencesRepository
 import com.andrewtinyakov.messenger.chat.web.payload.ChatPreferencesResponse
 import com.andrewtinyakov.messenger.chat.web.payload.PinnedChatsResponse
 import com.andrewtinyakov.messenger.chat.web.payload.toResponse

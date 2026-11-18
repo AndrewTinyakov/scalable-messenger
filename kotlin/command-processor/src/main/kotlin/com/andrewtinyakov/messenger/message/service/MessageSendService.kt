@@ -4,40 +4,38 @@ import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.auth.repository.UserRepository
 import com.andrewtinyakov.messenger.chat.model.Chat
 import com.andrewtinyakov.messenger.chat.model.ChatId
-import com.andrewtinyakov.messenger.chat.model.ChatKind
 import com.andrewtinyakov.messenger.chat.repository.ChatRepository
 import com.andrewtinyakov.messenger.chat.service.DirectChatService
 import com.andrewtinyakov.messenger.generated.messaging.command.SendMessageCommandV1
-import com.andrewtinyakov.messenger.generated.messaging.event.SavedMessageReferenceV1
-import com.andrewtinyakov.messenger.generated.messaging.event.SendRejectedEventV1
 import com.andrewtinyakov.messenger.generated.messaging.event.SendRejectionReason
 import com.andrewtinyakov.messenger.infrastructure.database.DatabaseTransaction
 import com.andrewtinyakov.messenger.infrastructure.database.observedExecute
 import com.andrewtinyakov.messenger.infrastructure.database.observedExecuteWithoutResult
 import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStage
 import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStageRecorder
-import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxMessage
-import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxRepository
-import com.andrewtinyakov.messenger.infrastructure.outbox.toOutboxMessage
-import com.andrewtinyakov.messenger.infrastructure.redis.RoomAddress
 import com.andrewtinyakov.messenger.message.model.CommandResult
+import com.andrewtinyakov.messenger.message.model.ForwardSource
 import com.andrewtinyakov.messenger.message.model.Message
 import com.andrewtinyakov.messenger.message.model.MessageId
 import com.andrewtinyakov.messenger.message.model.MessageReply
+import com.andrewtinyakov.messenger.message.model.PendingMessage
 import com.andrewtinyakov.messenger.message.model.RequestId
 import com.andrewtinyakov.messenger.message.model.SavedMessage
+import com.andrewtinyakov.messenger.message.model.SendChatContext
+import com.andrewtinyakov.messenger.message.model.SendDecision
+import com.andrewtinyakov.messenger.message.model.SendRequest
 import com.andrewtinyakov.messenger.message.model.SendResult
 import com.andrewtinyakov.messenger.message.model.SendResultStatus
 import com.andrewtinyakov.messenger.message.model.SendTarget
 import com.andrewtinyakov.messenger.message.model.asReply
+import com.andrewtinyakov.messenger.message.model.toSendRequest
 import com.andrewtinyakov.messenger.message.monitoring.MessageSendMetrics
-import com.andrewtinyakov.messenger.message.monitoring.MessageSendMetrics.TransactionWindow
+import com.andrewtinyakov.messenger.message.monitoring.TransactionWindow
 import com.andrewtinyakov.messenger.message.repository.MessageRepository
 import com.andrewtinyakov.messenger.shared.id.newId
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate
-import tools.jackson.databind.ObjectMapper
 import java.time.Clock
 import java.time.OffsetDateTime
 
@@ -47,9 +45,8 @@ class MessageSendService(
     private val chatRepository: ChatRepository,
     private val directChatService: DirectChatService,
     private val userRepository: UserRepository,
-    private val outboxRepository: OutboxRepository,
+    private val events: MessageSendEvents,
     private val tx: TransactionTemplate,
-    private val mapper: ObjectMapper,
     private val clock: Clock,
     private val metrics: MessageSendMetrics,
 ) {
@@ -68,7 +65,7 @@ class MessageSendService(
             if (messageRepository.findSendResult(senderId = request.senderId, requestId = request.requestId) == null) {
                 val result = rejected(request, SendRejectionReason.PROCESSING_FAILED)
                 messageRepository.insertSendResult(result)
-                enqueueRejection(request, result.reason!!)
+                events.enqueueRejection(request, result.reason!!)
             }
         }
     }
@@ -176,12 +173,12 @@ class MessageSendService(
         return chat
     }
 
-    private fun inspectChat(chat: Chat?, requests: List<SendRequest>, sendable: List<SendRequest>): ChatContext {
+    private fun inspectChat(chat: Chat?, requests: List<SendRequest>, sendable: List<SendRequest>): SendChatContext {
         val members = chat?.let { chatRepository.existingMemberIds(it.id, requests.map { request -> request.senderId }.distinct()) }
             .orEmpty()
         SendStageRecorder.requests(SendStage.MEMBERSHIP_CHECKED, requests) { it.requestId.value }
         val memberRequests = sendable.filter { it.senderId in members }
-        return ChatContext(
+        return SendChatContext(
             chat = chat,
             members = members,
             replyTargets = chat?.let { findReplyTargets(it.id, memberRequests) }.orEmpty(),
@@ -214,7 +211,7 @@ class MessageSendService(
         requests: List<SendRequest>,
         priorResults: Map<Pair<UserId, RequestId>, SendResult>,
         requestRejections: Map<Pair<UserId, RequestId>, SendRejectionReason?>,
-        context: ChatContext,
+        context: SendChatContext,
     ): List<SendDecision> {
         val fingerprintsInBatch = mutableMapOf<Pair<UserId, RequestId>, String>()
         return requests.map { request ->
@@ -229,7 +226,7 @@ class MessageSendService(
         }
     }
 
-    private fun recordDecisions(decisions: List<SendDecision>, context: ChatContext): List<CommandResult> {
+    private fun recordDecisions(decisions: List<SendDecision>, context: SendChatContext): List<CommandResult> {
         val results = decisions.map { decision ->
             when (decision) {
                 is SendDecision.Repeated -> duplicateOutcome(decision.request, decision.previousFingerprint)
@@ -242,12 +239,12 @@ class MessageSendService(
         return results
     }
 
-    private fun saveAccepted(chat: Chat, accepted: List<SendRequest>, context: ChatContext) {
+    private fun saveAccepted(chat: Chat, accepted: List<SendRequest>, context: SendChatContext) {
         val firstSequence = checkNotNull(chatRepository.allocateSequencesForMembers(chat.id, accepted.map { it.senderId })) {
             "Chat membership changed during a locked send batch"
         }
         SendStageRecorder.requests(SendStage.SEQUENCES_ALLOCATED, accepted) { it.requestId.value }
-        val rooms = roomsFor(chat)
+        val rooms = events.rooms(chat)
         val pending = accepted.mapIndexed { index, request ->
             prepareMessage(
                 request = request,
@@ -260,27 +257,20 @@ class MessageSendService(
         }
         messageRepository.insertSavedMessages(pending.map { it.saved })
         SendStageRecorder.requests(SendStage.MESSAGES_RESULTS_WRITTEN, accepted) { it.requestId.value }
-        outboxRepository.enqueue(pending.flatMap { it.events })
+        events.enqueueSaved(pending.flatMap { it.events })
         SendStageRecorder.requests(SendStage.OUTBOX_WRITTEN, accepted) { it.requestId.value }
     }
 
-    private fun roomsFor(chat: Chat): List<String> =
-        if (chat.kind == ChatKind.GROUP) {
-            listOf(RoomAddress.group(chat.id))
-        } else {
-            chatRepository.findMemberIds(chat.id).map(RoomAddress::user)
-        }
-
     private fun duplicateOutcome(request: SendRequest, previousFingerprint: String): CommandResult {
         if (previousFingerprint == request.fingerprint) return CommandResult.DUPLICATE
-        enqueueRejection(request, SendRejectionReason.REQUEST_ID_CONFLICT)
+        events.enqueueRejection(request, SendRejectionReason.REQUEST_ID_CONFLICT)
         return CommandResult.CONFLICT
     }
 
     private fun rejectedOutcome(request: SendRequest, reason: SendRejectionReason): CommandResult {
         messageRepository.insertSendResult(rejected(request, reason))
         SendStageRecorder.record(SendStage.MESSAGES_RESULTS_WRITTEN, requestId = request.requestId.value)
-        enqueueRejection(request = request, reason = reason)
+        events.enqueueRejection(request = request, reason = reason)
         return CommandResult.REJECTED
     }
 
@@ -319,24 +309,9 @@ class MessageSendService(
                 reason = null,
             ),
         )
-        val events = rooms.map { room ->
-            SavedMessageReferenceV1.create(
-                eventId = newId(),
-                room = room,
-                chatId = chatId.value,
-                requestId = request.requestId.value,
-                messageId = messageId.value,
-                sequence = sequence.toString(),
-            )
-        }
-        if (SendStageRecorder.isEnabled) {
-            events.forEach { event ->
-                SendStageRecorder.record(SendStage.EVENT_PREPARED, requestId = request.requestId.value, eventId = event.eventId)
-            }
-        }
         return PendingMessage(
             saved,
-            events.map { it.toOutboxMessage(mapper) },
+            events.savedReferences(request, chat, messageId, sequence, rooms),
         )
     }
 
@@ -350,68 +325,5 @@ class MessageSendService(
         messageId = null,
         sequence = null,
         reason = reason,
-    )
-
-    private fun enqueueRejection(request: SendRequest, reason: SendRejectionReason) {
-        enqueue(
-            SendRejectedEventV1.create(
-                eventId = newId(),
-                room = RoomAddress.user(request.senderId),
-                chatId = request.chatId?.value,
-                recipientId = request.recipientId?.value,
-                requestId = request.requestId.value,
-                reason = reason,
-            ),
-        )
-    }
-
-    private fun enqueue(event: SendRejectedEventV1) {
-        SendStageRecorder.record(SendStage.EVENT_PREPARED, requestId = event.requestId, eventId = event.eventId)
-        outboxRepository.enqueue(event.toOutboxMessage(mapper))
-        SendStageRecorder.record(SendStage.OUTBOX_WRITTEN, requestId = event.requestId, eventId = event.eventId)
-    }
-
-    private class ChatContext(
-        val chat: Chat?,
-        val members: Set<UserId>,
-        val replyTargets: Map<Pair<UserId, MessageId>, Message>,
-        val forwardSources: Map<Pair<UserId, ForwardSource>, Message>,
-    ) {
-        fun rejection(request: SendRequest): SendRejectionReason? = when {
-            chat == null -> SendRejectionReason.CHAT_NOT_FOUND
-            request.senderId !in members -> SendRejectionReason.NOT_A_MEMBER
-            request.forwardSource != null && request.replyToMessageId != null -> SendRejectionReason.INVALID_FORWARD_SOURCE
-            request.replyToMessageId != null && replyTarget(request) == null -> SendRejectionReason.INVALID_REPLY_TARGET
-            request.forwardSource != null && forwardSource(request) == null -> SendRejectionReason.INVALID_FORWARD_SOURCE
-            else -> null
-        }
-
-        fun replyTarget(request: SendRequest): MessageReply? =
-            request.replyToMessageId?.let { replyTargets[request.senderId to it] }?.asReply()
-
-        fun forwardSource(request: SendRequest): Message? = request.forwardSource?.let { forwardSources[request.senderId to it] }
-    }
-
-    private sealed interface SendDecision {
-        val request: SendRequest
-
-        data class Repeated(
-            override val request: SendRequest,
-            val previousFingerprint: String,
-        ) : SendDecision
-
-        data class Rejected(
-            override val request: SendRequest,
-            val reason: SendRejectionReason,
-        ) : SendDecision
-
-        data class Accepted(
-            override val request: SendRequest,
-        ) : SendDecision
-    }
-
-    private data class PendingMessage(
-        val saved: SavedMessage,
-        val events: List<OutboxMessage>,
     )
 }

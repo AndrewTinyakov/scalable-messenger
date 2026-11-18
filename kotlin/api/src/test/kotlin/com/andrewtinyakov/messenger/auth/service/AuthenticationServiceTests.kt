@@ -4,7 +4,6 @@ import com.andrewtinyakov.messenger.ApiApplication
 import com.andrewtinyakov.messenger.auth.model.ExpectedSessionIdentity
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.auth.web.payload.AuthRequest
-import com.andrewtinyakov.messenger.chat.grpc.ChatAuthorizationGrpcService
 import com.andrewtinyakov.messenger.chat.service.ChatService
 import com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupRequest
 import com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupResponse
@@ -15,6 +14,8 @@ import com.andrewtinyakov.messenger.generated.grpc.ValidateSessionResponse
 import com.andrewtinyakov.messenger.shared.crypto.sha256
 import com.andrewtinyakov.messenger.shared.id.newId
 import com.andrewtinyakov.messenger.shared.web.ApiException
+import com.andrewtinyakov.messenger.ws.grpc.ChatAuthorizationGrpcService
+import com.andrewtinyakov.messenger.ws.service.WsTicketService
 import io.grpc.Status
 import io.grpc.StatusRuntimeException
 import io.grpc.stub.StreamObserver

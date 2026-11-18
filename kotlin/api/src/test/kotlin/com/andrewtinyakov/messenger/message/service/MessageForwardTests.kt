@@ -22,7 +22,7 @@ class MessageForwardTests
         private val sends: MessageSendService,
         private val batches: MessageSendBatchService,
         private val history: MessageHistoryService,
-        private val sendStatusService: SendStatusService,
+        private val messageSendStatusService: MessageSendStatusService,
         private val mutations: MessageMutationService,
         private val chats: ChatService,
     ) : MessengerIntegrationTest() {
@@ -65,7 +65,7 @@ class MessageForwardTests
             assertEquals(CommandResult.REJECTED, sends.process(single))
             assertEquals(
                 SendRejectionReason.INVALID_FORWARD_SOURCE,
-                sendStatusService.status(UserId(outsider), RequestId(single.requestId)).reason,
+                messageSendStatusService.status(UserId(outsider), RequestId(single.requestId)).reason,
             )
 
             val visible = send(friend, target, "visible")
@@ -80,7 +80,7 @@ class MessageForwardTests
             assertEquals(listOf(author, friend), saved.map { it.forwardedFromUserId })
             assertEquals(
                 SendRejectionReason.INVALID_FORWARD_SOURCE,
-                sendStatusService.status(UserId(outsider), RequestId(batch[1].requestId)).reason,
+                messageSendStatusService.status(UserId(outsider), RequestId(batch[1].requestId)).reason,
             )
             assertEquals(CommandResult.DUPLICATE, sends.process(batch[0]))
         }

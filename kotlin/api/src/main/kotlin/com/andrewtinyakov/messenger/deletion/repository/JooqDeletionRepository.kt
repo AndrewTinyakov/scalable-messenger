@@ -23,9 +23,9 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.VIS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.DeletionOperationsRecord
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.HiddenMessageRangesRecord
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.HistoryPurgeJobsRecord
-import com.andrewtinyakov.messenger.message.model.MessageChangeKind
 import com.andrewtinyakov.messenger.message.model.MessageId
 import com.andrewtinyakov.messenger.message.model.RequestId
+import com.andrewtinyakov.messenger.message.model.change.MessageChangeKind
 import com.andrewtinyakov.messenger.message.repository.visibleMessage
 import org.jooq.DSLContext
 import org.jooq.InsertOnDuplicateStep

@@ -2,9 +2,9 @@ package com.andrewtinyakov.messenger.infrastructure.redis
 
 import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStage
 import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStageRecorder
-import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxEventPublisher
 import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxMessage
-import com.andrewtinyakov.messenger.infrastructure.outbox.PublisherProperties
+import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxPublisherProperties
+import com.andrewtinyakov.messenger.infrastructure.outbox.publication.OutboxEventPublisher
 import jakarta.annotation.PreDestroy
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate
 import org.springframework.stereotype.Component
@@ -15,14 +15,14 @@ import tools.jackson.databind.ObjectMapper
 class RoomEventPublisher(
     redis: ReactiveStringRedisTemplate,
     properties: RedisRoomProperties,
-    private val publisherProperties: PublisherProperties,
+    private val outboxPublisherProperties: OutboxPublisherProperties,
     mapper: ObjectMapper,
     private val publicationHydration: PublicationHydration,
 ) : OutboxEventPublisher,
     AutoCloseable {
     private val scheduler = Schedulers.newBoundedElastic(
-        publisherProperties.concurrency,
-        publisherProperties.roomPublicationQueueCapacity,
+        outboxPublisherProperties.concurrency,
+        outboxPublisherProperties.roomPublicationQueueCapacity,
         "room-publication",
     )
     private val publication = RoomPublicationScript(redis, mapper, properties)
@@ -34,7 +34,7 @@ class RoomEventPublisher(
         try {
             val streamId = publication.publish(message)
                 .subscribeOn(scheduler)
-                .timeout(publisherProperties.publishTimeout)
+                .timeout(outboxPublisherProperties.publishTimeout)
                 .block()
             check(streamId != null) { "Redis returned no stream ID" }
             SendStageRecorder.record(SendStage.REDIS_PUBLISH_CONFIRMED, eventId = message.id.value)

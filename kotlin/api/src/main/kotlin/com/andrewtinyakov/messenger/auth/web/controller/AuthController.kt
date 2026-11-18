@@ -3,13 +3,11 @@ package com.andrewtinyakov.messenger.auth.web.controller
 import com.andrewtinyakov.messenger.auth.model.AuthenticatedSession
 import com.andrewtinyakov.messenger.auth.service.AuthenticationService
 import com.andrewtinyakov.messenger.auth.service.UserLookupService
-import com.andrewtinyakov.messenger.auth.service.WsTicketService
 import com.andrewtinyakov.messenger.auth.web.SessionCookie
 import com.andrewtinyakov.messenger.auth.web.expectedSessionIdentity
 import com.andrewtinyakov.messenger.auth.web.payload.AuthRequest
 import com.andrewtinyakov.messenger.auth.web.payload.AuthResponse
 import com.andrewtinyakov.messenger.auth.web.payload.SessionResponse
-import com.andrewtinyakov.messenger.auth.web.payload.WsTicketResponse
 import com.andrewtinyakov.messenger.auth.web.payload.toAuthResponse
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
@@ -27,7 +25,6 @@ import org.springframework.web.bind.annotation.RestController
 class AuthController(
     private val authenticationService: AuthenticationService,
     private val userLookupService: UserLookupService,
-    private val wsTicketService: WsTicketService,
     private val sessionCookie: SessionCookie,
 ) {
     @PostMapping("/register")
@@ -68,9 +65,4 @@ class AuthController(
         authenticationService.logout(token = sessionCookie.read(request), expectedIdentity = request.expectedSessionIdentity())
         sessionCookie.clear(response)
     }
-
-    @PostMapping("/ws-ticket")
-    fun wsTicket(
-        session: AuthenticatedSession,
-    ): WsTicketResponse = wsTicketService.issue(session)
 }

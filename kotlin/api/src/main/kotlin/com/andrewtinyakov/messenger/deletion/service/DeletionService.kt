@@ -4,8 +4,11 @@ import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.model.ChatKind
 import com.andrewtinyakov.messenger.chat.service.ChatEventAudience
+import com.andrewtinyakov.messenger.deletion.model.AppliedDeletion
+import com.andrewtinyakov.messenger.deletion.model.CommittedDeletion
 import com.andrewtinyakov.messenger.deletion.model.DeletionChat
 import com.andrewtinyakov.messenger.deletion.model.DeletionMessage
+import com.andrewtinyakov.messenger.deletion.model.DeletionRevisions
 import com.andrewtinyakov.messenger.deletion.model.DeletionScope
 import com.andrewtinyakov.messenger.deletion.model.DeletionTarget
 import com.andrewtinyakov.messenger.deletion.model.StoredDeletion
@@ -40,21 +43,6 @@ class DeletionService(
     private val tx: TransactionTemplate,
     private val metrics: DeletionMetrics,
 ) {
-    private data class CommittedDeletion(
-        val response: DeletionResponse,
-        val newlyAccepted: Boolean,
-    )
-
-    private data class DeletionRevisions(
-        val mutation: Long,
-        val visibility: Long,
-    )
-
-    private data class AppliedDeletion(
-        val revisions: DeletionRevisions,
-        val deletedRows: Int,
-    )
-
     fun deleteMessages(
         chatId: ChatId,
         userId: UserId,

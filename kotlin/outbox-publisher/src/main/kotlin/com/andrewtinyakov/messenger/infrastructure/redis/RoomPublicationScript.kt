@@ -31,7 +31,7 @@ internal class RoomPublicationScript(
         }
     }
 
-    private fun publicationOptions(message: OutboxMessage) = PublicationOptions(
+    private fun publicationOptions(message: OutboxMessage) = RoomPublicationOptions(
         version = 1,
         room = message.room,
         eventId = message.id.value,
@@ -43,7 +43,7 @@ internal class RoomPublicationScript(
         groupPublicationOrder = message.groupPublicationOrder?.also { require(it > 0) }?.toString(),
     )
 
-    private fun appendAndPublish(message: OutboxMessage, options: PublicationOptions): Mono<String> {
+    private fun appendAndPublish(message: OutboxMessage, options: RoomPublicationOptions): Mono<String> {
         val prefix = "messenger:{${message.room}}"
         return redis.execute(
             script,
@@ -67,15 +67,3 @@ internal class RoomPublicationScript(
         return SidebarActivityEventV1.create(event.path("chatId").asText(), event.path("sequence").asText())
     }
 }
-
-private data class PublicationOptions(
-    val version: Int,
-    val room: String,
-    val eventId: String,
-    val epoch: UUID,
-    val historyMaxLength: Int,
-    val historyMaxBytes: Int,
-    val historySeconds: Int,
-    val idleTtlSeconds: Int,
-    val groupPublicationOrder: String?,
-)

@@ -27,7 +27,7 @@ class MessageHistoryServiceTests
         private val chatRepository: ChatRepository,
         private val chatMembershipService: ChatMembershipService,
         private val messageHistoryService: MessageHistoryService,
-        private val sendStatusService: SendStatusService,
+        private val messageSendStatusService: MessageSendStatusService,
     ) : MessengerIntegrationTest() {
         @Test
         fun `batch send status preserves order and hides other users results`() {
@@ -42,7 +42,7 @@ class MessageHistoryServiceTests
             service.process(command(sender, rejected, "hello", recipient = newId()))
             service.process(command(other, otherRequest, "hello", recipient = recipient))
 
-            val statuses = sendStatusService.statuses(
+            val statuses = messageSendStatusService.statuses(
                 UserId(sender),
                 listOf(saved, rejected, otherRequest, unknown).map(::RequestId),
             ).results
@@ -55,7 +55,7 @@ class MessageHistoryServiceTests
             )
             assertEquals(null, statuses[2].result.chatId)
             assertThrows(RuntimeException::class.java) {
-                sendStatusService.statuses(UserId(sender), listOf(saved, saved).map(::RequestId))
+                messageSendStatusService.statuses(UserId(sender), listOf(saved, saved).map(::RequestId))
             }
         }
 

@@ -22,7 +22,7 @@ class MessageSendServiceTests
     constructor(
         private val service: MessageSendService,
         private val batches: MessageSendBatchService,
-        private val sendStatusService: SendStatusService,
+        private val messageSendStatusService: MessageSendStatusService,
         private val chatService: ChatService,
         private val chatMembershipService: ChatMembershipService,
     ) : MessengerIntegrationTest() {
@@ -44,9 +44,9 @@ class MessageSendServiceTests
                 assertThrows(IllegalArgumentException::class.java) { service.rejectExhausted(malformed) }
             }
 
-            assertEquals(SendLookupStatus.UNKNOWN, sendStatusService.status(UserId(sender), RequestId(requestId)).status)
+            assertEquals(SendLookupStatus.UNKNOWN, messageSendStatusService.status(UserId(sender), RequestId(requestId)).status)
             service.process(valid)
-            assertEquals(SendLookupStatus.SAVED, sendStatusService.status(UserId(sender), RequestId(requestId)).status)
+            assertEquals(SendLookupStatus.SAVED, messageSendStatusService.status(UserId(sender), RequestId(requestId)).status)
         }
 
         @Test
@@ -128,7 +128,7 @@ class MessageSendServiceTests
             service.process(send)
             service.process(send)
 
-            val chat = sendStatusService.status(UserId(sender), RequestId(request)).chatId!!
+            val chat = messageSendStatusService.status(UserId(sender), RequestId(request)).chatId!!
             assertEquals(1, db.queryForObject("SELECT count(*) FROM chats WHERE direct_pair_key=?", Int::class.java, pair))
             assertEquals(1, db.queryForObject("SELECT count(*) FROM messages WHERE chat_id=?", Int::class.java, chat))
             assertEquals(
@@ -176,19 +176,19 @@ class MessageSendServiceTests
             listOf(" " to SendRejectionReason.EMPTY_BODY, "x".repeat(4001) to SendRejectionReason.BODY_TOO_LONG).forEach { (body, reason) ->
                 val invalidRequest = newId()
                 service.process(command(member, invalidRequest, body, chat = chat.id))
-                assertEquals(reason, sendStatusService.status(UserId(member), RequestId(invalidRequest)).reason)
+                assertEquals(reason, messageSendStatusService.status(UserId(member), RequestId(invalidRequest)).reason)
             }
             chatMembershipService.removeMember(ChatId(chat.id), UserId(owner), UserId(member))
             service.process(command(member, requestId, "after removal", chat = chat.id))
 
-            assertEquals(SendRejectionReason.NOT_A_MEMBER, sendStatusService.status(UserId(member), RequestId(requestId)).reason)
+            assertEquals(SendRejectionReason.NOT_A_MEMBER, messageSendStatusService.status(UserId(member), RequestId(requestId)).reason)
             assertEquals(0, db.queryForObject("SELECT count(*) FROM messages WHERE chat_id=?", Int::class.java, chat.id))
             assertEquals(1L, db.queryForObject("SELECT next_sequence FROM chats WHERE id=?", Long::class.java, chat.id))
 
             val acceptedRequest = newId()
             service.process(command(owner, acceptedRequest, "first saved message", chat = chat.id))
 
-            assertEquals("1", sendStatusService.status(UserId(owner), RequestId(acceptedRequest)).sequence)
+            assertEquals("1", messageSendStatusService.status(UserId(owner), RequestId(acceptedRequest)).sequence)
             assertEquals(listOf(1L), db.queryForList("SELECT sequence FROM messages WHERE chat_id=?", Long::class.java, chat.id))
             assertEquals(2L, db.queryForObject("SELECT next_sequence FROM chats WHERE id=?", Long::class.java, chat.id))
         }
@@ -210,8 +210,8 @@ class MessageSendServiceTests
 
             assertEquals("REJECTED", db.queryForObject("SELECT status FROM send_requests WHERE request_id=?", String::class.java, request))
             assertEquals(0, db.queryForObject("SELECT count(*) FROM messages WHERE chat_id=?", Int::class.java, chat))
-            assertEquals(SendLookupStatus.REJECTED, sendStatusService.status(UserId(sender), RequestId(request)).status)
-            assertEquals(SendLookupStatus.UNKNOWN, sendStatusService.status(UserId(sender), RequestId(newId())).status)
+            assertEquals(SendLookupStatus.REJECTED, messageSendStatusService.status(UserId(sender), RequestId(request)).status)
+            assertEquals(SendLookupStatus.UNKNOWN, messageSendStatusService.status(UserId(sender), RequestId(newId())).status)
         }
 
         @Test
@@ -219,8 +219,11 @@ class MessageSendServiceTests
             val sender = user("invalid-recipient-sender")
             val request = newId()
             service.process(command(sender, request, "hello", recipient = newId()))
-            assertEquals(SendRejectionReason.RECIPIENT_NOT_FOUND, sendStatusService.status(UserId(sender), RequestId(request)).reason)
-            assertEquals(null, sendStatusService.status(UserId(sender), RequestId(request)).chatId)
+            assertEquals(
+                SendRejectionReason.RECIPIENT_NOT_FOUND,
+                messageSendStatusService.status(UserId(sender), RequestId(request)).reason,
+            )
+            assertEquals(null, messageSendStatusService.status(UserId(sender), RequestId(request)).chatId)
         }
 
         @Test
@@ -231,7 +234,7 @@ class MessageSendServiceTests
             val chat = chatService.createGroup(UserId(owner), "Rejection order", listOf(member).map(::UserId)).id
             val target = newId()
             service.process(command(owner, target, "target", chat = chat))
-            val targetId = sendStatusService.status(UserId(owner), RequestId(target)).messageId!!
+            val targetId = messageSendStatusService.status(UserId(owner), RequestId(target)).messageId!!
 
             fun replyAndForward(sender: String, body: String, chatId: String = chat) =
                 command(sender, newId(), body, chat = chatId).copy(
@@ -280,7 +283,7 @@ class MessageSendServiceTests
             assertEquals(CommandResult.REJECTED, service.process(single))
             assertEquals(listOf(CommandResult.REJECTED), batches.process(listOf(batched)))
             listOf(single, batched).forEach { command ->
-                assertEquals(reason, sendStatusService.status(UserId(command.senderId), RequestId(command.requestId)).reason)
+                assertEquals(reason, messageSendStatusService.status(UserId(command.senderId), RequestId(command.requestId)).reason)
             }
         }
 

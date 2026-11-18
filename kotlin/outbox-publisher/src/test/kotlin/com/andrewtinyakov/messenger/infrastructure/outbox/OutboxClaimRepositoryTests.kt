@@ -1,6 +1,7 @@
 package com.andrewtinyakov.messenger.infrastructure.outbox
 
 import com.andrewtinyakov.messenger.MessengerOutboxPublisherApplication
+import com.andrewtinyakov.messenger.infrastructure.outbox.publication.OutboxPublicationWorker
 import com.andrewtinyakov.messenger.shared.id.newId
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals

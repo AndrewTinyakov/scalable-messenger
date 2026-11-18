@@ -56,15 +56,6 @@ class DatabaseQueryListener(
         metrics.record("messenger.database.fetch", state.operation.metricValue, outcome, System.nanoTime() - started)
     }
 
-    private class QueryState(
-        val operation: DatabaseOperation,
-    ) {
-        val started = System.nanoTime()
-        var statementStarted: Long? = null
-        var fetchStarted: Long? = null
-        var failed = false
-    }
-
     companion object {
         private val STATE = Any()
     }

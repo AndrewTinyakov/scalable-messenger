@@ -27,10 +27,10 @@ class PublicationHydration(
         }
     }
 
-    private fun readSavedMessageReferences(rows: List<OutboxMessage>): Map<EventId, Reference> = rows.mapNotNull { row ->
+    private fun readSavedMessageReferences(rows: List<OutboxMessage>): Map<EventId, PublicationReference> = rows.mapNotNull { row ->
         val fields = runCatching { mapper.readValue(row.payload, Map::class.java) }.getOrNull() ?: return@mapNotNull null
         if (fields["type"] != RoomEventType.MESSAGE_SAVED.value) return@mapNotNull null
-        row.id to Reference(
+        row.id to PublicationReference(
             chatId = fields.string("chatId"),
             messageId = MessageId(fields.string("messageId")),
             requestId = fields.string("requestId"),
@@ -38,13 +38,13 @@ class PublicationHydration(
         )
     }.toMap()
 
-    private fun findCurrentMessages(references: Collection<Reference>): Map<MessageId, Message> =
+    private fun findCurrentMessages(references: Collection<PublicationReference>): Map<MessageId, Message> =
         references.map { it.messageId }.distinct().chunked(Message.MAX_LOOKUP_IDS).flatMap { ids ->
             metrics.batchRequested(ids.size)
             messageRepository.findMessagesForPublication(ids)
         }.associateBy { it.id }
 
-    private fun hydrate(row: OutboxMessage, reference: Reference, current: Message?): OutboxMessage {
+    private fun hydrate(row: OutboxMessage, reference: PublicationReference, current: Message?): OutboxMessage {
         val hint = recoveryHint(row, reference)
         val message = current?.takeIf { it.matches(reference) }
         val live = if (message == null) {
@@ -57,10 +57,10 @@ class PublicationHydration(
         return row.copy(payload = live, replayPayload = hint)
     }
 
-    private fun Message.matches(reference: Reference): Boolean =
+    private fun Message.matches(reference: PublicationReference): Boolean =
         chatId.value == reference.chatId && sequence.toString() == reference.sequence && deletedAt == null
 
-    private fun recoveryHint(row: OutboxMessage, reference: Reference): String = mapper.writeValueAsString(
+    private fun recoveryHint(row: OutboxMessage, reference: PublicationReference): String = mapper.writeValueAsString(
         HistoryChangedEventV1.create(
             eventId = row.id.value,
             room = row.room,
@@ -71,7 +71,7 @@ class PublicationHydration(
         ),
     )
 
-    private fun liveMessage(row: OutboxMessage, reference: Reference, message: Message): String = mapper.writeValueAsString(
+    private fun liveMessage(row: OutboxMessage, reference: PublicationReference, message: Message): String = mapper.writeValueAsString(
         MessageSavedEventV1.create(
             eventId = row.id.value,
             room = row.room,
@@ -89,11 +89,4 @@ class PublicationHydration(
     )
 
     private fun Map<*, *>.string(name: String): String = requireNotNull(this[name] as? String) { "Invalid outbox $name" }
-
-    private data class Reference(
-        val chatId: String,
-        val messageId: MessageId,
-        val requestId: String,
-        val sequence: String,
-    )
 }

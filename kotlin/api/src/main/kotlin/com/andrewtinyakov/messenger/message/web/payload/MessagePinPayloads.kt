@@ -1,7 +1,7 @@
 package com.andrewtinyakov.messenger.message.web.payload
 
-import com.andrewtinyakov.messenger.message.model.PinScope
-import com.andrewtinyakov.messenger.message.model.PinnedMessage
+import com.andrewtinyakov.messenger.message.model.pin.PinScope
+import com.andrewtinyakov.messenger.message.model.pin.PinnedMessage
 import com.fasterxml.jackson.annotation.JsonInclude
 import io.swagger.v3.oas.annotations.media.Schema
 

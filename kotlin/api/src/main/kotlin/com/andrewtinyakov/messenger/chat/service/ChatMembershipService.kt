@@ -6,7 +6,7 @@ import com.andrewtinyakov.messenger.auth.web.payload.toResponse
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.model.ChatKind
 import com.andrewtinyakov.messenger.chat.repository.ChatRepository
-import com.andrewtinyakov.messenger.chat.repository.GroupMembershipRepository
+import com.andrewtinyakov.messenger.chat.repository.membership.GroupMembershipRepository
 import com.andrewtinyakov.messenger.chat.web.payload.GroupMemberPageResponse
 import com.andrewtinyakov.messenger.generated.messaging.event.MemberRemovedEventV1
 import com.andrewtinyakov.messenger.infrastructure.database.DatabaseTransaction

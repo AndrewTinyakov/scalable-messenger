@@ -19,8 +19,8 @@ class PasswordPersistenceTests : MessengerIntegrationTest() {
     @Test
     fun `configured hashes longer than one hundred characters survive persistence`() {
         val settings = listOf(
-            PasswordProperties.Pbkdf2Properties(iterations = 1000, algorithm = PBKDF2WithHmacSHA512),
-            PasswordProperties.Pbkdf2Properties(iterations = 1000, encodeHashAsBase64 = false),
+            Pbkdf2Properties(iterations = 1000, algorithm = PBKDF2WithHmacSHA512),
+            Pbkdf2Properties(iterations = 1000, encodeHashAsBase64 = false),
         )
         for (encoding in settings) {
             val encoder = PasswordConfig().passwordEncoder(

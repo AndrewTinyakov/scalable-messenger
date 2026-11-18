@@ -8,6 +8,7 @@ import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStageRecorder
 import com.andrewtinyakov.messenger.message.model.CommandResult
 import com.andrewtinyakov.messenger.message.model.SendBatch
 import com.andrewtinyakov.messenger.message.model.SendTarget
+import com.andrewtinyakov.messenger.message.model.toSendRequest
 import com.andrewtinyakov.messenger.message.monitoring.MessageSendMetrics
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionSynchronizationManager

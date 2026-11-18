@@ -26,13 +26,11 @@ import tools.jackson.databind.ObjectMapper
 import java.time.Clock
 import java.time.Instant
 import java.time.OffsetDateTime
-import java.time.ZoneId
 import java.time.ZoneOffset
 import java.util.concurrent.Callable
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicReference
 
 class ReadServiceTests
     @Autowired
@@ -43,30 +41,7 @@ class ReadServiceTests
         private val mapper: ObjectMapper,
         private val tx: TransactionTemplate,
     ) : MessengerIntegrationTest() {
-        private class MutableClock(
-            initial: String,
-        ) : Clock() {
-            private val value = AtomicReference(Instant.parse(initial))
-
-            fun set(next: String) {
-                value.set(Instant.parse(next))
-            }
-
-            override fun instant(): Instant = value.get()
-
-            override fun getZone(): ZoneId = ZoneOffset.UTC
-
-            override fun withZone(zone: ZoneId): Clock = Clock.fixed(instant(), zone)
-        }
-
-        private data class Fixture(
-            val owner: UserId,
-            val members: List<UserId>,
-            val chat: ChatId,
-            val messages: List<MessageId>,
-        )
-
-        private fun fixture(count: Int = 3, messages: Int = 3, createdAt: String = "2026-11-01T12:00:00Z"): Fixture {
+        private fun fixture(count: Int = 3, messages: Int = 3, createdAt: String = "2026-11-01T12:00:00Z"): ReadFixture {
             val owner = UserId(user("reads-${newId()}"))
             val members = (1..count).map { UserId(user("reader-${newId()}")) }
             val chat = ChatId(chatService.createGroup(owner, "Read receipts", members).id)
@@ -83,7 +58,7 @@ class ReadServiceTests
                 }
             }
             db.update("UPDATE chats SET next_sequence=? WHERE id=?", messages.toLong() + 1, chat.value)
-            return Fixture(owner, members, chat, ids)
+            return ReadFixture(owner, members, chat, ids)
         }
 
         private fun service(clock: Clock, registry: SimpleMeterRegistry = SimpleMeterRegistry()): ReadService = ReadService(

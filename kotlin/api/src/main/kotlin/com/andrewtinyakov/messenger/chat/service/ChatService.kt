@@ -5,9 +5,9 @@ import com.andrewtinyakov.messenger.chat.model.Chat
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.model.ChatKind
 import com.andrewtinyakov.messenger.chat.model.ChatPreferences
-import com.andrewtinyakov.messenger.chat.repository.ChatDirectoryRepository
 import com.andrewtinyakov.messenger.chat.repository.ChatRepository
-import com.andrewtinyakov.messenger.chat.repository.GroupMembershipRepository
+import com.andrewtinyakov.messenger.chat.repository.directory.ChatDirectoryRepository
+import com.andrewtinyakov.messenger.chat.repository.membership.GroupMembershipRepository
 import com.andrewtinyakov.messenger.chat.web.payload.ChatPageResponse
 import com.andrewtinyakov.messenger.chat.web.payload.ChatResponse
 import com.andrewtinyakov.messenger.chat.web.payload.toResponse

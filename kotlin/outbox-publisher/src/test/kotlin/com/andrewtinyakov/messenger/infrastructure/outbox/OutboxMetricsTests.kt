@@ -1,10 +1,11 @@
 package com.andrewtinyakov.messenger.infrastructure.outbox
 
-import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxMetrics.BatchOutcome
-import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxMetrics.PublicationOutcome
-import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxMetrics.RetentionReason
-import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxMetrics.Stage
-import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxMetrics.StageOutcome
+import com.andrewtinyakov.messenger.infrastructure.outbox.metrics.OutboxBatchOutcome
+import com.andrewtinyakov.messenger.infrastructure.outbox.metrics.OutboxMetrics
+import com.andrewtinyakov.messenger.infrastructure.outbox.metrics.OutboxPublicationOutcome
+import com.andrewtinyakov.messenger.infrastructure.outbox.metrics.OutboxRetentionReason
+import com.andrewtinyakov.messenger.infrastructure.outbox.metrics.OutboxStage
+import com.andrewtinyakov.messenger.infrastructure.outbox.metrics.OutboxStageOutcome
 import io.micrometer.prometheusmetrics.PrometheusConfig
 import io.micrometer.prometheusmetrics.PrometheusMeterRegistry
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -93,15 +94,15 @@ class OutboxMetricsTests {
     fun `publication records counts retention batches and stage outcomes`() {
         metrics.claimed(5)
         metrics.published()
-        metrics.publicationFinished(metrics.started(), PublicationOutcome.SUCCESS)
+        metrics.publicationFinished(metrics.started(), OutboxPublicationOutcome.SUCCESS)
         metrics.publishFailed()
-        metrics.publicationFinished(metrics.started(), PublicationOutcome.FAILURE)
-        for (reason in RetentionReason.entries) metrics.retained(reason, 3)
-        for (outcome in BatchOutcome.entries) metrics.batchFinished(metrics.started(), outcome)
-        for (stage in Stage.entries) {
+        metrics.publicationFinished(metrics.started(), OutboxPublicationOutcome.FAILURE)
+        for (reason in OutboxRetentionReason.entries) metrics.retained(reason, 3)
+        for (outcome in OutboxBatchOutcome.entries) metrics.batchFinished(metrics.started(), outcome)
+        for (stage in OutboxStage.entries) {
             val outcomes = when (stage) {
-                Stage.PUBLISH -> StageOutcome.entries
-                else -> listOf(StageOutcome.SUCCESS, StageOutcome.FAILURE)
+                OutboxStage.PUBLISH -> OutboxStageOutcome.entries
+                else -> listOf(OutboxStageOutcome.SUCCESS, OutboxStageOutcome.FAILURE)
             }
             for (outcome in outcomes) metrics.stageFinished(metrics.started(), stage, outcome)
         }

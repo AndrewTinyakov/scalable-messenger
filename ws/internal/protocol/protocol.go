@@ -125,71 +125,26 @@ func DecodeFrame(data []byte) (Frame, error) {
 	}
 	switch f.Type {
 	case FrameSend:
-		if (f.ChatID == "") == (f.RecipientID == "") ||
-			(f.ChatID != "" && !ValidULID(f.ChatID)) ||
-			(f.RecipientID != "" && !ValidULID(f.RecipientID)) ||
-			!ValidULID(f.RequestID) || strings.TrimSpace(f.Body) == "" || len([]rune(f.Body)) > 4000 || f.Kind != "" || f.Sequence != "" || f.Epoch != "" || f.StreamID != "" || f.LastAppliedSequence != "" {
-			return f, errors.New("invalid send")
-		}
+		err = validateSendFrame(f)
 	case FrameWatchSidebar:
-		if f.ChatIDs == nil || len(f.ChatIDs) > 100 {
-			return f, errors.New("invalid sidebar targets")
-		}
-		seen := make(map[string]bool, len(f.ChatIDs))
-		for _, id := range f.ChatIDs {
-			if !ValidULID(id) || seen[id] {
-				return f, errors.New("invalid sidebar target")
-			}
-			seen[id] = true
-		}
+		err = validateWatchSidebarFrame(f)
 	case FrameWatchPresence, FrameUnwatchPresence:
 	case FrameSubscribe:
-		if f.RecipientID != "" || f.RequestID != "" || f.Body != "" || f.Sequence != "" {
-			return f, errors.New("invalid subscribe")
-		}
-		if !validSubscription(Subscription{f.ChatID, f.Kind, f.Epoch, f.StreamID, f.LastAppliedSequence}) {
-			return f, errors.New("invalid subscribe")
-		}
+		err = validateSubscribeFrame(f)
 	case FrameSubscribeMany:
-		if f.ChatID != "" || f.Kind != "" || f.RecipientID != "" || f.RequestID != "" || f.Body != "" || f.Sequence != "" || f.Epoch != "" || f.StreamID != "" || f.LastAppliedSequence != "" || len(f.Subscriptions) < 1 || len(f.Subscriptions) > 10 {
-			return f, errors.New("invalid subscribe batch")
-		}
-		seen := make(map[string]struct{}, len(f.Subscriptions))
-		for _, subscription := range f.Subscriptions {
-			if !validSubscription(subscription) {
-				return f, errors.New("invalid subscribe batch entry")
-			}
-			if _, exists := seen[subscription.ChatID]; exists {
-				return f, errors.New("duplicate chat in subscribe batch")
-			}
-			seen[subscription.ChatID] = struct{}{}
-		}
+		err = validateSubscribeManyFrame(f)
 	case FrameUnsubscribe:
-		if !ValidULID(f.ChatID) || f.Kind != "" || f.RecipientID != "" || f.RequestID != "" || f.Body != "" || f.Sequence != "" || f.Epoch != "" || f.StreamID != "" || f.LastAppliedSequence != "" {
-			return f, errors.New("invalid unsubscribe")
-		}
+		err = validateUnsubscribeFrame(f)
 	case FrameApplied:
-		if !ValidULID(f.ChatID) || !validSequence(f.Sequence) {
-			return f, errors.New("invalid applied position")
-		}
-		if f.Kind != "" || f.RecipientID != "" || f.RequestID != "" || f.Body != "" || f.LastAppliedSequence != "" {
-			return f, errors.New("invalid applied frame")
-		}
-		if (f.Epoch == "") != (f.StreamID == "") {
-			return f, errors.New("incomplete Redis cursor")
-		}
+		err = validateAppliedFrame(f)
 	case FrameDismissed:
-		if !ValidULID(f.ChatID) || !validSequence(f.Sequence) || f.Sequence == "0" || f.Kind != "" || f.RecipientID != "" || f.RequestID != "" || f.Body != "" || f.Epoch != "" || f.StreamID != "" || f.LastAppliedSequence != "" {
-			return f, errors.New("invalid dismissed frame")
-		}
+		err = validateDismissedFrame(f)
 	case FrameReceivedMessage:
-		if !ValidULID(f.ChatID) || !validSequence(f.Sequence) || f.Sequence == "0" || f.Kind != "" || f.RecipientID != "" || f.RequestID != "" || f.Body != "" || f.Epoch != "" || f.StreamID != "" || f.LastAppliedSequence != "" {
-			return f, errors.New("invalid received message frame")
-		}
+		err = validateReceivedMessageFrame(f)
 	default:
 		return f, errors.New("unknown frame type")
 	}
-	return f, nil
+	return f, err
 }
 
 func validSubscription(s Subscription) bool {

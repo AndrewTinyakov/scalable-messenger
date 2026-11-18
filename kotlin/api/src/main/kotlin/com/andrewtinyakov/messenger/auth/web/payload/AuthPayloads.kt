@@ -32,13 +32,6 @@ data class SessionResponse(
     val deviceId: String,
 )
 
-data class WsTicketResponse(
-    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
-    val token: String,
-    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
-    val expiresAt: Long,
-)
-
 fun SessionCredentials.toAuthResponse(): AuthResponse = AuthResponse(
     user = UserResponse(id = user.id.value, username = user.username),
     deviceId = session.deviceId.value,

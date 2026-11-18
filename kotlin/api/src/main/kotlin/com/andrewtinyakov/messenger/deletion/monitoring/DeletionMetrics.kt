@@ -117,8 +117,6 @@ class DeletionMetrics(
         purgeBatches.getValue(outcome).record(System.nanoTime() - started, TimeUnit.NANOSECONDS)
     }
 
-    private enum class PurgeOutcome { EMPTY, WORK, FAILED }
-
     private companion object {
         const val SUCCESS = "success"
         const val FAILED = "failed"

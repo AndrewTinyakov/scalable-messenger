@@ -1,7 +1,6 @@
 package com.andrewtinyakov.messenger.infrastructure.config
 
 import com.andrewtinyakov.messenger.auth.config.AuthProperties
-import com.andrewtinyakov.messenger.auth.config.PasswordConfig
 import com.andrewtinyakov.messenger.auth.config.PasswordProperties
 import com.andrewtinyakov.messenger.deletion.config.HistoryPurgeProperties
 import com.andrewtinyakov.messenger.infrastructure.grpc.GrpcProperties
@@ -9,20 +8,17 @@ import com.andrewtinyakov.messenger.message.config.MessageChangeRetentionPropert
 import com.andrewtinyakov.messenger.read.config.ReadProperties
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
-import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.boot.security.autoconfigure.SecurityProperties
 import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.boot.webmvc.autoconfigure.WebMvcProperties
-import org.springframework.context.annotation.Configuration
-import org.springframework.context.annotation.Import
 import org.springframework.security.crypto.password.PasswordEncoder
 import java.time.Duration
 
 class ConfigurationPropertiesTests {
     private val runner = ApplicationContextRunner()
         .withInitializer(ConfigDataApplicationContextInitializer())
-        .withUserConfiguration(PropertiesConfiguration::class.java)
+        .withUserConfiguration(ConfigurationPropertiesTestConfiguration::class.java)
         .withPropertyValues("messenger.grpc.enabled=false")
 
     @Test
@@ -134,26 +130,11 @@ class ConfigurationPropertiesTests {
             "messenger.auth.password.pbkdf2.pbkdf2-sha256-600000.iterations=0",
             "messenger.auth.password.pbkdf2.pbkdf2-sha256-600000.salt-length=0",
             "messenger.grpc.enabled=true",
-            "messenger.auth.ws-ticket-secret=short",
+            "messenger.ws.ticket-secret=short",
         )) {
             runner.withPropertyValues(property).run { context ->
                 assertThat(context).hasFailed()
             }
         }
     }
-
-    @Configuration(proxyBeanMethods = false)
-    @EnableConfigurationProperties(
-        AuthProperties::class,
-        PasswordProperties::class,
-        GrpcProperties::class,
-        HistoryPurgeProperties::class,
-        ReadProperties::class,
-        MessageChangeRetentionProperties::class,
-        WebProperties::class,
-        SecurityProperties::class,
-        WebMvcProperties::class,
-    )
-    @Import(PasswordConfig::class)
-    class PropertiesConfiguration
 }

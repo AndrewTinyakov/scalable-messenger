@@ -27,6 +27,7 @@ class WsTicketServiceTests {
             deviceId = DeviceId("device-1"),
             sessionId = SessionId("a".repeat(64)),
             expiresAt = now.plus(Duration.ofDays(30)),
+            lastUsedAt = now,
         )
 
     @Test
@@ -57,7 +58,7 @@ class WsTicketServiceTests {
         val sessionExpiry = now.plusSeconds(30)
         val issued = tickets.issue(session.copy(expiresAt = sessionExpiry))
 
-        assertEquals(sessionExpiry.epochSecond, issued.expiresAt)
+        assertEquals(sessionExpiry, issued.expiresAt)
     }
 
     @Test

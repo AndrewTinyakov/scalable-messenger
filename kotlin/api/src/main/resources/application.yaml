@@ -1,5 +1,11 @@
 server:
   port: 8080
+  forward-headers-strategy: native
+  tomcat:
+    remoteip:
+      internal-proxies: ${MESSENGER_HTTP_PROXY_PATTERN:127\.0\.0\.1}
+      remote-ip-header: X-Forwarded-For
+      protocol-header: X-Forwarded-Proto
 spring:
   application:
     name: messenger-api
@@ -26,8 +32,8 @@ spring:
       enabled: true
   datasource:
     url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/messenger}
-    username: ${DATABASE_USER:messenger}
-    password: ${DATABASE_PASSWORD:messenger}
+    username: ${DATABASE_USER}
+    password: ${DATABASE_PASSWORD}
     hikari:
       data-source-properties:
         ApplicationName: messenger-api

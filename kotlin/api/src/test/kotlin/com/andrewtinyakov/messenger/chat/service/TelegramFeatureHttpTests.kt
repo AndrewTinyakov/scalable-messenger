@@ -3,7 +3,6 @@ package com.andrewtinyakov.messenger.chat.service
 import com.andrewtinyakov.messenger.ApiApplication
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.auth.service.AuthenticationService
-import com.andrewtinyakov.messenger.auth.web.payload.AuthRequest
 import com.andrewtinyakov.messenger.message.service.MessageSendService
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
 import com.andrewtinyakov.messenger.shared.id.newId
@@ -31,7 +30,7 @@ import java.time.OffsetDateTime
 class TelegramFeatureHttpTests
     @Autowired
     constructor(
-        @Value("\${local.server.port}") private val port: Int,
+        @Value($$"${local.server.port}") private val port: Int,
         private val authentication: AuthenticationService,
         private val chats: ChatService,
         private val sends: MessageSendService,
@@ -238,8 +237,8 @@ class TelegramFeatureHttpTests
         private fun page(query: String, cookie: String): JsonNode = json(request(query, cookie))
 
         private fun account(): Pair<String, String> {
-            val registered = authentication.register(AuthRequest("telegram_${newId()}", "long-demo-password"))
-            return registered.user.id.value to "messenger_session=${registered.token.value}"
+            val registered = authentication.register("telegram_${newId()}", "long-demo-password")
+            return registered.user.id.value to "__Host-messenger_session=${registered.token.value}"
         }
 
         private fun request(path: String, cookie: String?, method: String = "GET", body: String = ""): HttpResponse<String> {

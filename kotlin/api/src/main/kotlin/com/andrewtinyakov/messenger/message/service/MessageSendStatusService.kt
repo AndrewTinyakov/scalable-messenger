@@ -9,8 +9,7 @@ import com.andrewtinyakov.messenger.message.web.payload.SendLookupStatus
 import com.andrewtinyakov.messenger.message.web.payload.SendStatusEntry
 import com.andrewtinyakov.messenger.message.web.payload.SendStatusResponse
 import com.andrewtinyakov.messenger.message.web.payload.SendStatusesResponse
-import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
-import com.andrewtinyakov.messenger.shared.web.badRequest
+import com.andrewtinyakov.messenger.shared.web.invalidInput
 import org.springframework.stereotype.Service
 
 @Service
@@ -24,7 +23,7 @@ class MessageSendStatusService(
         if (requestIds.size !in 1..SendResult.MAX_LOOKUP_REQUEST_IDS ||
             requestIds.size != requestIds.toSet().size
         ) {
-            badRequest(ApiErrorCode.INVALID_ID, "Provide 1 to ${SendResult.MAX_LOOKUP_REQUEST_IDS} distinct request IDs")
+            invalidInput("requestIds", "Provide 1 to ${SendResult.MAX_LOOKUP_REQUEST_IDS} distinct request IDs")
         }
         val found = messageRepository.findSendResults(userId, requestIds).associateBy { it.requestId }
         return SendStatusesResponse(

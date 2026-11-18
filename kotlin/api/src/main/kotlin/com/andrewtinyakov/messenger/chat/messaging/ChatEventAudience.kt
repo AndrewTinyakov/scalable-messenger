@@ -1,4 +1,4 @@
-package com.andrewtinyakov.messenger.chat.service
+package com.andrewtinyakov.messenger.chat.messaging
 
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.ChatId

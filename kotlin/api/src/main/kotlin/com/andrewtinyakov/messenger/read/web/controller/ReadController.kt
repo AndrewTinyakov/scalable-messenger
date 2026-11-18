@@ -9,8 +9,7 @@ import com.andrewtinyakov.messenger.read.web.payload.AdvanceReadRequest
 import com.andrewtinyakov.messenger.read.web.payload.MessageReadsResponse
 import com.andrewtinyakov.messenger.read.web.payload.ReadProgressResponse
 import com.andrewtinyakov.messenger.read.web.payload.ReadSummaryResponse
-import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
-import com.andrewtinyakov.messenger.shared.web.badRequest
+import com.andrewtinyakov.messenger.shared.web.invalidInput
 import com.andrewtinyakov.messenger.shared.web.parseSequence
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
@@ -33,7 +32,7 @@ class ReadController(
     ): ReadProgressResponse {
         val chatId = ChatId.parse(id)
         val throughSequence = parseSequence(input.throughSequence)
-            ?: badRequest(ApiErrorCode.INVALID_SEQUENCE, "throughSequence must be a nonnegative decimal integer")
+            ?: invalidInput("throughSequence", "throughSequence must be a nonnegative decimal integer")
         return readService.advance(chatId = chatId, userId = session.userId, throughSequence = throughSequence)
     }
 

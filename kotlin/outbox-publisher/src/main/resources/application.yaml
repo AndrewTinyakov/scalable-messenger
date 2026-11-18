@@ -11,8 +11,8 @@ spring:
       password: ${METRICS_PASSWORD:${random.uuid}}
   datasource:
     url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/messenger}
-    username: ${DATABASE_USER:messenger}
-    password: ${DATABASE_PASSWORD:messenger}
+    username: ${DATABASE_USER}
+    password: ${DATABASE_PASSWORD}
     hikari:
       data-source-properties:
         ApplicationName: messenger-outbox-publisher
@@ -24,6 +24,7 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
       timeout: ${messenger.publisher.publish-timeout-ms:1000}ms
       connect-timeout: ${messenger.publisher.publish-timeout-ms:1000}ms
       lettuce:

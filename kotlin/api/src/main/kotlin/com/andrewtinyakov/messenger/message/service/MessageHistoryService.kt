@@ -29,8 +29,7 @@ import com.andrewtinyakov.messenger.message.web.payload.toHistoryResponse
 import com.andrewtinyakov.messenger.message.web.payload.toResolveResponse
 import com.andrewtinyakov.messenger.message.web.payload.toResponse
 import com.andrewtinyakov.messenger.message.web.payload.toVisibilityResponse
-import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
-import com.andrewtinyakov.messenger.shared.web.badRequest
+import com.andrewtinyakov.messenger.shared.web.invalidInput
 import com.andrewtinyakov.messenger.shared.web.notFound
 import com.andrewtinyakov.messenger.shared.web.requirePageLimit
 import org.springframework.stereotype.Service
@@ -44,7 +43,7 @@ class MessageHistoryService(
     private val metrics: MessageMetrics,
     private val messageChangeRepository: MessageChangeRepository,
     private val messageVisibilityRepository: MessageVisibilityRepository,
-    private val visibleHistory: VisibleHistory,
+    private val visibleHistoryService: VisibleHistoryService,
     tx: TransactionTemplate,
 ) {
     private val snapshot = TransactionTemplate(requireNotNull(tx.transactionManager)).apply {
@@ -60,9 +59,9 @@ class MessageHistoryService(
                 val state = state(chatId, userId)
                 requirePageLimit(limit)
                 if (afterSeq != null && afterSeq > state.snapshotSequence) {
-                    badRequest(ApiErrorCode.INVALID_SEQUENCE, "afterSeq exceeds saved history")
+                    invalidInput("afterSeq", "afterSeq exceeds saved history")
                 }
-                val page = visibleHistory.page(
+                val page = visibleHistoryService.page(
                     chatId = chatId,
                     userId = userId,
                     state = state,
@@ -111,7 +110,7 @@ class MessageHistoryService(
         if (ids.size !in 1..Message.MAX_LOOKUP_IDS ||
             ids.distinct().size != ids.size
         ) {
-            badRequest(ApiErrorCode.INVALID_REQUEST, "Provide 1 to ${Message.MAX_LOOKUP_IDS} distinct message IDs")
+            invalidInput("messageIds", "Provide 1 to ${Message.MAX_LOOKUP_IDS} distinct message IDs")
         }
         state.toResolveResponse(messages = messageRepository.findMessagesByIds(chatId, userId, ids))
     }
@@ -137,7 +136,7 @@ class MessageHistoryService(
 
     private fun requireAnchorReference(messageId: MessageId?, anchorSequence: Long?) {
         if (messageId == null && anchorSequence == null) {
-            badRequest(ApiErrorCode.INVALID_REQUEST, "Provide a messageId or anchorSequence")
+            invalidInput(null, "Provide a messageId or anchorSequence")
         }
     }
 
@@ -154,7 +153,7 @@ class MessageHistoryService(
 
     private fun readNeighbours(chatId: ChatId, userId: UserId, state: VisibilitySnapshot, anchorAt: Long): AnchorNeighbours =
         AnchorNeighbours(
-            before = visibleHistory.page(
+            before = visibleHistoryService.page(
                 chatId = chatId,
                 userId = userId,
                 state = state,
@@ -162,7 +161,7 @@ class MessageHistoryService(
                 ascending = false,
                 limit = 1,
             ),
-            after = visibleHistory.page(
+            after = visibleHistoryService.page(
                 chatId = chatId,
                 userId = userId,
                 state = state,
@@ -188,7 +187,7 @@ class MessageHistoryService(
         anchor: Message,
         limit: Int,
     ): AnchorWindow = AnchorWindow(
-        older = visibleHistory.page(
+        older = visibleHistoryService.page(
             chatId = chatId,
             userId = userId,
             state = state,
@@ -196,7 +195,7 @@ class MessageHistoryService(
             ascending = false,
             limit = limit,
         ),
-        newer = visibleHistory.page(
+        newer = visibleHistoryService.page(
             chatId = chatId,
             userId = userId,
             state = state,

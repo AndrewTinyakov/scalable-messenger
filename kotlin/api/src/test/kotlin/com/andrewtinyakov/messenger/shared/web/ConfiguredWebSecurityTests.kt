@@ -39,7 +39,7 @@ import java.util.Base64
     ],
 )
 class ConfiguredWebSecurityTests : MessengerIntegrationTest() {
-    @Value("\${local.server.port}")
+    @Value($$"${local.server.port}")
     private var port: Int = 0
 
     private val http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()

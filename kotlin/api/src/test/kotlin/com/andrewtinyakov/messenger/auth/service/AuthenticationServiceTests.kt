@@ -3,7 +3,6 @@ package com.andrewtinyakov.messenger.auth.service
 import com.andrewtinyakov.messenger.ApiApplication
 import com.andrewtinyakov.messenger.auth.model.ExpectedSessionIdentity
 import com.andrewtinyakov.messenger.auth.model.UserId
-import com.andrewtinyakov.messenger.auth.web.payload.AuthRequest
 import com.andrewtinyakov.messenger.chat.service.ChatService
 import com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupRequest
 import com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupResponse
@@ -80,9 +79,8 @@ class AuthenticationServiceTests
         @Test
         fun `registration and login return credentials for their persisted session`() {
             val username = "identity_${UUID.randomUUID().toString().replace("-", "").take(20)}"
-            val input = AuthRequest(username, "long-demo-password", "identity-device")
-            val registered = authenticationService.register(input)
-            val loggedIn = authenticationService.login(input)
+            val registered = authenticationService.register(username, "long-demo-password", "identity-device")
+            val loggedIn = authenticationService.login(username, "long-demo-password", "identity-device")
 
             for (credentials in listOf(registered, loggedIn)) {
                 val stored = authenticationService.authenticatedSession(credentials.token)
@@ -99,7 +97,7 @@ class AuthenticationServiceTests
         @Test
         fun `websocket ticket expires no later than its cookie session`() {
             val username = "expiry_${UUID.randomUUID().toString().replace("-", "").take(20)}"
-            val created = authenticationService.register(AuthRequest(username, "long-demo-password"))
+            val created = authenticationService.register(username, "long-demo-password")
             val bearer = created.token
             val session = authenticationService.authenticatedSession(bearer)
             val expiry = OffsetDateTime.now(ZoneOffset.UTC).plusMinutes(5).withNano(0)
@@ -107,7 +105,7 @@ class AuthenticationServiceTests
 
             val issued = wsTicketService.issue(authenticationService.authenticatedSession(bearer))
 
-            assertEquals(expiry.toEpochSecond(), issued.expiresAt)
+            assertEquals(expiry.toEpochSecond(), issued.expiresAt.epochSecond)
             val claims = mapper.readTree(java.util.Base64.getUrlDecoder().decode(issued.token.split('.')[1]))
             assertEquals(expiry.toEpochSecond(), claims.path("exp").longValue())
         }
@@ -116,10 +114,10 @@ class AuthenticationServiceTests
         fun `registration preserves password differences past seventy two bytes`() {
             val username = "password_${UUID.randomUUID().toString().replace("-", "").take(20)}"
             val prefix = "é".repeat(40)
-            val created = authenticationService.register(AuthRequest(username, "${prefix}correct"))
+            val created = authenticationService.register(username, "${prefix}correct")
 
-            assertEquals(created.session.userId, authenticationService.login(AuthRequest(username, "${prefix}correct")).session.userId)
-            assertThrows(ApiException::class.java) { authenticationService.login(AuthRequest(username, "${prefix}incorrect")) }
+            assertEquals(created.session.userId, authenticationService.login(username, "${prefix}correct").session.userId)
+            assertThrows(ApiException::class.java) { authenticationService.login(username, "${prefix}incorrect") }
         }
 
         @Test
@@ -129,15 +127,15 @@ class AuthenticationServiceTests
             val hash = BCryptPasswordEncoder().encode("legacy-password")
             db.update("INSERT INTO users(id,username,password_hash) VALUES (?,?,?)", userId, username, hash)
 
-            assertEquals(userId, authenticationService.login(AuthRequest(username, "legacy-password")).session.userId.value)
-            assertThrows(ApiException::class.java) { authenticationService.login(AuthRequest(username, "incorrect-password")) }
+            assertEquals(userId, authenticationService.login(username, "legacy-password").session.userId.value)
+            assertThrows(ApiException::class.java) { authenticationService.login(username, "incorrect-password") }
         }
 
         @Test
         fun `logout revokes only the cookie session and publishes one exact event`() {
             val username = "logout_${UUID.randomUUID().toString().replace("-", "").take(20)}"
-            val first = authenticationService.register(AuthRequest(username, "long-demo-password", "first-device"))
-            val second = authenticationService.login(AuthRequest(username, "long-demo-password", "second-device"))
+            val first = authenticationService.register(username, "long-demo-password", "first-device")
+            val second = authenticationService.login(username, "long-demo-password", "second-device")
             val firstBearer = first.token
             val secondBearer = second.token
             val firstSession = authenticationService.authenticatedSession(firstBearer)
@@ -173,9 +171,9 @@ class AuthenticationServiceTests
         @Test
         fun `batch group authorization returns only current memberships and checks session`() {
             val suffix = UUID.randomUUID().toString().replace("-", "").take(12)
-            val owner = authenticationService.register(AuthRequest("owner_$suffix", "long-demo-password", "owner-device"))
-            val member = authenticationService.register(AuthRequest("member_$suffix", "long-demo-password", "member-device"))
-            val other = authenticationService.register(AuthRequest("other_$suffix", "long-demo-password", "other-device"))
+            val owner = authenticationService.register("owner_$suffix", "long-demo-password", "owner-device")
+            val member = authenticationService.register("member_$suffix", "long-demo-password", "member-device")
+            val other = authenticationService.register("other_$suffix", "long-demo-password", "other-device")
             val joined = chatService.createGroup(
                 owner.session.userId,
                 "Joined",
@@ -199,7 +197,7 @@ class AuthenticationServiceTests
         @Test
         fun `session validation derives persisted identity and rejects invalid or expired session IDs`() {
             val username = "session_${UUID.randomUUID().toString().replace("-", "").take(20)}"
-            val created = authenticationService.register(AuthRequest(username, "long-demo-password", "persisted-device"))
+            val created = authenticationService.register(username, "long-demo-password", "persisted-device")
             val request = ValidateSessionRequest.newBuilder().setSessionId(created.session.sessionId.value).build()
 
             val response = validate(request)
@@ -221,7 +219,9 @@ class AuthenticationServiceTests
         @Test
         fun `failed identity comparison rolls back session deletion before any revocation event`() {
             val credentials = authenticationService.register(
-                AuthRequest(username = "rollback_${newId().lowercase()}", password = "long-demo-password", deviceId = "current-device"),
+                username = "rollback_${newId().lowercase()}",
+                password = "long-demo-password",
+                deviceId = "current-device",
             )
             val failure = assertThrows(ApiException::class.java) {
                 authenticationService.logout(
@@ -239,9 +239,7 @@ class AuthenticationServiceTests
 
         @Test
         fun `expired sessions are deleted and revoked despite stale or duplicate expected identity`() {
-            val credentials = authenticationService.register(
-                AuthRequest(username = "expired_${newId().lowercase()}", password = "long-demo-password"),
-            )
+            val credentials = authenticationService.register(username = "expired_${newId().lowercase()}", password = "long-demo-password")
             db.update(
                 "UPDATE sessions SET expires_at=? WHERE token_hash=?",
                 OffsetDateTime.now().minusSeconds(1),
@@ -261,7 +259,8 @@ class AuthenticationServiceTests
         @Test
         fun `concurrent logouts commit exactly one session revocation`() {
             val credentials = authenticationService.register(
-                AuthRequest(username = "concurrent_${newId().lowercase()}", password = "long-demo-password"),
+                username = "concurrent_${newId().lowercase()}",
+                password = "long-demo-password",
             )
             val ready = CountDownLatch(2)
             val start = CountDownLatch(1)
@@ -288,9 +287,7 @@ class AuthenticationServiceTests
 
         @Test
         fun `failed outbox persistence rolls back logout and permits retry`() {
-            val credentials = authenticationService.register(
-                AuthRequest(username = "outbox_${newId().lowercase()}", password = "long-demo-password"),
-            )
+            val credentials = authenticationService.register(username = "outbox_${newId().lowercase()}", password = "long-demo-password")
             val suffix = UUID.randomUUID().toString().replace("-", "")
             val function = "reject_revocation_$suffix"
             val sessionId = credentials.session.sessionId.value
@@ -324,9 +321,7 @@ class AuthenticationServiceTests
 
         @Test
         fun `session validation reads sessions alone and logout skips preliminary lookup`() {
-            val credentials = authenticationService.register(
-                AuthRequest(username = "queries_${newId().lowercase()}", password = "long-demo-password"),
-            )
+            val credentials = authenticationService.register(username = "queries_${newId().lowercase()}", password = "long-demo-password")
             val validation = statements {
                 authenticationService.authenticatedSession(token = credentials.token)
             }
@@ -342,9 +337,7 @@ class AuthenticationServiceTests
 
         @Test
         fun `each authorization RPC reads current session and memberships in one statement`() {
-            val credentials = authenticationService.register(
-                AuthRequest(username = "rpc_${newId().lowercase()}", password = "long-demo-password"),
-            )
+            val credentials = authenticationService.register(username = "rpc_${newId().lowercase()}", password = "long-demo-password")
             val missing = newId()
             val batch = AuthorizeGroupsRequest.newBuilder().setSessionId(credentials.session.sessionId.value).addChatIds(missing).build()
             val single = AuthorizeGroupRequest.newBuilder().setSessionId(credentials.session.sessionId.value).setChatId(missing).build()

@@ -579,7 +579,7 @@ describe('messenger request coordination', () => {
     expect(chat().markedUnread).toBe(false)
   })
 
-  it.each(['rate_limited', 'room_limit', 'dependency_unavailable', 'publish_failed'])(
+  it.each(['RATE_LIMITED', 'ROOM_LIMIT', 'DEPENDENCY_UNAVAILABLE', 'PUBLISH_FAILED'])(
     'silently retries %s sends with their original request ID',
     async (code) => {
       vi.useFakeTimers()

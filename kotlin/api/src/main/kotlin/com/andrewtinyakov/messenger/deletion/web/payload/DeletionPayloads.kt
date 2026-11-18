@@ -6,9 +6,8 @@ import com.andrewtinyakov.messenger.deletion.model.DeletionState
 import com.andrewtinyakov.messenger.deletion.model.DeletionTarget
 import com.andrewtinyakov.messenger.deletion.model.StoredDeletion
 import com.andrewtinyakov.messenger.message.model.MessageId
-import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
 import com.andrewtinyakov.messenger.shared.web.StrictStringDeserializer
-import com.andrewtinyakov.messenger.shared.web.badRequest
+import com.andrewtinyakov.messenger.shared.web.invalidInput
 import io.swagger.v3.oas.annotations.media.Schema
 import tools.jackson.databind.annotation.JsonDeserialize
 
@@ -48,10 +47,10 @@ fun DeletionRequest.validMessageIds(): List<MessageId> {
     val ids = messageIds.orEmpty()
     if (target == DeletionTarget.MESSAGES) {
         if (ids.size !in 1..DeletionMessage.MAX_PER_REQUEST || ids.size != ids.distinct().size) {
-            badRequest(ApiErrorCode.INVALID_REQUEST, "Provide 1 to ${DeletionMessage.MAX_PER_REQUEST} distinct message IDs")
+            invalidInput("messageIds", "Provide 1 to ${DeletionMessage.MAX_PER_REQUEST} distinct message IDs")
         }
     } else if (messageIds != null) {
-        badRequest(ApiErrorCode.INVALID_REQUEST, "messageIds is only valid for message deletion")
+        invalidInput("messageIds", "messageIds is only valid for message deletion")
     }
     return ids.map(MessageId::parse)
 }

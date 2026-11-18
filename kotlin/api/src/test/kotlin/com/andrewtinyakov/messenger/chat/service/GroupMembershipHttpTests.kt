@@ -3,7 +3,6 @@ package com.andrewtinyakov.messenger.chat.service
 import com.andrewtinyakov.messenger.ApiApplication
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.auth.service.AuthenticationService
-import com.andrewtinyakov.messenger.auth.web.payload.AuthRequest
 import com.andrewtinyakov.messenger.chat.web.payload.CreateGroupChatRequest
 import com.andrewtinyakov.messenger.message.service.MessageSendService
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
@@ -30,7 +29,7 @@ import java.time.Duration
 class GroupMembershipHttpTests
     @Autowired
     constructor(
-        @Value("\${local.server.port}") private val port: Int,
+        @Value($$"${local.server.port}") private val port: Int,
         private val authenticationService: AuthenticationService,
         private val chatService: ChatService,
         private val messageSendService: MessageSendService,
@@ -112,22 +111,24 @@ class GroupMembershipHttpTests
             val member = user("validation_${newId()}")
             val chat = chatService.createGroup(UserId(owner.first), "Validation", listOf(member).map(::UserId))
             assertEquals(401, request("/${chat.id}/members").statusCode())
-            for ((suffix, code) in listOf(
-                "?limit=0" to "INVALID_LIMIT",
-                "?limit=101" to "INVALID_LIMIT",
-                "?limit=-1" to "INVALID_LIMIT",
-                "?limit=bad" to "INVALID_REQUEST",
-                "?afterUserId=invalid" to "INVALID_ID",
-                "?afterUserId=" to "INVALID_ID",
-                "?afterUserId=${member.lowercase()}" to "INVALID_ID",
+            for ((suffix, field) in listOf(
+                "?limit=0" to "limit",
+                "?limit=101" to "limit",
+                "?limit=-1" to "limit",
+                "?limit=bad" to "limit",
+                "?afterUserId=invalid" to null,
+                "?afterUserId=" to null,
+                "?afterUserId=${member.lowercase()}" to null,
             )) {
                 val response = request("/${chat.id}/members$suffix", owner.second)
+                val problem = mapper.readTree(response.body())
                 assertEquals(400, response.statusCode(), suffix)
-                assertEquals(code, mapper.readTree(response.body()).path("code").stringValue(), suffix)
+                assertEquals("VALIDATION_FAILED", problem.path("code").stringValue(), suffix)
+                assertEquals(field, problem.path("errors").path(0).path("field").stringValue(null), suffix)
             }
             val invalidChat = request("/invalid/members", owner.second)
             assertEquals(400, invalidChat.statusCode())
-            assertEquals("INVALID_ID", mapper.readTree(invalidChat.body()).path("code").stringValue())
+            assertEquals("VALIDATION_FAILED", mapper.readTree(invalidChat.body()).path("code").stringValue())
             assertEquals(404, request("/${newId()}/members", owner.second).statusCode())
         }
 
@@ -153,8 +154,8 @@ class GroupMembershipHttpTests
         }
 
         private fun account(): Pair<String, String> {
-            val credentials = authenticationService.register(AuthRequest("members_${newId()}", "long-demo-password"))
-            return credentials.user.id.value to "messenger_session=${credentials.token.value}"
+            val credentials = authenticationService.register("members_${newId()}", "long-demo-password")
+            return credentials.user.id.value to "__Host-messenger_session=${credentials.token.value}"
         }
 
         private fun request(path: String, cookie: String? = null, method: String = "GET", body: String = ""): HttpResponse<String> {

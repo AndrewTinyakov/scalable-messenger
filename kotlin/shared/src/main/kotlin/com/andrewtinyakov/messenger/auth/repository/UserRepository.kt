@@ -9,6 +9,12 @@ interface UserRepository {
 
     fun findUserByUsername(username: String): User?
 
+    fun findUser(userId: UserId): User?
+
+    fun lockPasswordHash(userId: UserId): String?
+
+    fun replacePasswordHash(userId: UserId, expectedHash: String, newHash: String): Boolean
+
     fun findSummary(userId: UserId): UserSummary?
 
     fun existsById(userId: UserId): Boolean

@@ -18,6 +18,8 @@ import com.andrewtinyakov.messenger.generated.grpc.ChatAuthorizationGrpc
 import com.andrewtinyakov.messenger.generated.grpc.SidebarChat
 import com.andrewtinyakov.messenger.generated.grpc.ValidateSessionRequest
 import com.andrewtinyakov.messenger.generated.grpc.ValidateSessionResponse
+import com.andrewtinyakov.messenger.generated.grpc.ValidateSessionsRequest
+import com.andrewtinyakov.messenger.generated.grpc.ValidateSessionsResponse
 import com.andrewtinyakov.messenger.infrastructure.redis.RoomAddress
 import com.andrewtinyakov.messenger.shared.web.ApiException
 import com.andrewtinyakov.messenger.ws.model.GroupAuthorization
@@ -33,6 +35,7 @@ import java.time.Clock
 import java.time.OffsetDateTime
 
 private const val MAX_PRESENCE_PEERS = 100
+private const val MAX_SESSIONS_PER_REQUEST = 100
 
 @Component
 class ChatAuthorizationGrpcService(
@@ -71,12 +74,18 @@ class ChatAuthorizationGrpcService(
 
     override fun validateSession(request: ValidateSessionRequest, responseObserver: StreamObserver<ValidateSessionResponse>) =
         respond(responseObserver) {
-            val session = requireSession(request.sessionId)
-            ValidateSessionResponse.newBuilder()
-                .setUserId(session.userId.value)
-                .setDeviceId(session.deviceId.value)
-                .setSessionId(session.sessionId.value)
-                .build()
+            requireSession(request.sessionId).toResponse()
+        }
+
+    override fun validateSessions(request: ValidateSessionsRequest, responseObserver: StreamObserver<ValidateSessionsResponse>) =
+        respond(responseObserver) {
+            val ids = request.sessionIdsList
+            if (ids.size !in 1..MAX_SESSIONS_PER_REQUEST || ids.size != ids.toSet().size || !ids.all(::isValidSessionId)) {
+                throw Status.INVALID_ARGUMENT.withDescription("Provide 1 to $MAX_SESSIONS_PER_REQUEST distinct session IDs")
+                    .asRuntimeException()
+            }
+            val sessions = sessionRepository.findSessions(sessionIds = ids.map(::SessionId), now = OffsetDateTime.now(clock))
+            ValidateSessionsResponse.newBuilder().addAllSessions(sessions.map { it.toResponse() }).build()
         }
 
     override fun authorizeGroup(request: AuthorizeGroupRequest, responseObserver: StreamObserver<AuthorizeGroupResponse>) =
@@ -120,6 +129,13 @@ class ChatAuthorizationGrpcService(
             ) ?: throw Status.PERMISSION_DENIED.withDescription("Presence access denied").asRuntimeException()
             AuthorizePresenceResponse.newBuilder().addAllAuthorizedUserIds(peers.filter(allowed::contains).map(UserId::value)).build()
         }
+
+    private fun AuthenticatedSession.toResponse(): ValidateSessionResponse = ValidateSessionResponse.newBuilder()
+        .setUserId(userId.value)
+        .setDeviceId(deviceId.value)
+        .setSessionId(sessionId.value)
+        .setExpiresAtUnixSeconds(expiresAt.epochSecond)
+        .build()
 
     private fun requireSession(value: String): AuthenticatedSession =
         sessionRepository.findSession(sessionId = requireSessionId(value), now = OffsetDateTime.now(clock))

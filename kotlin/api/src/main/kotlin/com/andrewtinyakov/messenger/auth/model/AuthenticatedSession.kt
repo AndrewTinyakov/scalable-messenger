@@ -7,4 +7,5 @@ data class AuthenticatedSession(
     val deviceId: DeviceId,
     val sessionId: SessionId,
     val expiresAt: Instant,
+    val lastUsedAt: Instant,
 )

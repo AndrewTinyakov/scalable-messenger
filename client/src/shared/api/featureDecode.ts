@@ -1,21 +1,10 @@
 import type { MessageChange } from '../../entities/message/historySnapshot'
-import { isDateTime, isId, isRecord, isSequence } from '../lib/validation'
+import { isDateTime, isId, isSequence } from '../lib/validation'
 import { decodeHistory, decodeMessage } from './decode'
 import type { components } from './generated/schema'
 import { decodeSnapshot, snapshotFields } from './snapshotDecode'
+import { check, record } from './strictDecode'
 
-function record(value: unknown, keys: string[]): Record<string, unknown> {
-  if (
-    !isRecord(value) ||
-    Object.keys(value).some((key) => !keys.includes(key)) ||
-    keys.some((key) => !Object.hasOwn(value, key))
-  )
-    throw new Error('Invalid response from server')
-  return value
-}
-function check(condition: boolean): asserts condition {
-  if (!condition) throw new Error('Invalid response from server')
-}
 export type AroundPage = Required<components['schemas']['MessageAroundResponse']>
 export function decodeAround(value: unknown, chatId: string): AroundPage {
   const page = record(value, [

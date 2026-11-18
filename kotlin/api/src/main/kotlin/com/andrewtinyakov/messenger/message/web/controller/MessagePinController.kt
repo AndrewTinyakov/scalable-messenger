@@ -6,8 +6,7 @@ import com.andrewtinyakov.messenger.message.model.MessageId
 import com.andrewtinyakov.messenger.message.service.MessagePinService
 import com.andrewtinyakov.messenger.message.web.payload.PinMessageRequest
 import com.andrewtinyakov.messenger.message.web.payload.PinnedMessagePageResponse
-import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
-import com.andrewtinyakov.messenger.shared.web.badRequest
+import com.andrewtinyakov.messenger.shared.web.invalidInput
 import com.andrewtinyakov.messenger.shared.web.parseSequence
 import com.andrewtinyakov.messenger.shared.web.requirePageLimit
 import org.springframework.http.HttpStatus
@@ -39,7 +38,7 @@ class MessagePinController(
             chatId = chatId,
             userId = session.userId,
             beforeSequence = beforeSequence?.let {
-                parseSequence(it) ?: badRequest(ApiErrorCode.INVALID_SEQUENCE, "beforeSequence must be a nonnegative decimal integer")
+                parseSequence(it) ?: invalidInput("beforeSequence", "beforeSequence must be a nonnegative decimal integer")
             },
             limit = limit,
         )

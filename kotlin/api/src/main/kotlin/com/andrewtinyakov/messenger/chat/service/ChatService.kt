@@ -1,7 +1,9 @@
 package com.andrewtinyakov.messenger.chat.service
 
 import com.andrewtinyakov.messenger.auth.model.UserId
+import com.andrewtinyakov.messenger.chat.messaging.ChatOutbox
 import com.andrewtinyakov.messenger.chat.model.Chat
+import com.andrewtinyakov.messenger.chat.model.ChatCursor
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.model.ChatKind
 import com.andrewtinyakov.messenger.chat.model.ChatPreferences
@@ -11,33 +13,24 @@ import com.andrewtinyakov.messenger.chat.repository.membership.GroupMembershipRe
 import com.andrewtinyakov.messenger.chat.web.payload.ChatPageResponse
 import com.andrewtinyakov.messenger.chat.web.payload.ChatResponse
 import com.andrewtinyakov.messenger.chat.web.payload.toResponse
-import com.andrewtinyakov.messenger.generated.messaging.event.ChatCreatedEventV1
-import com.andrewtinyakov.messenger.generated.messaging.event.MembershipChangedEventV1
 import com.andrewtinyakov.messenger.infrastructure.database.DatabaseTransaction
 import com.andrewtinyakov.messenger.infrastructure.database.observedExecute
 import com.andrewtinyakov.messenger.infrastructure.database.observedExecuteWithoutResult
-import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxMessage
-import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxRepository
-import com.andrewtinyakov.messenger.infrastructure.outbox.toOutboxMessage
-import com.andrewtinyakov.messenger.infrastructure.redis.RoomAddress
 import com.andrewtinyakov.messenger.shared.id.newId
-import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
-import com.andrewtinyakov.messenger.shared.web.badRequest
 import com.andrewtinyakov.messenger.shared.web.forbidden
+import com.andrewtinyakov.messenger.shared.web.invalidInput
 import com.andrewtinyakov.messenger.shared.web.notFound
 import com.andrewtinyakov.messenger.shared.web.requirePageLimit
 import com.andrewtinyakov.messenger.shared.web.userNotFound
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
-import tools.jackson.databind.ObjectMapper
 
 @Service
 class ChatService(
     private val chatRepository: ChatRepository,
     private val chatDirectoryRepository: ChatDirectoryRepository,
     private val groupMembershipRepository: GroupMembershipRepository,
-    private val outboxRepository: OutboxRepository,
-    private val mapper: ObjectMapper,
+    private val chatOutbox: ChatOutbox,
     private val tx: TransactionTemplate,
 ) {
     fun list(
@@ -46,7 +39,7 @@ class ChatService(
         limit: Int,
     ): ChatPageResponse {
         requirePageLimit(limit)
-        val position = cursor?.let(ChatCursor::decode)
+        val position = cursor?.let { ChatCursor.decode(it) ?: invalidInput("cursor", "Invalid chat cursor") }
         val fetched = chatDirectoryRepository.findByMember(
             userId = userId,
             beforeActivityAt = position?.activityAt,
@@ -93,11 +86,11 @@ class ChatService(
     ): ChatResponse {
         val groupName = name.trim()
         if (groupName.length !in 1..Chat.MAX_NAME_LENGTH) {
-            badRequest(ApiErrorCode.INVALID_NAME, "Group name must be 1 to ${Chat.MAX_NAME_LENGTH} characters")
+            invalidInput("name", "Group name must be 1 to ${Chat.MAX_NAME_LENGTH} characters")
         }
         val members = (memberIds + userId).distinct()
         if (members.size !in 2..Chat.MAX_INITIAL_GROUP_MEMBERS) {
-            badRequest(ApiErrorCode.INVALID_MEMBERS, "Initial group needs 2 to ${Chat.MAX_INITIAL_GROUP_MEMBERS} members")
+            invalidInput("memberIds", "Initial group needs 2 to ${Chat.MAX_INITIAL_GROUP_MEMBERS} members")
         }
         return tx.observedExecute(DatabaseTransaction.CHAT_CREATE_GROUP) {
             requireUsersAndLock(members)
@@ -115,10 +108,7 @@ class ChatService(
                 name = groupName,
                 ownerId = userId,
                 members = members,
-                events = createdEvents(
-                    chatId = chat.id,
-                    members = members,
-                ),
+                events = chatOutbox.chatCreatedMessages(chatId = chat.id, members = members),
             )
             get(chat.id, userId)
         }
@@ -167,7 +157,7 @@ class ChatService(
 
     private fun requireMemberLimit(chat: Chat, additions: List<UserId>) {
         if (chat.memberCount + additions.size > Chat.MAX_MEMBERS) {
-            badRequest(ApiErrorCode.INVALID_MEMBERS, "Group cannot exceed ${Chat.MAX_MEMBERS} members")
+            invalidInput("memberIds", "Group cannot exceed ${Chat.MAX_MEMBERS} members")
         }
     }
 
@@ -177,17 +167,7 @@ class ChatService(
             chatId = chatId,
             userIds = additions,
         )
-        val membershipChanged = MembershipChangedEventV1.create(
-            eventId = newId(),
-            room = RoomAddress.group(chatId),
-            chatId = chatId.value,
-        )
-        outboxRepository.enqueue(
-            messages = createdEvents(
-                chatId = chatId,
-                members = additions,
-            ) + membershipChanged.toOutboxMessage(mapper),
-        )
+        chatOutbox.enqueueMembersAdded(chatId = chatId, members = additions)
     }
 
     private fun requireUsersAndLock(userIds: List<UserId>) {
@@ -196,20 +176,7 @@ class ChatService(
 
     private fun requireGroupCapacity(userIds: List<UserId>) {
         if (groupMembershipRepository.groupCountsByUser(userIds = userIds).values.any { it >= Chat.MAX_GROUPS_PER_USER }) {
-            badRequest(ApiErrorCode.INVALID_MEMBERS, "A member cannot join more than ${Chat.MAX_GROUPS_PER_USER} groups")
+            invalidInput("memberIds", "A member cannot join more than ${Chat.MAX_GROUPS_PER_USER} groups")
         }
     }
-
-    private fun createdEvents(
-        chatId: ChatId,
-        members: List<UserId>,
-    ): List<OutboxMessage> =
-        members.map { userId ->
-            ChatCreatedEventV1.create(
-                eventId = newId(),
-                room = RoomAddress.user(userId),
-                chatId = chatId.value,
-                requestId = null,
-            ).toOutboxMessage(mapper)
-        }
 }

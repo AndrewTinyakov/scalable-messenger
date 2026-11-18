@@ -131,6 +131,8 @@ Processor timing now finishes even if broker ACK or reject fails. A separate ack
 
 WebSocket setup timing ends before the read loop on accepted connections, so it excludes socket lifetime. Stages are admission, connection lease, HTTP upgrade, user room join and session validation. Admission includes ticket/origin checks, local capacity and Redis rate limiting. Only entered stages record a sample. Successful stages use ready; setup result describes acceptance or a bounded failure. These metrics see requests reaching Go, not requests rejected by NGINX.
 
+Open sockets recheck their SQL session every 4 to 6 minutes in batches of up to 100 sessions. `messenger_ws_session_checks_total` counts active, revoked and unavailable results per socket. A passing check authorizes the socket for 15 more minutes, never past session expiry. A failed RPC retries after 30 seconds and keeps the socket open. A socket closes with `session_revoked` once its session is gone, or when checks keep failing past its authorization deadline.
+
 The database recording-failure alert warns when observations are lost while application work continues. The persistent lock alert warns when a lock-waiting query remains older than five seconds for two minutes. These are diagnostic thresholds, not product SLOs.
 
 ## Remaining monitoring and performance work

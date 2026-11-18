@@ -1,7 +1,7 @@
 import { Eye, EyeOff } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { deviceId, type Session } from '../../entities/session/model'
-import { api } from '../../shared/api/http'
+import { api, ApiError } from '../../shared/api/http'
 import { BrandMark } from '../../shared/ui/Brand'
 
 export function AuthPage({ onSession }: { onSession: (session: Session) => void }) {
@@ -11,11 +11,13 @@ export function AuthPage({ onSession }: { onSession: (session: Session) => void 
   const [reveal, setReveal] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [fieldErrors, setFieldErrors] = useState<{ username?: string; password?: string }>({})
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setBusy(true)
     setError(null)
+    setFieldErrors({})
     try {
       const session =
         mode === 'login'
@@ -23,7 +25,16 @@ export function AuthPage({ onSession }: { onSession: (session: Session) => void 
           : await api.register(username.trim(), password, deviceId())
       onSession(session)
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not sign in')
+      const fields =
+        cause instanceof ApiError
+          ? {
+              username:
+                cause.code === 'USERNAME_TAKEN' ? cause.message : cause.fieldError('username'),
+              password: cause.fieldError('password'),
+            }
+          : {}
+      if (fields.username || fields.password) setFieldErrors(fields)
+      else setError(cause instanceof Error ? cause.message : 'Could not sign in')
     } finally {
       setBusy(false)
     }
@@ -48,7 +59,12 @@ export function AuthPage({ onSession }: { onSession: (session: Session) => void 
               autoCapitalize="none"
               spellCheck={false}
               value={username}
-              onChange={(event) => setUsername(event.target.value)}
+              onChange={(event) => {
+                setUsername(event.target.value)
+                setFieldErrors((previous) => ({ ...previous, username: undefined }))
+              }}
+              aria-invalid={fieldErrors.username ? true : undefined}
+              aria-describedby={fieldErrors.username ? 'username-error' : undefined}
               minLength={3}
               maxLength={40}
               pattern="[A-Za-z0-9_]+"
@@ -58,6 +74,11 @@ export function AuthPage({ onSession }: { onSession: (session: Session) => void 
             />
             <label htmlFor="username">Username</label>
           </div>
+          {fieldErrors.username && (
+            <p className="field-error" id="username-error" role="alert">
+              {fieldErrors.username}
+            </p>
+          )}
           <div className="field">
             <input
               id="password"
@@ -65,7 +86,12 @@ export function AuthPage({ onSession }: { onSession: (session: Session) => void 
               type={reveal ? 'text' : 'password'}
               autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
               value={password}
-              onChange={(event) => setPassword(event.target.value)}
+              onChange={(event) => {
+                setPassword(event.target.value)
+                setFieldErrors((previous) => ({ ...previous, password: undefined }))
+              }}
+              aria-invalid={fieldErrors.password ? true : undefined}
+              aria-describedby={fieldErrors.password ? 'password-error' : undefined}
               minLength={8}
               maxLength={100}
               required
@@ -81,6 +107,11 @@ export function AuthPage({ onSession }: { onSession: (session: Session) => void 
               {reveal ? <EyeOff size={19} /> : <Eye size={19} />}
             </button>
           </div>
+          {fieldErrors.password && (
+            <p className="field-error" id="password-error" role="alert">
+              {fieldErrors.password}
+            </p>
+          )}
           {error && (
             <div className="form-error" role="alert">
               {error}
@@ -97,6 +128,7 @@ export function AuthPage({ onSession }: { onSession: (session: Session) => void 
             onClick={() => {
               setMode(mode === 'login' ? 'register' : 'login')
               setError(null)
+              setFieldErrors({})
             }}
           >
             {mode === 'login' ? 'Create an account' : 'Sign in'}

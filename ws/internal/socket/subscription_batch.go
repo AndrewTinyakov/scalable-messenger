@@ -295,7 +295,7 @@ func (subscriptions *chatSubscriptions) groupAuthorizationContext(base context.C
 		return nil, func() {}, err
 	}
 	deadline := time.Now().Add(subscriptions.config.APITimeout)
-	if admission := subscriptions.connection.session.ExpiresAt; !admission.IsZero() && admission.Before(deadline) {
+	if admission := subscriptions.connection.authorizationDeadline(); !admission.IsZero() && admission.Before(deadline) {
 		deadline = admission
 	}
 	ctx, cancel := context.WithDeadline(base, deadline)

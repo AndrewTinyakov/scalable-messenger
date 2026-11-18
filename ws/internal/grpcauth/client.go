@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"google.golang.org/grpc"
 	_ "google.golang.org/grpc/balancer/roundrobin"
@@ -30,6 +31,7 @@ type Session struct {
 	UserID    string
 	DeviceID  string
 	SessionID string
+	ExpiresAt time.Time
 }
 
 type TLSConfig struct {
@@ -115,10 +117,42 @@ func (c *Client) ValidateSession(ctx context.Context, sessionID string) (Session
 		}
 		return Session{}, fmt.Errorf("validate session: %w", err)
 	}
-	if response.GetUserId() == "" || response.GetDeviceId() == "" || response.GetSessionId() == "" {
+	return decodeSession(response)
+}
+
+func (c *Client) ValidateSessions(ctx context.Context, sessionIDs []string) (map[string]Session, error) {
+	response, err := c.service.ValidateSessions(ctx, &authorization.ValidateSessionsRequest{SessionIds: sessionIDs})
+	if err != nil {
+		return nil, fmt.Errorf("validate sessions: %w", err)
+	}
+	requested := make(map[string]bool, len(sessionIDs))
+	for _, id := range sessionIDs {
+		requested[id] = true
+	}
+	sessions := make(map[string]Session, len(response.GetSessions()))
+	for _, item := range response.GetSessions() {
+		session, err := decodeSession(item)
+		if err != nil {
+			return nil, err
+		}
+		if _, seen := sessions[session.SessionID]; seen || !requested[session.SessionID] {
+			return nil, errors.New("invalid session validation response")
+		}
+		sessions[session.SessionID] = session
+	}
+	return sessions, nil
+}
+
+func decodeSession(response *authorization.ValidateSessionResponse) (Session, error) {
+	if response.GetUserId() == "" || response.GetDeviceId() == "" || response.GetSessionId() == "" || response.GetExpiresAtUnixSeconds() <= 0 {
 		return Session{}, errors.New("invalid session validation response")
 	}
-	return Session{UserID: response.GetUserId(), DeviceID: response.GetDeviceId(), SessionID: response.GetSessionId()}, nil
+	return Session{
+		UserID:    response.GetUserId(),
+		DeviceID:  response.GetDeviceId(),
+		SessionID: response.GetSessionId(),
+		ExpiresAt: time.Unix(response.GetExpiresAtUnixSeconds(), 0),
+	}, nil
 }
 
 func (c *Client) Close() error { return c.connection.Close() }

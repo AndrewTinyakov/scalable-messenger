@@ -168,7 +168,7 @@ describe('socket event decoding', () => {
     const controls = [
       { type: 'queued', version: 1, requestId: id, recipientId: id },
       { type: 'subscribed', version: 1, chatId: id, room: `user:${id}` },
-      { type: 'error', version: 1, requestId: id, code: 'publish_unknown' },
+      { type: 'error', version: 1, requestId: id, code: 'PUBLISH_UNKNOWN' },
       { type: 'recovery_failed', version: 1, chatId: id },
       { type: 'subscription_expired', version: 1, chatId: id },
     ]
@@ -179,7 +179,7 @@ describe('socket event decoding', () => {
     const controls = [
       { type: 'queued', version: 1, requestId: id, recipientId: id, epoch: 'unexpected' },
       { type: 'subscribed', version: 1, chatId: id, room: `user:${id}`, requestId: id },
-      { type: 'error', version: 1, code: 'publish_unknown', body: 'unexpected' },
+      { type: 'error', version: 1, code: 'PUBLISH_UNKNOWN', body: 'unexpected' },
       { type: 'recovery_failed', version: 1, chatId: id, sequence: '1' },
       { type: 'subscription_expired', version: 1, chatId: id, room: `user:${id}` },
       {

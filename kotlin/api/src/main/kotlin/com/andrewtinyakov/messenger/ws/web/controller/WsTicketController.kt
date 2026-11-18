@@ -15,5 +15,5 @@ class WsTicketController(
     @PostMapping("/ws-ticket")
     fun wsTicket(
         session: AuthenticatedSession,
-    ): WsTicketResponse = wsTicketService.issue(session)
+    ): WsTicketResponse = wsTicketService.issue(session).let { WsTicketResponse(token = it.token, expiresAt = it.expiresAt.epochSecond) }
 }

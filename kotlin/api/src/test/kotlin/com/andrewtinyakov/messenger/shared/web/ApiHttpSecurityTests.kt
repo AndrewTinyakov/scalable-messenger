@@ -3,7 +3,6 @@ package com.andrewtinyakov.messenger.shared.web
 import com.andrewtinyakov.messenger.ApiApplication
 import com.andrewtinyakov.messenger.auth.model.SessionToken
 import com.andrewtinyakov.messenger.auth.service.AuthenticationService
-import com.andrewtinyakov.messenger.auth.web.payload.AuthRequest
 import com.andrewtinyakov.messenger.shared.id.newId
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -37,7 +36,7 @@ import java.util.UUID
 class ApiHttpSecurityTests
     @Autowired
     constructor(
-        @Value("\${local.server.port}") private val port: Int,
+        @Value($$"${local.server.port}") private val port: Int,
         private val mapper: ObjectMapper,
         private val authenticationService: AuthenticationService,
         private val db: JdbcTemplate,
@@ -91,7 +90,7 @@ class ApiHttpSecurityTests
             for (path in listOf("/api/v1/chats/invalid", "/api/v1/chats/invalid/messages", "/api/v1/sends/invalid")) {
                 val response = request(path, cookie)
                 assertEquals(400, response.statusCode())
-                assertEquals("INVALID_ID", mapper.readTree(response.body()).path("code").stringValue())
+                assertEquals("VALIDATION_FAILED", mapper.readTree(response.body()).path("code").stringValue())
             }
         }
 
@@ -115,7 +114,7 @@ class ApiHttpSecurityTests
             val response = http.send(request, HttpResponse.BodyHandlers.ofString())
 
             assertEquals(400, response.statusCode())
-            assertEquals("INVALID_REQUEST", mapper.readTree(response.body()).path("code").stringValue())
+            assertEquals("VALIDATION_FAILED", mapper.readTree(response.body()).path("code").stringValue())
         }
 
         @Test
@@ -123,7 +122,7 @@ class ApiHttpSecurityTests
             val response = request("/api/v1/chats?limit=invalid", bearer())
 
             assertEquals(400, response.statusCode())
-            assertEquals("INVALID_REQUEST", mapper.readTree(response.body()).path("code").stringValue())
+            assertEquals("VALIDATION_FAILED", mapper.readTree(response.body()).path("code").stringValue())
         }
 
         @Test
@@ -198,7 +197,8 @@ class ApiHttpSecurityTests
             assertTrue(header.contains("HttpOnly"))
             assertTrue(header.contains("Secure"))
             assertTrue(header.contains("SameSite=Strict"))
-            assertTrue(header.contains("Path=/api"))
+            assertTrue(header.startsWith("__Host-messenger_session="))
+            assertTrue(header.contains("; Path=/;"))
             assertTrue(header.contains("Max-Age="))
             assertFalse(header.contains("Domain="))
             val cookie = header.substringBefore(';')
@@ -219,7 +219,7 @@ class ApiHttpSecurityTests
         fun `session cookies reject duplicates and malformed values`() {
             val cookie = bearer()
             assertEquals(401, request("/api/v1/auth/session", "$cookie; $cookie").statusCode())
-            assertEquals(401, request("/api/v1/auth/session", "messenger_session=invalid").statusCode())
+            assertEquals(401, request("/api/v1/auth/session", "__Host-messenger_session=invalid").statusCode())
             assertEquals(401, mutate("/api/v1/auth/logout", cookie = "$cookie; $cookie").statusCode())
         }
 
@@ -326,7 +326,7 @@ class ApiHttpSecurityTests
         @Test
         fun `logout remains idempotent with stale headers when cookie is missing or unknown`() {
             val headers = listOf("X-Messenger-User" to "", "X-Messenger-User" to "stale-user")
-            for (cookie in listOf(null, "messenger_session=${"A".repeat(43)}")) {
+            for (cookie in listOf(null, "__Host-messenger_session=${"A".repeat(43)}")) {
                 val response = logout(cookie = cookie, headers = headers)
                 assertEquals(204, response.statusCode())
                 assertTrue(response.headers().firstValue("Set-Cookie").orElseThrow().contains("Max-Age=0"))
@@ -401,7 +401,7 @@ class ApiHttpSecurityTests
 
         private fun bearer(): String {
             val username = "http_${UUID.randomUUID().toString().replace("-", "").take(20)}"
-            return "messenger_session=${authenticationService.register(AuthRequest(username, "long-demo-password")).token.value}"
+            return "__Host-messenger_session=${authenticationService.register(username, "long-demo-password").token.value}"
         }
 
         private fun request(path: String, authorization: String? = null): HttpResponse<String> {
@@ -410,7 +410,7 @@ class ApiHttpSecurityTests
             if (authorization !=
                 null
             ) {
-                request.header(if (authorization.startsWith("messenger_session=")) "Cookie" else "Authorization", authorization)
+                request.header(if (authorization.startsWith("__Host-messenger_session=")) "Cookie" else "Authorization", authorization)
             }
             return http.send(request.build(), HttpResponse.BodyHandlers.ofString())
         }

@@ -1,6 +1,7 @@
 package com.andrewtinyakov.messenger.chat.service
 
 import com.andrewtinyakov.messenger.auth.model.UserId
+import com.andrewtinyakov.messenger.chat.messaging.ChatOutbox
 import com.andrewtinyakov.messenger.chat.model.Chat
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.model.MemberChatDetails
@@ -213,8 +214,7 @@ class ChatServiceTests
                 chatRepository = chatRepository,
                 chatDirectoryRepository = removingRepository,
                 groupMembershipRepository = groupMembershipRepository,
-                outboxRepository = outboxRepository,
-                mapper = mapper,
+                chatOutbox = ChatOutbox(outboxRepository, mapper),
                 tx = tx,
             )
 
@@ -252,8 +252,7 @@ class ChatServiceTests
                 chatRepository = invalidEvents,
                 chatDirectoryRepository = chatDirectoryRepository,
                 groupMembershipRepository = groupMembershipRepository,
-                outboxRepository = outboxRepository,
-                mapper = mapper,
+                chatOutbox = ChatOutbox(outboxRepository, mapper),
                 tx = tx,
             )
 
@@ -332,8 +331,7 @@ class ChatServiceTests
                 chatRepository = chatRepository,
                 groupMembershipRepository = groupMembershipRepository,
                 tx = tx,
-                outboxRepository = failingOutbox,
-                mapper = mapper,
+                chatOutbox = ChatOutbox(failingOutbox, mapper),
             )
 
             assertThrows(RuntimeException::class.java) { failing.removeMember(ChatId(chat.id), UserId(owner), UserId(member)) }
@@ -370,8 +368,7 @@ class ChatServiceTests
                     chatRepository = chatRepository,
                     groupMembershipRepository = pausedRepository,
                     tx = tx,
-                    outboxRepository = outboxRepository,
-                    mapper = mapper,
+                    chatOutbox = ChatOutbox(outboxRepository, mapper),
                 )
             val removal = concurrently { removing.removeMember(ChatId(chat.id), UserId(owner), UserId(member)) }
             try {
@@ -388,8 +385,7 @@ class ChatServiceTests
                         chatRepository = addingRepository,
                         chatDirectoryRepository = chatDirectoryRepository,
                         groupMembershipRepository = groupMembershipRepository,
-                        outboxRepository = outboxRepository,
-                        mapper = mapper,
+                        chatOutbox = ChatOutbox(outboxRepository, mapper),
                         tx = tx,
                     )
                 val adding = concurrently {
@@ -416,8 +412,7 @@ class ChatServiceTests
                 chatRepository = chatRepository,
                 groupMembershipRepository = groupMembershipRepository,
                 tx = tx,
-                outboxRepository = outboxRepository,
-                mapper = mapper,
+                chatOutbox = ChatOutbox(outboxRepository, mapper),
             )
             val removals = (1..2).map {
                 concurrently {
@@ -460,8 +455,7 @@ class ChatServiceTests
                 chatRepository = chatRepository,
                 groupMembershipRepository = paused,
                 tx = tx,
-                outboxRepository = outboxRepository,
-                mapper = mapper,
+                chatOutbox = ChatOutbox(outboxRepository, mapper),
             )
             val removal = concurrently { removing.removeMember(ChatId(chat.id), UserId(owner), UserId(member)) }
             try {
@@ -518,8 +512,7 @@ class ChatServiceTests
                 chatRepository = observing,
                 groupMembershipRepository = groupMembershipRepository,
                 tx = tx,
-                outboxRepository = outboxRepository,
-                mapper = mapper,
+                chatOutbox = ChatOutbox(outboxRepository, mapper),
             )
             try {
                 assertTrue(locked.await(10, TimeUnit.SECONDS))
@@ -716,8 +709,7 @@ class ChatServiceTests
                 chatRepository = chatRepository,
                 chatDirectoryRepository = chatDirectoryRepository,
                 groupMembershipRepository = groupMembershipRepository,
-                outboxRepository = failingOutbox,
-                mapper = mapper,
+                chatOutbox = ChatOutbox(failingOutbox, mapper),
                 tx = tx,
             )
 

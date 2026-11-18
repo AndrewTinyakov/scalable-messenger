@@ -9,12 +9,12 @@ import com.andrewtinyakov.messenger.message.monitoring.HistoryDirection
 import com.andrewtinyakov.messenger.message.monitoring.MessageMetrics
 import com.andrewtinyakov.messenger.message.repository.MessageRepository
 import com.andrewtinyakov.messenger.message.repository.MessageVisibilityRepository
-import org.springframework.stereotype.Component
+import org.springframework.stereotype.Service
 
 private const val SPAN_BUDGET = 16
 
-@Component
-class VisibleHistory(
+@Service
+class VisibleHistoryService(
     private val messageRepository: MessageRepository,
     private val messageVisibilityRepository: MessageVisibilityRepository,
     private val metrics: MessageMetrics,

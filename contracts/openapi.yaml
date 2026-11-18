@@ -1093,6 +1093,60 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/ApiProblem"
+  /v1/auth/sessions/revoke-others:
+    post:
+      tags:
+      - auth-session-controller
+      operationId: revokeOtherSessions
+      parameters:
+      - name: X-Messenger-CSRF
+        in: header
+        required: true
+        schema:
+          type: string
+          enum:
+          - "1"
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RevokedSessionsResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "401":
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
   /v1/auth/register:
     post:
       tags:
@@ -1138,6 +1192,66 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiProblem"
       security: []
+  /v1/auth/password:
+    post:
+      tags:
+      - auth-controller
+      operationId: changePassword
+      parameters:
+      - name: X-Messenger-CSRF
+        in: header
+        required: true
+        schema:
+          type: string
+          enum:
+          - "1"
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangePasswordRequest"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RevokedSessionsResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "401":
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
   /v1/auth/logout:
     post:
       tags:
@@ -2246,6 +2360,53 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/ApiProblem"
+  /v1/auth/sessions:
+    get:
+      tags:
+      - auth-session-controller
+      operationId: listSessions
+      parameters:
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ActiveSessionsResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
   /v1/auth/session:
     get:
       tags:
@@ -2305,6 +2466,61 @@ paths:
         schema:
           type: string
       - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: X-Messenger-CSRF
+        in: header
+        required: true
+        schema:
+          type: string
+          enum:
+          - "1"
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
+      responses:
+        "204":
+          description: No Content
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "401":
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+  /v1/auth/sessions/{sessionId}:
+    delete:
+      tags:
+      - auth-session-controller
+      operationId: revokeSession
+      parameters:
+      - name: sessionId
         in: path
         required: true
         schema:
@@ -2832,6 +3048,14 @@ components:
       required:
       - expiresAt
       - token
+    RevokedSessionsResponse:
+      type: object
+      properties:
+        revokedSessions:
+          type: integer
+          format: int32
+      required:
+      - revokedSessions
     AuthRequest:
       type: object
       properties:
@@ -2860,6 +3084,20 @@ components:
       required:
       - deviceId
       - user
+    ChangePasswordRequest:
+      type: object
+      properties:
+        currentPassword:
+          type: string
+          maxLength: 100
+          minLength: 0
+        newPassword:
+          type: string
+          maxLength: 100
+          minLength: 8
+      required:
+      - currentPassword
+      - newPassword
     EditMessageRequest:
       type: object
       properties:
@@ -3167,6 +3405,36 @@ components:
       required:
       - chat
       - recipient
+    ActiveSessionResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        deviceLabel:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        lastUsedAt:
+          type: string
+          format: date-time
+        current:
+          type: boolean
+      required:
+      - createdAt
+      - current
+      - deviceLabel
+      - id
+      - lastUsedAt
+    ActiveSessionsResponse:
+      type: object
+      properties:
+        sessions:
+          type: array
+          items:
+            $ref: "#/components/schemas/ActiveSessionResponse"
+      required:
+      - sessions
     SessionResponse:
       type: object
       properties:
@@ -3180,6 +3448,16 @@ components:
       - deviceId
       - userId
       - username
+    ApiFieldError:
+      type: object
+      properties:
+        field:
+          type: string
+        message:
+          type: string
+      required:
+      - field
+      - message
     ApiProblem:
       type: object
       properties:
@@ -3190,8 +3468,31 @@ components:
           type: string
         code:
           type: string
+          enum:
+          - VALIDATION_FAILED
+          - UNAUTHORIZED
+          - INVALID_CREDENTIALS
+          - FORBIDDEN
+          - NOT_FOUND
+          - USERNAME_TAKEN
+          - PASSWORD_CHANGED
+          - VERSION_CHANGED
+          - REQUEST_ID_REUSED
+          - PIN_LIMIT
+          - PIN_ORDER_CHANGED
+          - TOO_MANY_ATTEMPTS
+          - INTERNAL_SERVER_ERROR
+          - SERVICE_UNAVAILABLE
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/ApiFieldError"
+      required:
+      - code
+      - detail
+      - status
   securitySchemes:
     sessionCookie:
       type: apiKey
-      name: messenger_session
+      name: __Host-messenger_session
       in: cookie

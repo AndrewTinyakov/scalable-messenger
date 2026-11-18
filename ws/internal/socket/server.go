@@ -72,6 +72,7 @@ type GroupAuthorizer interface {
 
 type SessionAuthorizer interface {
 	ValidateSession(context.Context, string) (grpcauth.Session, error)
+	ValidateSessions(context.Context, []string) (map[string]grpcauth.Session, error)
 }
 
 type ConnectionLeaser interface {

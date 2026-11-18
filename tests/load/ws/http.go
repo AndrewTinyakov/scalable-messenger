@@ -22,7 +22,7 @@ func (work *run) register(ctx context.Context, body any, target any) (string, er
 		return "", err
 	}
 	for _, cookie := range response.Cookies() {
-		if cookie.Name == "messenger_session" {
+		if cookie.Name == "__Host-messenger_session" || cookie.Name == "messenger_session" {
 			return cookie.Name + "=" + cookie.Value, nil
 		}
 	}

@@ -1,6 +1,8 @@
 import type { DeleteScope, DeleteTarget } from '../../entities/message/historySnapshot'
 import type { Session } from '../../entities/session/model'
+import { runtimeConfig } from '../config/runtime'
 import { isRecord } from '../lib/validation'
+import { decodeActiveSessions, decodeRevokedSessions } from './accountDecode'
 import {
   decodeChat,
   decodeChatPreferences,
@@ -31,15 +33,16 @@ import {
 } from './featureDecode'
 import type { components, paths } from './generated/schema'
 
-const apiBase = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8081/api').replace(
-  /\/$/,
-  '',
-)
+const apiBase = runtimeConfig.apiBaseUrl
 const routes = {
   login: '/v1/auth/login',
   register: '/v1/auth/register',
   session: '/v1/auth/session',
   logout: '/v1/auth/logout',
+  password: '/v1/auth/password',
+  sessions: '/v1/auth/sessions',
+  activeSession: '/v1/auth/sessions/{sessionId}',
+  revokeOtherSessions: '/v1/auth/sessions/revoke-others',
   wsTicket: '/v1/auth/ws-ticket',
   users: '/v1/users',
   user: '/v1/users/{userId}',
@@ -84,14 +87,54 @@ function endpoint(
   return `${resolved}${search}`
 }
 
+export type ApiErrorCode = components['schemas']['ApiProblem']['code']
+export type ApiFieldError = components['schemas']['ApiFieldError']
+
+const apiErrorCodes = {
+  VALIDATION_FAILED: true,
+  UNAUTHORIZED: true,
+  INVALID_CREDENTIALS: true,
+  FORBIDDEN: true,
+  NOT_FOUND: true,
+  USERNAME_TAKEN: true,
+  PASSWORD_CHANGED: true,
+  VERSION_CHANGED: true,
+  REQUEST_ID_REUSED: true,
+  PIN_LIMIT: true,
+  PIN_ORDER_CHANGED: true,
+  TOO_MANY_ATTEMPTS: true,
+  INTERNAL_SERVER_ERROR: true,
+  SERVICE_UNAVAILABLE: true,
+} satisfies Record<ApiErrorCode, true>
+
 export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
     public retryAfter = 0,
+    public code: ApiErrorCode | null = null,
+    public fieldErrors: ApiFieldError[] = [],
   ) {
     super(message)
   }
+
+  fieldError(field: string): string | undefined {
+    return this.fieldErrors.find((error) => error.field === field)?.message
+  }
+}
+
+function problemCode(value: unknown): ApiErrorCode | null {
+  return typeof value === 'string' && Object.hasOwn(apiErrorCodes, value)
+    ? (value as ApiErrorCode)
+    : null
+}
+
+function problemFieldErrors(value: unknown): ApiFieldError[] {
+  if (!Array.isArray(value)) return []
+  return value.filter(
+    (item): item is ApiFieldError =>
+      isRecord(item) && typeof item.field === 'string' && typeof item.message === 'string',
+  )
 }
 
 export function isWaitingFailure(cause: unknown): boolean {
@@ -130,6 +173,8 @@ async function attempt<T>(
     })
     if (!response.ok) {
       let message = `Request failed (${response.status})`
+      let code: ApiErrorCode | null = null
+      let fieldErrors: ApiFieldError[] = []
       try {
         const body: unknown = await response.json()
         if (isRecord(body)) {
@@ -137,6 +182,8 @@ async function attempt<T>(
             (value) => typeof value === 'string' && value.length > 0,
           )
           if (typeof detail === 'string') message = detail
+          code = problemCode(body.code)
+          fieldErrors = problemFieldErrors(body.errors)
         }
       } catch {}
       const value = response.headers.get('Retry-After')
@@ -145,7 +192,7 @@ async function attempt<T>(
           ? Number(value) * 1000
           : Math.max(0, Date.parse(value) - Date.now()) || 0
         : 0
-      throw new ApiError(response.status, message, retryAfter)
+      throw new ApiError(response.status, message, retryAfter, code, fieldErrors)
     }
     return decode(response.status === 204 ? undefined : ((await response.json()) as unknown))
   } catch (cause) {
@@ -210,14 +257,14 @@ function noContent(value: unknown): void {
 export const api = {
   login(username: string, password: string, deviceId: string) {
     const body: components['schemas']['AuthRequest'] = { username, password, deviceId }
-    return request(endpoint(routes.login), decodeSession, {
+    return attempt(endpoint(routes.login), decodeSession, {
       method: 'POST',
       body: JSON.stringify(body),
     })
   },
   register(username: string, password: string, deviceId: string) {
     const body: components['schemas']['AuthRequest'] = { username, password, deviceId }
-    return request(endpoint(routes.register), decodeSession, {
+    return attempt(endpoint(routes.register), decodeSession, {
       method: 'POST',
       body: JSON.stringify(body),
     })
@@ -237,6 +284,30 @@ export const api = {
     return {
       logout(): Promise<void> {
         return authenticated(endpoint(routes.logout), noContent, { method: 'POST' })
+      },
+      sessions(signal?: AbortSignal) {
+        return authenticated(endpoint(routes.sessions), decodeActiveSessions, { signal })
+      },
+      revokeSession(sessionId: string): Promise<void> {
+        return authenticated(endpoint(routes.activeSession, { sessionId }), noContent, {
+          method: 'DELETE',
+        })
+      },
+      revokeOtherSessions() {
+        return authenticated(endpoint(routes.revokeOtherSessions), decodeRevokedSessions, {
+          method: 'POST',
+        })
+      },
+      changePassword(currentPassword: string, newPassword: string) {
+        const body: components['schemas']['ChangePasswordRequest'] = {
+          currentPassword,
+          newPassword,
+        }
+        return attempt(endpoint(routes.password), decodeRevokedSessions, {
+          method: 'POST',
+          body: JSON.stringify(body),
+          headers,
+        })
       },
       wsTicket(signal?: AbortSignal) {
         return authenticated(endpoint(routes.wsTicket), decodeTicket, { method: 'POST', signal })

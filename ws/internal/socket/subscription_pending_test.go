@@ -279,7 +279,7 @@ func TestSubscribeManyFinalCheckFailureCleansEveryPendingFeed(t *testing.T) {
 				case "revoked session":
 					return nil, grpcauth.ErrUnauthorized
 				case "expired admission":
-					connection.session.ExpiresAt = time.Now().Add(-time.Second)
+					connection.authorizedUntil.Store(time.Now().Add(-time.Second).UnixNano())
 				case "canceled request":
 					cancel()
 					expected = context.Canceled

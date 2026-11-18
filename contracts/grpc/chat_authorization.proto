@@ -9,6 +9,7 @@ option go_package = "messenger/ws/internal/generated/grpc;authorization";
 service ChatAuthorization {
   rpc AuthorizeSidebar(AuthorizeSidebarRequest) returns (AuthorizeSidebarResponse);
   rpc ValidateSession(ValidateSessionRequest) returns (ValidateSessionResponse);
+  rpc ValidateSessions(ValidateSessionsRequest) returns (ValidateSessionsResponse);
   rpc AuthorizeGroup(AuthorizeGroupRequest) returns (AuthorizeGroupResponse);
   rpc AuthorizeGroups(AuthorizeGroupsRequest) returns (AuthorizeGroupsResponse);
   rpc AuthorizePresence(AuthorizePresenceRequest) returns (AuthorizePresenceResponse);
@@ -24,6 +25,15 @@ message ValidateSessionResponse {
   string user_id = 1;
   string device_id = 2;
   string session_id = 3;
+  int64 expires_at_unix_seconds = 4;
+}
+
+message ValidateSessionsRequest {
+  repeated string session_ids = 1;
+}
+
+message ValidateSessionsResponse {
+  repeated ValidateSessionResponse sessions = 1;
 }
 
 message AuthorizeGroupRequest {

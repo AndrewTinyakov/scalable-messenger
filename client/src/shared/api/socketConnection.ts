@@ -77,12 +77,13 @@ export function connectSocket(options: SocketConnectionOptions): SocketConnectio
       const owned = () =>
         (lifecycle.phase === 'handshake' || lifecycle.phase === 'connected') &&
         lifecycle.socket === active
-      const closed = (revoked = false) => {
+      const closed = (sessionRejected = false) => {
         if (!owned()) return
+        const opened = lifecycle.phase === 'connected'
         transition({ phase: 'idle' })
         options.onClose()
-        if (revoked) revokeSession()
-        else retry()
+        if (sessionRejected || !opened) ticket = null
+        retry()
       }
       transition({
         phase: 'handshake',

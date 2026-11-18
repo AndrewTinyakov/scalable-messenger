@@ -6,6 +6,7 @@ import com.andrewtinyakov.messenger.chat.service.ChatService
 import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxRepository
 import com.andrewtinyakov.messenger.message.model.MessageId
 import com.andrewtinyakov.messenger.read.config.ReadProperties
+import com.andrewtinyakov.messenger.read.messaging.ReadOutbox
 import com.andrewtinyakov.messenger.read.monitoring.ReadMetrics
 import com.andrewtinyakov.messenger.read.repository.JooqReadRepository
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
@@ -63,9 +64,8 @@ class ReadServiceTests
 
         private fun service(clock: Clock, registry: SimpleMeterRegistry = SimpleMeterRegistry()): ReadService = ReadService(
             JooqReadRepository(jooq, clock),
-            outbox,
+            ReadOutbox(outbox, mapper),
             ReadProperties(),
-            mapper,
             tx,
             clock,
             ReadMetrics(registry),

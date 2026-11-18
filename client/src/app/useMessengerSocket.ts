@@ -7,6 +7,7 @@ import { EventType } from '../shared/api/generated/socket-vocabulary'
 import type { api } from '../shared/api/http'
 import type { SocketEvent } from '../shared/api/socket'
 import { connectSocket, type ConnectionState } from '../shared/api/socketConnection'
+import { runtimeConfig } from '../shared/config/runtime'
 import { reconnectDelay } from '../shared/lib/reconnect'
 
 interface MessengerSocketOptions {
@@ -40,18 +41,18 @@ interface MessengerSocketOptions {
 }
 
 function websocketUrl(): string {
-  return import.meta.env.VITE_WS_URL || 'ws://localhost:8082/ws'
+  return runtimeConfig.wsUrl
 }
 
 function socketErrorMessage(code?: string): string {
   switch (code) {
-    case 'unauthorized':
+    case 'UNAUTHORIZED':
       return 'You can no longer send to this chat.'
-    case 'publish_unknown':
+    case 'PUBLISH_UNKNOWN':
       return 'Queue confirmation was lost. Check status before retrying.'
-    case 'dependency_unavailable':
+    case 'DEPENDENCY_UNAVAILABLE':
       return 'The message service is unavailable. Try again.'
-    case 'publish_failed':
+    case 'PUBLISH_FAILED':
       return 'The message could not be queued. Try again.'
     default:
       return 'Could not queue this message. Try again.'
@@ -233,23 +234,23 @@ export function useMessengerSocket({
           requests.rejected(frame.requestId, frame.reason)
         } else if (frame.type === EventType.ERROR && frame.requestId) {
           if (
-            ['rate_limited', 'room_limit', 'dependency_unavailable', 'publish_failed'].includes(
+            ['RATE_LIMITED', 'ROOM_LIMIT', 'DEPENDENCY_UNAVAILABLE', 'PUBLISH_FAILED'].includes(
               frame.code ?? '',
             )
           )
             requests.transient(frame.requestId)
-          else if (frame.code === 'publish_unknown') requests.unknown(frame.requestId)
+          else if (frame.code === 'PUBLISH_UNKNOWN') requests.unknown(frame.requestId)
           else requests.retryable(frame.requestId, socketErrorMessage(frame.code))
         } else if (
           frame.type === EventType.ERROR &&
           !frame.requestId &&
-          frame.code === 'unauthorized'
+          frame.code === 'UNAUTHORIZED'
         ) {
           void refreshChats(false, true)
         } else if (
           frame.type === EventType.ERROR &&
           !frame.requestId &&
-          frame.code === 'dependency_unavailable'
+          frame.code === 'DEPENDENCY_UNAVAILABLE'
         ) {
           if (groupRetryRef.current === undefined) {
             groupRetryRef.current = window.setTimeout(() => {

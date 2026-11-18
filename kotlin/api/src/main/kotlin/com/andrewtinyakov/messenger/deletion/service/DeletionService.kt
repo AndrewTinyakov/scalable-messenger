@@ -1,9 +1,10 @@
 package com.andrewtinyakov.messenger.deletion.service
 
 import com.andrewtinyakov.messenger.auth.model.UserId
+import com.andrewtinyakov.messenger.chat.messaging.ChatEventAudience
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.model.ChatKind
-import com.andrewtinyakov.messenger.chat.service.ChatEventAudience
+import com.andrewtinyakov.messenger.deletion.messaging.DeletionOutbox
 import com.andrewtinyakov.messenger.deletion.model.AppliedDeletion
 import com.andrewtinyakov.messenger.deletion.model.CommittedDeletion
 import com.andrewtinyakov.messenger.deletion.model.DeletionChat
@@ -16,30 +17,23 @@ import com.andrewtinyakov.messenger.deletion.monitoring.DeletionMetrics
 import com.andrewtinyakov.messenger.deletion.repository.DeletionRepository
 import com.andrewtinyakov.messenger.deletion.web.payload.DeletionResponse
 import com.andrewtinyakov.messenger.deletion.web.payload.toResponse
-import com.andrewtinyakov.messenger.generated.messaging.event.ChatDeletedEventV1
-import com.andrewtinyakov.messenger.generated.messaging.event.HistoryChangedEventV1
 import com.andrewtinyakov.messenger.infrastructure.database.DatabaseTransaction
 import com.andrewtinyakov.messenger.infrastructure.database.observedExecute
-import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxRepository
-import com.andrewtinyakov.messenger.infrastructure.outbox.toOutboxMessage
 import com.andrewtinyakov.messenger.message.model.MessageId
 import com.andrewtinyakov.messenger.message.model.RequestId
 import com.andrewtinyakov.messenger.shared.crypto.sha256
-import com.andrewtinyakov.messenger.shared.id.newId
 import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
 import com.andrewtinyakov.messenger.shared.web.conflict
 import com.andrewtinyakov.messenger.shared.web.forbidden
 import com.andrewtinyakov.messenger.shared.web.notFound
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
-import tools.jackson.databind.ObjectMapper
 
 @Service
 class DeletionService(
     private val deletionRepository: DeletionRepository,
     private val chatEventAudience: ChatEventAudience,
-    private val outboxRepository: OutboxRepository,
-    private val mapper: ObjectMapper,
+    private val deletionOutbox: DeletionOutbox,
     private val tx: TransactionTemplate,
     private val metrics: DeletionMetrics,
 ) {
@@ -172,7 +166,7 @@ class DeletionService(
     ): CommittedDeletion? {
         val existing = deletionRepository.operation(userId, requestId) ?: return null
         if (existing.chatId != chatId || existing.fingerprint != fingerprint) {
-            conflict(ApiErrorCode.INVALID_REQUEST, "Deletion request ID changed")
+            conflict(ApiErrorCode.REQUEST_ID_REUSED, "Deletion request ID changed")
         }
         return CommittedDeletion(existing.toResponse(), newlyAccepted = false)
     }
@@ -220,7 +214,7 @@ class DeletionService(
 
     private fun requireExpectedVersions(targets: List<DeletionMessage>, expectedVersions: Map<MessageId, Long>) {
         if (expectedVersions.any { (id, version) -> targets.singleOrNull { it.id == id }?.messageVersion != version }) {
-            conflict(ApiErrorCode.INVALID_REQUEST, "Message version changed")
+            conflict(ApiErrorCode.VERSION_CHANGED, "Message version changed")
         }
     }
 
@@ -248,37 +242,8 @@ class DeletionService(
         revisions: DeletionRevisions,
     ) {
         val rooms = chatEventAudience.rooms(chatId, chat.kind, personalViewer = userId.takeIf { scope == DeletionScope.SELF })
-        enqueueHistoryChanged(rooms, chatId, scope, chat, revisions)
-        if (scope == DeletionScope.EVERYONE && target == DeletionTarget.CHAT) enqueueChatDeleted(rooms, chatId)
-    }
-
-    private fun enqueueHistoryChanged(
-        rooms: List<String>,
-        chatId: ChatId,
-        scope: DeletionScope,
-        chat: DeletionChat,
-        revisions: DeletionRevisions,
-    ) {
-        outboxRepository.enqueue(
-            rooms.map { room ->
-                HistoryChangedEventV1.create(
-                    eventId = newId(),
-                    room = room,
-                    chatId = chatId.value,
-                    sequence = chat.lastSequence.toString(),
-                    mutationRevision = revisions.mutation.toString(),
-                    visibilityRevision = if (scope == DeletionScope.SELF) revisions.visibility.toString() else "0",
-                ).toOutboxMessage(mapper)
-            },
-        )
-    }
-
-    private fun enqueueChatDeleted(rooms: List<String>, chatId: ChatId) {
-        outboxRepository.enqueue(
-            rooms.map { room ->
-                ChatDeletedEventV1.create(eventId = newId(), room = room, chatId = chatId.value).toOutboxMessage(mapper)
-            },
-        )
+        deletionOutbox.enqueueHistoryChanged(rooms, chatId, scope, chat, revisions)
+        if (scope == DeletionScope.EVERYONE && target == DeletionTarget.CHAT) deletionOutbox.enqueueChatDeleted(rooms, chatId)
     }
 
     private fun saved(userId: UserId, requestId: RequestId): StoredDeletion = checkNotNull(deletionRepository.operation(userId, requestId))

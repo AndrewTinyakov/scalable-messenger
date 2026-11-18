@@ -1,17 +1,13 @@
 package com.andrewtinyakov.messenger.message.service
 
 import com.andrewtinyakov.messenger.auth.model.UserId
-import com.andrewtinyakov.messenger.chat.model.Chat
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.repository.ChatRepository
-import com.andrewtinyakov.messenger.chat.service.ChatEventAudience
 import com.andrewtinyakov.messenger.deletion.model.DeletionScope
 import com.andrewtinyakov.messenger.deletion.service.DeletionService
-import com.andrewtinyakov.messenger.generated.messaging.event.HistoryChangedEventV1
 import com.andrewtinyakov.messenger.infrastructure.database.DatabaseTransaction
 import com.andrewtinyakov.messenger.infrastructure.database.observedExecute
-import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxRepository
-import com.andrewtinyakov.messenger.infrastructure.outbox.toOutboxMessage
+import com.andrewtinyakov.messenger.message.messaging.MessageOutbox
 import com.andrewtinyakov.messenger.message.model.Message
 import com.andrewtinyakov.messenger.message.model.MessageId
 import com.andrewtinyakov.messenger.message.model.RequestId
@@ -24,14 +20,13 @@ import com.andrewtinyakov.messenger.message.web.payload.toResponse
 import com.andrewtinyakov.messenger.shared.id.newId
 import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
 import com.andrewtinyakov.messenger.shared.web.ApiException
-import com.andrewtinyakov.messenger.shared.web.badRequest
 import com.andrewtinyakov.messenger.shared.web.conflict
 import com.andrewtinyakov.messenger.shared.web.forbidden
+import com.andrewtinyakov.messenger.shared.web.invalidInput
 import com.andrewtinyakov.messenger.shared.web.notFound
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
-import tools.jackson.databind.ObjectMapper
 import java.time.Clock
 import java.time.OffsetDateTime
 
@@ -40,11 +35,9 @@ class MessageMutationService(
     private val deletionService: DeletionService,
     private val messageRepository: MessageRepository,
     private val chatRepository: ChatRepository,
-    private val chatEventAudience: ChatEventAudience,
+    private val messageOutbox: MessageOutbox,
     private val messageChangeRepository: MessageChangeRepository,
-    private val outboxRepository: OutboxRepository,
     private val tx: TransactionTemplate,
-    private val mapper: ObjectMapper,
     private val clock: Clock,
     private val metrics: MessageMetrics,
 ) {
@@ -67,7 +60,7 @@ class MessageMutationService(
                 requireValidBody(body)
                 val revision = messageChangeRepository.edit(chatId, messageId, body, OffsetDateTime.now(clock))
                 val updated = checkNotNull(messageRepository.findMessage(chatId, userId, messageId))
-                enqueueHistoryChanged(chat, revision)
+                messageOutbox.enqueueHistoryChanged(chat, revision)
                 updated.toResponse()
             }
         } catch (failure: Exception) {
@@ -112,23 +105,8 @@ class MessageMutationService(
 
     private fun requireValidBody(body: String) {
         if (body.isBlank() || body.codePointCount(0, body.length) !in 1..Message.MAX_BODY_LENGTH) {
-            badRequest(ApiErrorCode.INVALID_REQUEST, "body must contain 1 to ${Message.MAX_BODY_LENGTH} characters and cannot be blank")
+            invalidInput("body", "body must contain 1 to ${Message.MAX_BODY_LENGTH} characters and cannot be blank")
         }
-    }
-
-    private fun enqueueHistoryChanged(chat: Chat, revision: Long) {
-        outboxRepository.enqueue(
-            chatEventAudience.rooms(chat.id, chat.kind).map { room ->
-                HistoryChangedEventV1.create(
-                    eventId = newId(),
-                    room = room,
-                    chatId = chat.id.value,
-                    sequence = chat.lastSequence.toString(),
-                    mutationRevision = revision.toString(),
-                    visibilityRevision = "0",
-                ).toOutboxMessage(mapper)
-            },
-        )
     }
 
     private fun editFailure(failure: Exception): MessageEditFailure = when ((failure as? ApiException)?.status) {
@@ -137,5 +115,5 @@ class MessageMutationService(
         else -> MessageEditFailure.ERROR
     }
 
-    private fun versionChanged(): Nothing = conflict(ApiErrorCode.INVALID_REQUEST, "Message version changed")
+    private fun versionChanged(): Nothing = conflict(ApiErrorCode.VERSION_CHANGED, "Message version changed")
 }

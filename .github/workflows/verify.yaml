@@ -1,6 +1,9 @@
 name: Verify
 
 on:
+  pull_request:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -46,6 +49,18 @@ jobs:
           npm ci
           npm --prefix contracts ci
           npm --prefix client ci
+      - name: Validate deployment configuration
+        run: |
+          node scripts/prepare-dev-env.mjs
+          docker compose config --quiet
+          MESSENGER_API_BASE_URL=https://chat.example.com/api MESSENGER_WS_URL=wss://chat.example.com/ws MESSENGER_CLIENT_ORIGIN=https://chat.example.com MESSENGER_TRUSTED_PROXY_CIDRS=192.0.2.0/24 docker compose -f compose.yaml -f compose.production.yaml config --quiet
+          node --test scripts/deployment.test.mjs
+          docker compose build client
+          docker compose run --rm --no-deps -T api-proxy nginx -t
+          docker compose run --rm --no-deps -T ws-proxy nginx -t
+          docker compose run --rm --no-deps -T client nginx -t
+          docker compose run --rm --no-deps -T monitoring-access nginx -t
+          docker compose run --rm --no-deps -T --entrypoint promtool prometheus check config /etc/prometheus/prometheus.yaml
       - name: Check contracts and generated message models
         run: |
           npm run validate:asyncapi
@@ -75,3 +90,6 @@ jobs:
           npm --prefix client run format:check
       - name: Run client unit tests
         run: npm --prefix client test
+      - name: Remove deployment validation resources
+        if: always()
+        run: docker compose down --volumes

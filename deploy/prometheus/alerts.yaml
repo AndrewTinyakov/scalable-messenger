@@ -176,7 +176,7 @@ groups:
           description: Check Redis history retention, Pub/Sub gaps, and database load.
 
       - alert: MessengerWsDependencyErrors
-        expr: sum(increase(messenger_ws_error_frames_total{code=~"dependency_unavailable|publish_failed|publish_unknown"}[5m])) > 10
+        expr: sum(increase(messenger_ws_error_frames_total{code=~"DEPENDENCY_UNAVAILABLE|PUBLISH_FAILED|PUBLISH_UNKNOWN"}[5m])) > 10
         for: 5m
         labels:
           severity: warning

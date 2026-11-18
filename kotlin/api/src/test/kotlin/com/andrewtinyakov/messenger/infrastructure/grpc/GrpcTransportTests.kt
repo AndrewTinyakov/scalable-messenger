@@ -2,7 +2,6 @@ package com.andrewtinyakov.messenger.infrastructure.grpc
 
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.auth.service.AuthenticationService
-import com.andrewtinyakov.messenger.auth.web.payload.AuthRequest
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.service.ChatMembershipService
 import com.andrewtinyakov.messenger.chat.service.ChatService
@@ -10,6 +9,7 @@ import com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupRequest
 import com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupsRequest
 import com.andrewtinyakov.messenger.generated.grpc.ChatAuthorizationGrpc
 import com.andrewtinyakov.messenger.generated.grpc.ValidateSessionRequest
+import com.andrewtinyakov.messenger.generated.grpc.ValidateSessionsRequest
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
 import com.andrewtinyakov.messenger.shared.id.newId
 import com.andrewtinyakov.messenger.ws.grpc.ChatAuthorizationGrpcService
@@ -68,7 +68,9 @@ class GrpcTransportTests : MessengerIntegrationTest() {
     @Test
     fun `trusted WS certificate resolves persisted session identity over TLS`() {
         val credentials = authenticationService.register(
-            AuthRequest("tls_${UUID.randomUUID().toString().replace("-", "").take(20)}", "test-password", "tls-device"),
+            "tls_${UUID.randomUUID().toString().replace("-", "").take(20)}",
+            "test-password",
+            "tls-device",
         )
 
         withClient { client ->
@@ -78,6 +80,7 @@ class GrpcTransportTests : MessengerIntegrationTest() {
             assertEquals(credentials.session.userId.value, response.userId)
             assertEquals("tls-device", response.deviceId)
             assertEquals(credentials.session.sessionId.value, response.sessionId)
+            assertEquals(credentials.session.expiresAt.epochSecond, response.expiresAtUnixSeconds)
         }
     }
 
@@ -124,9 +127,7 @@ class GrpcTransportTests : MessengerIntegrationTest() {
 
     @Test
     fun `RPCs require a lowercase hex session ID and a live persisted session`() {
-        val credentials = authenticationService.register(
-            AuthRequest("sid_${UUID.randomUUID().toString().replace("-", "").take(20)}", "test-password"),
-        )
+        val credentials = authenticationService.register("sid_${UUID.randomUUID().toString().replace("-", "").take(20)}", "test-password")
         val request = ValidateSessionRequest.newBuilder().setSessionId(credentials.session.sessionId.value).build()
         withClient { client ->
             for (invalid in listOf("", "A".repeat(64), "a".repeat(63), "a".repeat(65), "g".repeat(64), credentials.token.value)) {
@@ -149,10 +150,38 @@ class GrpcTransportTests : MessengerIntegrationTest() {
     }
 
     @Test
-    fun `RPCs reject sessions expired in SQL`() {
-        val credentials = authenticationService.register(
-            AuthRequest("exp_${UUID.randomUUID().toString().replace("-", "").take(20)}", "test-password"),
+    fun `batch session validation returns only live sessions`() {
+        fun register(
+            prefix: String,
+        ) = authenticationService.register("${prefix}_${UUID.randomUUID().toString().replace("-", "").take(20)}", "test-password")
+        val live = register("live")
+        val loggedOut = register("out")
+        val expired = register("old")
+        authenticationService.logout(loggedOut.token)
+        db.update(
+            "UPDATE sessions SET expires_at=? WHERE token_hash=?",
+            OffsetDateTime.now().minusSeconds(1),
+            expired.session.sessionId.value,
         )
+        val ids = listOf(live, loggedOut, expired).map { it.session.sessionId.value } + "0".repeat(64)
+
+        withClient { client ->
+            val response = client.validateSessions(ValidateSessionsRequest.newBuilder().addAllSessionIds(ids).build())
+            val session = response.sessionsList.single()
+            assertEquals(live.session.sessionId.value, session.sessionId)
+            assertEquals(live.session.userId.value, session.userId)
+            assertEquals(live.session.expiresAt.epochSecond, session.expiresAtUnixSeconds)
+            for (invalid in listOf(emptyList(), listOf(ids[0], ids[0]), listOf("A".repeat(64)), List(101) { "%064x".format(it) })) {
+                assertRpcStatus(Status.Code.INVALID_ARGUMENT) {
+                    client.validateSessions(ValidateSessionsRequest.newBuilder().addAllSessionIds(invalid).build())
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `RPCs reject sessions expired in SQL`() {
+        val credentials = authenticationService.register("exp_${UUID.randomUUID().toString().replace("-", "").take(20)}", "test-password")
         db.update(
             "UPDATE sessions SET expires_at=? WHERE token_hash=?",
             OffsetDateTime.now().minusSeconds(1),
@@ -178,9 +207,9 @@ class GrpcTransportTests : MessengerIntegrationTest() {
     @Test
     fun `group RPCs consult current memberships and retain argument validation`() {
         val suffix = UUID.randomUUID().toString().replace("-", "").take(12)
-        val owner = authenticationService.register(AuthRequest("owner_$suffix", "test-password"))
-        val member = authenticationService.register(AuthRequest("member_$suffix", "test-password"))
-        val other = authenticationService.register(AuthRequest("other_$suffix", "test-password"))
+        val owner = authenticationService.register("owner_$suffix", "test-password")
+        val member = authenticationService.register("member_$suffix", "test-password")
+        val other = authenticationService.register("other_$suffix", "test-password")
         val joined = chatService.createGroup(owner.session.userId, "Joined", listOf(member.session.userId.value).map(::UserId))
         val unjoined = chatService.createGroup(owner.session.userId, "Unjoined", listOf(other.session.userId.value).map(::UserId))
         val single = AuthorizeGroupRequest.newBuilder().setSessionId(member.session.sessionId.value).setChatId(joined.id).build()
@@ -215,9 +244,7 @@ class GrpcTransportTests : MessengerIntegrationTest() {
 
     @Test
     fun `group authorization rejects direct chats even when the session user is a member`() {
-        val credentials = authenticationService.register(
-            AuthRequest(username = "direct_${newId().lowercase()}", password = "test-password"),
-        )
+        val credentials = authenticationService.register(username = "direct_${newId().lowercase()}", password = "test-password")
         val chatId = newId()
         db.update("INSERT INTO chats(id,kind,direct_pair_key) VALUES (?,'DIRECT',?)", chatId, "pair_$chatId")
         db.update("INSERT INTO chat_members(chat_id,user_id) VALUES (?,?)", chatId, credentials.session.userId.value)

@@ -8,6 +8,6 @@ import org.springframework.stereotype.Component
 class MessageChangeRetentionScheduler(
     private val messageChangeRetentionService: MessageChangeRetentionService,
 ) {
-    @Scheduled(fixedDelayString = "\${messenger.message-changes.cleanup-delay-ms:60000}")
+    @Scheduled(fixedDelayString = $$"${messenger.message-changes.cleanup-delay-ms:60000}")
     fun runRetention() = messageChangeRetentionService.pruneExpiredChanges()
 }

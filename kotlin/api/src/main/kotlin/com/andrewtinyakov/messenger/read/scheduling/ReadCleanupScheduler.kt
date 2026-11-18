@@ -9,8 +9,8 @@ class ReadCleanupScheduler(
     private val readCleanupService: ReadCleanupService,
 ) {
     @Scheduled(
-        fixedDelayString = "\${messenger.read.cleanup-delay-ms:1000}",
-        initialDelayString = "\${messenger.read.cleanup-initial-delay-ms:10000}",
+        fixedDelayString = $$"${messenger.read.cleanup-delay-ms:1000}",
+        initialDelayString = $$"${messenger.read.cleanup-initial-delay-ms:10000}",
     )
     fun runCleanup() = readCleanupService.cleanup()
 }

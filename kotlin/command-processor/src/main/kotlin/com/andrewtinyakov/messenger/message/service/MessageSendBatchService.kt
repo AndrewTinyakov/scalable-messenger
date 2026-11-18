@@ -10,6 +10,7 @@ import com.andrewtinyakov.messenger.message.model.SendBatch
 import com.andrewtinyakov.messenger.message.model.SendTarget
 import com.andrewtinyakov.messenger.message.model.toSendRequest
 import com.andrewtinyakov.messenger.message.monitoring.MessageSendMetrics
+import com.andrewtinyakov.messenger.message.monitoring.SendTransactionCompletion
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate
@@ -38,7 +39,7 @@ class MessageSendBatchService(
         val started = System.nanoTime()
         var callbackFinished = started
         return tx.observedExecute(DatabaseTransaction.SEND_BATCH) {
-            afterSendTransactionCompletes { completion ->
+            SendTransactionCompletion.onCompletion { completion ->
                 SendStageRecorder.requests(completion.stage, commands) { it.requestId }
                 val finished = System.nanoTime()
                 metrics.batchCompleted(

@@ -11,6 +11,7 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Cha
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.DeletionOperations;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.HiddenMessageRanges;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.HistoryPurgeJobs;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.LoginThrottles;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.MessageChanges;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.MessengerOutboxEvents;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Sessions;
@@ -43,6 +44,7 @@ public class Indexes {
     public static final Index HIDDEN_MESSAGE_RANGES_REVERSE_IDX = Internal.createIndex(DSL.name("hidden_message_ranges_reverse_idx"), HiddenMessageRanges.HIDDEN_MESSAGE_RANGES, new OrderField[] { HiddenMessageRanges.HIDDEN_MESSAGE_RANGES.CHAT_ID, HiddenMessageRanges.HIDDEN_MESSAGE_RANGES.USER_ID, HiddenMessageRanges.HIDDEN_MESSAGE_RANGES.THROUGH_SEQUENCE }, false);
     public static final Index HISTORY_PURGE_JOBS_AGE_IDX = Internal.createIndex(DSL.name("history_purge_jobs_age_idx"), HistoryPurgeJobs.HISTORY_PURGE_JOBS, new OrderField[] { HistoryPurgeJobs.HISTORY_PURGE_JOBS.CREATED_AT, HistoryPurgeJobs.HISTORY_PURGE_JOBS.CHAT_ID }, false);
     public static final Index HISTORY_PURGE_JOBS_FAIR_IDX = Internal.createIndex(DSL.name("history_purge_jobs_fair_idx"), HistoryPurgeJobs.HISTORY_PURGE_JOBS, new OrderField[] { HistoryPurgeJobs.HISTORY_PURGE_JOBS.UPDATED_AT, HistoryPurgeJobs.HISTORY_PURGE_JOBS.CHAT_ID }, false);
+    public static final Index LOGIN_THROTTLES_LAST_ATTEMPT_IDX = Internal.createIndex(DSL.name("login_throttles_last_attempt_idx"), LoginThrottles.LOGIN_THROTTLES, new OrderField[] { LoginThrottles.LOGIN_THROTTLES.LAST_ATTEMPT_AT }, false);
     public static final Index MESSAGE_CHANGES_RETENTION_IDX = Internal.createIndex(DSL.name("message_changes_retention_idx"), MessageChanges.MESSAGE_CHANGES, new OrderField[] { MessageChanges.MESSAGE_CHANGES.CHANGED_AT, MessageChanges.MESSAGE_CHANGES.CHAT_ID, MessageChanges.MESSAGE_CHANGES.REVISION }, false);
     public static final Index MESSENGER_OUTBOX_EVENTS_PENDING_IDX = Internal.createIndex(DSL.name("messenger_outbox_events_pending_idx"), MessengerOutboxEvents.MESSENGER_OUTBOX_EVENTS, new OrderField[] { MessengerOutboxEvents.MESSENGER_OUTBOX_EVENTS.CREATED_AT, MessengerOutboxEvents.MESSENGER_OUTBOX_EVENTS.ID }, false);
     public static final Index MESSENGER_OUTBOX_EVENTS_PENDING_ROOM_ORDER_IDX = Internal.createIndex(DSL.name("messenger_outbox_events_pending_room_order_idx"), MessengerOutboxEvents.MESSENGER_OUTBOX_EVENTS, new OrderField[] { MessengerOutboxEvents.MESSENGER_OUTBOX_EVENTS.ROOM, MessengerOutboxEvents.MESSENGER_OUTBOX_EVENTS.PUBLICATION_ORDER }, false);

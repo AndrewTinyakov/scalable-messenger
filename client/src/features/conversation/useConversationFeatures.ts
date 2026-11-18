@@ -4,7 +4,7 @@ import type { ChatRecovery } from '../../entities/message/chatRecovery'
 import type { DeleteScope, DeleteTarget } from '../../entities/message/historySnapshot'
 import { isContiguous } from '../../entities/message/historyWindow'
 import { type Message } from '../../entities/message/model'
-import type { api } from '../../shared/api/http'
+import { ApiError, type api } from '../../shared/api/http'
 import type { OutgoingSocketFrame, PresenceStatus, SocketEvent } from '../../shared/api/socket'
 import { createUlid } from '../../shared/lib/id'
 import { MutationRecovery } from './mutationRecovery'
@@ -340,6 +340,14 @@ export function useConversationFeatures(options: Options) {
               message.messageVersion ?? '1',
             )
       if (generation === scope.current) current.recovery.patch(message.chatId, [result])
+    } catch (cause) {
+      if (
+        cause instanceof ApiError &&
+        cause.code === 'VERSION_CHANGED' &&
+        generation === scope.current
+      )
+        await current.recovery.synchronize(message.chatId).catch(() => undefined)
+      throw cause
     } finally {
       mutationBusy.current.delete(message.id)
     }
@@ -361,7 +369,13 @@ export function useConversationFeatures(options: Options) {
       deletionRequests.current.set(key, requestId)
       if (deletionRequests.current.size > 100)
         deletionRequests.current.delete(deletionRequests.current.keys().next().value!)
-      const result = await current.sessionApi.delete(id, requestId, scope, target, ids)
+      const result = await current.sessionApi
+        .delete(id, requestId, scope, target, ids)
+        .catch((cause: unknown) => {
+          if (cause instanceof ApiError && cause.code === 'REQUEST_ID_REUSED')
+            deletionRequests.current.delete(key)
+          throw cause
+        })
       deletionRequests.current.delete(key)
       current.recovery.observe(id, {
         mutationRevision: result.mutationRevision,

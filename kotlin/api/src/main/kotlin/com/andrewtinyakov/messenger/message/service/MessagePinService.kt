@@ -6,13 +6,10 @@ import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.model.ChatKind
 import com.andrewtinyakov.messenger.chat.repository.ChatRepository
 import com.andrewtinyakov.messenger.chat.repository.directory.ChatDirectoryRepository
-import com.andrewtinyakov.messenger.chat.service.ChatEventAudience
-import com.andrewtinyakov.messenger.generated.messaging.event.PinsChangedEventV1
 import com.andrewtinyakov.messenger.infrastructure.database.DatabaseTransaction
 import com.andrewtinyakov.messenger.infrastructure.database.observedExecute
 import com.andrewtinyakov.messenger.infrastructure.database.observedExecuteWithoutResult
-import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxRepository
-import com.andrewtinyakov.messenger.infrastructure.outbox.toOutboxMessage
+import com.andrewtinyakov.messenger.message.messaging.MessageOutbox
 import com.andrewtinyakov.messenger.message.model.Message
 import com.andrewtinyakov.messenger.message.model.MessageId
 import com.andrewtinyakov.messenger.message.model.pin.PinScope
@@ -22,14 +19,12 @@ import com.andrewtinyakov.messenger.message.repository.MessageRepository
 import com.andrewtinyakov.messenger.message.web.payload.PinnedMessagePageResponse
 import com.andrewtinyakov.messenger.message.web.payload.PinnedMessageResponse
 import com.andrewtinyakov.messenger.message.web.payload.toResponse
-import com.andrewtinyakov.messenger.shared.id.newId
 import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
-import com.andrewtinyakov.messenger.shared.web.badRequest
 import com.andrewtinyakov.messenger.shared.web.conflict
+import com.andrewtinyakov.messenger.shared.web.invalidInput
 import com.andrewtinyakov.messenger.shared.web.notFound
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
-import tools.jackson.databind.ObjectMapper
 
 @Service
 class MessagePinService(
@@ -37,9 +32,7 @@ class MessagePinService(
     private val messageRepository: MessageRepository,
     private val chatRepository: ChatRepository,
     private val chatDirectoryRepository: ChatDirectoryRepository,
-    private val chatEventAudience: ChatEventAudience,
-    private val outboxRepository: OutboxRepository,
-    private val mapper: ObjectMapper,
+    private val messageOutbox: MessageOutbox,
     private val tx: TransactionTemplate,
 ) {
     fun list(chatId: ChatId, userId: UserId, beforeSequence: Long?, limit: Int): PinnedMessagePageResponse =
@@ -62,7 +55,7 @@ class MessagePinService(
     ) {
         val (chat, message) = target(chatId, userId, messageId)
         if (scope == PinScope.SELF && chat.kind != ChatKind.DIRECT) {
-            badRequest(ApiErrorCode.INVALID_REQUEST, "Messages can be pinned only for everyone in groups")
+            invalidInput("scope", "Messages can be pinned only for everyone in groups")
         }
         val viewer = userId.takeIf { scope == PinScope.SELF }
         messagePinRepository.lock(chatId)
@@ -70,7 +63,7 @@ class MessagePinService(
         if (messagePinRepository.count(chatId, viewer) >= PinnedMessage.MAX_PER_SCOPE) {
             conflict(ApiErrorCode.PIN_LIMIT, "A chat can have up to ${PinnedMessage.MAX_PER_SCOPE} pinned messages")
         }
-        if (messagePinRepository.pin(chatId, message.sequence, viewer)) notify(chat, viewer)
+        if (messagePinRepository.pin(chatId, message.sequence, viewer)) messageOutbox.enqueuePinsChanged(chat, viewer)
     }
 
     fun unpin(chatId: ChatId, userId: UserId, messageId: MessageId) = tx.observedExecuteWithoutResult(DatabaseTransaction.MESSAGE_PIN) {
@@ -87,8 +80,8 @@ class MessagePinService(
 
     private fun notifyRemoved(chat: Chat, userId: UserId, removed: Set<PinScope>) {
         when {
-            PinScope.EVERYONE in removed -> notify(chat, null)
-            PinScope.SELF in removed -> notify(chat, userId)
+            PinScope.EVERYONE in removed -> messageOutbox.enqueuePinsChanged(chat, null)
+            PinScope.SELF in removed -> messageOutbox.enqueuePinsChanged(chat, userId)
         }
     }
 
@@ -96,13 +89,5 @@ class MessagePinService(
         val chat = chatDirectoryRepository.findById(chatId) ?: notFound()
         val message = messageRepository.findMessage(chatId, userId, messageId)?.takeIf { it.deletedAt == null } ?: notFound()
         return chat to message
-    }
-
-    private fun notify(chat: Chat, personalViewer: UserId?) {
-        outboxRepository.enqueue(
-            chatEventAudience.rooms(chat.id, chat.kind, personalViewer).map { room ->
-                PinsChangedEventV1.create(eventId = newId(), room = room, chatId = chat.id.value).toOutboxMessage(mapper)
-            },
-        )
     }
 }

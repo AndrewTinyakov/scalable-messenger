@@ -1,6 +1,7 @@
 package com.andrewtinyakov.messenger.chat.service
 
 import com.andrewtinyakov.messenger.auth.model.UserId
+import com.andrewtinyakov.messenger.chat.messaging.ChatOutbox
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.model.ChatPreferences
 import com.andrewtinyakov.messenger.chat.model.MuteEnd
@@ -8,28 +9,21 @@ import com.andrewtinyakov.messenger.chat.repository.preferences.ChatPreferencesR
 import com.andrewtinyakov.messenger.chat.web.payload.ChatPreferencesResponse
 import com.andrewtinyakov.messenger.chat.web.payload.PinnedChatsResponse
 import com.andrewtinyakov.messenger.chat.web.payload.toResponse
-import com.andrewtinyakov.messenger.generated.messaging.event.ChatPreferencesChangedEventV1
 import com.andrewtinyakov.messenger.infrastructure.database.DatabaseTransaction
 import com.andrewtinyakov.messenger.infrastructure.database.observedExecute
-import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxRepository
-import com.andrewtinyakov.messenger.infrastructure.outbox.toOutboxMessage
-import com.andrewtinyakov.messenger.infrastructure.redis.RoomAddress
-import com.andrewtinyakov.messenger.shared.id.newId
 import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
-import com.andrewtinyakov.messenger.shared.web.badRequest
 import com.andrewtinyakov.messenger.shared.web.conflict
+import com.andrewtinyakov.messenger.shared.web.invalidInput
 import com.andrewtinyakov.messenger.shared.web.notFound
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
-import tools.jackson.databind.ObjectMapper
 import java.time.Clock
 import java.time.OffsetDateTime
 
 @Service
 class ChatPreferencesService(
     private val chatPreferencesRepository: ChatPreferencesRepository,
-    private val outboxRepository: OutboxRepository,
-    private val mapper: ObjectMapper,
+    private val chatOutbox: ChatOutbox,
     private val tx: TransactionTemplate,
     private val clock: Clock,
 ) {
@@ -64,8 +58,8 @@ class ChatPreferencesService(
 
     fun mute(chatId: ChatId, userId: UserId, durationSeconds: Long?): ChatPreferencesResponse {
         if (durationSeconds != null && durationSeconds !in MuteEnd.MIN_DURATION_SECONDS..MuteEnd.MAX_DURATION_SECONDS) {
-            badRequest(
-                ApiErrorCode.INVALID_REQUEST,
+            invalidInput(
+                "durationSeconds",
                 "durationSeconds must be ${MuteEnd.MIN_DURATION_SECONDS} to ${MuteEnd.MAX_DURATION_SECONDS}",
             )
         }
@@ -84,7 +78,7 @@ class ChatPreferencesService(
     private fun change(chatId: ChatId, userId: UserId, update: () -> Boolean): ChatPreferencesResponse =
         tx.observedExecute(DatabaseTransaction.CHAT_PREFERENCES) {
             if (!update()) notFound()
-            notify(userId, listOf(chatId))
+            chatOutbox.enqueuePreferencesChanged(userId, listOf(chatId))
             checkNotNull(chatPreferencesRepository.find(chatId, userId)).toResponse(chatId.value)
         }
 
@@ -95,17 +89,8 @@ class ChatPreferencesService(
             val next = change(current)
             if (next != current) {
                 chatPreferencesRepository.replacePinnedOrder(userId, next)
-                notify(userId, (current + next).distinct().filter { current.indexOf(it) != next.indexOf(it) })
+                chatOutbox.enqueuePreferencesChanged(userId, (current + next).distinct().filter { current.indexOf(it) != next.indexOf(it) })
             }
             PinnedChatsResponse(next.map(ChatId::value))
         }
-
-    private fun notify(userId: UserId, chatIds: List<ChatId>) {
-        outboxRepository.enqueue(
-            chatIds.map { chatId ->
-                ChatPreferencesChangedEventV1.create(eventId = newId(), room = RoomAddress.user(userId), chatId = chatId.value)
-                    .toOutboxMessage(mapper)
-            },
-        )
-    }
 }

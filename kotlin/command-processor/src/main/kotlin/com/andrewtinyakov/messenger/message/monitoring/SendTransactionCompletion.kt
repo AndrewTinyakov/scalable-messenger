@@ -1,7 +1,6 @@
-package com.andrewtinyakov.messenger.message.service
+package com.andrewtinyakov.messenger.message.monitoring
 
 import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStage
-import com.andrewtinyakov.messenger.message.monitoring.SendBatchOutcome
 import org.springframework.transaction.support.TransactionSynchronization
 import org.springframework.transaction.support.TransactionSynchronizationManager
 
@@ -20,11 +19,11 @@ internal enum class SendTransactionCompletion(
             TransactionSynchronization.STATUS_ROLLED_BACK -> ROLLED_BACK
             else -> UNKNOWN
         }
-    }
-}
 
-internal fun afterSendTransactionCompletes(action: (SendTransactionCompletion) -> Unit) {
-    TransactionSynchronizationManager.registerSynchronization(object : TransactionSynchronization {
-        override fun afterCompletion(status: Int) = action(SendTransactionCompletion.from(status))
-    })
+        fun onCompletion(action: (SendTransactionCompletion) -> Unit) {
+            TransactionSynchronizationManager.registerSynchronization(object : TransactionSynchronization {
+                override fun afterCompletion(status: Int) = action(from(status))
+            })
+        }
+    }
 }

@@ -3,7 +3,6 @@ package com.andrewtinyakov.messenger.message.service
 import com.andrewtinyakov.messenger.ApiApplication
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.auth.service.AuthenticationService
-import com.andrewtinyakov.messenger.auth.web.payload.AuthRequest
 import com.andrewtinyakov.messenger.chat.service.ChatService
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
 import com.andrewtinyakov.messenger.shared.id.newId
@@ -30,7 +29,7 @@ import java.time.Duration
 class MessageFeatureHttpTests
     @Autowired
     constructor(
-        @Value("\${local.server.port}") private val port: Int,
+        @Value($$"${local.server.port}") private val port: Int,
         private val authentication: AuthenticationService,
         private val chats: ChatService,
         private val sends: MessageSendService,
@@ -189,13 +188,13 @@ class MessageFeatureHttpTests
         }
 
         private fun account(): Pair<String, String> {
-            val registered = authentication.register(AuthRequest("mutations_${newId()}", "long-demo-password"))
-            return registered.user.id.value to "messenger_session=${registered.token.value}"
+            val registered = authentication.register("mutations_${newId()}", "long-demo-password")
+            return registered.user.id.value to "__Host-messenger_session=${registered.token.value}"
         }
 
         private fun assertInvalidSequence(response: HttpResponse<String>, case: String) {
             assertEquals(400, response.statusCode(), case)
-            assertEquals("INVALID_SEQUENCE", mapper.readTree(response.body()).path("code").stringValue(), case)
+            assertEquals("VALIDATION_FAILED", mapper.readTree(response.body()).path("code").stringValue(), case)
         }
 
         private fun request(path: String, cookie: String?, method: String = "GET", body: String = ""): HttpResponse<String> {

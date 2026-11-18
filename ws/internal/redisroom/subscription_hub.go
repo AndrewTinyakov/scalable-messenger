@@ -67,7 +67,7 @@ func (h *subscriptionHub) group(ctx context.Context, room string) (*subscription
 	}
 	client, standalone := h.owner.redis.(*redis.Client)
 	if !standalone {
-		client = redis.NewClient(&redis.Options{Addr: address})
+		client = redis.NewClient(nodeOptions(h.owner.connectionOptions, address))
 	}
 	groupCtx, cancel := context.WithCancel(context.Background())
 	pubsub := client.SSubscribe(ctx)

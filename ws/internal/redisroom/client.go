@@ -16,10 +16,11 @@ import (
 )
 
 type Client struct {
-	metrics *monitoring.Metrics
-	redis   redis.UniversalClient
-	seeds   []*redis.Client
-	subs    *subscriptionHub
+	connectionOptions *redis.Options
+	metrics           *monitoring.Metrics
+	redis             redis.UniversalClient
+	seeds             []*redis.Client
+	subs              *subscriptionHub
 }
 type Live struct {
 	Epoch            string         `json:"epoch"`
@@ -31,13 +32,26 @@ type Live struct {
 }
 
 func New(rawURL string, clusterNodes []string) (*Client, error) {
+	if rawURL == "" {
+		rawURL = "redis://localhost:6379/0"
+	}
+	opts, err := redis.ParseURL(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("Redis URL: %w", err)
+	}
 	if len(clusterNodes) > 0 {
+		if opts.TLSConfig != nil {
+			opts.TLSConfig.ServerName = ""
+		}
 		seeds := make([]*redis.Client, 0, len(clusterNodes))
 		for _, address := range clusterNodes {
-			seeds = append(seeds, redis.NewClient(&redis.Options{Addr: address}))
+			seeds = append(seeds, redis.NewClient(nodeOptions(opts, address)))
 		}
 		cluster := redis.NewClusterClient(&redis.ClusterOptions{
-			Addrs: clusterNodes,
+			Addrs:     clusterNodes,
+			Username:  opts.Username,
+			Password:  opts.Password,
+			TLSConfig: opts.TLSConfig,
 			ClusterSlots: func(ctx context.Context) ([]redis.ClusterSlot, error) {
 				var lastErr error
 				for _, seed := range seeds {
@@ -54,13 +68,9 @@ func New(rawURL string, clusterNodes []string) (*Client, error) {
 				return nil, fmt.Errorf("Redis Cluster topology unavailable: %w", lastErr)
 			},
 		})
-		client := &Client{redis: cluster, seeds: seeds}
+		client := &Client{redis: cluster, seeds: seeds, connectionOptions: opts}
 		client.subs = newSubscriptionHub(client)
 		return client, nil
-	}
-	opts, err := redis.ParseURL(rawURL)
-	if err != nil {
-		return nil, fmt.Errorf("Redis URL: %w", err)
 	}
 	client := &Client{redis: redis.NewClient(opts)}
 	client.subs = newSubscriptionHub(client)
@@ -247,4 +257,15 @@ func (c *Client) RunActivity(ctx context.Context, chatID string, consume func(pr
 		}
 		consume(live.Event)
 	}
+}
+
+func nodeOptions(base *redis.Options, address string) *redis.Options {
+	options := *base
+	options.Addr = address
+	options.DB = 0
+	if base.TLSConfig != nil {
+		options.TLSConfig = base.TLSConfig.Clone()
+		options.TLSConfig.ServerName = ""
+	}
+	return &options
 }

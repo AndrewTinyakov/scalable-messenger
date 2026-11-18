@@ -1,4 +1,4 @@
-package com.andrewtinyakov.messenger.message.service
+package com.andrewtinyakov.messenger.message.messaging
 
 import com.andrewtinyakov.messenger.chat.model.Chat
 import com.andrewtinyakov.messenger.chat.model.ChatKind
@@ -19,7 +19,7 @@ import org.springframework.stereotype.Component
 import tools.jackson.databind.ObjectMapper
 
 @Component
-class MessageSendEvents(
+class MessageSendOutbox(
     private val chatRepository: ChatRepository,
     private val outboxRepository: OutboxRepository,
     private val mapper: ObjectMapper,

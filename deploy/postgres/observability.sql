@@ -15,4 +15,6 @@ BEGIN
     END IF;
 END
 $$;
+GRANT USAGE ON SCHEMA observability TO messenger_exporter;
+GRANT SELECT ON ALL TABLES IN SCHEMA observability TO messenger_exporter;
 COMMIT;

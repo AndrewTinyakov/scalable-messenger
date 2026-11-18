@@ -6,12 +6,13 @@ import com.andrewtinyakov.messenger.shared.web.unauthorized
 import com.andrewtinyakov.messenger.ws.config.WsProperties
 import com.andrewtinyakov.messenger.ws.model.TicketClaims
 import com.andrewtinyakov.messenger.ws.model.TicketHeader
-import com.andrewtinyakov.messenger.ws.web.payload.WsTicketResponse
+import com.andrewtinyakov.messenger.ws.model.WsTicket
 import org.springframework.stereotype.Service
 import tools.jackson.databind.ObjectMapper
 import java.nio.charset.StandardCharsets
 import java.time.Clock
 import java.time.Duration
+import java.time.Instant
 import java.util.Base64
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
@@ -31,7 +32,7 @@ class WsTicketService(
     private val key = properties.ticketSecret.toByteArray(StandardCharsets.UTF_8)
     private val encoder = Base64.getUrlEncoder().withoutPadding()
 
-    fun issue(session: AuthenticatedSession): WsTicketResponse {
+    fun issue(session: AuthenticatedSession): WsTicket {
         val now = clock.instant()
         val expiry = minOf(now.plus(TICKET_LIFETIME), session.expiresAt).epochSecond
         if (expiry <= now.epochSecond) unauthorized(ApiErrorCode.UNAUTHORIZED, "Invalid WS ticket")
@@ -49,7 +50,7 @@ class WsTicketService(
             ),
         )
         val signed = "$header.$body"
-        return WsTicketResponse(token = "$signed.${encoder.encodeToString(sign(signed))}", expiresAt = expiry)
+        return WsTicket(token = "$signed.${encoder.encodeToString(sign(signed))}", expiresAt = Instant.ofEpochSecond(expiry))
     }
 
     private fun sign(input: String): ByteArray = Mac.getInstance("HmacSHA256").run {

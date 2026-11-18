@@ -44,4 +44,10 @@ public interface ValidateSessionResponseOrBuilder extends
    */
   com.google.protobuf.ByteString
       getSessionIdBytes();
+
+  /**
+   * <code>int64 expires_at_unix_seconds = 4;</code>
+   * @return The expiresAtUnixSeconds.
+   */
+  long getExpiresAtUnixSeconds();
 }

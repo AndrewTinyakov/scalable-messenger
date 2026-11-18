@@ -2,7 +2,6 @@ package com.andrewtinyakov.messenger.ws.grpc
 
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.auth.service.AuthenticationService
-import com.andrewtinyakov.messenger.auth.web.payload.AuthRequest
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.service.ChatMembershipService
 import com.andrewtinyakov.messenger.chat.service.ChatService
@@ -147,7 +146,7 @@ class PresenceAuthorizationTests
             assertEquals(Status.Code.UNAUTHENTICATED, Status.fromThrowable(requireNotNull(badSession.error)).code)
         }
 
-        private fun credentials() = authentication.register(AuthRequest("presence_${newId().lowercase()}", "test-password"))
+        private fun credentials() = authentication.register("presence_${newId().lowercase()}", "test-password")
 
         private fun request(session: String, chat: String, users: List<String>): AuthorizePresenceRequest =
             AuthorizePresenceRequest.newBuilder().setSessionId(session).setChatId(chat).addAllUserIds(users).build()

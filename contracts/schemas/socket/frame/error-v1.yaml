@@ -12,7 +12,14 @@ properties:
     const: 1
   code:
     type: string
-    minLength: 1
+    enum:
+      - INVALID_FRAME
+      - DEPENDENCY_UNAVAILABLE
+      - UNAUTHORIZED
+      - RATE_LIMITED
+      - ROOM_LIMIT
+      - PUBLISH_FAILED
+      - PUBLISH_UNKNOWN
   requestId:
     type: string
     pattern: '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'

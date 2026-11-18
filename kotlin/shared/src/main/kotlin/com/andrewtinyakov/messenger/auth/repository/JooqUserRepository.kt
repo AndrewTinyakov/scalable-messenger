@@ -33,6 +33,30 @@ class JooqUserRepository(
             }
     }
 
+    override fun findUser(userId: UserId): User? = DatabaseObservation.query(DatabaseOperation.USER_FIND_USER_BY_ID) {
+        db.selectFrom(USERS)
+            .where(USERS.ID.eq(userId.value))
+            .fetchOne()?.let { row ->
+                User(id = UserId(row.id!!), username = row.username!!, passwordHash = row.passwordHash!!)
+            }
+    }
+
+    override fun lockPasswordHash(userId: UserId): String? = DatabaseObservation.query(DatabaseOperation.USER_LOCK_PASSWORD_HASH) {
+        db.select(USERS.PASSWORD_HASH)
+            .from(USERS)
+            .where(USERS.ID.eq(userId.value))
+            .forUpdate()
+            .fetchOne(USERS.PASSWORD_HASH)
+    }
+
+    override fun replacePasswordHash(userId: UserId, expectedHash: String, newHash: String): Boolean =
+        DatabaseObservation.query(DatabaseOperation.USER_UPDATE_PASSWORD_HASH) {
+            db.update(USERS)
+                .set(USERS.PASSWORD_HASH, newHash)
+                .where(USERS.ID.eq(userId.value), USERS.PASSWORD_HASH.eq(expectedHash))
+                .execute() == 1
+        }
+
     override fun findSummary(userId: UserId): UserSummary? = DatabaseObservation.query(DatabaseOperation.USER_FIND_SUMMARY) {
         db.select(USERS.ID, USERS.USERNAME)
             .from(USERS)

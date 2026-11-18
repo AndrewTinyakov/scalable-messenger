@@ -8,6 +8,6 @@ import org.springframework.stereotype.Component
 class HistoryPurgeScheduler(
     private val historyPurgeService: HistoryPurgeService,
 ) {
-    @Scheduled(fixedDelayString = "\${messenger.deletion.purge-delay-ms:1000}")
+    @Scheduled(fixedDelayString = $$"${messenger.deletion.purge-delay-ms:1000}")
     fun runPurge() = historyPurgeService.purgeDeletedHistory()
 }

@@ -114,7 +114,7 @@ test('server socket frame schemas preserve durable and replay metadata', () => {
   assert.equal(socketRecoveryFailed({
     type: 'recovery_failed', version: 1, chatId: savedEvent.chatId,
   }), true, JSON.stringify(socketRecoveryFailed.errors));
-  assert.equal(socketError({ type: 'error', version: 1, code: 'invalid_frame' }), true, JSON.stringify(socketError.errors));
+  assert.equal(socketError({ type: 'error', version: 1, code: 'INVALID_FRAME' }), true, JSON.stringify(socketError.errors));
   assert.equal(socketSaved({ ...savedEvent, ...cursor, sequence: 9007199254740993 }), false);
   assert.equal(socketRejected({ ...rejectedEvent, ...cursor, reason: 'MAYBE' }), false);
   assert.equal(socketQueued({ type: 'queued', version: 1, requestId: savedEvent.requestId }), false);

@@ -28,6 +28,7 @@ type Connection struct {
 	socket            *websocket.Conn
 	session           ticket.Identity
 	connectionLeaseID string
+	authorizedUntil   atomic.Int64
 	ctx               context.Context
 	cancel            context.CancelFunc
 	out               chan outbound
@@ -43,6 +44,7 @@ type Connection struct {
 	commandBytes      int
 	commandState      commandState
 	nextLeaseRenewal  time.Time
+	nextSessionCheck  time.Time
 	sidebarSerial     atomic.Uint64
 	presenceSerial    atomic.Uint64
 	presenceChatID    string
@@ -50,28 +52,42 @@ type Connection struct {
 
 func newConnection(server *Server, socket *websocket.Conn, session ticket.Identity, leaseID string) *Connection {
 	server.startRuntime()
-	var ctx context.Context
-	var cancel context.CancelFunc
-	if session.ExpiresAt.IsZero() {
-		ctx, cancel = context.WithCancel(server.ctx)
-	} else {
-		ctx, cancel = context.WithDeadline(server.ctx, session.ExpiresAt)
-	}
+	ctx, cancel := context.WithCancel(server.ctx)
 	c := &Connection{server: server, socket: socket, session: session, connectionLeaseID: leaseID, ctx: ctx, cancel: cancel, out: make(chan outbound, server.config.QueueItems), acks: newACKTracker(server.config.PendingACKLimit, server.config.ACKTimeout)}
 	c.opened = time.Now()
 	c.acks.metrics = server.metrics
 	c.subscriptions = newChatSubscriptions(c)
 	c.nextLeaseRenewal = time.Now().Add(jitteredFirstTick(30 * time.Second))
-	if !session.ExpiresAt.IsZero() {
-		c.mu.Lock()
-		c.expiry = time.AfterFunc(time.Until(session.ExpiresAt), c.Close)
-		c.mu.Unlock()
-	}
+	c.authorizeUntil(session.ExpiresAt)
 	return c
 }
 
+func (c *Connection) authorizationDeadline() time.Time {
+	if until := c.authorizedUntil.Load(); until != 0 {
+		return time.Unix(0, until)
+	}
+	return time.Time{}
+}
+
+func (c *Connection) authorizeUntil(deadline time.Time) {
+	if deadline.IsZero() {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.state == lifecycleClosed {
+		return
+	}
+	c.authorizedUntil.Store(deadline.UnixNano())
+	if c.expiry == nil {
+		c.expiry = time.AfterFunc(time.Until(deadline), c.Close)
+	} else {
+		c.expiry.Reset(time.Until(deadline))
+	}
+}
+
 func (c *Connection) admissionError() error {
-	if !c.session.ExpiresAt.IsZero() && !time.Now().Before(c.session.ExpiresAt) {
+	if deadline := c.authorizationDeadline(); !deadline.IsZero() && !time.Now().Before(deadline) {
 		return grpcauth.ErrUnauthorized
 	}
 	return c.ctx.Err()

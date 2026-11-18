@@ -4,7 +4,11 @@ enum class DatabaseTransaction(
     val metricValue: String,
 ) {
     AUTH_REGISTER("auth.register"),
+    AUTH_LOGIN("auth.login"),
+    AUTH_LOGIN_THROTTLE("auth.login_throttle"),
     AUTH_LOGOUT("auth.logout"),
+    AUTH_REVOKE_SESSIONS("auth.revoke_sessions"),
+    AUTH_CHANGE_PASSWORD("auth.change_password"),
     CHAT_CREATE_GROUP("chat.create_group"),
     CHAT_ADD_MEMBERS("chat.add_members"),
     CHAT_REMOVE_MEMBER("chat.remove_member"),

@@ -4,16 +4,49 @@ import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
 import com.andrewtinyakov.messenger.shared.id.newId
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.postgresql.PGConnection
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.dao.DataIntegrityViolationException
+import org.springframework.transaction.support.TransactionTemplate
 import java.sql.SQLException
+import javax.sql.DataSource
 
 class OutboxRepositoryTests
     @Autowired
     constructor(
         private val outboxRepository: OutboxRepository,
+        private val transactions: TransactionTemplate,
+        private val dataSource: DataSource,
     ) : MessengerIntegrationTest() {
+        @Test
+        fun `publishers wake after the enqueueing transaction commits, not inside it`() {
+            assertEquals(
+                0,
+                db.queryForObject("SELECT count(*) FROM pg_trigger WHERE tgrelid = 'messenger_outbox_events'::regclass", Int::class.java),
+            )
+            dataSource.connection.use { connection ->
+                connection.autoCommit = true
+                connection.createStatement().use { it.execute("LISTEN $OUTBOX_WAKEUP_CHANNEL") }
+                val listener = connection.unwrap(PGConnection::class.java)
+                listener.getNotifications(200)
+                val event = { OutboxMessage(EventId(newId()), "user:${newId()}", "{}") }
+
+                transactions.execute {
+                    outboxRepository.enqueue(event())
+                    assertTrue(listener.getNotifications(300).isNullOrEmpty(), "Woke publishers before commit")
+                }
+                assertTrue(listener.getNotifications(5000).orEmpty().any { it.name == OUTBOX_WAKEUP_CHANNEL })
+
+                transactions.execute { status ->
+                    outboxRepository.enqueue(event())
+                    status.setRollbackOnly()
+                }
+                assertTrue(listener.getNotifications(300).isNullOrEmpty(), "Woke publishers for a rolled-back enqueue")
+            }
+        }
+
         @Test
         fun `durable outbox rejects message and quote content`() {
             for (field in listOf("body", "replyBody")) {

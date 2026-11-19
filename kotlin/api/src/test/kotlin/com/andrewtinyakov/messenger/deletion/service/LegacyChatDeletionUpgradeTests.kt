@@ -15,6 +15,7 @@ import com.andrewtinyakov.messenger.deletion.monitoring.DeletionMetrics
 import com.andrewtinyakov.messenger.deletion.repository.JooqDeletionRepository
 import com.andrewtinyakov.messenger.deletion.repository.JooqHistoryPurgeRepository
 import com.andrewtinyakov.messenger.infrastructure.outbox.JooqOutboxRepository
+import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxWakeup
 import com.andrewtinyakov.messenger.message.messaging.MessageSendOutbox
 import com.andrewtinyakov.messenger.message.model.CommandResult
 import com.andrewtinyakov.messenger.message.model.MessageId
@@ -164,7 +165,7 @@ class LegacyChatDeletionUpgradeTests
                 val clock = Clock.systemUTC()
                 val messages = JooqMessageRepository(jooq)
                 val chats = JooqChatRepository(jooq)
-                val outbox = JooqOutboxRepository(jooq)
+                val outbox = JooqOutboxRepository(jooq, OutboxWakeup(upgradedSource))
                 val sends =
                     MessageSendService(
                         messages,

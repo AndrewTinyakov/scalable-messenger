@@ -37,7 +37,7 @@ spring:
     listener:
       simple:
         acknowledge-mode: manual
-        concurrency: ${MESSENGER_SEND_CONSUMERS:1}
+        concurrency: ${MESSENGER_SEND_CONSUMERS:4}
         prefetch: ${MESSENGER_SEND_PREFETCH:20}
 management:
   metrics:

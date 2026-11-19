@@ -109,15 +109,16 @@ class OutboxPublicationService(
         rooms: List<List<OutboxMessage>>,
         prepared: Map<EventId, OutboxMessage>,
         deadline: Long,
-    ): List<BatchPublication> = Executors.newThreadPerTaskExecutor(
-        Thread.ofVirtual().name("outbox-publication").factory(),
-    ).use { executor ->
-        val tasks = rooms.map { roomRows ->
-            executor.submit(
-                Callable { publishClaimedRoom(roomRows.map { checkNotNull(prepared[it.id]) }, deadline) },
-            )
+    ): List<BatchPublication> {
+        val completion = GroupCompletion { ids -> tx.executeWithoutResult { outboxClaimRepository.complete(ids, owner) } }
+        return Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("outbox-publication").factory()).use { executor ->
+            val tasks = rooms.map { roomRows ->
+                executor.submit(
+                    Callable { publishClaimedRoom(roomRows.map { checkNotNull(prepared[it.id]) }, deadline, completion) },
+                )
+            }
+            tasks.map { it.get() }
         }
-        tasks.map { it.get() }
     }
 
     private fun summarize(published: List<BatchPublication>): BatchPublication {
@@ -128,16 +129,13 @@ class OutboxPublicationService(
     private fun publishClaimedRoom(
         rows: List<OutboxMessage>,
         deadline: Long,
+        completion: GroupCompletion,
     ): BatchPublication {
         val result = observePhase(OutboxStage.PUBLISH, { it.outcome }) { publishRoom(rows = rows, deadline = deadline) }
         val completed = result.published
         if (completed.isNotEmpty()) {
             try {
-                observePhase(OutboxStage.COMPLETE) {
-                    tx.executeWithoutResult {
-                        outboxClaimRepository.complete(completed, owner)
-                    }
-                }
+                observePhase(OutboxStage.COMPLETE) { completion.complete(completed) }
             } catch (error: Exception) {
                 metrics.retained(OutboxRetentionReason.COMPLETE_FAILURE, completed.size)
                 throw error

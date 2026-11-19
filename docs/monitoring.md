@@ -108,7 +108,7 @@ Gateway replay remains bounded to 500 events. Longer gaps use paginated SQL reco
 
 ## Send batching and latency checks
 
-The send listener gathers at most sixteen physical command envelopes, with a five-millisecond assembly deadline and a one-millisecond receive timeout. Scheduler delays can extend elapsed time. MESSENGER_SEND_BATCH_SIZE selects 1 to 16; size 1 selects one command per transaction on the current implementation. MESSENGER_SEND_CONSUMERS defaults to one per processor replica and MESSENGER_SEND_PREFETCH defaults to twenty. The dead-letter listener remains separate.
+The send listener gathers at most sixteen physical command envelopes, with a five-millisecond assembly deadline and a one-millisecond receive timeout. Scheduler delays can extend elapsed time. MESSENGER_SEND_BATCH_SIZE selects 1 to 16; size 1 selects one command per transaction on the current implementation. MESSENGER_SEND_CONSUMERS defaults to four per processor replica, so one replica commits several chats' sends at once and MESSENGER_SEND_PREFETCH defaults to twenty. The dead-letter listener remains separate.
 
 Each group shares one typed chat or direct-pair target and one explicit SQL transaction. Request locks are acquired in stable order before chat locks. Messages retain arrival order within each group. After a group failure returns from the transaction manager, individual fallback reacquires request locks and resolves persisted results. SQL deduplication also handles uncertain commit outcomes. Commands are acknowledged only after the actual commit; retries retain SQL deduplication. The batch-size summary counts attempted commands, including duplicates. Batch transaction counters distinguish committed, rolled-back and unknown outcomes.
 

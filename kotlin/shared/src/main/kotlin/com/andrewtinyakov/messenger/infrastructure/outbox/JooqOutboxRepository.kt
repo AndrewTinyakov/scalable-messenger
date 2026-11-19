@@ -10,6 +10,7 @@ private const val INSERT_CHUNK_SIZE = 500
 @Repository
 class JooqOutboxRepository(
     private val db: DSLContext,
+    private val wakeup: OutboxWakeup,
 ) : OutboxRepository {
     override fun enqueue(messages: Collection<OutboxMessage>) {
         if (messages.isEmpty()) return
@@ -26,5 +27,6 @@ class JooqOutboxRepository(
             val inserted = insert.execute()
             check(inserted == chunk.size) { "Expected to enqueue ${chunk.size} outbox events, inserted $inserted" }
         }
+        wakeup.afterCommit()
     }
 }

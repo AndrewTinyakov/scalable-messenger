@@ -1,5 +1,6 @@
 package com.andrewtinyakov.messenger.infrastructure.outbox.publication
 
+import com.andrewtinyakov.messenger.infrastructure.outbox.OUTBOX_WAKEUP_CHANNEL
 import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxPublisherProperties
 import jakarta.annotation.PreDestroy
 import org.postgresql.PGConnection
@@ -9,8 +10,6 @@ import org.springframework.context.event.EventListener
 import org.springframework.stereotype.Component
 import java.sql.Connection
 import javax.sql.DataSource
-
-private const val NOTIFICATION_CHANNEL = "messenger_outbox"
 
 @Component
 class OutboxPublicationWorker(
@@ -95,6 +94,6 @@ class OutboxPublicationWorker(
 
     private fun listen(connection: Connection) {
         connection.autoCommit = true
-        connection.createStatement().use { it.execute("LISTEN $NOTIFICATION_CHANNEL") }
+        connection.createStatement().use { it.execute("LISTEN $OUTBOX_WAKEUP_CHANNEL") }
     }
 }

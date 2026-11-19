@@ -35,10 +35,14 @@ data class Message(
     }
 }
 
+/** The first [Message.PREVIEW_LENGTH] code points of the body, as quotes and the chat list show it. */
+val Message.preview: String
+    get() = body.substring(0, body.offsetByCodePoints(0, minOf(Message.PREVIEW_LENGTH, body.codePointCount(0, body.length))))
+
 fun Message.asReply(): MessageReply = MessageReply(
     messageId = id,
     senderId = senderId,
-    body = body.substring(0, body.offsetByCodePoints(0, minOf(Message.PREVIEW_LENGTH, body.codePointCount(0, body.length)))),
+    body = preview,
     deleted = deletedAt != null,
     version = messageVersion,
 )

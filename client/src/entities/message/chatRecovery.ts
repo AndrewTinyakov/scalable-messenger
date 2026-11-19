@@ -29,6 +29,14 @@ type CatchUpRetry = { chatId: string; attempt: number } & (
   { phase: 'scheduled'; timer: ReturnType<typeof setTimeout> } | { phase: 'retrying' }
 )
 
+type CatchUpRequest = {
+  promise: Promise<void>
+  socketGeneration: number
+  requiredSequence: string
+  /** One more pass after this one, for hints about messages newer than its snapshot. */
+  followUp?: Promise<void>
+}
+
 export class ChatRecovery {
   private readonly state: RecoveryState
   private readonly batch: RecoveryBatch
@@ -40,10 +48,7 @@ export class ChatRecovery {
   >()
   private synchronizationQueue = new Map<string, { promise: Promise<void>; resolve(): void }>()
   private runtime?: RecoveryRuntime
-  private catchingUp = new Map<
-    string,
-    { promise: Promise<void>; socketGeneration: number; requiredSequence: string }
-  >()
+  private catchingUp = new Map<string, CatchUpRequest>()
   private paging = new Set<string>()
   private pageFailures = new Map<string, { context: string; attempts: number; until: number }>()
 
@@ -219,7 +224,7 @@ export class ChatRecovery {
     chatId: string,
     moveViewport = false,
     initialize = false,
-  ): Promise<{ latest?: string; messages: Message[] }> {
+  ): Promise<{ latest?: string; messages: Message[]; skipped?: true }> {
     const runtime = this.runtime!
     const generation = this.lifecycleGeneration
     const socketGeneration = this.socketGeneration
@@ -250,7 +255,7 @@ export class ChatRecovery {
           if (moveViewport && navigation === this.navigationRevision) runtime.jumped()
           return { latest: result.snapshotSequence ?? page.latest, messages: page.messages }
         },
-      )) ?? { latest: undefined, messages: [] }
+      )) ?? { latest: undefined, messages: [], skipped: true }
     )
   }
 
@@ -487,25 +492,33 @@ export class ChatRecovery {
     }
   }
 
+  /**
+   * Fetches history the client is missing. A call during a running catch-up normally joins it.
+   * With `fresh`, the caller knows of a message that may postdate the running request's snapshot
+   * (a recovery_failed hint), so one more pass runs after it; concurrent fresh calls share that pass.
+   */
   catchUp(
     chatId: string,
     fromStart = false,
     requiredSequence = '0',
     allowLiveArrival = false,
+    fresh = false,
   ): Promise<void> {
     if (this.disposed || chatId.startsWith('draft:')) return Promise.resolve()
     const current = this.catchingUp.get(chatId)
     if (current) {
       if (BigInt(requiredSequence) > BigInt(current.requiredSequence))
         current.requiredSequence = requiredSequence
-      if (current.socketGeneration === this.socketGeneration) return current.promise
+      if (current.socketGeneration === this.socketGeneration && !fresh) return current.promise
+      if (current.followUp) return current.followUp
       const generation = this.lifecycleGeneration
-      return current.promise.then(() => {
+      current.followUp = current.promise.then(() => {
         if (!this.disposed && generation === this.lifecycleGeneration)
           return this.catchUp(chatId, fromStart, requiredSequence, allowLiveArrival)
       })
+      return current.followUp
     }
-    const request = {
+    const request: CatchUpRequest = {
       promise: Promise.resolve(),
       socketGeneration: this.socketGeneration,
       requiredSequence,
@@ -919,6 +932,7 @@ export class ChatRecovery {
       generation === this.lifecycleGeneration &&
       !this.runtime!.context(chatId).removed
     request.promise = (async () => {
+      let incompletePasses = 0
       do {
         request.phase = 'refreshing'
         const visibility = await this.runtime!.history.visibility!(chatId)
@@ -939,22 +953,35 @@ export class ChatRecovery {
             await this.catchUp(chatId, false, visibility.snapshotSequence, true)
           continue
         }
+        // A batch can be skipped when every history slot is busy, or dropped when a newer revision
+        // fences it. Only a pass that reconciled everything may mark this revision as verified.
+        let complete = true
         const ids = this.state.retainedIds(chatId)
         for (let index = 0; index < ids.length; index += 100) {
           const batch = ids.slice(index, index + 100)
-          await this.withHistorySnapshot(
+          await this.historyRequests.waitForCapacity()
+          const installed = await this.withHistorySnapshot(
             chatId,
             () => this.runtime!.history.resolve!(chatId, batch),
             (page) => {
               if (valid()) this.state.resolve(chatId, batch, page)
+              return true
             },
           )
+          if (!installed) complete = false
         }
         if (!valid()) return
-        await this.fetchLatest(
+        await this.historyRequests.waitForCapacity()
+        const latest = await this.fetchLatest(
           chatId,
           !this.state.isDetached(chatId) && !this.runtime!.context(chatId).readingHistory,
         )
+        if (latest.skipped) complete = false
+        if (!complete) {
+          // Retry a few times; after that, leave the revision unverified so the next hint repairs it.
+          if (++incompletePasses < 3 && valid()) request.phase = 'invalidated'
+          continue
+        }
         this.state.verifySnapshot(chatId, {
           mutationRevision: visibility.mutationRevision,
           visibilityRevision: visibility.visibilityRevision,
@@ -1041,6 +1068,15 @@ export class ChatRecovery {
     if (messages.length) this.patchAccepted(chatId, messages)
     this.runtime!.changed()
     return true
+  }
+  /**
+   * The quoted message was deleted or hidden after its replies loaded: show those quotes as unavailable now,
+   * then synchronize so any other stale rows in the retained windows are repaired too.
+   */
+  quoteTargetGone(chatId: string, messageId: string): void {
+    this.state.quoteTargetGone(chatId, messageId)
+    this.runtime!.changed()
+    void this.synchronize(chatId).catch(() => {})
   }
   patch(chatId: string, messages: Message[]): void {
     if (!this.runtime!.history.resolve) {

@@ -15,8 +15,10 @@ type Event struct {
 	MessageID           string           `json:"messageId,omitempty"`
 	Sequence            string           `json:"sequence,omitempty"`
 	SenderID            string           `json:"senderId,omitempty"`
+	SenderUsername      string           `json:"senderUsername,omitempty"`
 	Body                string           `json:"body,omitempty"`
 	CreatedAt           string           `json:"createdAt,omitempty"`
+	Preview             string           `json:"preview,omitempty"`
 	Reason              string           `json:"reason,omitempty"`
 	Epoch               string           `json:"epoch,omitempty"`
 	StreamID            string           `json:"streamId,omitempty"`

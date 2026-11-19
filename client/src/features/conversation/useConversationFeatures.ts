@@ -312,7 +312,10 @@ export function useConversationFeatures(options: Options) {
         },
       )
     } catch (cause) {
-      if (generation === scope.current)
+      if (generation !== scope.current) return
+      if (cause instanceof ApiError && cause.status === 404)
+        current.recovery.quoteTargetGone(id, messageId)
+      else
         current.fail(cause instanceof Error ? cause.message : 'Could not find the original message')
     } finally {
       if (generation === scope.current && jumpRequest.current === revision)

@@ -17,6 +17,8 @@ interface UserRepository {
 
     fun findSummary(userId: UserId): UserSummary?
 
+    fun findSummaries(userIds: Collection<UserId>): List<UserSummary>
+
     fun existsById(userId: UserId): Boolean
 
     fun search(query: String): List<UserSummary>

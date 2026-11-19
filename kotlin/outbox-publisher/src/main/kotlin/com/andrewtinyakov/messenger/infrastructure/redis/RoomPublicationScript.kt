@@ -52,18 +52,14 @@ internal class RoomPublicationScript(
         ).single().doOnNext { check(streamIdPattern.matches(it)) { "Redis returned an invalid stream ID" } }
     }
 
+    // Activity is pub/sub only: it never enters the replay stream, so a preview isn't retained after deletion.
     private fun publishSidebarActivity(message: OutboxMessage): Mono<Long> {
-        val activity = sidebarActivity(message) ?: return Mono.empty()
-        return redis.execute(
-            activityScript,
-            listOf("messenger:{activity:${activity.chatId}}:live"),
-            listOf(mapper.writeValueAsString(activity)),
-        ).single()
-    }
-
-    private fun sidebarActivity(message: OutboxMessage): SidebarActivityEventV1? {
+        if (!RoomAddress.isGroup(message.room)) return Mono.empty()
         val event = mapper.readTree(message.payload)
-        if (!RoomAddress.isGroup(message.room) || event.path("type").asText() != RoomEventType.MESSAGE_SAVED.value) return null
-        return SidebarActivityEventV1.create(event.path("chatId").asText(), event.path("sequence").asText())
+        if (event.path("type").asText() != RoomEventType.MESSAGE_SAVED.value) return Mono.empty()
+        val chatId = event.path("chatId").asText()
+        val activity = message.activityPayload
+            ?: mapper.writeValueAsString(SidebarActivityEventV1.create(chatId, event.path("sequence").asText()))
+        return redis.execute(activityScript, listOf("messenger:{activity:$chatId}:live"), listOf(activity)).single()
     }
 }

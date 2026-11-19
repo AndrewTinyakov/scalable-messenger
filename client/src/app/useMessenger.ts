@@ -162,6 +162,7 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     listChats,
     rememberChat,
     refreshChatSummary,
+    applyActivity,
     applyPreferences,
     applyPinnedOrder,
     markRead,
@@ -171,6 +172,7 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     removeChat,
   } = useChatDirectory({
     sessionApi,
+    userId: session.user.id,
     selectedId,
     selectedIdRef: selectedRef,
     recordLatest,
@@ -306,7 +308,8 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
   useRecoveryLifecycle({ recovery, selectedId, selectedRef, activeRef, focusRequestRef })
 
   const catchUp = useCallback(
-    (chatId: string, fromStart = false) => recovery.catchUp(chatId, fromStart),
+    (chatId: string, fromStart = false, fresh = false) =>
+      recovery.catchUp(chatId, fromStart, '0', false, fresh),
     [recovery],
   )
 
@@ -462,6 +465,7 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     refreshChats,
     listChats,
     refreshChatSummary,
+    applyActivity,
     catchUp,
     selectResolvedDraft,
     removeChat,

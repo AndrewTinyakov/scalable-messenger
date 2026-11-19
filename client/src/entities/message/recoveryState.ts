@@ -155,6 +155,11 @@ export class RecoveryState {
       this.historyBuffered[chatId] = filter(this.historyBuffered[chatId])
   }
 
+  /** Shows quotes of a message the server no longer returns as unavailable. */
+  quoteTargetGone(chatId: string, messageId: string): void {
+    this.filterWindows(chatId, () => true, new Set([messageId]))
+  }
+
   observeSnapshot(chatId: string, snapshot: Partial<SnapshotMetadata>): void {
     const previousCutoff = this.cutoff(chatId)
     const ids = this.retainedIds(chatId)

@@ -288,6 +288,25 @@ describe('shared sidebar contracts', () => {
       expect(decodeSocketEvent(JSON.stringify({ ...value, body: 'forbidden' }))).toBeNull()
     }
   })
+  it('decodes a complete activity preview and rejects a partial one', () => {
+    const raw = readFileSync(
+      new URL(
+        '../../../../contracts/fixtures/valid/sidebar-activity-message.json',
+        import.meta.url,
+      ),
+      'utf8',
+    )
+    const value = JSON.parse(raw)
+    expect(decodeSocketEvent(raw)).toEqual(value)
+    const { preview: _, ...partial } = value
+    expect(decodeSocketEvent(JSON.stringify(partial))).toBeNull()
+    expect(decodeSocketEvent(JSON.stringify({ ...value, preview: 'x'.repeat(161) }))).toBeNull()
+    expect(
+      decodeSocketEvent(JSON.stringify({ ...value, preview: '😀'.repeat(160) })),
+    ).not.toBeNull()
+    expect(decodeSocketEvent(JSON.stringify({ ...value, senderUsername: 'Not Valid' }))).toBeNull()
+    expect(decodeSocketEvent(JSON.stringify({ ...value, createdAt: 'yesterday' }))).toBeNull()
+  })
 })
 
 describe('personal chat events and forwards', () => {

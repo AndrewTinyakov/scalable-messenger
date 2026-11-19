@@ -5,7 +5,7 @@ import type { Message } from '../entities/message/model'
 import type { SavedSend, SendRequests } from '../entities/message/sendRequests'
 import { EventType } from '../shared/api/generated/socket-vocabulary'
 import type { api } from '../shared/api/http'
-import type { SocketEvent } from '../shared/api/socket'
+import type { ActivityMessage, SocketEvent } from '../shared/api/socket'
 import { connectSocket, type ConnectionState } from '../shared/api/socketConnection'
 import { runtimeConfig } from '../shared/config/runtime'
 import { reconnectDelay } from '../shared/lib/reconnect'
@@ -31,13 +31,43 @@ interface MessengerSocketOptions {
   refreshChats(full?: boolean, invalidated?: boolean): Promise<Chat[]>
   listChats(): Chat[]
   refreshChatSummary(chatId: string): Promise<void>
-  catchUp(chatId: string, fromStart?: boolean): Promise<void>
+  applyActivity(chatId: string, sequence: string, message: ActivityMessage): boolean
+  catchUp(chatId: string, fromStart?: boolean, fresh?: boolean): Promise<void>
   selectResolvedDraft(saved: SavedSend): boolean
   removeChat(chatId: string): Chat[]
   closeChat(): void
   setMessages: Dispatch<SetStateAction<Record<string, Message[]>>>
   setLatestSequences: Dispatch<SetStateAction<Record<string, string>>>
   leaveHistory(chatId: string): void
+}
+
+const PREVIEW_LENGTH = 160
+
+/**
+ * The chat-list view of a new message. Group activity carries it; a saved direct or selected-chat message
+ * has everything except the sender's name, which the row's members provide when known.
+ */
+function activityMessage(
+  frame: Extract<SocketEvent, { type: 'sidebar_activity' | typeof EventType.MESSAGE_SAVED }>,
+  chats: Chat[],
+): ActivityMessage | null {
+  if (frame.type === 'sidebar_activity') {
+    const { messageId, senderId, senderUsername, createdAt, preview } = frame
+    return messageId && senderId && senderUsername && createdAt && preview
+      ? { messageId, senderId, senderUsername, createdAt, preview }
+      : null
+  }
+  const sender = chats
+    .find((chat) => chat.id === frame.chatId)
+    ?.members.find((member) => member.id === frame.senderId)
+  if (!sender) return null
+  return {
+    messageId: frame.messageId,
+    senderId: frame.senderId,
+    senderUsername: sender.username,
+    createdAt: frame.createdAt,
+    preview: [...frame.body].slice(0, PREVIEW_LENGTH).join(''),
+  }
 }
 
 function websocketUrl(): string {
@@ -80,6 +110,7 @@ export function useMessengerSocket({
   refreshChats,
   listChats,
   refreshChatSummary,
+  applyActivity,
   catchUp,
   selectResolvedDraft,
   removeChat,
@@ -100,14 +131,19 @@ export function useMessengerSocket({
           timer: ReturnType<typeof setTimeout>
         } = { phase: 'idle' }
     const disposed = () => summary.phase === 'closed'
-    const summaryChats = new Set<string>()
+    // Chats whose row needs a refresh, with the sequence the row must reach (null: refresh regardless).
+    const summaryChats = new Map<string, string | null>()
     const refreshSummaries = async () => {
       if (disposed() || summary.phase === 'refreshing') return
       summary = { phase: 'refreshing' }
       const batch = [...summaryChats].slice(0, 10)
-      for (const id of batch) summaryChats.delete(id)
+      for (const [id] of batch) summaryChats.delete(id)
+      const rows = listChats()
       await Promise.all(
-        batch.map(async (id) => {
+        batch.map(async ([id, sequence]) => {
+          // Activity that arrived after this was queued may already have brought the row up to date.
+          const row = rows.find((chat) => chat.id === id)
+          if (sequence !== null && row && BigInt(row.lastSequence) >= BigInt(sequence)) return
           try {
             if (!disposed()) await refreshChatSummary(id)
           } catch {}
@@ -121,9 +157,13 @@ export function useMessengerSocket({
           }
         : { phase: 'idle' }
     }
-    const invalidateSummary = (id: string, jitter = false) => {
+    const invalidateSummary = (id: string, jitter = false, sequence: string | null = null) => {
       if (disposed() || (summaryChats.size >= 100 && !summaryChats.has(id))) return
-      summaryChats.add(id)
+      const queued = summaryChats.get(id)
+      // Keep the highest sequence to reach; any unconditional request makes the refresh unconditional.
+      if (queued === undefined) summaryChats.set(id, sequence)
+      else if (queued === null || sequence === null) summaryChats.set(id, null)
+      else if (BigInt(sequence) > BigInt(queued)) summaryChats.set(id, sequence)
       if (summary.phase === 'idle')
         summary = {
           phase: 'scheduled',
@@ -148,14 +188,18 @@ export function useMessengerSocket({
         void reconcilePending(true)
       },
       onEvent: (frame, socket) => {
-        if (
-          frame.type === EventType.MESSAGE_SAVED ||
+        if (frame.type === EventType.MESSAGE_SAVED || frame.type === 'sidebar_activity') {
+          const message = activityMessage(frame, listChats())
+          if (!message || !applyActivity(frame.chatId, frame.sequence, message))
+            invalidateSummary(frame.chatId, frame.type === 'sidebar_activity', frame.sequence)
+        } else if (
           frame.type === 'message_changed' ||
           frame.type === 'history_changed' ||
-          frame.type === 'reads_changed' ||
-          frame.type === 'sidebar_activity'
+          // Only my own reads change my unread count, and those always reach my account room.
+          // A group-room hint means someone else read, which leaves my chat-list row as it is.
+          (frame.type === 'reads_changed' && !frame.room.startsWith('group:'))
         )
-          invalidateSummary(frame.chatId, frame.type === 'sidebar_activity')
+          invalidateSummary(frame.chatId)
         if (frame.type === 'history_changed') void refreshChats(false, true)
         if (frame.type === 'message_changed') requests.revised(frame.messageId)
         if (frame.type === 'chat_preferences_changed') {
@@ -260,7 +304,8 @@ export function useMessengerSocket({
             }, reconnectDelay(++groupRetryAttemptsRef.current))
           }
         } else if (frame.type === EventType.RECOVERY_FAILED) {
-          void catchUp(frame.chatId)
+          // The missing message may be newer than a catch-up already in flight, so read again after it.
+          void catchUp(frame.chatId, false, true)
           void reconcilePending()
         } else if (frame.type === EventType.SUBSCRIPTION_EXPIRED) {
           recovery.onSubscriptionExpired(frame.chatId)

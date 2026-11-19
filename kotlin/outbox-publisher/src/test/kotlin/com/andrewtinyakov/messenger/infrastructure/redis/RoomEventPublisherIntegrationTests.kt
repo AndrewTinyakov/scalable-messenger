@@ -1,5 +1,6 @@
 package com.andrewtinyakov.messenger.infrastructure.redis
 
+import com.andrewtinyakov.messenger.auth.repository.UserRepository
 import com.andrewtinyakov.messenger.infrastructure.outbox.EventId
 import com.andrewtinyakov.messenger.infrastructure.outbox.MemoryOutbox
 import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxMessage
@@ -71,6 +72,48 @@ class RoomEventPublisherIntegrationTests {
                 assertTrue(actual != null)
                 assertEquals(expected, mapper.readTree(actual!!))
                 assertEquals(false, StringRedisTemplate(factory).hasKey("messenger:{activity:$chatId}:stream"))
+            }
+        }
+    }
+
+    @Test
+    fun `group publication forwards the hydrated chat-list preview without retaining it`() {
+        withRedis { factory ->
+            val mapper = JsonMapper.builder().build()
+            val activity = Path.of("../../contracts/fixtures/valid/sidebar-activity-message.json").readText()
+            val chatId = mapper.readTree(activity).path("chatId").asText()
+            val event = mapper.readTree(Path.of("../../contracts/fixtures/valid/message-saved.json").readText()) as ObjectNode
+            val room = "group:$chatId"
+            val eventId = newId()
+            event.put("room", room).put("eventId", eventId).put("chatId", chatId)
+            val replay = mapper.writeValueAsString(
+                mapOf(
+                    "type" to "history_changed",
+                    "version" to 1,
+                    "eventId" to eventId,
+                    "room" to room,
+                    "chatId" to chatId,
+                    "sequence" to event.path("sequence").asText(),
+                    "mutationRevision" to "0",
+                    "visibilityRevision" to "0",
+                ),
+            )
+            withLiveMessages(factory, "activity:$chatId") { received ->
+                roomPublisher(ReactiveStringRedisTemplate(factory)).publish(
+                    OutboxMessage(
+                        EventId(eventId),
+                        room,
+                        mapper.writeValueAsString(event),
+                        replayPayload = replay,
+                        activityPayload = activity,
+                    ),
+                )
+                assertEquals(mapper.readTree(activity), mapper.readTree(received.poll(1, TimeUnit.SECONDS)!!))
+                assertEquals(false, StringRedisTemplate(factory).hasKey("messenger:{activity:$chatId}:stream"))
+                val retained = StringRedisTemplate(
+                    factory,
+                ).opsForStream<String, String>().range("messenger:{$room}:stream", Range.unbounded())
+                assertTrue(retained!!.none { record -> record.value.values.any { it.contains("preview") } })
             }
         }
     }
@@ -482,6 +525,7 @@ class RoomEventPublisherIntegrationTests {
             mapper = JsonMapper.builder().build(),
             publicationHydration = PublicationHydration(
                 mock(MessageRepository::class.java),
+                mock(UserRepository::class.java),
                 JsonMapper.builder().build(),
                 PublicationHydrationMetrics(SimpleMeterRegistry()),
             ),

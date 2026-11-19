@@ -543,6 +543,29 @@ describe('messenger request coordination', () => {
     expect(paths.some((path) => path.endsWith('/messages'))).toBe(false)
   })
 
+  it("leaves the chat-list row alone when another member's read reaches the group room", async () => {
+    vi.useFakeTimers()
+    await renderMessenger()
+    await act(async () => {
+      sockets[0].open()
+      messenger.closeChat()
+    })
+    paths = []
+    await act(async () => {
+      sockets[0].event({
+        type: 'reads_changed',
+        version: 1,
+        eventId: recipient.id,
+        room: `group:${chatId}`,
+        epoch: 'epoch',
+        streamId: '1-0',
+        chatId,
+      })
+      await vi.advanceTimersByTimeAsync(2000)
+    })
+    expect(paths.filter((path) => path.endsWith(`/chats/${chatId}`))).toHaveLength(0)
+  })
+
   it('keeps an unread mark made while the chat stays selected and clears it on the next opening', async () => {
     vi.useFakeTimers()
     await renderMessenger()
@@ -689,6 +712,39 @@ describe('messenger request coordination', () => {
     expect(messenger.chats.find((chat) => chat.id === chatId)?.lastMessage).toEqual(lastSummary)
     expect(paths.filter((path) => path.endsWith(`/chats/${chatId}`))).toHaveLength(1)
     expect(messenger.selectedId).toBeNull()
+  })
+
+  it('shows group activity that carries its preview without fetching the row', async () => {
+    vi.useFakeTimers()
+    await renderMessenger()
+    await act(async () => {
+      sockets[0].open()
+      messenger.closeChat()
+    })
+    const row = messenger.chats.find((chat) => chat.id === chatId)!
+    const next = String(BigInt(row.lastSequence) + 1n)
+    paths = []
+    const activity = {
+      type: 'sidebar_activity',
+      version: 1,
+      chatId,
+      sequence: next,
+      messageId: '01BX5ZZKBKACTAV9WEVGEMMVRZ',
+      senderId: recipient.id,
+      senderUsername: 'katya',
+      createdAt: '2026-11-19T10:00:00Z',
+      preview: 'Хорошо',
+    }
+    await act(async () => {
+      sockets[0].event(activity)
+      sockets[0].event(activity)
+      await vi.advanceTimersByTimeAsync(2000)
+    })
+    expect(messenger.chats.find((chat) => chat.id === chatId)).toMatchObject({
+      lastSequence: next,
+      lastMessage: { id: activity.messageId, senderUsername: 'katya', bodyPreview: 'Хорошо' },
+    })
+    expect(paths.filter((path) => path.endsWith(`/chats/${chatId}`))).toHaveLength(0)
   })
 
   it('deletes a never-opened chat without changing selection or loading its history', async () => {

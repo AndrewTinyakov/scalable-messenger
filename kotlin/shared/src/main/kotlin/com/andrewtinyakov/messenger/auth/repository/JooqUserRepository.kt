@@ -56,6 +56,14 @@ class JooqUserRepository(
             .where(USERS.ID.eq(userId.value))
             .fetchOne { it.toUserSummary() }
 
+    override fun findSummaries(userIds: Collection<UserId>): List<UserSummary> {
+        if (userIds.isEmpty()) return emptyList()
+        return db.select(USERS.ID, USERS.USERNAME)
+            .from(USERS)
+            .where(USERS.ID.`in`(userIds.map { it.value }))
+            .fetch { it.toUserSummary() }
+    }
+
     override fun existsById(userId: UserId): Boolean =
         db.fetchExists(db.selectOne().from(USERS).where(USERS.ID.eq(userId.value)))
 

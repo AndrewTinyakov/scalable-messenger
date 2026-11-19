@@ -9,4 +9,6 @@ data class OutboxMessage(
     val groupPublicationOrder: Long? = null,
     val createdAt: OffsetDateTime? = null,
     val replayPayload: String? = null,
+    /** Chat-list activity for a group message, built while hydrating. Published live only, never stored. */
+    val activityPayload: String? = null,
 )

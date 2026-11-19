@@ -1,12 +1,16 @@
 package com.andrewtinyakov.messenger.infrastructure.redis
 
+import com.andrewtinyakov.messenger.auth.model.UserId
+import com.andrewtinyakov.messenger.auth.repository.UserRepository
 import com.andrewtinyakov.messenger.generated.messaging.event.HistoryChangedEventV1
 import com.andrewtinyakov.messenger.generated.messaging.event.MessageSavedEventV1
 import com.andrewtinyakov.messenger.generated.messaging.event.RoomEventType
+import com.andrewtinyakov.messenger.generated.messaging.event.SidebarActivityEventV1
 import com.andrewtinyakov.messenger.infrastructure.outbox.EventId
 import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxMessage
 import com.andrewtinyakov.messenger.message.model.Message
 import com.andrewtinyakov.messenger.message.model.MessageId
+import com.andrewtinyakov.messenger.message.model.preview
 import com.andrewtinyakov.messenger.message.repository.MessageRepository
 import org.springframework.stereotype.Component
 import tools.jackson.databind.ObjectMapper
@@ -14,6 +18,7 @@ import tools.jackson.databind.ObjectMapper
 @Component
 class PublicationHydration(
     private val messageRepository: MessageRepository,
+    private val userRepository: UserRepository,
     private val mapper: ObjectMapper,
     private val metrics: PublicationHydrationMetrics,
 ) {
@@ -21,9 +26,10 @@ class PublicationHydration(
         val references = readSavedMessageReferences(rows)
         if (references.isEmpty()) return rows
         val current = findCurrentMessages(references.values)
+        val usernames = findGroupSenderUsernames(rows, references, current)
         return rows.map { row ->
             val reference = references[row.id] ?: return@map row
-            hydrate(row, reference, current[reference.messageId])
+            hydrate(row, reference, current[reference.messageId], usernames)
         }
     }
 
@@ -44,18 +50,49 @@ class PublicationHydration(
             messageRepository.findMessagesForPublication(ids)
         }.associateBy { it.id }
 
-    private fun hydrate(row: OutboxMessage, reference: PublicationReference, current: Message?): OutboxMessage {
+    // Chat-list rows show the sender's name, so group activity needs usernames. One lookup covers the batch.
+    private fun findGroupSenderUsernames(
+        rows: List<OutboxMessage>,
+        references: Map<EventId, PublicationReference>,
+        current: Map<MessageId, Message>,
+    ): Map<UserId, String> {
+        val senders = rows.filter { RoomAddress.isGroup(it.room) }
+            .mapNotNull { row -> references[row.id]?.let { current[it.messageId]?.senderId } }
+            .toSet()
+        return userRepository.findSummaries(senders).associate { it.id to it.username }
+    }
+
+    private fun hydrate(
+        row: OutboxMessage,
+        reference: PublicationReference,
+        current: Message?,
+        usernames: Map<UserId, String>,
+    ): OutboxMessage {
         val hint = recoveryHint(row, reference)
         val message = current?.takeIf { it.matches(reference) }
-        val live = if (message == null) {
+        if (message == null) {
             metrics.absent()
-            hint
-        } else {
-            metrics.saved()
-            liveMessage(row, reference, message)
+            return row.copy(payload = hint, replayPayload = hint)
         }
-        return row.copy(payload = live, replayPayload = hint)
+        metrics.saved()
+        val activity = usernames[message.senderId]
+            ?.takeIf { RoomAddress.isGroup(row.room) }
+            ?.let { sidebarActivity(reference, message, it) }
+        return row.copy(payload = liveMessage(row, reference, message), replayPayload = hint, activityPayload = activity)
     }
+
+    private fun sidebarActivity(reference: PublicationReference, message: Message, senderUsername: String): String =
+        mapper.writeValueAsString(
+            SidebarActivityEventV1.create(
+                chatId = reference.chatId,
+                sequence = reference.sequence,
+                messageId = message.id.value,
+                senderId = message.senderId.value,
+                senderUsername = senderUsername,
+                createdAt = message.createdAt,
+                preview = message.preview,
+            ),
+        )
 
     private fun Message.matches(reference: PublicationReference): Boolean =
         chatId.value == reference.chatId && sequence.toString() == reference.sequence && deletedAt == null

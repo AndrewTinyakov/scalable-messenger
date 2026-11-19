@@ -71,8 +71,24 @@ export function sendSocketFrame(socket: WebSocket, frame: OutgoingSocketFrame): 
 type LiveEvent = { eventId: string; room: string; epoch: string; streamId: string }
 
 type MessageFields = Omit<Message, 'id'> & { messageId: string }
+/** The new message a chat-list row can show without fetching it. */
+export type ActivityMessage = {
+  messageId: string
+  senderId: string
+  senderUsername: string
+  createdAt: string
+  preview: string
+}
+const activityMessageFields = [
+  'messageId',
+  'senderId',
+  'senderUsername',
+  'createdAt',
+  'preview',
+] as const
+const USERNAME = /^[a-z0-9_]{3,40}$/
 export type SocketEvent = { version: 1 } & (
-  | { type: 'sidebar_activity'; chatId: string; sequence: string }
+  | ({ type: 'sidebar_activity'; chatId: string; sequence: string } & Partial<ActivityMessage>)
   | { type: 'sidebar_presence'; observedAt: string; validForMs: number; statuses: PresenceStatus[] }
   | ({
       type: 'history_changed'
@@ -143,7 +159,7 @@ const messageFields = [
   'replyVersion',
 ]
 const eventFields = {
-  sidebar_activity: ['chatId', 'sequence'],
+  sidebar_activity: ['chatId', 'sequence', ...activityMessageFields],
   sidebar_presence: ['observedAt', 'validForMs', 'statuses'],
   history_changed: [...liveFields, 'chatId', 'sequence', 'mutationRevision', 'visibilityRevision'],
   message_changed: [...liveFields, ...messageFields, 'mutationRevision'],
@@ -227,9 +243,22 @@ export function decodeSocketEvent(data: unknown): SocketEvent | null {
         isSequence(frame.mutationRevision) &&
         isSequence(frame.visibilityRevision)
       break
-    case 'sidebar_activity':
-      valid = isId(frame.chatId) && isSequence(frame.sequence) && frame.sequence !== '0'
+    case 'sidebar_activity': {
+      const present = activityMessageFields.filter((key) => key in frame).length
+      valid =
+        isId(frame.chatId) &&
+        isSequence(frame.sequence) &&
+        frame.sequence !== '0' &&
+        (present === 0 ||
+          (present === activityMessageFields.length &&
+            typeof frame.senderUsername === 'string' &&
+            USERNAME.test(frame.senderUsername) &&
+            isDateTime(frame.createdAt) &&
+            typeof frame.preview === 'string' &&
+            frame.preview.length > 0 &&
+            [...frame.preview].length <= 160))
       break
+    }
     case 'sidebar_presence':
     case 'presence':
       valid =

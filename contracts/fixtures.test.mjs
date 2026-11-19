@@ -219,6 +219,19 @@ test('sidebar watch and bodyless observations share strict bounded schemas', () 
   assert.equal(watch({ ...fixture, chatIds: Array.from({length:101}, (_, i) => String(i).padStart(26, '0')) }), false);
 });
 
+test('sidebar activity carries a complete message preview or none of it', () => {
+  for (const path of ['schemas/socket/frame/sidebar-activity-v1.yaml', 'schemas/message/event/sidebar-activity-v1.yaml']) {
+    const activity = ajv.getSchema(new URL(path, root).href) ?? validate(path);
+    const message = readJSON('fixtures/valid/sidebar-activity-message.json');
+    assert.equal(activity(message), true, JSON.stringify(activity.errors));
+    const { preview, ...withoutPreview } = message;
+    assert.equal(activity(withoutPreview), false);
+    assert.equal(activity({ ...message, preview: 'x'.repeat(161) }), false);
+    assert.equal(activity({ ...message, preview: '😀'.repeat(160) }), true, 'preview length counts code points');
+    assert.equal(activity({ ...message, senderUsername: 'Not Valid' }), false);
+  }
+});
+
 test('personal chat preferences, message pins and forwards share strict wire fixtures', () => {
   const preferences = validate('schemas/message/event/chat-preferences-changed-v1.yaml');
   const socketPreferences = validate('schemas/socket/frame/chat-preferences-changed-v1.yaml');

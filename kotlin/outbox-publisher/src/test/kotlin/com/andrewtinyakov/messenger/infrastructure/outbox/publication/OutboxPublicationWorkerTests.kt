@@ -41,7 +41,7 @@ class OutboxPublicationWorkerTests {
         `when`(connection.createStatement()).thenReturn(statement)
         `when`(connection.unwrap(PGConnection::class.java)).thenReturn(mock(PGConnection::class.java))
         val publisher = OutboxPublicationWorker(
-            dataSource,
+            { dataSource.connection },
             mock(OutboxPublicationService::class.java),
             OutboxPublisherProperties(workerJoinTimeout = Duration.ofMillis(10)),
         )
@@ -79,7 +79,10 @@ class OutboxPublicationWorkerTests {
             check(release.await(5, TimeUnit.SECONDS))
             emptyArray<PGNotification>()
         }
-        val publisher = OutboxPublicationWorker(dataSource, publication, OutboxPublisherProperties(pollInterval = Duration.ofMillis(100)))
+        val publisher =
+            OutboxPublicationWorker({
+                dataSource.connection
+            }, publication, OutboxPublisherProperties(pollInterval = Duration.ofMillis(100)))
         publisher.start()
         try {
             assertTrue(connected.await(1, TimeUnit.SECONDS))
@@ -126,7 +129,8 @@ class OutboxPublicationWorkerTests {
             if (calls.getAndIncrement() == 0) notification.set(true) else nextQuery.countDown()
             0
         }
-        val publisher = OutboxPublicationWorker(dataSource, publication, OutboxPublisherProperties(pollInterval = Duration.ofSeconds(5)))
+        val publisher =
+            OutboxPublicationWorker({ dataSource.connection }, publication, OutboxPublisherProperties(pollInterval = Duration.ofSeconds(5)))
         publisher.start()
         try {
             assertTrue(nextQuery.await(1, TimeUnit.SECONDS))

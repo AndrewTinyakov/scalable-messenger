@@ -2,6 +2,7 @@ package com.andrewtinyakov.messenger.message.service
 
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.ChatId
+import com.andrewtinyakov.messenger.infrastructure.database.ReadTransactions
 import com.andrewtinyakov.messenger.message.model.AnchorNeighbours
 import com.andrewtinyakov.messenger.message.model.AnchorWindow
 import com.andrewtinyakov.messenger.message.model.Message
@@ -31,8 +32,6 @@ import com.andrewtinyakov.messenger.shared.web.invalidInput
 import com.andrewtinyakov.messenger.shared.web.notFound
 import com.andrewtinyakov.messenger.shared.web.requirePageLimit
 import org.springframework.stereotype.Service
-import org.springframework.transaction.TransactionDefinition
-import org.springframework.transaction.support.TransactionTemplate
 import com.andrewtinyakov.messenger.message.web.payload.MessageChangeKind as MessageChangeKindResponse
 
 @Service
@@ -42,18 +41,13 @@ class MessageHistoryService(
     private val messageChangeRepository: MessageChangeRepository,
     private val messageVisibilityRepository: MessageVisibilityRepository,
     private val visibleHistoryService: VisibleHistoryService,
-    tx: TransactionTemplate,
+    private val reads: ReadTransactions,
 ) {
-    private val snapshot = TransactionTemplate(requireNotNull(tx.transactionManager)).apply {
-        isolationLevel = TransactionDefinition.ISOLATION_REPEATABLE_READ
-        isReadOnly = true
-    }
-
     fun messages(chatId: ChatId, userId: UserId, afterSeq: Long?, beforeSeq: Long?, limit: Int): MessageHistoryResponse {
         require(afterSeq == null || beforeSeq == null)
         val direction = if (afterSeq != null) HistoryDirection.AFTER else HistoryDirection.BEFORE
         return metrics.timeMessages(direction) {
-            snapshot.execute {
+            reads.primary(snapshot = true) {
                 val state = state(chatId, userId)
                 requirePageLimit(limit)
                 if (afterSeq != null && afterSeq > state.snapshotSequence) {
@@ -86,7 +80,7 @@ class MessageHistoryService(
         anchorSequence: Long?,
         limit: Int,
     ): MessageAroundResponse = metrics.timeAround {
-        snapshot.execute {
+        reads.primary(snapshot = true) {
             val state = state(chatId, userId)
             requirePageLimit(limit)
             requireAnchorReference(messageId, anchorSequence)
@@ -95,13 +89,13 @@ class MessageHistoryService(
             val neighbours = readNeighbours(chatId, userId, state, anchorAt)
             val anchor = requested
                 ?: neighbours.closestTo(anchorAt)
-                ?: return@execute emptyAround(state, neighbours)
+                ?: return@primary emptyAround(state, neighbours)
             val window = readWindow(chatId, userId, state, anchor, limit)
             trimWindow(state, anchor, window, limit)
         }
     }
 
-    fun resolve(chatId: ChatId, userId: UserId, ids: List<MessageId>): MessageResolveResponse = snapshot.execute {
+    fun resolve(chatId: ChatId, userId: UserId, ids: List<MessageId>): MessageResolveResponse = reads.primary(snapshot = true) {
         val state = state(chatId, userId)
         if (ids.size !in 1..Message.MAX_LOOKUP_IDS ||
             ids.distinct().size != ids.size
@@ -114,11 +108,11 @@ class MessageHistoryService(
     fun visibility(chatId: ChatId, userId: UserId): MessageVisibilityResponse = state(chatId, userId).toVisibilityResponse()
 
     fun changes(chatId: ChatId, userId: UserId, after: Long, limit: Int): MessageChangesResponse = metrics.timeChanges {
-        snapshot.execute {
+        reads.primary(snapshot = true) {
             val state = state(chatId, userId)
             val cursor = messageChangeRepository.cursor(chatId, userId) ?: notFound()
             requirePageLimit(limit)
-            if (after < cursor.floor || after > cursor.revision) return@execute resetChanges(state, cursor)
+            if (after < cursor.floor || after > cursor.revision) return@primary resetChanges(state, cursor)
             val page = messageChangeRepository.page(chatId, after, cursor.revision, limit)
             val current = findCurrentMessages(chatId, userId, page)
             state.toChangesResponse(

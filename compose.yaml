@@ -1,7 +1,8 @@
 name: messenger
 
 x-database-environment: &database-environment
-  SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/messenger
+  SPRING_DATASOURCE_URL: jdbc:postgresql://pgbouncer:6432/messenger
+  SPRING_FLYWAY_URL: jdbc:postgresql://postgres:5432/messenger
   SPRING_DATASOURCE_USERNAME: messenger_api
   SPRING_DATASOURCE_PASSWORD: ${POSTGRES_API_PASSWORD:?Run scripts/dev-up.sh}
   SPRING_FLYWAY_USER: messenger_migrator
@@ -49,6 +50,8 @@ x-api: &api
     - ./.local/grpc/api-key.pem:/run/messenger-grpc/api-key.pem:ro
   depends_on:
     postgres:
+      condition: service_healthy
+    pgbouncer:
       condition: service_healthy
   restart: unless-stopped
 
@@ -143,6 +146,25 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+    restart: unless-stopped
+
+  pgbouncer:
+    networks: [data]
+    image: messenger-pgbouncer:local
+    build: ./deploy/pgbouncer
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      POSTGRES_API_PASSWORD: ${POSTGRES_API_PASSWORD:?Run scripts/dev-up.sh}
+      POSTGRES_COMMAND_PASSWORD: ${POSTGRES_COMMAND_PASSWORD:?Run scripts/dev-up.sh}
+      POSTGRES_PUBLISHER_PASSWORD: ${POSTGRES_PUBLISHER_PASSWORD:?Run scripts/dev-up.sh}
+    healthcheck:
+      test: [CMD, nc, -z, 127.0.0.1, '6432']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    depends_on:
+      postgres: { condition: service_healthy }
     restart: unless-stopped
 
   rabbitmq-1:
@@ -400,6 +422,7 @@ services:
       SPRING_RABBITMQ_ADDRESSES: amqp://messenger:${RABBITMQ_PASSWORD:?Run scripts/dev-up.sh}@rabbitmq-1:5672/,amqp://messenger:${RABBITMQ_PASSWORD:?Run scripts/dev-up.sh}@rabbitmq-2:5672/,amqp://messenger:${RABBITMQ_PASSWORD:?Run scripts/dev-up.sh}@rabbitmq-3:5672/
     depends_on:
       postgres: { condition: service_healthy }
+      pgbouncer: { condition: service_healthy }
       rabbitmq-cluster-init: { condition: service_completed_successfully }
     restart: unless-stopped
 
@@ -419,10 +442,12 @@ services:
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PUBLISHER_PASSWORD:?Run scripts/dev-up.sh}
       METRICS_USERNAME: metrics
       METRICS_PASSWORD: ${METRICS_PASSWORD:?Run scripts/dev-up.sh}
+      MESSENGER_PUBLISHER_LISTEN_URL: jdbc:postgresql://postgres:5432/messenger
       SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:?Run scripts/dev-up.sh}
       SPRING_DATA_REDIS_CLUSTER_NODES: redis-1:6379,redis-2:6379,redis-3:6379
     depends_on:
       postgres: { condition: service_healthy }
+      pgbouncer: { condition: service_healthy }
       redis-cluster-init: { condition: service_completed_successfully }
     restart: unless-stopped
 

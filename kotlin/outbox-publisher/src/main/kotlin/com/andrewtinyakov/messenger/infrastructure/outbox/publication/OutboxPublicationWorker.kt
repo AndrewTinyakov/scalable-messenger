@@ -9,11 +9,10 @@ import org.springframework.boot.context.event.ApplicationReadyEvent
 import org.springframework.context.event.EventListener
 import org.springframework.stereotype.Component
 import java.sql.Connection
-import javax.sql.DataSource
 
 @Component
 class OutboxPublicationWorker(
-    private val dataSource: DataSource,
+    private val listenConnections: OutboxListenConnections,
     private val outboxPublicationService: OutboxPublicationService,
     private val properties: OutboxPublisherProperties,
 ) {
@@ -64,7 +63,7 @@ class OutboxPublicationWorker(
     private fun run() {
         while (running) {
             try {
-                dataSource.connection.use { connection ->
+                listenConnections.open().use { connection ->
                     listen(connection)
                     val postgres = connection.unwrap(PGConnection::class.java)
                     while (running) {

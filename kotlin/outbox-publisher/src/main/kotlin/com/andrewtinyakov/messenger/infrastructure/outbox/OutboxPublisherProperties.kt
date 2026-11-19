@@ -23,6 +23,7 @@ data class OutboxPublisherProperties(
     val roomBatchSize: Int = 16,
     val workerJoinTimeout: Duration = Duration.ofSeconds(2),
     val roomPublicationQueueCapacity: Int = 500,
+    val listenUrl: String? = null,
 ) {
     init {
         require(pollInterval in Duration.ofMillis(100)..Duration.ofSeconds(60)) {

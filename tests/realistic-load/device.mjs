@@ -70,7 +70,7 @@ export class Device {
 
   backgroundTask(key, task) {
     if (this.refreshes.has(key)) return this.refreshes.get(key);
-    if (this.state.background.size >= 256) {
+    if (this.state.background.size >= 256 * this.state.capacity) {
       this.state.metrics.failure(key.split('/')[0], new Fault('backgroundCapacity'));
       return Promise.resolve();
     }

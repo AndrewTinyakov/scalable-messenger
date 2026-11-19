@@ -38,7 +38,7 @@ async function main() {
     return;
   }
   check(values.plan && values.manifest, 'planAndManifest');
-  const input = await json(values.plan, 32 * 2 ** 20);
+  const input = await json(values.plan, 512 * 2 ** 20);
   const plan = buildPlan(input.profile, input.seed);
   check(JSON.stringify(input) === JSON.stringify(plan), 'planMismatch');
   const fingerprint = createHash('sha256').update(JSON.stringify(plan)).digest('hex');
@@ -50,8 +50,10 @@ async function main() {
     composeProject: values['compose-project'] ?? 'messenger',
     authRate: Number(values['auth-rate'] ?? 1),
     ticketRate: Number(values['ticket-rate'] ?? 4),
+    // Driver queue limits are sized for 1,000 users and grow with the population.
+    capacity: Math.ceil(plan.population.length / 1000),
   };
-  check(options.authRate >= 1 && options.authRate <= 100 && options.ticketRate >= 1 && options.ticketRate <= 25, 'rateBounds');
+  check(options.authRate >= 1 && options.authRate <= 200 && options.ticketRate >= 1 && options.ticketRate <= 500, 'rateBounds');
   const metrics = new Measurements();
   const http = new Http(options, metrics);
   const halt = () => http.controller.abort(new Fault('interrupted'));
@@ -69,6 +71,12 @@ async function main() {
       const report = await run(plan, manifest, http, metrics);
       await writeFile(values.report, JSON.stringify(report, null, 2) + '\n');
       process.stdout.write(`${plan.profile.name} ${report.passed ? 'passed' : 'failed'}, ${report.correctness.saved} saved, ${report.correctness.missing} missing, ${report.correctness.pending} pending, ${report.metrics.latencies.schedulingLag?.maxMs.toFixed(1)} ms max scheduling lag\n`);
+      for (const stage of report.metrics.stages ?? []) {
+        const p99 = name => stage.latencies[name]?.p99UpperMs.toFixed(0) ?? '-';
+        const failures = Object.values(stage.failures).reduce((a, b) => a + b, 0);
+        const errors = Object.entries(stage.httpStatuses).filter(([code]) => code >= 500 || code === '429').reduce((a, [, n]) => a + n, 0);
+        process.stdout.write(`  ${stage.users} users from ${stage.atMs / 1000}s: p99 own ack ${p99('send.ownAck')} ms, delivery ${p99('send.recipientLive')} ms, chat open ${p99('chatOpen.firstPageReady')} ms, lag ${p99('schedulingLag')} ms, ${failures} failures, ${errors} HTTP 429/5xx\n`);
+      }
       if (!report.passed) process.exitCode = 1;
     }
   } catch (error) {

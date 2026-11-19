@@ -163,3 +163,37 @@ test('HTTP failures report status without the response body, auth headers or sub
   assert.match(report, /"403":1/);
   assert.doesNotMatch(report, /secret-/);
 });
+
+test('ramp profile adds users in stages at a steady per-user rate', () => {
+  const input = { ...profile('users-200'), name: 'ramp', durationMs: 900000,
+    ramp: { periodMs: 600000, stages: [{ atMs: 0, users: 50 }, { atMs: 300000, users: 100 }, { atMs: 600000, users: 200 }] } };
+  input.users = 200;
+  const plan = buildPlan(input, 1118);
+  const joined = id => input.ramp.stages.find(stage => id < stage.users).atMs;
+  assert.ok(plan.sessions.every(session => session.start >= joined(session.actor) && session.end <= input.durationMs));
+  // Sessions per user per period match the profile, whatever the join time.
+  const rate = users => {
+    const ids = new Set(plan.population.filter(user => users(user.id)).map(user => user.id));
+    const window = input.durationMs - joined([...ids][0]);
+    return plan.sessions.filter(session => ids.has(session.actor)).length / ids.size / window;
+  };
+  const early = rate(id => id < 50);
+  const late = rate(id => id >= 100);
+  assert.ok(Math.abs(late / early - 1) < .25, `${early} vs ${late}`);
+  assert.throws(() => buildPlan({ ...input, ramp: { ...input.ramp, stages: input.ramp.stages.slice(1) } }, 1118), /ramp/);
+  assert.equal(JSON.stringify(buildPlan(profile('users-200'), 1118)), JSON.stringify(buildPlan(profile('users-200'), 1118)));
+});
+
+test('stage metrics follow the clock', () => {
+  const metrics = new Measurements();
+  metrics.startStages([{ atMs: 0, users: 10 }, { atMs: 50, users: 20 }], performance.now());
+  metrics.observe('send.ownAck', 5);
+  metrics.status(500);
+  metrics.stageStarted -= 100;
+  metrics.observe('send.ownAck', 7);
+  const [first, second] = metrics.report().stages;
+  assert.equal(first.latencies['send.ownAck'].count, 1);
+  assert.equal(first.httpStatuses[500], 1);
+  assert.equal(second.latencies['send.ownAck'].maxMs, 7);
+  assert.equal(metrics.report().latencies['send.ownAck'].count, 2);
+});

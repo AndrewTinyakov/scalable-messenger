@@ -2,7 +2,7 @@
 // The same inputs always produce the same plan, so every run offers identical client behavior.
 
 const FORMAT = 'messenger-realistic-load-v1';
-const LIMITS = { fixtureMessages: 200_000, actions: 80_000, sends: 20_000, sendsPerSecond: 100 };
+const LIMITS = { users: 10_000, fixtureMessages: 1_000_000, actions: 1_000_000, sends: 200_000, sendsPerSecond: 1000 };
 
 // Offsets in milliseconds, taken from how the browser client behaves around one chat visit.
 const CLIENT = {
@@ -72,7 +72,7 @@ function distribute(rng, count, shares) {
 }
 
 export function validateProfile(profile, seed) {
-  const { name, users, durationMs, personas, devicesPerUser, graph, history, timing, rates, text } = profile;
+  const { name, users, durationMs, personas, devicesPerUser, graph, history, timing, rates, text, ramp } = profile;
   const probability = value => Number.isFinite(value) && value >= 0 && value <= 1;
   const integer = (value, min, max) => Number.isInteger(value) && value >= min && value <= max;
   const shares = values => values.every(probability) && Math.abs(values.reduce((a, b) => a + b, 0) - 1) < 1e-6;
@@ -81,7 +81,7 @@ export function validateProfile(profile, seed) {
   const checks = {
     seed: integer(seed, 0, 0xffffffff),
     name: /^[a-z0-9-]{1,40}$/.test(name),
-    users: integer(users, 8, 1000),
+    users: integer(users, 8, LIMITS.users),
     durationMs: integer(durationMs, 30000, 3600000),
     personas: Array.isArray(personas) && personas.map(persona => persona.name).join() === PERSONAS.join() &&
       shares(personas.map(persona => persona.share)) &&
@@ -100,6 +100,12 @@ export function validateProfile(profile, seed) {
       integer(timing.lagLimitMs, 1, 60000),
     rates: ACTION_RATES.every(key => probability(rates?.[key])) && rates.reply <= .5,
     text: integer(text?.median, 3, 4000) && Number.isFinite(text.spread) && text.spread >= 0 && text.spread <= 4,
+    // Each stage adds users who join at its start. The last stage includes everyone, and joins leave two minutes of traffic.
+    ramp: ramp === undefined || (integer(ramp.periodMs, 60000, 3600000) && Array.isArray(ramp.stages) &&
+      ramp.stages.length >= 2 && ramp.stages.length <= 20 && ramp.stages[0].atMs === 0 &&
+      ramp.stages.at(-1).users === users && ramp.stages.every((stage, i) => integer(stage.users, 8, users) &&
+        integer(stage.atMs, 0, durationMs - 120000) &&
+        (i === 0 || (stage.atMs > ramp.stages[i - 1].atMs && stage.users > ramp.stages[i - 1].users)))),
   };
   const invalid = Object.keys(checks).filter(key => !checks[key]);
   if (invalid.length) throw new Error('Invalid profile: ' + invalid.join(', '));
@@ -192,17 +198,25 @@ class Planner {
 
   // Each device gets its sessions spread over the run. Only one session per device is open at a time.
   planUser(user, persona, directPairs, everyone) {
-    const { rng, profile: { durationMs, timing } } = this;
+    const { rng, profile: { durationMs, timing, ramp } } = this;
     const chats = rng.shuffle(this.memberships[user.id]);
     const favorites = chats.slice(0, persona.favoriteChats);
+    // In a ramp, persona session counts are per ramp period, so a user's activity rate doesn't depend on when they join.
+    const joined = ramp ? ramp.stages.find(stage => user.id < stage.users).atMs : 0;
+    const window = durationMs - joined;
+    const sessions = expected => {
+      const whole = Math.floor(expected);
+      return whole + Number(rng.chance(expected - whole));
+    };
     for (let device = 0; device < user.devices; device++) {
-      const count = device === 0 ? persona.sessions : Number(rng.chance(timing.secondaryUse));
-      const slot = durationMs / count;
+      const count = !ramp ? (device === 0 ? persona.sessions : Number(rng.chance(timing.secondaryUse)))
+        : sessions((device === 0 ? persona.sessions : timing.secondaryUse) * window / ramp.periodMs);
+      const slot = window / count;
       for (let i = 0; i < count; i++) {
-        const latestStart = Math.min(slot * .65, slot - Math.min(1000, slot / 3), durationMs - 18000);
-        const start = Math.round(i * slot + rng() * latestStart);
+        const latestStart = Math.min(slot * .65, slot - Math.min(1000, slot / 3), window - 18000);
+        const start = Math.round(joined + i * slot + rng() * latestStart);
         const length = clamp(rng.lognormal(persona.sessionMedianMs, timing.sessionSpread), CLIENT.session.min, slot * .75);
-        const end = Math.min(Math.floor((i + 1) * slot) - 50, start + Math.round(length));
+        const end = Math.min(joined + Math.floor((i + 1) * slot) - 50, start + Math.round(length));
         const session = { id: this.sessions.length, actor: user.id, device, start, end };
         this.sessions.push(session);
         this.planSession(session, persona, { chats, favorites }, directPairs, everyone);

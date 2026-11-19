@@ -15,19 +15,41 @@ export class Measurements {
   latencies = new Map();
   failures = Object.create(null);
   rss = 0;
+  // During a ramp, everything is also recorded under the stage that is running at the time.
+  stages = null;
+  stage = null;
+
+  startStages(stages, started = performance.now()) {
+    this.stages = stages.map(stage => ({ ...stage, metrics: new Measurements() }));
+    this.stageStarted = started;
+  }
+
+  current() {
+    if (!this.stages) return null;
+    const elapsed = performance.now() - this.stageStarted;
+    return this.stages.findLast(stage => stage.atMs <= elapsed)?.metrics ?? null;
+  }
 
   count(name, amount = 1) {
     this.counts[name] = (this.counts[name] ?? 0) + amount;
+    this.current()?.count(name, amount);
+  }
+
+  status(code) {
+    this.statuses[code] = (this.statuses[code] ?? 0) + 1;
+    this.current()?.status(code);
   }
 
   observe(name, ms) {
     if (!this.latencies.has(name)) this.latencies.set(name, new Histogram());
     this.latencies.get(name).observe(Math.max(0, ms));
+    this.current()?.observe(name, ms);
   }
 
   failure(operation, error) {
     const key = operation + '/' + (error instanceof Fault ? error.code : 'unexpected');
     this.failures[key] = (this.failures[key] ?? 0) + 1;
+    this.current()?.failure(operation, error);
   }
 
   report() {
@@ -35,6 +57,7 @@ export class Measurements {
       counts: this.counts, httpStatuses: this.statuses, failures: this.failures,
       generatorRssBytes: this.rss,
       latencies: Object.fromEntries([...this.latencies].map(([name, histogram]) => [name, histogram.report()])),
+      ...(this.stages ? { stages: this.stages.map(({ metrics, ...stage }) => ({ ...stage, ...metrics.report() })) } : {}),
     };
   }
 }
@@ -60,8 +83,10 @@ export class Http {
   constructor(options, metrics) {
     this.options = options;
     this.metrics = metrics;
-    this.tickets = new TicketAdmission({ intervalMs: Math.ceil(1000 / options.ticketRate), limit: 64, sleep: sleepForAdmission });
-    this.auth = new TicketAdmission({ intervalMs: Math.ceil(1000 / options.authRate), limit: 32, sleep: sleepForAdmission });
+    const capacity = options.capacity ?? 1;
+    this.inflightLimit = 256 * capacity;
+    this.tickets = new TicketAdmission({ intervalMs: 1000 / options.ticketRate, limit: 64 * capacity, sleep: sleepForAdmission });
+    this.auth = new TicketAdmission({ intervalMs: 1000 / options.authRate, limit: 32 * capacity, sleep: sleepForAdmission });
   }
 
   async request(session, path, method = 'GET', body) {
@@ -87,7 +112,7 @@ export class Http {
   }
 
   async attempt(session, path, method, body, signal) {
-    check(this.inflight < 256, 'httpCapacity');
+    check(this.inflight < this.inflightLimit, 'httpCapacity');
     this.inflight++;
     try {
       const token = session?.cookie;
@@ -103,7 +128,7 @@ export class Http {
         body: body === undefined ? undefined : JSON.stringify(body),
       });
       const status = response.status;
-      this.metrics.statuses[status] = (this.metrics.statuses[status] ?? 0) + 1;
+      this.metrics.status(status);
       if (!response.ok) {
         await response.body?.cancel();
         const error = new Fault('http' + status);

@@ -22,7 +22,7 @@ class Run {
   early = new Map();
 
   constructor(plan, manifest, http, metrics) {
-    Object.assign(this, { plan, manifest, http, metrics, signal: http.controller.signal });
+    Object.assign(this, { plan, manifest, http, metrics, signal: http.controller.signal, capacity: http.options.capacity ?? 1 });
     this.devices = manifest.devices.map((devices, actor) => devices.map(credentials => new Device(this, credentials, actor)));
     this.roster = new Map(plan.chats.map(chat => [manifest.chats[chat.id], chat]));
   }
@@ -443,7 +443,19 @@ class Run {
 
 export async function run(plan, manifest, http, metrics) {
   const state = new Run(plan, manifest, http, metrics);
-  const sampleRss = () => { metrics.rss = Math.max(metrics.rss, process.memoryUsage.rss()); };
+  // The generator samples its own health, so a saturated driver can be told apart from a slow server.
+  let lastSample = performance.now();
+  let lastUtilization = performance.eventLoopUtilization();
+  const sampleRss = () => {
+    metrics.rss = Math.max(metrics.rss, process.memoryUsage.rss());
+    const now = performance.now();
+    const utilization = performance.eventLoopUtilization();
+    metrics.observe('generator.timerDelay', Math.max(0, now - lastSample - 1000));
+    metrics.observe('generator.eventLoopBusyPercent', 100 * performance.eventLoopUtilization(utilization, lastUtilization).utilization);
+    metrics.observe('generator.inflightHttp', http.inflight);
+    [lastSample, lastUtilization] = [now, utilization];
+  };
+  if (plan.profile.ramp) metrics.startStages(plan.profile.ramp.stages);
   sampleRss();
   const rssTimer = setInterval(sampleRss, 1000);
   let scheduleResult;
@@ -457,6 +469,7 @@ export async function run(plan, manifest, http, metrics) {
         if (ms > plan.profile.timing.lagLimitMs) metrics.count('lagExceeded');
       },
       failed: (action, error) => { state.failedActions++; metrics.failure('scheduler.' + action.type, error); },
+      limit: 512 * state.capacity,
     });
     while (state.background.size) await Promise.all([...state.background]);
     correctness = await state.verify();

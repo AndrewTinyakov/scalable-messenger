@@ -442,7 +442,7 @@ services:
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PUBLISHER_PASSWORD:?Run scripts/dev-up.sh}
       METRICS_USERNAME: metrics
       METRICS_PASSWORD: ${METRICS_PASSWORD:?Run scripts/dev-up.sh}
-      MESSENGER_PUBLISHER_LISTEN_URL: jdbc:postgresql://postgres:5432/messenger
+      MESSENGER_PUBLISHER_LISTEN_URL: jdbc:postgresql://postgres:5432/messenger?ApplicationName=messenger-outbox-publisher-listen
       SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:?Run scripts/dev-up.sh}
       SPRING_DATA_REDIS_CLUSTER_NODES: redis-1:6379,redis-2:6379,redis-3:6379
     depends_on:

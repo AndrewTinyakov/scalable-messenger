@@ -35,7 +35,7 @@ class JooqChatDirectoryRepository(
         limit: Int,
         pinned: Boolean,
     ): List<MemberChat> {
-        val summary = chatSummary(userId)
+        val summary = chatSummary(userId, CHAT_MEMBERS)
         val activityAt = DSL.coalesce(CHATS.LAST_ACTIVITY_AT, CHAT_MEMBERS.JOINED_AT)
         val preferences = ChatPreferenceFields(CHAT_MEMBERS)
         return db.select(
@@ -165,8 +165,8 @@ class JooqChatDirectoryRepository(
         userId: UserId,
     ): MemberChatDetails? {
         val members = memberPreview()
-        val summary = chatSummary(userId)
         val viewer = CHAT_MEMBERS.`as`("viewer")
+        val summary = chatSummary(userId, viewer)
         val preferences = ChatPreferenceFields(viewer)
         val activityAt = DSL.coalesce(CHATS.LAST_ACTIVITY_AT, viewer.JOINED_AT)
         return db.select(

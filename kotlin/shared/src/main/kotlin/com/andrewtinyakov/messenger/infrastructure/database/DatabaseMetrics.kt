@@ -31,6 +31,10 @@ class DatabaseMetrics(
         }
     }
 
+    fun replicaRead(outcome: ReplicaReadOutcome) {
+        safely { registry.counter("messenger.database.replica.reads", "outcome", outcome.metricValue).increment() }
+    }
+
     private inline fun safely(action: () -> Unit) {
         try {
             action()

@@ -6,7 +6,8 @@ export function mergeReports(parts) {
   check(parts.length > 0 && parts.every(part => part.format === 'messenger-realistic-load-report-v1' && part.rawMetrics), 'shardReports');
   const [first] = parts;
   check(parts.every(part => part.fingerprint && part.fingerprint === first.fingerprint && part.startAt !== null &&
-    part.startAt === first.startAt && part.shard.count === parts.length), 'shardMismatch');
+    part.startAt === first.startAt && part.manifestFingerprint === first.manifestFingerprint &&
+    part.shard.count === parts.length), 'shardMismatch');
   check(new Set(parts.map(part => part.shard.index)).size === parts.length, 'shardMismatch');
   const sum = key => Object.fromEntries(Object.keys(first[key]).map(field =>
     [field, typeof first[key][field] === 'number' ? parts.reduce((total, part) => total + (part[key][field] ?? 0), 0) : first[key][field]]));

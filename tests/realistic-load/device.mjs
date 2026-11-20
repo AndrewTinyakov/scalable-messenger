@@ -308,10 +308,11 @@ export class Device {
 
   // Mirrors the browser: one /state check returns every counter the selected chat needs, and only the
   // parts whose counter moved are fetched.
-  async sync(id) {
+  async sync(id, { primary = false } = {}) {
     const view = this.view(id);
     view.stateAt = performance.now();
-    const current = await this.get(chatPath(id) + '/state', greater(view.baseline, '0') ? { minSeq: view.baseline } : {});
+    const fresh = !primary && view.loaded ? { minSeq: view.baseline, minMemberSeq: view.visibility } : {};
+    const current = await this.get(chatPath(id) + '/state', fresh);
     check(isSeq(current?.lastSeq) && isSeq(current.mutationSeq) && isSeq(current.memberSeq) && isSeq(current.pinsSeq) &&
       isSeq(current.ownReadThrough) && isSeq(current.otherReadThrough), 'invalidState');
     if (greater(current.ownReadThrough, view.reads)) view.reads = current.ownReadThrough;
@@ -492,7 +493,7 @@ export class Device {
     } else if (type === 'subscribed' && this.selected?.id === chatId) {
       this.subscribedTo = chatId;
     } else if (type === 'reads_changed' && this.selected?.id === chatId) {
-      this.backgroundTask('live.state/' + chatId, () => this.sync(chatId));
+      this.backgroundTask('live.state/' + chatId, () => this.sync(chatId, { primary: true }));
     } else if (type === 'message_changed' || type === 'history_changed') {
       this.backgroundTask('live.visibility/' + chatId, () => this.sync(chatId));
     } else if (type === 'pins_changed' && this.selected?.id === chatId) {

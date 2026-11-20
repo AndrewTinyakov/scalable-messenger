@@ -130,6 +130,7 @@ async function main() {
       const report = {
         ...await run(plan, manifest, http, metrics, { shard: { index: shardIndex, count: shardCount }, startAt }),
         fingerprint, startAt: startAt ?? null,
+        manifestFingerprint: createHash('sha256').update(JSON.stringify(manifest)).digest('hex'),
       };
       await writeFile(values.report, JSON.stringify(report, null, 2) + '\n');
       summarize(plan, report);

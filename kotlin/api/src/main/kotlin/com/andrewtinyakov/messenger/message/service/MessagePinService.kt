@@ -58,7 +58,7 @@ class MessagePinService(
         if (messagePinRepository.count(chatId, viewer) >= PinnedMessage.MAX_PER_SCOPE) {
             conflict(ApiErrorCode.PIN_LIMIT, "A chat can have up to ${PinnedMessage.MAX_PER_SCOPE} pinned messages")
         }
-        if (messagePinRepository.pin(chatId, message.sequence, viewer)) messageOutbox.enqueuePinsChanged(chat, viewer)
+        if (messagePinRepository.pin(chatId, message.sequence, viewer)) announce(chat, userId, viewer)
     }
 
     fun unpin(chatId: ChatId, userId: UserId, messageId: MessageId) = tx.executeWithoutResult {
@@ -74,10 +74,19 @@ class MessagePinService(
     }
 
     private fun notifyRemoved(chat: Chat, userId: UserId, removed: Set<PinScope>) {
-        when {
-            PinScope.EVERYONE in removed -> messageOutbox.enqueuePinsChanged(chat, null)
-            PinScope.SELF in removed -> messageOutbox.enqueuePinsChanged(chat, userId)
+        if (PinScope.EVERYONE in removed) announce(chat, userId, personalViewer = null)
+        if (PinScope.SELF in removed) announce(chat, userId, personalViewer = userId)
+    }
+
+    private fun announce(chat: Chat, userId: UserId, personalViewer: UserId?) {
+        if (personalViewer != null) {
+            val memberSeq = chatRepository.allocateMemberSequence(chat.id, personalViewer) ?: notFound()
+            messageOutbox.enqueuePinsChanged(chat, memberSeq, personalViewer)
+            return
         }
+        val seq = chatRepository.allocateEventSequence(chat.id, userId) ?: notFound()
+        messagePinRepository.recordSharedChange(chat.id, seq)
+        messageOutbox.enqueuePinsChanged(chat, seq, personalViewer = null)
     }
 
     private fun target(chatId: ChatId, userId: UserId, messageId: MessageId): Pair<Chat, Message> {

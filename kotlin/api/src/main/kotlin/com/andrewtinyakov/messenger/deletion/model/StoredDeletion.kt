@@ -10,8 +10,8 @@ data class StoredDeletion(
     val scope: DeletionScope,
     val target: DeletionTarget,
     val clearedThroughSequence: Long,
-    val mutationRevision: Long,
-    val visibilityRevision: Long,
+    val seq: Long,
+    val memberSeq: Long,
     val state: DeletionState,
     val deletedRows: Long,
 )

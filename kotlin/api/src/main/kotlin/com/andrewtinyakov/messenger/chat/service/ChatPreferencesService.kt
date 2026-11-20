@@ -1,10 +1,12 @@
 package com.andrewtinyakov.messenger.chat.service
 
 import com.andrewtinyakov.messenger.auth.model.UserId
+import com.andrewtinyakov.messenger.auth.repository.UserRepository
 import com.andrewtinyakov.messenger.chat.messaging.ChatOutbox
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.model.ChatPreferences
 import com.andrewtinyakov.messenger.chat.model.MuteEnd
+import com.andrewtinyakov.messenger.chat.repository.ChatRepository
 import com.andrewtinyakov.messenger.chat.repository.preferences.ChatPreferencesRepository
 import com.andrewtinyakov.messenger.chat.web.payload.ChatPreferencesResponse
 import com.andrewtinyakov.messenger.chat.web.payload.PinnedChatsResponse
@@ -21,6 +23,8 @@ import java.time.OffsetDateTime
 @Service
 class ChatPreferencesService(
     private val chatPreferencesRepository: ChatPreferencesRepository,
+    private val chatRepository: ChatRepository,
+    private val userRepository: UserRepository,
     private val chatOutbox: ChatOutbox,
     private val tx: TransactionTemplate,
     private val clock: Clock,
@@ -76,7 +80,8 @@ class ChatPreferencesService(
     private fun change(chatId: ChatId, userId: UserId, update: () -> Boolean): ChatPreferencesResponse =
         tx.execute {
             if (!update()) notFound()
-            chatOutbox.enqueuePreferencesChanged(userId, listOf(chatId))
+            val memberSeq = chatRepository.allocateMemberSequence(chatId, userId) ?: notFound()
+            chatOutbox.enqueueMemberPreferencesChanged(userId, chatId, memberSeq)
             checkNotNull(chatPreferencesRepository.find(chatId, userId)).toResponse(chatId.value)
         }
 
@@ -87,7 +92,8 @@ class ChatPreferencesService(
             val next = change(current)
             if (next != current) {
                 chatPreferencesRepository.replacePinnedOrder(userId, next)
-                chatOutbox.enqueuePreferencesChanged(userId, (current + next).distinct().filter { current.indexOf(it) != next.indexOf(it) })
+                val moved = (current + next).distinct().filter { current.indexOf(it) != next.indexOf(it) }
+                chatOutbox.enqueuePinOrderChanged(userId, moved, userRepository.allocateEventSequences(userId, moved.size))
             }
             PinnedChatsResponse(next.map(ChatId::value))
         }

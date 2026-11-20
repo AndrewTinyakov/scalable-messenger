@@ -15,13 +15,14 @@ import tools.jackson.databind.ObjectMapper
 class DirectChatOutbox(
     private val mapper: ObjectMapper,
 ) {
-    fun chatCreatedMessages(chatId: ChatId, members: List<UserId>, requestId: RequestId): List<OutboxMessage> =
-        members.map { userId ->
+    fun chatCreatedMessages(chatId: ChatId, userSeqs: Map<UserId, Long>, requestId: RequestId): List<OutboxMessage> =
+        userSeqs.map { (userId, userSeq) ->
             ChatCreatedEventV1.create(
                 eventId = newId(),
                 room = RoomAddress.user(userId = userId),
                 chatId = chatId.value,
                 requestId = requestId.value,
+                userSeq = userSeq.toString(),
             ).toOutboxMessage(mapper)
         }
 }

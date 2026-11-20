@@ -19,44 +19,67 @@ class ChatOutbox(
     private val outboxRepository: OutboxRepository,
     private val mapper: ObjectMapper,
 ) {
-    fun chatCreatedMessages(chatId: ChatId, members: List<UserId>): List<OutboxMessage> =
-        members.map { userId ->
+    fun chatCreatedMessages(chatId: ChatId, userSeqs: Map<UserId, Long>): List<OutboxMessage> =
+        userSeqs.map { (userId, userSeq) ->
             ChatCreatedEventV1.create(
                 eventId = newId(),
                 room = RoomAddress.user(userId),
                 chatId = chatId.value,
                 requestId = null,
+                userSeq = userSeq.toString(),
             ).toOutboxMessage(mapper)
         }
 
-    fun enqueueMembersAdded(chatId: ChatId, members: List<UserId>) {
+    fun enqueueMembersAdded(chatId: ChatId, userSeqs: Map<UserId, Long>, seq: Long) {
         val membershipChanged = MembershipChangedEventV1.create(
             eventId = newId(),
             room = RoomAddress.group(chatId),
             chatId = chatId.value,
+            seq = seq.toString(),
         )
-        outboxRepository.enqueue(chatCreatedMessages(chatId, members) + membershipChanged.toOutboxMessage(mapper))
+        outboxRepository.enqueue(chatCreatedMessages(chatId, userSeqs) + membershipChanged.toOutboxMessage(mapper))
     }
 
-    fun enqueueMemberRemoved(chatId: ChatId, memberId: UserId) {
+    fun enqueueMemberRemoved(chatId: ChatId, memberId: UserId, seq: Long, userSeq: Long) {
         outboxRepository.enqueue(
-            listOf(RoomAddress.user(memberId), RoomAddress.group(chatId)).map { room ->
-                MemberRemovedEventV1.create(
+            listOf(
+                removal(RoomAddress.user(memberId), chatId, memberId, userSeq = userSeq.toString()),
+                removal(RoomAddress.group(chatId), chatId, memberId, seq = seq.toString()),
+            ),
+        )
+    }
+
+    fun enqueueMemberPreferencesChanged(userId: UserId, chatId: ChatId, memberSeq: Long) {
+        outboxRepository.enqueue(
+            ChatPreferencesChangedEventV1.create(
+                eventId = newId(),
+                room = RoomAddress.user(userId),
+                chatId = chatId.value,
+                memberSeq = memberSeq.toString(),
+            ).toOutboxMessage(mapper),
+        )
+    }
+
+    fun enqueuePinOrderChanged(userId: UserId, chatIds: List<ChatId>, firstUserSeq: Long) {
+        outboxRepository.enqueue(
+            chatIds.mapIndexed { index, chatId ->
+                ChatPreferencesChangedEventV1.create(
                     eventId = newId(),
-                    room = room,
+                    room = RoomAddress.user(userId),
                     chatId = chatId.value,
-                    memberId = memberId.value,
+                    userSeq = (firstUserSeq + index).toString(),
                 ).toOutboxMessage(mapper)
             },
         )
     }
 
-    fun enqueuePreferencesChanged(userId: UserId, chatIds: List<ChatId>) {
-        outboxRepository.enqueue(
-            chatIds.map { chatId ->
-                ChatPreferencesChangedEventV1.create(eventId = newId(), room = RoomAddress.user(userId), chatId = chatId.value)
-                    .toOutboxMessage(mapper)
-            },
-        )
-    }
+    private fun removal(room: String, chatId: ChatId, memberId: UserId, seq: String? = null, userSeq: String? = null) =
+        MemberRemovedEventV1.create(
+            eventId = newId(),
+            room = room,
+            chatId = chatId.value,
+            memberId = memberId.value,
+            seq = seq,
+            userSeq = userSeq,
+        ).toOutboxMessage(mapper)
 }

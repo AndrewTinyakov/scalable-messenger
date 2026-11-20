@@ -60,7 +60,7 @@ class ScopedDeletionTests
             assertEquals(listOf("reply"), secondDevice.messages.map { it.body })
             assertEquals(first.id, secondDevice.messages.single().replyToMessageId)
             assertNull(secondDevice.messages.single().replyBody)
-            assertEquals("1", secondDevice.visibilityRevision)
+            assertEquals("1", secondDevice.memberSeq)
             assertEquals(listOf("first", "reply"), history.messages(ChatId(chat), UserId(member), null, null, 100).messages.map { it.body })
             assertEquals("first", history.messages(ChatId(chat), UserId(member), null, null, 100).messages.last().replyBody)
             assertTrue(history.resolve(ChatId(chat), UserId(owner), listOf(MessageId(first.id))).messages.isEmpty())
@@ -118,8 +118,8 @@ class ScopedDeletionTests
             delete(chat, owner, DeletionScope.EVERYONE, DeletionTarget.MESSAGES, listOf(target.id))
             assertEquals(0, db.queryForObject("SELECT count(*) FROM messages WHERE id=?", Int::class.java, target.id))
             val rows = history.messages(ChatId(chat), UserId(member), 0L, null, 100)
-            assertEquals(listOf("2"), rows.messages.map { it.sequence })
-            assertEquals("2", rows.nextSequence)
+            assertEquals(listOf("3"), rows.messages.map { it.sequence })
+            assertEquals("4", rows.nextSequence)
             assertFalse(rows.hasMore)
             assertNull(rows.messages.single().replyBody)
             val changes = history.changes(ChatId(chat), UserId(member), 0L, 100)
@@ -128,7 +128,7 @@ class ScopedDeletionTests
             assertEquals(target.id, messageSendStatusService.status(UserId(member), RequestId(request.requestId)).messageId)
             assertEquals(1, db.queryForObject("SELECT count(*) FROM messages WHERE chat_id=?", Int::class.java, chat))
             assertEquals(
-                listOf("2"),
+                listOf("3"),
                 history.around(ChatId(chat), UserId(member), MessageId(target.id), target.sequence.toLong(), 10).messages.map {
                     it.sequence
                 },
@@ -149,7 +149,7 @@ class ScopedDeletionTests
                 }.status,
             )
             assertEquals(2, history.messages(ChatId(chat), UserId(member), null, null, 10).messages.size)
-            assertEquals("0", history.visibility(ChatId(chat), UserId(member)).mutationRevision)
+            assertEquals("2", history.visibility(ChatId(chat), UserId(member)).snapshotSequence)
             assertEquals(
                 HttpStatus.FORBIDDEN,
                 assertThrows(ApiException::class.java) {
@@ -177,8 +177,8 @@ class ScopedDeletionTests
             assertEquals(1201, db.queryForObject("SELECT count(*) FROM messages WHERE chat_id=?", Int::class.java, chat))
             val empty = history.messages(ChatId(chat), UserId(member), 0L, null, 50)
             assertTrue(empty.messages.isEmpty())
-            assertEquals("1201", empty.nextSequence)
-            assertEquals("1201", empty.coverageThroughSequence)
+            assertEquals("1202", empty.nextSequence)
+            assertEquals("1202", empty.coverageThroughSequence)
             assertFalse(empty.hasMore)
             send(owner, chat, "after cutoff")
             assertEquals(500, purge.runBatch())
@@ -254,7 +254,7 @@ class ScopedDeletionTests
                 }
                 assertThrows(RuntimeException::class.java) { delete(chat, owner, DeletionScope.EVERYONE, DeletionTarget.HISTORY) }
                 assertEquals(listOf("retained"), history.messages(ChatId(chat), UserId(member), null, null, 10).messages.map { it.body })
-                assertEquals("0", history.visibility(ChatId(chat), UserId(member)).mutationRevision)
+                assertEquals("1", history.visibility(ChatId(chat), UserId(member)).snapshotSequence)
                 assertEquals("0", history.visibility(ChatId(chat), UserId(member)).globalClearedThroughSequence)
                 assertEquals(0, db.queryForObject("SELECT count(*) FROM deletion_operations WHERE chat_id=?", Int::class.java, chat))
                 assertEquals(0, db.queryForObject("SELECT count(*) FROM history_purge_jobs WHERE chat_id=?", Int::class.java, chat))
@@ -282,7 +282,7 @@ class ScopedDeletionTests
                     chat,
                 ),
             )
-            assertEquals("2", history.visibility(ChatId(chat), UserId(member)).visibilityRevision)
+            assertEquals("2", history.visibility(ChatId(chat), UserId(member)).memberSeq)
             val request = RequestId(newId())
             deletions.clearHistory(ChatId(chat), UserId(owner), request, DeletionScope.SELF)
             assertEquals(
@@ -375,7 +375,7 @@ class ScopedDeletionTests
                 }.status,
             )
             assertEquals(2, db.queryForObject("SELECT count(*) FROM messages WHERE chat_id=?", Int::class.java, chat))
-            assertEquals("0", history.visibility(ChatId(chat), UserId(member)).mutationRevision)
+            assertEquals("2", history.visibility(ChatId(chat), UserId(member)).snapshotSequence)
             assertEquals(listOf("mine", "theirs"), history.messages(ChatId(chat), UserId(owner), null, null, 10).messages.map { it.body })
         }
 
@@ -432,7 +432,7 @@ class ScopedDeletionTests
             assertEquals("32", middle.nextSequence)
             val survivor = history.messages(ChatId(chat), UserId(member), middle.nextSequence.toLong(), null, 50)
             assertEquals(listOf("41"), survivor.messages.map { it.sequence })
-            assertEquals("41", survivor.coverageThroughSequence)
+            assertEquals("42", survivor.coverageThroughSequence)
             assertFalse(survivor.hasMore)
         }
 

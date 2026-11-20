@@ -22,4 +22,8 @@ interface UserRepository {
     fun existsById(userId: UserId): Boolean
 
     fun search(query: String): List<UserSummary>
+
+    fun allocateEventSequences(userIds: Collection<UserId>): Map<UserId, Long>
+
+    fun allocateEventSequences(userId: UserId, count: Int): Long
 }

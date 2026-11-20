@@ -91,16 +91,16 @@ public class ChatMembersRecord extends UpdatableRecordImpl<ChatMembersRecord> {
     }
 
     /**
-     * Setter for <code>public.chat_members.visibility_revision</code>.
+     * Setter for <code>public.chat_members.member_seq</code>.
      */
-    public void setVisibilityRevision(Long value) {
+    public void setMemberSeq(Long value) {
         set(5, value);
     }
 
     /**
-     * Getter for <code>public.chat_members.visibility_revision</code>.
+     * Getter for <code>public.chat_members.member_seq</code>.
      */
-    public Long getVisibilityRevision() {
+    public Long getMemberSeq() {
         return (Long) get(5);
     }
 
@@ -169,7 +169,7 @@ public class ChatMembersRecord extends UpdatableRecordImpl<ChatMembersRecord> {
     /**
      * Create a detached, initialised ChatMembersRecord
      */
-    public ChatMembersRecord(String chatId, String userId, OffsetDateTime joinedAt, Long clearedThroughSequence, Long hiddenThroughSequence, Long visibilityRevision, Short pinnedRank, OffsetDateTime mutedUntil, OffsetDateTime markedUnreadAt) {
+    public ChatMembersRecord(String chatId, String userId, OffsetDateTime joinedAt, Long clearedThroughSequence, Long hiddenThroughSequence, Long memberSeq, Short pinnedRank, OffsetDateTime mutedUntil, OffsetDateTime markedUnreadAt) {
         super(ChatMembers.CHAT_MEMBERS);
 
         setChatId(chatId);
@@ -177,7 +177,7 @@ public class ChatMembersRecord extends UpdatableRecordImpl<ChatMembersRecord> {
         setJoinedAt(joinedAt);
         setClearedThroughSequence(clearedThroughSequence);
         setHiddenThroughSequence(hiddenThroughSequence);
-        setVisibilityRevision(visibilityRevision);
+        setMemberSeq(memberSeq);
         setPinnedRank(pinnedRank);
         setMutedUntil(mutedUntil);
         setMarkedUnreadAt(markedUnreadAt);

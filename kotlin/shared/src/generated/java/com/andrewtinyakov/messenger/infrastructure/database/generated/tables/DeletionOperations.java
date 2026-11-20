@@ -98,14 +98,14 @@ public class DeletionOperations extends TableImpl<DeletionOperationsRecord> {
     public final TableField<DeletionOperationsRecord, Long> THROUGH_SEQUENCE = createField(DSL.name("through_sequence"), SQLDataType.BIGINT.nullable(false), this, "");
 
     /**
-     * The column <code>public.deletion_operations.mutation_revision</code>.
+     * The column <code>public.deletion_operations.seq</code>.
      */
-    public final TableField<DeletionOperationsRecord, Long> MUTATION_REVISION = createField(DSL.name("mutation_revision"), SQLDataType.BIGINT.nullable(false), this, "");
+    public final TableField<DeletionOperationsRecord, Long> SEQ = createField(DSL.name("seq"), SQLDataType.BIGINT.nullable(false), this, "");
 
     /**
-     * The column <code>public.deletion_operations.visibility_revision</code>.
+     * The column <code>public.deletion_operations.member_seq</code>.
      */
-    public final TableField<DeletionOperationsRecord, Long> VISIBILITY_REVISION = createField(DSL.name("visibility_revision"), SQLDataType.BIGINT.nullable(false), this, "");
+    public final TableField<DeletionOperationsRecord, Long> MEMBER_SEQ = createField(DSL.name("member_seq"), SQLDataType.BIGINT.nullable(false), this, "");
 
     /**
      * The column <code>public.deletion_operations.deleted_rows</code>.
@@ -232,12 +232,12 @@ public class DeletionOperations extends TableImpl<DeletionOperationsRecord> {
     public List<Check<DeletionOperationsRecord>> getChecks() {
         return Arrays.asList(
             Internal.createCheck(this, DSL.name("deletion_operations_deleted_rows_check"), "((deleted_rows >= 0))", true),
-            Internal.createCheck(this, DSL.name("deletion_operations_mutation_revision_check"), "((mutation_revision >= 0))", true),
+            Internal.createCheck(this, DSL.name("deletion_operations_mutation_revision_check"), "((seq >= 0))", true),
             Internal.createCheck(this, DSL.name("deletion_operations_purge_rows_before_check"), "((purge_rows_before >= 0))", true),
             Internal.createCheck(this, DSL.name("deletion_operations_scope_check"), "(((scope)::text = ANY ((ARRAY['SELF'::character varying, 'EVERYONE'::character varying])::text[])))", true),
             Internal.createCheck(this, DSL.name("deletion_operations_target_check"), "(((target)::text = ANY ((ARRAY['MESSAGES'::character varying, 'HISTORY'::character varying, 'CHAT'::character varying])::text[])))", true),
             Internal.createCheck(this, DSL.name("deletion_operations_through_sequence_check"), "((through_sequence >= 0))", true),
-            Internal.createCheck(this, DSL.name("deletion_operations_visibility_revision_check"), "((visibility_revision >= 0))", true)
+            Internal.createCheck(this, DSL.name("deletion_operations_visibility_revision_check"), "((member_seq >= 0))", true)
         );
     }
 

@@ -4,13 +4,14 @@ import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.messaging.ChatEventAudience
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.model.ChatKind
+import com.andrewtinyakov.messenger.chat.repository.ChatRepository
 import com.andrewtinyakov.messenger.deletion.messaging.DeletionOutbox
 import com.andrewtinyakov.messenger.deletion.model.AppliedDeletion
 import com.andrewtinyakov.messenger.deletion.model.CommittedDeletion
 import com.andrewtinyakov.messenger.deletion.model.DeletionChat
 import com.andrewtinyakov.messenger.deletion.model.DeletionMessage
-import com.andrewtinyakov.messenger.deletion.model.DeletionRevisions
 import com.andrewtinyakov.messenger.deletion.model.DeletionScope
+import com.andrewtinyakov.messenger.deletion.model.DeletionSequences
 import com.andrewtinyakov.messenger.deletion.model.DeletionTarget
 import com.andrewtinyakov.messenger.deletion.model.StoredDeletion
 import com.andrewtinyakov.messenger.deletion.monitoring.DeletionMetrics
@@ -30,6 +31,7 @@ import org.springframework.transaction.support.TransactionTemplate
 @Service
 class DeletionService(
     private val deletionRepository: DeletionRepository,
+    private val chatRepository: ChatRepository,
     private val chatEventAudience: ChatEventAudience,
     private val deletionOutbox: DeletionOutbox,
     private val tx: TransactionTemplate,
@@ -49,21 +51,19 @@ class DeletionService(
             requireExpectedVersions(targets, expectedVersions)
             requireMessageDeletionAllowed(chat, userId, scope, targets)
             when (scope) {
-                DeletionScope.SELF -> AppliedDeletion(
-                    revisions = DeletionRevisions(
-                        mutation = chat.mutationRevision,
-                        visibility = deletionRepository.hideMessages(chatId, userId, targets),
-                    ),
-                    deletedRows = 0,
-                )
+                DeletionScope.SELF -> {
+                    deletionRepository.hideMessages(chatId, userId, targets)
+                    AppliedDeletion(
+                        DeletionSequences(seq = chat.lastSequence, memberSeq = nextMemberSequence(chatId, userId)),
+                        deletedRows = 0,
+                    )
+                }
 
-                DeletionScope.EVERYONE -> AppliedDeletion(
-                    revisions = DeletionRevisions(
-                        mutation = deletionRepository.removeMessages(chatId, targets),
-                        visibility = chat.visibilityRevision,
-                    ),
-                    deletedRows = targets.size,
-                )
+                DeletionScope.EVERYONE -> {
+                    val seq = nextChatSequence(chatId, userId)
+                    deletionRepository.removeMessages(chatId, targets, seq)
+                    AppliedDeletion(DeletionSequences(seq = seq, memberSeq = chat.memberSeq), deletedRows = targets.size)
+                }
             }
         }
     }
@@ -114,11 +114,10 @@ class DeletionService(
                 target = target,
                 fingerprint = fingerprint,
                 chat = chat,
-                mutationRevision = applied.revisions.mutation,
-                visibilityRevision = applied.revisions.visibility,
+                sequences = applied.sequences,
                 rows = applied.deletedRows,
             )
-            enqueueDeletionEvents(chatId, userId, scope, target, chat, applied.revisions)
+            enqueueDeletionEvents(chatId, userId, scope, target, chat, applied.sequences)
             CommittedDeletion(saved(userId, requestId).toResponse(), newlyAccepted = true)
         }
         if (committed.newlyAccepted) metrics.accepted(scope, target)
@@ -132,22 +131,22 @@ class DeletionService(
         chat: DeletionChat,
         wholeChat: Boolean,
     ): AppliedDeletion = when (scope) {
-        DeletionScope.SELF -> AppliedDeletion(
-            revisions = DeletionRevisions(
-                mutation = chat.mutationRevision,
-                visibility = deletionRepository.clearPersonal(chatId, userId, through = chat.lastSequence, hide = wholeChat),
-            ),
-            deletedRows = 0,
-        )
+        DeletionScope.SELF -> {
+            deletionRepository.clearPersonal(chatId, userId, through = chat.lastSequence, hide = wholeChat)
+            AppliedDeletion(DeletionSequences(seq = chat.lastSequence, memberSeq = nextMemberSequence(chatId, userId)), deletedRows = 0)
+        }
 
-        DeletionScope.EVERYONE -> AppliedDeletion(
-            revisions = DeletionRevisions(
-                mutation = deletionRepository.clearGlobal(chatId, userId, through = chat.lastSequence, close = wholeChat),
-                visibility = chat.visibilityRevision,
-            ),
-            deletedRows = 0,
-        )
+        DeletionScope.EVERYONE -> {
+            val seq = nextChatSequence(chatId, userId)
+            deletionRepository.clearGlobal(chatId, userId, through = chat.lastSequence, close = wholeChat, seq = seq)
+            AppliedDeletion(DeletionSequences(seq = seq, memberSeq = chat.memberSeq), deletedRows = 0)
+        }
     }
+
+    private fun nextChatSequence(chatId: ChatId, userId: UserId): Long = chatRepository.allocateEventSequence(chatId, userId) ?: notFound()
+
+    private fun nextMemberSequence(chatId: ChatId, userId: UserId): Long =
+        chatRepository.allocateMemberSequence(chatId, userId) ?: notFound()
 
     private fun fingerprint(
         chatId: ChatId,
@@ -203,8 +202,7 @@ class DeletionService(
             target = target,
             fingerprint = fingerprint,
             chat = chat,
-            mutationRevision = chat.mutationRevision,
-            visibilityRevision = chat.visibilityRevision,
+            sequences = DeletionSequences(seq = chat.lastSequence, memberSeq = chat.memberSeq),
             rows = 0,
         )
         return CommittedDeletion(saved(userId, requestId).toResponse(), newlyAccepted = false)
@@ -237,11 +235,15 @@ class DeletionService(
         scope: DeletionScope,
         target: DeletionTarget,
         chat: DeletionChat,
-        revisions: DeletionRevisions,
+        sequences: DeletionSequences,
     ) {
         val rooms = chatEventAudience.rooms(chatId, chat.kind, personalViewer = userId.takeIf { scope == DeletionScope.SELF })
-        deletionOutbox.enqueueHistoryChanged(rooms, chatId, scope, chat, revisions)
-        if (scope == DeletionScope.EVERYONE && target == DeletionTarget.CHAT) deletionOutbox.enqueueChatDeleted(rooms, chatId)
+        deletionOutbox.enqueueHistoryChanged(rooms, chatId, scope, sequences)
+        if (scope == DeletionScope.EVERYONE &&
+            target == DeletionTarget.CHAT
+        ) {
+            deletionOutbox.enqueueChatDeleted(rooms, chatId, sequences.seq)
+        }
     }
 
     private fun saved(userId: UserId, requestId: RequestId): StoredDeletion = checkNotNull(deletionRepository.operation(userId, requestId))

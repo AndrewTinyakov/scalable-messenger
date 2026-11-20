@@ -1,6 +1,6 @@
 package com.andrewtinyakov.messenger.message.model.change
 
 data class MutationCursor(
-    val revision: Long,
+    val lastSeq: Long,
     val floor: Long,
 )

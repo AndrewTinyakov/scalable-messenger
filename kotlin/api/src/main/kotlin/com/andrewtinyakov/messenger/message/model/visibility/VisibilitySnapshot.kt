@@ -2,8 +2,8 @@ package com.andrewtinyakov.messenger.message.model.visibility
 
 data class VisibilitySnapshot(
     val snapshotSequence: Long,
-    val mutationRevision: Long,
-    val visibilityRevision: Long,
+    val mutationSeq: Long,
+    val memberSeq: Long,
     val clearedThroughSequence: Long,
     val globalClearedThroughSequence: Long,
     val hidden: Boolean,

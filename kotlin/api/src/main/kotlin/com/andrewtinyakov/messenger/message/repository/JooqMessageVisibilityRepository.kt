@@ -2,12 +2,14 @@ package com.andrewtinyakov.messenger.message.repository
 
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.ChatId
+import com.andrewtinyakov.messenger.chat.repository.directory.hidden
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHATS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHAT_MEMBERS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.HIDDEN_MESSAGE_RANGES
 import com.andrewtinyakov.messenger.message.model.visibility.HiddenRange
 import com.andrewtinyakov.messenger.message.model.visibility.VisibilitySnapshot
 import org.jooq.DSLContext
+import org.jooq.impl.DSL
 import org.springframework.stereotype.Repository
 
 @Repository
@@ -20,22 +22,21 @@ class JooqMessageVisibilityRepository(
     ): VisibilitySnapshot? =
         db.select(
             CHATS.NEXT_SEQUENCE,
-            CHATS.MUTATION_REVISION,
-            CHAT_MEMBERS.VISIBILITY_REVISION,
+            mutationSeq(chatId),
+            CHAT_MEMBERS.MEMBER_SEQ,
             CHAT_MEMBERS.CLEARED_THROUGH_SEQUENCE,
             CHATS.CLEARED_THROUGH_SEQUENCE,
-            CHAT_MEMBERS.HIDDEN_THROUGH_SEQUENCE,
+            DSL.field(hidden(CHAT_MEMBERS)),
         ).from(CHATS).join(CHAT_MEMBERS).on(CHAT_MEMBERS.CHAT_ID.eq(CHATS.ID))
             .where(CHATS.ID.eq(chatId.value), CHAT_MEMBERS.USER_ID.eq(userId.value), CHATS.DELETED_AT.isNull)
             .fetchOne {
-                val snapshotSequence = it.value1()!! - 1
                 VisibilitySnapshot(
-                    snapshotSequence,
-                    it.value2()!!,
-                    it.value3()!!,
-                    it.value4()!!,
-                    it.value5()!!,
-                    it.value6()?.let { cutoff -> snapshotSequence <= cutoff } == true,
+                    snapshotSequence = it.value1()!! - 1,
+                    mutationSeq = it.value2()!!,
+                    memberSeq = it.value3()!!,
+                    clearedThroughSequence = it.value4()!!,
+                    globalClearedThroughSequence = it.value5()!!,
+                    hidden = it.value6() == true,
                 )
             }
 

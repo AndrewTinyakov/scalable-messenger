@@ -76,6 +76,20 @@ public class UsersRecord extends UpdatableRecordImpl<UsersRecord> {
         return (OffsetDateTime) get(3);
     }
 
+    /**
+     * Setter for <code>public.users.event_seq</code>.
+     */
+    public void setEventSeq(Long value) {
+        set(4, value);
+    }
+
+    /**
+     * Getter for <code>public.users.event_seq</code>.
+     */
+    public Long getEventSeq() {
+        return (Long) get(4);
+    }
+
     // -------------------------------------------------------------------------
     // Primary key information
     // -------------------------------------------------------------------------
@@ -99,13 +113,14 @@ public class UsersRecord extends UpdatableRecordImpl<UsersRecord> {
     /**
      * Create a detached, initialised UsersRecord
      */
-    public UsersRecord(String id, String username, String passwordHash, OffsetDateTime createdAt) {
+    public UsersRecord(String id, String username, String passwordHash, OffsetDateTime createdAt, Long eventSeq) {
         super(Users.USERS);
 
         setId(id);
         setUsername(username);
         setPasswordHash(passwordHash);
         setCreatedAt(createdAt);
+        setEventSeq(eventSeq);
         resetTouchedOnNotNull();
     }
 }

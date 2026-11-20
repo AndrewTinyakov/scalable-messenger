@@ -34,9 +34,9 @@ data class DeletionResponse(
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val clearedThroughSequence: String,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
-    val mutationRevision: String,
+    val seq: String,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
-    val visibilityRevision: String,
+    val memberSeq: String,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val state: DeletionState,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
@@ -60,8 +60,8 @@ fun StoredDeletion.toResponse(): DeletionResponse = DeletionResponse(
     scope = scope,
     target = target,
     clearedThroughSequence = clearedThroughSequence.toString(),
-    mutationRevision = mutationRevision.toString(),
-    visibilityRevision = visibilityRevision.toString(),
+    seq = seq.toString(),
+    memberSeq = memberSeq.toString(),
     state = state,
     deletedRows = deletedRows.toString(),
 )

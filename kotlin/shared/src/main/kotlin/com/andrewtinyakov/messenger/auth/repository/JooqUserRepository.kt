@@ -76,6 +76,29 @@ class JooqUserRepository(
             .orderBy(USERS.USERNAME)
             .limit(SEARCH_RESULT_LIMIT)
             .fetch { it.toUserSummary() }
+
+    override fun allocateEventSequences(userIds: Collection<UserId>): Map<UserId, Long> {
+        if (userIds.isEmpty()) return emptyMap()
+        val ids = userIds.map(UserId::value).distinct()
+        db.select(USERS.ID).from(USERS).where(USERS.ID.`in`(ids)).orderBy(USERS.ID).forNoKeyUpdate().execute()
+        return db.update(USERS)
+            .set(USERS.EVENT_SEQ, USERS.EVENT_SEQ.plus(1L))
+            .where(USERS.ID.`in`(ids))
+            .returning(USERS.ID, USERS.EVENT_SEQ)
+            .fetch()
+            .associate { UserId(it.id!!) to it.eventSeq!! }
+            .also { check(it.size == ids.size) { "Account sequence allocation found ${it.size} of ${ids.size} users" } }
+    }
+
+    override fun allocateEventSequences(userId: UserId, count: Int): Long {
+        require(count > 0)
+        val last = db.update(USERS)
+            .set(USERS.EVENT_SEQ, USERS.EVENT_SEQ.plus(count.toLong()))
+            .where(USERS.ID.eq(userId.value))
+            .returning(USERS.EVENT_SEQ)
+            .fetchOne()?.eventSeq
+        return checkNotNull(last) { "Account sequence allocation found no user" } - count + 1
+    }
 }
 
 private fun Record2<String?, String?>.toUserSummary(): UserSummary =

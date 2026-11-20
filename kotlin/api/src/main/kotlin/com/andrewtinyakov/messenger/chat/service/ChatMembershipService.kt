@@ -2,6 +2,7 @@ package com.andrewtinyakov.messenger.chat.service
 
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.auth.model.UserSummary
+import com.andrewtinyakov.messenger.auth.repository.UserRepository
 import com.andrewtinyakov.messenger.auth.web.payload.toResponse
 import com.andrewtinyakov.messenger.chat.messaging.ChatOutbox
 import com.andrewtinyakov.messenger.chat.model.ChatId
@@ -20,6 +21,7 @@ import org.springframework.transaction.support.TransactionTemplate
 class ChatMembershipService(
     private val chatRepository: ChatRepository,
     private val groupMembershipRepository: GroupMembershipRepository,
+    private val userRepository: UserRepository,
     private val tx: TransactionTemplate,
     private val chatOutbox: ChatOutbox,
 ) {
@@ -41,7 +43,9 @@ class ChatMembershipService(
             if (!groupMembershipRepository.deleteMemberAndDecrementCount(chatId = chatId, userId = memberId)) {
                 notFound("Member not found")
             }
-            chatOutbox.enqueueMemberRemoved(chatId = chatId, memberId = memberId)
+            val seq = checkNotNull(chatRepository.allocateEventSequence(chatId, owner))
+            val userSeq = userRepository.allocateEventSequences(memberId, count = 1)
+            chatOutbox.enqueueMemberRemoved(chatId = chatId, memberId = memberId, seq = seq, userSeq = userSeq)
         }
     }
 }

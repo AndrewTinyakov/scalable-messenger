@@ -5,7 +5,7 @@ type: object
 additionalProperties: false
 x-messenger-group-room: true
 description: Membership metadata invalidation. Room must equal group:<chatId>; no message sequence or delivery acknowledgement.
-required: [type, version, eventId, room, chatId, epoch, streamId]
+required: [type, version, eventId, room, chatId, seq, epoch, streamId]
 properties:
   type:
     const: membership_changed
@@ -21,6 +21,9 @@ properties:
   chatId:
     type: string
     pattern: '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'
+  seq:
+    type: string
+    pattern: ^[1-9][0-9]{0,18}$
   epoch:
     type: string
     minLength: 1

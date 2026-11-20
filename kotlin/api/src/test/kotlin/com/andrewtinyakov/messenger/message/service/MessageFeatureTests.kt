@@ -61,18 +61,21 @@ class MessageFeatureTests
             assertEquals(emptyList<Any>(), history.messages(ChatId(chat), UserId(member), 2L, null, 10).messages)
             mutations.edit(ChatId(chat), UserId(owner), MessageId(first.id), "changed again", 2L)
             val page = history.changes(ChatId(chat), UserId(member), 0L, 1)
-            assertEquals("2", page.lastRevision)
-            assertEquals("1", page.nextRevision)
+            assertEquals("4", page.lastSeq)
+            assertEquals("3", page.nextSeq)
+            assertEquals("3", page.changes.single().seq)
             assertEquals("3", page.changes.single().message!!.messageVersion)
             assertEquals("changed again", page.changes.single().message!!.body)
-            assertEquals("2", history.changes(ChatId(chat), UserId(member), page.nextRevision.toLong(), 1).nextRevision)
-            assertEquals("2", history.messages(ChatId(chat), UserId(member), null, null, 10).mutationRevision)
+            val rest = history.changes(ChatId(chat), UserId(member), page.nextSeq.toLong(), 1)
+            assertEquals("4", rest.nextSeq)
+            assertEquals(listOf("4"), rest.changes.map { it.seq })
+            assertEquals("4", history.messages(ChatId(chat), UserId(member), null, null, 10).snapshotSequence)
             val events = db.queryForList(
-                "SELECT payload->>'mutationRevision' FROM messenger_outbox_events WHERE payload->>'type'='history_changed' AND payload->>'chatId'=? ORDER BY payload->>'mutationRevision'",
+                "SELECT payload->>'seq' FROM messenger_outbox_events WHERE payload->>'type'='history_changed' AND payload->>'chatId'=? ORDER BY payload->>'seq'",
                 String::class.java,
                 chat,
             )
-            assertEquals(listOf("1", "2"), events)
+            assertEquals(listOf("3", "4"), events)
         }
 
         @Test
@@ -101,7 +104,7 @@ class MessageFeatureTests
         }
 
         @Test
-        fun `concurrent edits commit one winner and one revision`() {
+        fun `concurrent edits commit one winner and one chat sequence`() {
             val owner = user("edit-race-owner")
             val member = user("edit-race-member")
             val chat = group(owner, member)
@@ -118,7 +121,9 @@ class MessageFeatureTests
                 }
             }.map { it.get(10, TimeUnit.SECONDS) }.sorted()
             assertEquals(listOf("conflict", "saved"), results)
-            assertEquals("1", history.changes(ChatId(chat), UserId(member), 0L, 100).lastRevision)
+            val changes = history.changes(ChatId(chat), UserId(member), 0L, 100)
+            assertEquals("2", changes.lastSeq)
+            assertEquals(listOf("2"), changes.changes.map { it.seq })
         }
 
         @Test
@@ -269,12 +274,13 @@ class MessageFeatureTests
             val target = send(owner, chat, "original")
             mutations.edit(ChatId(chat), UserId(owner), MessageId(target.id), "old edit", 1L)
             mutations.edit(ChatId(chat), UserId(owner), MessageId(target.id), "recent edit", 2L)
-            db.update("UPDATE message_changes SET changed_at=now()-interval '8 days' WHERE chat_id=? AND revision=1", chat)
+            db.update("UPDATE message_changes SET changed_at=now()-interval '8 days' WHERE chat_id=? AND seq=2", chat)
             retention.pruneExpiredChanges()
             val reset = history.changes(ChatId(chat), UserId(member), 0L, 100)
             assertEquals(true, reset.resetRequired)
             assertEquals(emptyList<Any>(), reset.changes)
-            val retained = history.changes(ChatId(chat), UserId(member), 1L, 100)
+            assertEquals(true, history.changes(ChatId(chat), UserId(member), 1L, 100).resetRequired)
+            val retained = history.changes(ChatId(chat), UserId(member), 2L, 100)
             assertEquals(false, retained.resetRequired)
             assertEquals("recent edit", retained.changes.single().message!!.body)
             assertEquals("recent edit", history.messages(ChatId(chat), UserId(member), null, null, 10).messages.single().body)
@@ -282,7 +288,7 @@ class MessageFeatureTests
         }
 
         @Test
-        fun `mutation outbox failure rolls back body version and durable revision`() {
+        fun `mutation outbox failure rolls back body version and chat sequence`() {
             val owner = user("mutation-rollback-owner")
             val member = user("mutation-rollback-member")
             val chat = group(owner, member)
@@ -296,7 +302,7 @@ class MessageFeatureTests
                     mutations.edit(ChatId(chat), UserId(owner), MessageId(target.id), "lost", 1L)
                 }
                 assertEquals(target, history.messages(ChatId(chat), UserId(member), null, null, 10).messages.single())
-                assertEquals("0", history.changes(ChatId(chat), UserId(member), 0L, 10).lastRevision)
+                assertEquals("1", history.changes(ChatId(chat), UserId(member), 0L, 10).lastSeq)
             } finally {
                 db.execute("ALTER TABLE messenger_outbox_events DROP CONSTRAINT \"$constraint\"")
             }
@@ -327,7 +333,7 @@ class MessageFeatureTests
                 if (deleted) emptyList<MessageResponse>() else listOf(saved),
                 history.messages(ChatId(chat), UserId(member), null, null, 10).messages,
             )
-            assertEquals("1", history.changes(ChatId(chat), UserId(member), 0L, 10).lastRevision)
+            assertEquals("2", history.changes(ChatId(chat), UserId(member), 0L, 10).lastSeq)
         }
 
         @Test

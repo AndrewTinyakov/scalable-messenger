@@ -2,7 +2,7 @@ package com.andrewtinyakov.messenger.read.service
 
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.ChatId
-import com.andrewtinyakov.messenger.infrastructure.redis.RoomAddress
+import com.andrewtinyakov.messenger.chat.repository.ChatRepository
 import com.andrewtinyakov.messenger.message.model.MessageId
 import com.andrewtinyakov.messenger.read.config.ReadProperties
 import com.andrewtinyakov.messenger.read.messaging.ReadOutbox
@@ -26,6 +26,7 @@ import java.time.ZoneOffset
 @Service
 class ReadService(
     private val readRepository: ReadRepository,
+    private val chatRepository: ChatRepository,
     private val readOutbox: ReadOutbox,
     private val properties: ReadProperties,
     private val tx: TransactionTemplate,
@@ -38,9 +39,10 @@ class ReadService(
             if (throughSequence > lastSequence) invalidInput("throughSequence", "throughSequence exceeds saved history")
             val advance = readRepository.advance(chatId, userId, throughSequence)
             if (!advance.advanced) return@execute CommittedAdvance(advance, notificationCoalesced = false)
+            val memberSeq = chatRepository.allocateMemberSequence(chatId, userId) ?: notFound()
             val sharedRooms = readRepository.notificationRooms(chatId, advance.progress.readAt!!)
             if (sharedRooms.isNotEmpty()) readRepository.completeNotification(chatId, userId)
-            readOutbox.enqueueReadsChanged(chatId, (sharedRooms + RoomAddress.user(userId)).distinct())
+            readOutbox.enqueueReadAdvanced(chatId, userId, memberSeq, sharedRooms)
             CommittedAdvance(advance, notificationCoalesced = sharedRooms.isEmpty())
         }
         val advance = committed.advance

@@ -119,30 +119,30 @@ public class DeletionOperationsRecord extends UpdatableRecordImpl<DeletionOperat
     }
 
     /**
-     * Setter for <code>public.deletion_operations.mutation_revision</code>.
+     * Setter for <code>public.deletion_operations.seq</code>.
      */
-    public void setMutationRevision(Long value) {
+    public void setSeq(Long value) {
         set(7, value);
     }
 
     /**
-     * Getter for <code>public.deletion_operations.mutation_revision</code>.
+     * Getter for <code>public.deletion_operations.seq</code>.
      */
-    public Long getMutationRevision() {
+    public Long getSeq() {
         return (Long) get(7);
     }
 
     /**
-     * Setter for <code>public.deletion_operations.visibility_revision</code>.
+     * Setter for <code>public.deletion_operations.member_seq</code>.
      */
-    public void setVisibilityRevision(Long value) {
+    public void setMemberSeq(Long value) {
         set(8, value);
     }
 
     /**
-     * Getter for <code>public.deletion_operations.visibility_revision</code>.
+     * Getter for <code>public.deletion_operations.member_seq</code>.
      */
-    public Long getVisibilityRevision() {
+    public Long getMemberSeq() {
         return (Long) get(8);
     }
 
@@ -211,7 +211,7 @@ public class DeletionOperationsRecord extends UpdatableRecordImpl<DeletionOperat
     /**
      * Create a detached, initialised DeletionOperationsRecord
      */
-    public DeletionOperationsRecord(String actorId, String requestId, String chatId, String fingerprint, String scope, String target, Long throughSequence, Long mutationRevision, Long visibilityRevision, Long deletedRows, Long purgeRowsBefore, OffsetDateTime createdAt) {
+    public DeletionOperationsRecord(String actorId, String requestId, String chatId, String fingerprint, String scope, String target, Long throughSequence, Long seq, Long memberSeq, Long deletedRows, Long purgeRowsBefore, OffsetDateTime createdAt) {
         super(DeletionOperations.DELETION_OPERATIONS);
 
         setActorId(actorId);
@@ -221,8 +221,8 @@ public class DeletionOperationsRecord extends UpdatableRecordImpl<DeletionOperat
         setScope(scope);
         setTarget(target);
         setThroughSequence(throughSequence);
-        setMutationRevision(mutationRevision);
-        setVisibilityRevision(visibilityRevision);
+        setSeq(seq);
+        setMemberSeq(memberSeq);
         setDeletedRows(deletedRows);
         setPurgeRowsBefore(purgeRowsBefore);
         setCreatedAt(createdAt);

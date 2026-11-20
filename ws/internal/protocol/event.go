@@ -24,8 +24,9 @@ type Event struct {
 	StreamID            string           `json:"streamId,omitempty"`
 	Code                ErrorCode        `json:"code,omitempty"`
 	MessageVersion      string           `json:"messageVersion,omitempty"`
-	VisibilityRevision  string           `json:"visibilityRevision,omitempty"`
-	MutationRevision    string           `json:"mutationRevision,omitempty"`
+	Seq                 string           `json:"seq,omitempty"`
+	MemberSeq           string           `json:"memberSeq,omitempty"`
+	UserSeq             string           `json:"userSeq,omitempty"`
 	EditedAt            string           `json:"editedAt,omitempty"`
 	DeletedAt           string           `json:"deletedAt,omitempty"`
 	ReplyToMessageID    string           `json:"replyToMessageId,omitempty"`

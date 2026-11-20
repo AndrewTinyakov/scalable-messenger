@@ -17,25 +17,30 @@ class MessageOutbox(
     private val outboxRepository: OutboxRepository,
     private val mapper: ObjectMapper,
 ) {
-    fun enqueueHistoryChanged(chat: Chat, revision: Long) {
+    fun enqueueHistoryChanged(chat: Chat, seq: Long) {
         outboxRepository.enqueue(
             chatEventAudience.rooms(chat.id, chat.kind).map { room ->
                 HistoryChangedEventV1.create(
                     eventId = newId(),
                     room = room,
                     chatId = chat.id.value,
-                    sequence = chat.lastSequence.toString(),
-                    mutationRevision = revision.toString(),
-                    visibilityRevision = "0",
+                    sequence = seq.toString(),
+                    seq = seq.toString(),
                 ).toOutboxMessage(mapper)
             },
         )
     }
 
-    fun enqueuePinsChanged(chat: Chat, personalViewer: UserId?) {
+    fun enqueuePinsChanged(chat: Chat, change: Long, personalViewer: UserId?) {
         outboxRepository.enqueue(
             chatEventAudience.rooms(chat.id, chat.kind, personalViewer).map { room ->
-                PinsChangedEventV1.create(eventId = newId(), room = room, chatId = chat.id.value).toOutboxMessage(mapper)
+                PinsChangedEventV1.create(
+                    eventId = newId(),
+                    room = room,
+                    chatId = chat.id.value,
+                    seq = change.toString().takeIf { personalViewer == null },
+                    memberSeq = change.toString().takeIf { personalViewer != null },
+                ).toOutboxMessage(mapper)
             },
         )
     }

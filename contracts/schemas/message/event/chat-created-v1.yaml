@@ -2,7 +2,7 @@ $schema: http://json-schema.org/draft-07/schema#
 title: ChatCreatedEventV1
 type: object
 additionalProperties: false
-required: [type, version, eventId, room, chatId]
+required: [type, version, eventId, room, chatId, userSeq]
 properties:
   type:
     const: chat_created
@@ -21,3 +21,6 @@ properties:
   requestId:
     type: string
     pattern: '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'
+  userSeq:
+    type: string
+    pattern: ^[1-9][0-9]{0,18}$

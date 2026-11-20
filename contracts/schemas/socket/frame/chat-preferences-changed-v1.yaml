@@ -10,6 +10,11 @@ required:
   - chatId
   - epoch
   - streamId
+oneOf:
+  - required:
+      - memberSeq
+  - required:
+      - userSeq
 properties:
   type:
     const: chat_preferences_changed
@@ -23,6 +28,12 @@ properties:
     type: string
     pattern: ^user:[0-7][0-9A-HJKMNP-TV-Z]{25}$
   chatId: *a1
+  memberSeq:
+    type: string
+    pattern: ^[1-9][0-9]{0,18}$
+  userSeq:
+    type: string
+    pattern: ^[1-9][0-9]{0,18}$
   epoch:
     type: string
     minLength: 1

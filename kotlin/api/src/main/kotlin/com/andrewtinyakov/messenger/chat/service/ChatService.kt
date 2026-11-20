@@ -1,6 +1,7 @@
 package com.andrewtinyakov.messenger.chat.service
 
 import com.andrewtinyakov.messenger.auth.model.UserId
+import com.andrewtinyakov.messenger.auth.repository.UserRepository
 import com.andrewtinyakov.messenger.chat.messaging.ChatOutbox
 import com.andrewtinyakov.messenger.chat.model.Chat
 import com.andrewtinyakov.messenger.chat.model.ChatCursor
@@ -27,6 +28,7 @@ class ChatService(
     private val chatRepository: ChatRepository,
     private val chatDirectoryRepository: ChatDirectoryRepository,
     private val groupMembershipRepository: GroupMembershipRepository,
+    private val userRepository: UserRepository,
     private val chatOutbox: ChatOutbox,
     private val tx: TransactionTemplate,
 ) {
@@ -105,7 +107,7 @@ class ChatService(
                 name = groupName,
                 ownerId = userId,
                 members = members,
-                events = chatOutbox.chatCreatedMessages(chatId = chat.id, members = members),
+                events = chatOutbox.chatCreatedMessages(chatId = chat.id, userSeqs = allocateUserSequences(members)),
             )
             get(chat.id, userId)
         }
@@ -133,7 +135,7 @@ class ChatService(
             requireUsersAndLock(requested)
             val additions = newMembers(chatId, requested)
             requireMemberLimit(chat, additions)
-            if (additions.isNotEmpty()) addAndAnnounceMembers(chatId, additions)
+            if (additions.isNotEmpty()) addAndAnnounceMembers(chatId, userId, additions)
         }
     }
 
@@ -158,13 +160,19 @@ class ChatService(
         }
     }
 
-    private fun addAndAnnounceMembers(chatId: ChatId, additions: List<UserId>) {
+    private fun addAndAnnounceMembers(chatId: ChatId, ownerId: UserId, additions: List<UserId>) {
         requireGroupCapacity(additions)
         groupMembershipRepository.insertMembersAndIncrementCount(
             chatId = chatId,
             userIds = additions,
         )
-        chatOutbox.enqueueMembersAdded(chatId = chatId, members = additions)
+        val seq = checkNotNull(chatRepository.allocateEventSequence(chatId, ownerId))
+        chatOutbox.enqueueMembersAdded(chatId = chatId, userSeqs = allocateUserSequences(additions), seq = seq)
+    }
+
+    private fun allocateUserSequences(userIds: List<UserId>): Map<UserId, Long> {
+        val sequences = userRepository.allocateEventSequences(userIds)
+        return userIds.associateWith(sequences::getValue)
     }
 
     private fun requireUsersAndLock(userIds: List<UserId>) {

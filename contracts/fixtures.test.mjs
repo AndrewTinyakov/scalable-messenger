@@ -192,7 +192,11 @@ test('bodyless recovery hints and viewer-resolved live replies share strict fixt
   assert.equal(hint(fixture), true, JSON.stringify(hint.errors));
   assert.equal(socketHint({ ...fixture, epoch: 'epoch', streamId: '1-0' }), true);
   assert.equal(hint({ ...fixture, body: 'removed text' }), false);
-  assert.equal(hint({ ...fixture, visibilityRevision: 1 }), false);
+  assert.equal(hint({ ...fixture, mutationRevision: '1' }), false);
+  assert.equal(hint({ ...fixture, seq: undefined }), false);
+  assert.equal(hint({ ...fixture, seq: undefined, memberSeq: '2' }), true, JSON.stringify(hint.errors));
+  assert.equal(hint({ ...fixture, seq: '0' }), false);
+  assert.equal(socketHint({ ...fixture, memberSeq: '2', epoch: 'epoch', streamId: '1-0' }), true, 'replay coalescing can merge shared and private hints');
   const reply = readJSON('fixtures/valid/message-saved-reply-identity.json');
   assert.equal(saved(reply), true, JSON.stringify(saved.errors));
   assert.equal(socketSaved({ ...reply, epoch: 'epoch', streamId: '1-0' }), true);
@@ -264,4 +268,40 @@ test('personal chat preferences, message pins and forwards share strict wire fix
   assert.equal(socketSaved({ ...forwarded, ...live }), true, JSON.stringify(socketSaved.errors));
   assert.equal(saved({ ...forwarded, forwardedFromUserId: 'nobody' }), false);
   assert.equal(rejected({ ...readJSON('fixtures/valid/send-rejected.json'), reason: 'INVALID_FORWARD_SOURCE' }), true, JSON.stringify(rejected.errors));
+});
+
+const compiled = (path) => ajv.getSchema(new URL(path, root).href) ?? validate(path);
+
+test('hints carry the counter of the audience that saw the change', () => {
+  const cursor = { epoch: 'epoch', streamId: '1-0' };
+  const counters = [
+    ['membership-changed', 'membership-changed', { seq: undefined }],
+    ['chat-deleted', 'chat-deleted', { seq: undefined }],
+    ['chat-created', 'chat-created', { userSeq: undefined }],
+    ['member-removed', 'member-removed', { userSeq: undefined }],
+    ['member-removed', 'member-removed', { seq: '2' }],
+    ['pins-changed', 'pins-changed', { seq: undefined }],
+    ['pins-changed', 'pins-changed', { memberSeq: '2' }],
+    ['chat-preferences-changed', 'chat-preferences-changed', { memberSeq: undefined }],
+    ['chat-preferences-changed', 'chat-preferences-changed', { userSeq: '2' }],
+    ['message-changed', 'message-changed', { seq: undefined }],
+    ['reads-changed', 'reads-changed', { seq: '2' }],
+  ];
+  for (const [schema, fixture, change] of counters) {
+    const event = readJSON(`fixtures/valid/${fixture}.json`);
+    const broker = compiled(`schemas/message/event/${schema}-v1.yaml`);
+    const socket = compiled(`schemas/socket/frame/${schema}-v1.yaml`);
+    assert.equal(broker(event), true, `${fixture}: ${JSON.stringify(broker.errors)}`);
+    assert.equal(socket({ ...event, ...cursor }), true, `${fixture}: ${JSON.stringify(socket.errors)}`);
+    assert.equal(broker({ ...event, ...change }), false, `${fixture} with ${JSON.stringify(change)}`);
+    assert.equal(socket({ ...event, ...change, ...cursor }), false, `${fixture} frame with ${JSON.stringify(change)}`);
+  }
+  const removal = readJSON('fixtures/valid/member-removed.json');
+  assert.equal(compiled('schemas/message/event/member-removed-v1.yaml')({ ...removal, room: `group:${removal.chatId}`, userSeq: undefined, seq: '7' }), true);
+  const preferences = readJSON('fixtures/valid/chat-preferences-changed.json');
+  assert.equal(compiled('schemas/message/event/chat-preferences-changed-v1.yaml')({ ...preferences, memberSeq: undefined, userSeq: '9' }), true);
+  const pins = readJSON('fixtures/valid/pins-changed.json');
+  assert.equal(compiled('schemas/message/event/pins-changed-v1.yaml')({ ...pins, seq: undefined, memberSeq: '9' }), true);
+  const reads = readJSON('fixtures/valid/reads-changed.json');
+  assert.equal(compiled('schemas/message/event/reads-changed-v1.yaml')({ ...reads, memberSeq: undefined }), true, 'shared read receipts take no number');
 });

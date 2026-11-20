@@ -183,14 +183,18 @@ class MessageSendServiceTests
 
             assertEquals(SendRejectionReason.NOT_A_MEMBER, messageSendStatusService.status(UserId(member), RequestId(requestId)).reason)
             assertEquals(0, db.queryForObject("SELECT count(*) FROM messages WHERE chat_id=?", Int::class.java, chat.id))
-            assertEquals(1L, db.queryForObject("SELECT next_sequence FROM chats WHERE id=?", Long::class.java, chat.id))
+            assertEquals(
+                2L,
+                db.queryForObject("SELECT next_sequence FROM chats WHERE id=?", Long::class.java, chat.id),
+                "only the removal took a number",
+            )
 
             val acceptedRequest = newId()
             service.process(command(owner, acceptedRequest, "first saved message", chat = chat.id))
 
-            assertEquals("1", messageSendStatusService.status(UserId(owner), RequestId(acceptedRequest)).sequence)
-            assertEquals(listOf(1L), db.queryForList("SELECT sequence FROM messages WHERE chat_id=?", Long::class.java, chat.id))
-            assertEquals(2L, db.queryForObject("SELECT next_sequence FROM chats WHERE id=?", Long::class.java, chat.id))
+            assertEquals("2", messageSendStatusService.status(UserId(owner), RequestId(acceptedRequest)).sequence)
+            assertEquals(listOf(2L), db.queryForList("SELECT sequence FROM messages WHERE chat_id=?", Long::class.java, chat.id))
+            assertEquals(3L, db.queryForObject("SELECT next_sequence FROM chats WHERE id=?", Long::class.java, chat.id))
         }
 
         @Test

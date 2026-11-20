@@ -162,87 +162,87 @@ public class ChatsRecord extends UpdatableRecordImpl<ChatsRecord> {
     }
 
     /**
-     * Setter for <code>public.chats.mutation_revision</code>.
-     */
-    public void setMutationRevision(Long value) {
-        set(10, value);
-    }
-
-    /**
-     * Getter for <code>public.chats.mutation_revision</code>.
-     */
-    public Long getMutationRevision() {
-        return (Long) get(10);
-    }
-
-    /**
      * Setter for <code>public.chats.mutation_floor</code>.
      */
     public void setMutationFloor(Long value) {
-        set(11, value);
+        set(10, value);
     }
 
     /**
      * Getter for <code>public.chats.mutation_floor</code>.
      */
     public Long getMutationFloor() {
-        return (Long) get(11);
+        return (Long) get(10);
     }
 
     /**
      * Setter for <code>public.chats.cleared_through_sequence</code>.
      */
     public void setClearedThroughSequence(Long value) {
-        set(12, value);
+        set(11, value);
     }
 
     /**
      * Getter for <code>public.chats.cleared_through_sequence</code>.
      */
     public Long getClearedThroughSequence() {
-        return (Long) get(12);
+        return (Long) get(11);
     }
 
     /**
      * Setter for <code>public.chats.purged_through_sequence</code>.
      */
     public void setPurgedThroughSequence(Long value) {
-        set(13, value);
+        set(12, value);
     }
 
     /**
      * Getter for <code>public.chats.purged_through_sequence</code>.
      */
     public Long getPurgedThroughSequence() {
-        return (Long) get(13);
+        return (Long) get(12);
     }
 
     /**
      * Setter for <code>public.chats.purged_rows</code>.
      */
     public void setPurgedRows(Long value) {
-        set(14, value);
+        set(13, value);
     }
 
     /**
      * Getter for <code>public.chats.purged_rows</code>.
      */
     public Long getPurgedRows() {
-        return (Long) get(14);
+        return (Long) get(13);
     }
 
     /**
      * Setter for <code>public.chats.last_activity_at</code>.
      */
     public void setLastActivityAt(OffsetDateTime value) {
-        set(15, value);
+        set(14, value);
     }
 
     /**
      * Getter for <code>public.chats.last_activity_at</code>.
      */
     public OffsetDateTime getLastActivityAt() {
-        return (OffsetDateTime) get(15);
+        return (OffsetDateTime) get(14);
+    }
+
+    /**
+     * Setter for <code>public.chats.pins_seq</code>.
+     */
+    public void setPinsSeq(Long value) {
+        set(15, value);
+    }
+
+    /**
+     * Getter for <code>public.chats.pins_seq</code>.
+     */
+    public Long getPinsSeq() {
+        return (Long) get(15);
     }
 
     // -------------------------------------------------------------------------
@@ -268,7 +268,7 @@ public class ChatsRecord extends UpdatableRecordImpl<ChatsRecord> {
     /**
      * Create a detached, initialised ChatsRecord
      */
-    public ChatsRecord(String id, ChatKind kind, String name, String directPairKey, Long nextSequence, Integer memberCount, OffsetDateTime createdAt, String ownerId, OffsetDateTime deletedAt, String deletedBy, Long mutationRevision, Long mutationFloor, Long clearedThroughSequence, Long purgedThroughSequence, Long purgedRows, OffsetDateTime lastActivityAt) {
+    public ChatsRecord(String id, ChatKind kind, String name, String directPairKey, Long nextSequence, Integer memberCount, OffsetDateTime createdAt, String ownerId, OffsetDateTime deletedAt, String deletedBy, Long mutationFloor, Long clearedThroughSequence, Long purgedThroughSequence, Long purgedRows, OffsetDateTime lastActivityAt, Long pinsSeq) {
         super(Chats.CHATS);
 
         setId(id);
@@ -281,12 +281,12 @@ public class ChatsRecord extends UpdatableRecordImpl<ChatsRecord> {
         setOwnerId(ownerId);
         setDeletedAt(deletedAt);
         setDeletedBy(deletedBy);
-        setMutationRevision(mutationRevision);
         setMutationFloor(mutationFloor);
         setClearedThroughSequence(clearedThroughSequence);
         setPurgedThroughSequence(purgedThroughSequence);
         setPurgedRows(purgedRows);
         setLastActivityAt(lastActivityAt);
+        setPinsSeq(pinsSeq);
         resetTouchedOnNotNull();
     }
 }

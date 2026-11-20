@@ -17,8 +17,8 @@ func coalesceHistoryHints(items []redisroom.Live) []redisroom.Live {
 		if index, ok := pending[item.Event.ChatID]; ok {
 			previous := result[index].Event
 			item.Event.Sequence = maximumDecimal(previous.Sequence, item.Event.Sequence)
-			item.Event.MutationRevision = maximumDecimal(previous.MutationRevision, item.Event.MutationRevision)
-			item.Event.VisibilityRevision = maximumDecimal(previous.VisibilityRevision, item.Event.VisibilityRevision)
+			item.Event.Seq = maximumDecimal(previous.Seq, item.Event.Seq)
+			item.Event.MemberSeq = maximumDecimal(previous.MemberSeq, item.Event.MemberSeq)
 			result[index] = redisroom.Live{}
 		}
 		pending[item.Event.ChatID] = len(result)

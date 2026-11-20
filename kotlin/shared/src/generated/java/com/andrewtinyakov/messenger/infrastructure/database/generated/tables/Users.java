@@ -24,6 +24,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 
+import org.jooq.Check;
 import org.jooq.Condition;
 import org.jooq.Field;
 import org.jooq.ForeignKey;
@@ -88,6 +89,11 @@ public class Users extends TableImpl<UsersRecord> {
      * The column <code>public.users.created_at</code>.
      */
     public final TableField<UsersRecord, OffsetDateTime> CREATED_AT = createField(DSL.name("created_at"), SQLDataType.TIMESTAMPWITHTIMEZONE(6).nullable(false).defaultValue(DSL.field(DSL.raw("now()"), SQLDataType.TIMESTAMPWITHTIMEZONE)), this, "");
+
+    /**
+     * The column <code>public.users.event_seq</code>.
+     */
+    public final TableField<UsersRecord, Long> EVENT_SEQ = createField(DSL.name("event_seq"), SQLDataType.BIGINT.nullable(false).defaultValue(DSL.field(DSL.raw("0"), SQLDataType.BIGINT)), this, "");
 
     private Users(Name alias, Table<UsersRecord> aliased) {
         this(alias, aliased, (Field<?>[]) null, null);
@@ -365,6 +371,13 @@ public class Users extends TableImpl<UsersRecord> {
      */
     public ChatsPath visibilityCleanupJobsChatIdFkey() {
         return visibilityCleanupJobs().chats();
+    }
+
+    @Override
+    public List<Check<UsersRecord>> getChecks() {
+        return Arrays.asList(
+            Internal.createCheck(this, DSL.name("users_event_seq_check"), "((event_seq >= 0))", true)
+        );
     }
 
     @Override

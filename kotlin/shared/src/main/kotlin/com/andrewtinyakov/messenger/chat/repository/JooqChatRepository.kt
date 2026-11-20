@@ -193,13 +193,7 @@ class JooqChatRepository(
                 ),
         )
 
-    override fun allocateSequenceForMember(
-        chatId: ChatId,
-        userId: UserId,
-    ): Long? =
-        allocateSequencesForMembers(chatId, listOf(userId))
-
-    override fun allocateSequencesForMembers(chatId: ChatId, userIds: List<UserId>): Long? {
+    override fun allocateSequencesForMembers(chatId: ChatId, userIds: List<UserId>, recordActivity: Boolean): Long? {
         require(userIds.size in 1..SendBatch.MAX_SIZE) { "Sequence allocation must contain 1 to ${SendBatch.MAX_SIZE} senders" }
         val distinctUsers = userIds.distinct()
         val activityNow = DSL.field("clock_timestamp()", OffsetDateTime::class.java)
@@ -210,7 +204,14 @@ class JooqChatRepository(
             )
             .set(
                 CHATS.LAST_ACTIVITY_AT,
-                DSL.greatest(DSL.coalesce(CHATS.LAST_ACTIVITY_AT, activityNow), activityNow),
+                if (recordActivity) {
+                    DSL.greatest(
+                        DSL.coalesce(CHATS.LAST_ACTIVITY_AT, activityNow),
+                        activityNow,
+                    )
+                } else {
+                    CHATS.LAST_ACTIVITY_AT
+                },
             )
             .where(CHATS.ID.eq(chatId.value), CHATS.DELETED_AT.isNull)
             .and(
@@ -226,6 +227,13 @@ class JooqChatRepository(
             .returning(CHATS.NEXT_SEQUENCE)
             .fetchOne()?.nextSequence?.minus(userIds.size.toLong())
     }
+
+    override fun allocateMemberSequence(chatId: ChatId, userId: UserId): Long? =
+        db.update(CHAT_MEMBERS)
+            .set(CHAT_MEMBERS.MEMBER_SEQ, CHAT_MEMBERS.MEMBER_SEQ.plus(1L))
+            .where(CHAT_MEMBERS.CHAT_ID.eq(chatId.value), CHAT_MEMBERS.USER_ID.eq(userId.value))
+            .returning(CHAT_MEMBERS.MEMBER_SEQ)
+            .fetchOne()?.memberSeq
 
     override fun findMemberIds(chatId: ChatId): List<UserId> =
         db.select(CHAT_MEMBERS.USER_ID)

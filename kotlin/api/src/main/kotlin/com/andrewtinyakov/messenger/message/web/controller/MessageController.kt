@@ -89,12 +89,12 @@ class MessageController(
     fun changes(
         session: AuthenticatedSession,
         @PathVariable id: String,
-        @RequestParam afterRevision: String,
+        @RequestParam afterSeq: String,
         @RequestParam(defaultValue = "100") limit: Int,
     ): MessageChangesResponse = messageHistoryService.changes(
         chatId = ChatId.parse(id),
         userId = session.userId,
-        after = sequence("afterRevision", afterRevision),
+        after = sequence("afterSeq", afterSeq),
         limit = limit,
     )
 

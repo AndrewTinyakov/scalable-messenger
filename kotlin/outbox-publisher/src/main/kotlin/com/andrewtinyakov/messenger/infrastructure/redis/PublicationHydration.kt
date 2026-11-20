@@ -103,8 +103,7 @@ class PublicationHydration(
             room = row.room,
             chatId = reference.chatId,
             sequence = reference.sequence,
-            mutationRevision = "0",
-            visibilityRevision = "0",
+            seq = reference.sequence,
         ),
     )
 

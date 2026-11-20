@@ -1,9 +1,8 @@
 package com.andrewtinyakov.messenger.deletion.messaging
 
 import com.andrewtinyakov.messenger.chat.model.ChatId
-import com.andrewtinyakov.messenger.deletion.model.DeletionChat
-import com.andrewtinyakov.messenger.deletion.model.DeletionRevisions
 import com.andrewtinyakov.messenger.deletion.model.DeletionScope
+import com.andrewtinyakov.messenger.deletion.model.DeletionSequences
 import com.andrewtinyakov.messenger.generated.messaging.event.ChatDeletedEventV1
 import com.andrewtinyakov.messenger.generated.messaging.event.HistoryChangedEventV1
 import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxRepository
@@ -21,8 +20,7 @@ class DeletionOutbox(
         rooms: List<String>,
         chatId: ChatId,
         scope: DeletionScope,
-        chat: DeletionChat,
-        revisions: DeletionRevisions,
+        sequences: DeletionSequences,
     ) {
         outboxRepository.enqueue(
             rooms.map { room ->
@@ -30,18 +28,23 @@ class DeletionOutbox(
                     eventId = newId(),
                     room = room,
                     chatId = chatId.value,
-                    sequence = chat.lastSequence.toString(),
-                    mutationRevision = revisions.mutation.toString(),
-                    visibilityRevision = if (scope == DeletionScope.SELF) revisions.visibility.toString() else "0",
+                    sequence = sequences.seq.toString(),
+                    seq = sequences.seq.toString().takeIf { scope == DeletionScope.EVERYONE },
+                    memberSeq = sequences.memberSeq.toString().takeIf { scope == DeletionScope.SELF },
                 ).toOutboxMessage(mapper)
             },
         )
     }
 
-    fun enqueueChatDeleted(rooms: List<String>, chatId: ChatId) {
+    fun enqueueChatDeleted(rooms: List<String>, chatId: ChatId, seq: Long) {
         outboxRepository.enqueue(
             rooms.map { room ->
-                ChatDeletedEventV1.create(eventId = newId(), room = room, chatId = chatId.value).toOutboxMessage(mapper)
+                ChatDeletedEventV1.create(
+                    eventId = newId(),
+                    room = room,
+                    chatId = chatId.value,
+                    seq = seq.toString(),
+                ).toOutboxMessage(mapper)
             },
         )
     }

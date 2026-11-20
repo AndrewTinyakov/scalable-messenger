@@ -8,6 +8,7 @@ data class ChatCreatedEventV1(
     val room: String,
     val chatId: String,
     val requestId: String? = null,
+    val userSeq: String,
 ) {
     init {
         require(type == "chat_created" && version == 1)
@@ -19,6 +20,7 @@ data class ChatCreatedEventV1(
             room: String,
             chatId: String,
             requestId: String? = null,
+            userSeq: String,
         ): ChatCreatedEventV1 = ChatCreatedEventV1(
             type = RoomEventType.CHAT_CREATED.value,
             version = 1,
@@ -26,6 +28,7 @@ data class ChatCreatedEventV1(
             room = room,
             chatId = chatId,
             requestId = requestId,
+            userSeq = userSeq,
         )
     }
 }

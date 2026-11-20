@@ -176,6 +176,9 @@ func ValidateEvent(event Event) error {
 	if err := validateFeatureEvent(event); err != nil {
 		return err
 	}
+	if err := validateEventCounters(event); err != nil {
+		return err
+	}
 	switch event.Type {
 	case EventMessageSaved:
 		if !ValidULID(event.ChatID) || !ValidULID(event.RequestID) || event.RecipientID != "" || !ValidULID(event.MessageID) || !ValidULID(event.SenderID) || !validSequence(event.Sequence) || event.Sequence == "0" || event.Body == "" || len([]rune(event.Body)) > 4000 || event.Reason != "" {
@@ -185,7 +188,7 @@ func ValidateEvent(event Event) error {
 			return errors.New("invalid event timestamp")
 		}
 	case EventHistoryChanged:
-		if !ValidULID(event.ChatID) || !validSequence(event.Sequence) || !validSequence(event.MutationRevision) || !validSequence(event.VisibilityRevision) || event.Body != "" || event.MessageID != "" || event.RequestID != "" || event.SenderID != "" || event.CreatedAt != "" || event.RecipientID != "" || event.Reason != "" {
+		if !ValidULID(event.ChatID) || !validSequence(event.Sequence) || event.Body != "" || event.MessageID != "" || event.RequestID != "" || event.SenderID != "" || event.CreatedAt != "" || event.RecipientID != "" || event.Reason != "" {
 			return errors.New("invalid history change event")
 		}
 	case EventMessageChanged:

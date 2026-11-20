@@ -9,6 +9,7 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MES
 import com.andrewtinyakov.messenger.message.model.MessageId
 import com.andrewtinyakov.messenger.message.model.change.MessageChange
 import com.andrewtinyakov.messenger.message.model.change.MessageChangeKind
+import com.andrewtinyakov.messenger.message.model.change.MessageChangePage
 import com.andrewtinyakov.messenger.message.model.change.MutationCursor
 import org.jooq.DSLContext
 import org.jooq.impl.DSL
@@ -20,7 +21,7 @@ class JooqMessageChangeRepository(
     private val db: DSLContext,
 ) : MessageChangeRepository {
     override fun cursor(chatId: ChatId, userId: UserId): MutationCursor? =
-        db.select(CHATS.MUTATION_REVISION, CHATS.MUTATION_FLOOR)
+        db.select(CHATS.NEXT_SEQUENCE, CHATS.MUTATION_FLOOR)
             .from(CHATS)
             .where(CHATS.ID.eq(chatId.value), CHATS.DELETED_AT.isNull)
             .and(
@@ -29,71 +30,74 @@ class JooqMessageChangeRepository(
                         .where(CHAT_MEMBERS.CHAT_ID.eq(chatId.value), CHAT_MEMBERS.USER_ID.eq(userId.value)),
                 ),
             )
-            .fetchOne { MutationCursor(it.value1()!!, it.value2()!!) }
+            .fetchOne { MutationCursor(it.value1()!! - 1, it.value2()!!) }
 
-    override fun page(chatId: ChatId, afterRevision: Long, throughRevision: Long, limit: Int): List<MessageChange> =
-        db.select(
-            MESSAGE_CHANGES.REVISION,
+    override fun page(chatId: ChatId, afterSeq: Long, throughSeq: Long, limit: Int): MessageChangePage {
+        val boundary = db.select(MESSAGE_CHANGES.SEQ).from(MESSAGE_CHANGES)
+            .where(changesBetween(chatId, afterSeq, throughSeq))
+            .orderBy(MESSAGE_CHANGES.SEQ, MESSAGE_CHANGES.SEQUENCE).offset(limit - 1).limit(1)
+            .fetchOne(MESSAGE_CHANGES.SEQ)
+        val nextSeq = boundary ?: throughSeq
+        val changes = db.select(
+            MESSAGE_CHANGES.SEQ,
             MESSAGE_CHANGES.MESSAGE_ID,
             MESSAGE_CHANGES.KIND,
             MESSAGE_CHANGES.SEQUENCE,
             MESSAGE_CHANGES.CLEARED_THROUGH_SEQUENCE,
         ).from(MESSAGE_CHANGES)
-            .where(
-                MESSAGE_CHANGES.CHAT_ID.eq(chatId.value),
-                MESSAGE_CHANGES.REVISION.gt(afterRevision),
-                MESSAGE_CHANGES.REVISION.le(throughRevision),
-            )
-            .orderBy(MESSAGE_CHANGES.REVISION).limit(limit)
+            .where(changesBetween(chatId, afterSeq, nextSeq))
+            .orderBy(MESSAGE_CHANGES.SEQ, MESSAGE_CHANGES.SEQUENCE)
             .fetch {
                 MessageChange(
-                    revision = it.value1()!!,
+                    seq = it.value1()!!,
                     messageId = it.value2()?.let(::MessageId),
                     kind = MessageChangeKind.valueOf(it.value3()!!),
                     sequence = it.value4(),
                     clearedThroughSequence = it.value5(),
                 )
             }
+        return MessageChangePage(changes, nextSeq)
+    }
 
-    override fun edit(chatId: ChatId, messageId: MessageId, body: String, now: OffsetDateTime): Long {
+    private fun changesBetween(chatId: ChatId, afterSeq: Long, throughSeq: Long) = MESSAGE_CHANGES.CHAT_ID.eq(chatId.value)
+        .and(MESSAGE_CHANGES.SEQ.gt(afterSeq))
+        .and(MESSAGE_CHANGES.SEQ.le(throughSeq))
+
+    override fun edit(chatId: ChatId, messageId: MessageId, body: String, now: OffsetDateTime, seq: Long) {
         check(
             db.update(MESSAGES).set(MESSAGES.BODY, body)
                 .set(MESSAGES.MESSAGE_VERSION, MESSAGES.MESSAGE_VERSION.plus(1L))
                 .set(MESSAGES.EDITED_AT, now)
                 .where(MESSAGES.CHAT_ID.eq(chatId.value), MESSAGES.ID.eq(messageId.value)).execute() == 1,
         )
-        val revision = db.update(CHATS).set(CHATS.MUTATION_REVISION, CHATS.MUTATION_REVISION.plus(1L))
-            .where(CHATS.ID.eq(chatId.value), CHATS.DELETED_AT.isNull)
-            .returning(CHATS.MUTATION_REVISION).fetchOne()!!.mutationRevision!!
         check(
             db.insertInto(MESSAGE_CHANGES).set(MESSAGE_CHANGES.CHAT_ID, chatId.value)
-                .set(MESSAGE_CHANGES.REVISION, revision).set(MESSAGE_CHANGES.MESSAGE_ID, messageId.value)
+                .set(MESSAGE_CHANGES.SEQ, seq).set(MESSAGE_CHANGES.MESSAGE_ID, messageId.value)
                 .set(
                     MESSAGE_CHANGES.SEQUENCE,
                     DSL.field(db.select(MESSAGES.SEQUENCE).from(MESSAGES).where(MESSAGES.ID.eq(messageId.value))),
                 )
                 .set(MESSAGE_CHANGES.CHANGED_AT, now).execute() == 1,
         )
-        return revision
     }
 
     override fun prune(before: OffsetDateTime, limit: Int): Int {
         require(limit in 1..1000)
         val candidates = db.selectFrom(MESSAGE_CHANGES).where(MESSAGE_CHANGES.CHANGED_AT.lt(before))
-            .orderBy(MESSAGE_CHANGES.CHANGED_AT, MESSAGE_CHANGES.CHAT_ID, MESSAGE_CHANGES.REVISION).limit(limit).fetch()
+            .orderBy(MESSAGE_CHANGES.CHANGED_AT, MESSAGE_CHANGES.CHAT_ID, MESSAGE_CHANGES.SEQ).limit(limit).fetch()
         if (candidates.isEmpty()) return 0
         val locked = db.select(CHATS.ID).from(CHATS)
             .where(CHATS.ID.`in`(candidates.map { it.chatId }.distinct())).orderBy(CHATS.ID)
             .forNoKeyUpdate().skipLocked().fetch(CHATS.ID).toSet()
         var removed = 0
         for ((chat, rows) in candidates.filter { it.chatId in locked }.groupBy { it.chatId }) {
-            val floor = rows.maxOf { it.revision!! }
+            val floor = rows.maxOf { it.seq!! }
             check(
                 db.update(CHATS).set(CHATS.MUTATION_FLOOR, DSL.greatest(CHATS.MUTATION_FLOOR, DSL.`val`(floor)))
                     .where(CHATS.ID.eq(chat)).execute() == 1,
             )
             removed += db.deleteFrom(MESSAGE_CHANGES)
-                .where(MESSAGE_CHANGES.CHAT_ID.eq(chat), MESSAGE_CHANGES.REVISION.`in`(rows.map { it.revision })).execute()
+                .where(MESSAGE_CHANGES.CHAT_ID.eq(chat), MESSAGE_CHANGES.SEQ.le(floor)).execute()
         }
         return removed
     }

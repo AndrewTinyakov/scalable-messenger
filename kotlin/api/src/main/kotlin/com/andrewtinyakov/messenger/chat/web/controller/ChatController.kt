@@ -5,16 +5,20 @@ import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.service.ChatMembershipService
 import com.andrewtinyakov.messenger.chat.service.ChatService
+import com.andrewtinyakov.messenger.chat.service.ChatStateService
 import com.andrewtinyakov.messenger.chat.service.DirectChatLookupService
 import com.andrewtinyakov.messenger.chat.web.payload.AddGroupMembersRequest
 import com.andrewtinyakov.messenger.chat.web.payload.ChatPageResponse
 import com.andrewtinyakov.messenger.chat.web.payload.ChatResponse
+import com.andrewtinyakov.messenger.chat.web.payload.ChatStateResponse
 import com.andrewtinyakov.messenger.chat.web.payload.CreateGroupChatRequest
 import com.andrewtinyakov.messenger.chat.web.payload.DirectChatResponse
 import com.andrewtinyakov.messenger.chat.web.payload.GroupMemberPageResponse
 import com.andrewtinyakov.messenger.deletion.model.DeletionScope
 import com.andrewtinyakov.messenger.deletion.service.DeletionService
 import com.andrewtinyakov.messenger.message.model.RequestId
+import com.andrewtinyakov.messenger.shared.web.invalidInput
+import com.andrewtinyakov.messenger.shared.web.parseSequence
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.DeleteMapping
@@ -31,6 +35,7 @@ import org.springframework.web.bind.annotation.RestController
 @RequestMapping("/v1/chats")
 class ChatController(
     private val chatService: ChatService,
+    private val chatStateService: ChatStateService,
     private val deletionService: DeletionService,
     private val chatMembershipService: ChatMembershipService,
     private val directChatLookupService: DirectChatLookupService,
@@ -69,6 +74,17 @@ class ChatController(
         session: AuthenticatedSession,
         @PathVariable id: String,
     ): ChatResponse = chatService.get(chatId = ChatId.parse(id), userId = session.userId)
+
+    @GetMapping("/{id}/state")
+    fun state(
+        session: AuthenticatedSession,
+        @PathVariable id: String,
+        @RequestParam(required = false) minSeq: String?,
+    ): ChatStateResponse = chatStateService.state(
+        chatId = ChatId.parse(id),
+        userId = session.userId,
+        minSeq = minSeq?.let { parseSequence(it) ?: invalidInput("minSeq", "minSeq must be a decimal sequence") },
+    )
 
     @PostMapping("/groups")
     @ResponseStatus(HttpStatus.CREATED)

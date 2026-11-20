@@ -56,9 +56,10 @@ class MessageMutationService(
                     expectedVersion = expectedVersion,
                 )
                 requireValidBody(body)
-                val revision = messageChangeRepository.edit(chatId, messageId, body, OffsetDateTime.now(clock))
+                val seq = chatRepository.allocateEventSequence(chatId, userId) ?: notFound()
+                messageChangeRepository.edit(chatId, messageId, body, OffsetDateTime.now(clock), seq)
                 val updated = checkNotNull(messageRepository.findMessage(chatId, userId, messageId))
-                messageOutbox.enqueueHistoryChanged(chat, revision)
+                messageOutbox.enqueueHistoryChanged(chat, seq)
                 updated.toResponse()
             }
         } catch (failure: Exception) {

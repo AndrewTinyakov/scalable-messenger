@@ -8,6 +8,8 @@ data class MemberRemovedEventV1(
     val room: String,
     val chatId: String,
     val memberId: String,
+    val seq: String? = null,
+    val userSeq: String? = null,
 ) {
     init {
         require(type == "member_removed" && version == 1)
@@ -19,6 +21,8 @@ data class MemberRemovedEventV1(
             room: String,
             chatId: String,
             memberId: String,
+            seq: String? = null,
+            userSeq: String? = null,
         ): MemberRemovedEventV1 = MemberRemovedEventV1(
             type = RoomEventType.MEMBER_REMOVED.value,
             version = 1,
@@ -26,6 +30,8 @@ data class MemberRemovedEventV1(
             room = room,
             chatId = chatId,
             memberId = memberId,
+            seq = seq,
+            userSeq = userSeq,
         )
     }
 }

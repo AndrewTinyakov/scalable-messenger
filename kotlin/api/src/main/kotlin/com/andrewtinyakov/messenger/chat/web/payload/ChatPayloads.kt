@@ -5,6 +5,7 @@ import com.andrewtinyakov.messenger.auth.web.payload.UserResponse
 import com.andrewtinyakov.messenger.auth.web.payload.toResponse
 import com.andrewtinyakov.messenger.chat.model.Chat
 import com.andrewtinyakov.messenger.chat.model.ChatKind
+import com.andrewtinyakov.messenger.chat.model.ChatState
 import com.fasterxml.jackson.annotation.JsonInclude
 import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.constraints.NotBlank
@@ -143,4 +144,46 @@ data class ChatLastMessageResponse(
     val bodyPreview: String,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val deleted: Boolean,
+)
+
+data class ChatStateResponse(
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED, description = "Chat sequence of the latest shared event")
+    val lastSeq: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED, description = "Chat sequence of the latest shared pin change")
+    val pinsSeq: String,
+    @field:Schema(
+        requiredMode = Schema.RequiredMode.REQUIRED,
+        description = "Changes at or below this chat sequence are no longer retained",
+    )
+    val mutationFloor: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED, description = "Chat sequence of the latest shared edit, deletion or clear")
+    val mutationSeq: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val memberSeq: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val clearedThroughSequence: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val globalClearedThroughSequence: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val hidden: Boolean,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val ownReadThrough: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED, description = "Highest read-through among other active members")
+    val otherReadThrough: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val userSeq: String,
+)
+
+fun ChatState.toResponse(): ChatStateResponse = ChatStateResponse(
+    lastSeq = lastSeq.toString(),
+    pinsSeq = pinsSeq.toString(),
+    mutationFloor = mutationFloor.toString(),
+    mutationSeq = mutationSeq.toString(),
+    memberSeq = memberSeq.toString(),
+    clearedThroughSequence = clearedThroughSequence.toString(),
+    globalClearedThroughSequence = globalClearedThroughSequence.toString(),
+    hidden = hidden,
+    ownReadThrough = ownReadThrough.toString(),
+    otherReadThrough = otherReadThrough.toString(),
+    userSeq = userSeq.toString(),
 )

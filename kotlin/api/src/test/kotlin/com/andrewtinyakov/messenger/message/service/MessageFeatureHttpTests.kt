@@ -7,6 +7,7 @@ import com.andrewtinyakov.messenger.chat.service.ChatService
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
 import com.andrewtinyakov.messenger.shared.id.newId
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -58,7 +59,8 @@ class MessageFeatureHttpTests
                 assertTrue(target.has(field), field)
                 assertTrue(target.path(field).isNull, field)
             }
-            assertEquals("0", initial.path("mutationRevision").stringValue())
+            assertEquals("1", initial.path("snapshotSequence").stringValue())
+            assertFalse(initial.has("mutationRevision"))
             assertEquals("1", target.path("messageVersion").stringValue())
             assertEquals(
                 403,
@@ -84,16 +86,17 @@ class MessageFeatureHttpTests
             assertEquals(200, deleted.statusCode(), deleted.body())
             assertEquals("", mapper.readTree(deleted.body()).path("body").stringValue())
             assertEquals("3", mapper.readTree(deleted.body()).path("messageVersion").stringValue())
-            val changes = request("/$chat/messages/changes?afterRevision=0&limit=1", member.second)
+            val changes = request("/$chat/messages/changes?afterSeq=0&limit=1", member.second)
             assertEquals(200, changes.statusCode(), changes.body())
             val page = mapper.readTree(changes.body())
-            assertEquals("2", page.path("lastRevision").stringValue())
-            assertEquals("1", page.path("nextRevision").stringValue())
+            assertEquals("3", page.path("lastSeq").stringValue())
+            assertEquals("2", page.path("nextSeq").stringValue())
+            assertEquals("2", page.path("changes").first().path("seq").stringValue())
             assertEquals("REMOVED", page.path("changes").first().path("kind").stringValue())
             assertTrue(page.path("changes").first().path("message").isNull)
             assertEquals(204, request("/$chat", owner.second, "DELETE").statusCode())
             assertEquals(404, request("/$chat/messages", member.second).statusCode())
-            assertEquals(404, request("/$chat/messages/changes?afterRevision=0", member.second).statusCode())
+            assertEquals(404, request("/$chat/messages/changes?afterSeq=0", member.second).statusCode())
             assertEquals(404, request("/$chat/messages/around?messageId=$id", member.second).statusCode())
         }
 
@@ -108,7 +111,7 @@ class MessageFeatureHttpTests
             assertEquals(400, request("/$chat/messages/invalid?expectedVersion=1", owner.second, "DELETE").statusCode())
             assertEquals(400, request("/$chat/messages/$id?expectedVersion=01", owner.second, "DELETE").statusCode())
             assertEquals(400, request("/$chat/messages/around?messageId=$id&limit=101", owner.second).statusCode())
-            assertEquals(400, request("/$chat/messages/changes?afterRevision=01", owner.second).statusCode())
+            assertEquals(400, request("/$chat/messages/changes?afterSeq=01", owner.second).statusCode())
         }
 
         @Test
@@ -123,7 +126,7 @@ class MessageFeatureHttpTests
                     "messages?afterSeq=$value",
                     "messages?beforeSeq=$value",
                     "messages/around?anchorSequence=$value",
-                    "messages/changes?afterRevision=$value",
+                    "messages/changes?afterSeq=$value",
                     "pins?beforeSequence=$value",
                 )) {
                     assertInvalidSequence(request("/$chat/$path", owner.second), path)
@@ -157,13 +160,14 @@ class MessageFeatureHttpTests
             val operation = mapper.readTree(accepted.body())
             assertEquals(requestId, operation.path("operationId").stringValue())
             assertEquals("COMPLETED", operation.path("state").stringValue())
-            assertEquals("1", operation.path("visibilityRevision").stringValue())
+            assertEquals("1", operation.path("memberSeq").stringValue())
+            assertEquals("1", operation.path("seq").stringValue())
             val resolved = request("/$chat/messages/resolve", member.second, "POST", """{"messageIds":["$target"]}""")
             assertEquals(200, resolved.statusCode(), resolved.body())
             assertEquals(0, mapper.readTree(resolved.body()).path("messages").size())
             val visibility = mapper.readTree(request("/$chat/visibility", member.second).body())
             assertEquals("1", visibility.path("snapshotSequence").stringValue())
-            assertEquals("1", visibility.path("visibilityRevision").stringValue())
+            assertEquals("1", visibility.path("memberSeq").stringValue())
             assertEquals(200, request("/$chat/deletions/$requestId", member.second).statusCode())
             assertEquals(404, request("/$chat/deletions/$requestId", owner.second).statusCode())
             assertEquals(

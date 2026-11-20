@@ -3,6 +3,7 @@ package com.andrewtinyakov.messenger.message.repository
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Routines
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHATS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSAGES
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSAGE_PINS
 import com.andrewtinyakov.messenger.message.model.MessageId
@@ -19,6 +20,10 @@ class JooqMessagePinRepository(
 ) : MessagePinRepository {
     override fun lock(chatId: ChatId) =
         Routines.acquireTransactionLock(db.configuration(), "message-pins:${chatId.value}")
+
+    override fun recordSharedChange(chatId: ChatId, seq: Long) {
+        check(db.update(CHATS).set(CHATS.PINS_SEQ, seq).where(CHATS.ID.eq(chatId.value)).execute() == 1)
+    }
 
     override fun count(chatId: ChatId, viewerId: UserId?): Int =
         db.fetchCount(MESSAGE_PINS, MESSAGE_PINS.CHAT_ID.eq(chatId.value).and(scope(viewerId)))

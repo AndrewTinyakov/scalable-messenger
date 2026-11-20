@@ -20,9 +20,12 @@ interface ChatRepository {
 
     fun isMember(chatId: ChatId, userId: UserId): Boolean
 
-    fun allocateSequenceForMember(chatId: ChatId, userId: UserId): Long?
+    fun allocateSequencesForMembers(chatId: ChatId, userIds: List<UserId>, recordActivity: Boolean = true): Long?
 
-    fun allocateSequencesForMembers(chatId: ChatId, userIds: List<UserId>): Long?
+    fun allocateEventSequence(chatId: ChatId, actorId: UserId): Long? =
+        allocateSequencesForMembers(chatId, listOf(actorId), recordActivity = false)
+
+    fun allocateMemberSequence(chatId: ChatId, userId: UserId): Long?
 
     fun findMemberIds(chatId: ChatId): List<UserId>
 }

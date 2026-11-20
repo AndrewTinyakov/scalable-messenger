@@ -1,6 +1,7 @@
 package com.andrewtinyakov.messenger.chat.service
 
 import com.andrewtinyakov.messenger.auth.model.UserId
+import com.andrewtinyakov.messenger.auth.repository.UserRepository
 import com.andrewtinyakov.messenger.chat.messaging.ChatOutbox
 import com.andrewtinyakov.messenger.chat.model.Chat
 import com.andrewtinyakov.messenger.chat.model.ChatId
@@ -36,6 +37,7 @@ class ChatServiceTests
     constructor(
         private val chatService: ChatService,
         private val chatRepository: ChatRepository,
+        private val userRepository: UserRepository,
         private val chatDirectoryRepository: ChatDirectoryRepository,
         private val groupMembershipRepository: GroupMembershipRepository,
         private val chatMembershipService: ChatMembershipService,
@@ -53,7 +55,7 @@ class ChatServiceTests
             tx.executeWithoutResult {
                 val began = db.queryForObject("SELECT transaction_timestamp()", java.time.OffsetDateTime::class.java)!!
                 db.execute("SELECT pg_sleep(0.03)")
-                chatRepository.allocateSequenceForMember(ChatId(chat.id), UserId(owner))
+                chatRepository.allocateSequencesForMembers(ChatId(chat.id), listOf(UserId(owner)))
                 val activity = db.queryForObject(
                     "SELECT last_activity_at FROM chats WHERE id=?",
                     java.time.OffsetDateTime::class.java,
@@ -108,7 +110,7 @@ class ChatServiceTests
                 chats[0].id,
             )
             tx.executeWithoutResult { status ->
-                chatRepository.allocateSequenceForMember(ChatId(chats[0].id), UserId(owner))
+                chatRepository.allocateSequencesForMembers(ChatId(chats[0].id), listOf(UserId(owner)))
                 status.setRollbackOnly()
             }
             assertEquals(
@@ -214,6 +216,7 @@ class ChatServiceTests
                 chatRepository = chatRepository,
                 chatDirectoryRepository = removingRepository,
                 groupMembershipRepository = groupMembershipRepository,
+                userRepository = userRepository,
                 chatOutbox = ChatOutbox(outboxRepository, mapper),
                 tx = tx,
             )
@@ -252,6 +255,7 @@ class ChatServiceTests
                 chatRepository = invalidEvents,
                 chatDirectoryRepository = chatDirectoryRepository,
                 groupMembershipRepository = groupMembershipRepository,
+                userRepository = userRepository,
                 chatOutbox = ChatOutbox(outboxRepository, mapper),
                 tx = tx,
             )
@@ -331,6 +335,7 @@ class ChatServiceTests
                 chatRepository = chatRepository,
                 groupMembershipRepository = groupMembershipRepository,
                 tx = tx,
+                userRepository = userRepository,
                 chatOutbox = ChatOutbox(failingOutbox, mapper),
             )
 
@@ -368,6 +373,7 @@ class ChatServiceTests
                     chatRepository = chatRepository,
                     groupMembershipRepository = pausedRepository,
                     tx = tx,
+                    userRepository = userRepository,
                     chatOutbox = ChatOutbox(outboxRepository, mapper),
                 )
             val removal = concurrently { removing.removeMember(ChatId(chat.id), UserId(owner), UserId(member)) }
@@ -385,6 +391,7 @@ class ChatServiceTests
                         chatRepository = addingRepository,
                         chatDirectoryRepository = chatDirectoryRepository,
                         groupMembershipRepository = groupMembershipRepository,
+                        userRepository = userRepository,
                         chatOutbox = ChatOutbox(outboxRepository, mapper),
                         tx = tx,
                     )
@@ -412,6 +419,7 @@ class ChatServiceTests
                 chatRepository = chatRepository,
                 groupMembershipRepository = groupMembershipRepository,
                 tx = tx,
+                userRepository = userRepository,
                 chatOutbox = ChatOutbox(outboxRepository, mapper),
             )
             val removals = (1..2).map {
@@ -455,6 +463,7 @@ class ChatServiceTests
                 chatRepository = chatRepository,
                 groupMembershipRepository = paused,
                 tx = tx,
+                userRepository = userRepository,
                 chatOutbox = ChatOutbox(outboxRepository, mapper),
             )
             val removal = concurrently { removing.removeMember(ChatId(chat.id), UserId(owner), UserId(member)) }
@@ -482,7 +491,7 @@ class ChatServiceTests
             }
 
             assertEquals(SendRejectionReason.NOT_A_MEMBER, messageSendStatusService.status(UserId(member), RequestId(request)).reason)
-            assertEquals(0L, chatDirectoryRepository.findById(ChatId(chat.id))!!.lastSequence)
+            assertEquals(1L, chatDirectoryRepository.findById(ChatId(chat.id))!!.lastSequence, "only the removal took a number")
         }
 
         @Test
@@ -512,6 +521,7 @@ class ChatServiceTests
                 chatRepository = observing,
                 groupMembershipRepository = groupMembershipRepository,
                 tx = tx,
+                userRepository = userRepository,
                 chatOutbox = ChatOutbox(outboxRepository, mapper),
             )
             try {
@@ -525,7 +535,7 @@ class ChatServiceTests
                 release.countDown()
             }
 
-            assertEquals(1L, chatDirectoryRepository.findById(ChatId(chat.id))!!.lastSequence)
+            assertEquals(2L, chatDirectoryRepository.findById(ChatId(chat.id))!!.lastSequence)
             assertEquals(
                 listOf("message_saved", "member_removed"),
                 db.queryForList(
@@ -661,7 +671,7 @@ class ChatServiceTests
 
             assertEquals(3, chatService.get(ChatId(chat.id), UserId(owner)).memberCount)
             assertEquals(3, chatService.get(ChatId(chat.id), UserId(second)).memberCount)
-            assertEquals(0L, chatDirectoryRepository.findById(ChatId(chat.id))!!.lastSequence)
+            assertEquals(1L, chatDirectoryRepository.findById(ChatId(chat.id))!!.lastSequence)
             val payload = db.queryForObject(
                 "SELECT payload::text FROM messenger_outbox_events WHERE room=? AND payload->>'type'='membership_changed'",
                 String::class.java,
@@ -669,9 +679,10 @@ class ChatServiceTests
             )!!
             val notification = mapper.readTree(payload)
             assertEquals(
-                setOf("type", "version", "eventId", "room", "chatId"),
+                setOf("type", "version", "eventId", "room", "chatId", "seq"),
                 notification.properties().map { it.key }.toSet(),
             )
+            assertEquals("1", notification.get("seq").stringValue())
             assertEquals(1, notification.get("version").intValue())
             assertEquals(chat.id, notification.get("chatId").stringValue())
             assertEquals("group:${chat.id}", notification.get("room").stringValue())
@@ -709,6 +720,7 @@ class ChatServiceTests
                 chatRepository = chatRepository,
                 chatDirectoryRepository = chatDirectoryRepository,
                 groupMembershipRepository = groupMembershipRepository,
+                userRepository = userRepository,
                 chatOutbox = ChatOutbox(failingOutbox, mapper),
                 tx = tx,
             )

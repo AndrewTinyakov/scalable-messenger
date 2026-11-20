@@ -9,10 +9,13 @@ required:
   - room
   - chatId
   - sequence
-  - mutationRevision
-  - visibilityRevision
   - epoch
   - streamId
+anyOf:
+  - required:
+      - seq
+  - required:
+      - memberSeq
 properties:
   type:
     const: history_changed
@@ -29,8 +32,12 @@ properties:
   sequence: &sequence
     type: string
     pattern: ^(0|[1-9][0-9]{0,18})$
-  mutationRevision: *sequence
-  visibilityRevision: *sequence
+  seq:
+    type: string
+    pattern: ^[1-9][0-9]{0,18}$
+  memberSeq:
+    type: string
+    pattern: ^[1-9][0-9]{0,18}$
   epoch:
     type: string
     minLength: 1

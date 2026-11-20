@@ -170,7 +170,7 @@ class LegacyChatDeletionUpgradeTests
                     MessageSendService(
                         messages,
                         chats,
-                        DirectChatService(chats, DirectChatOutbox(mapper)),
+                        DirectChatService(chats, DirectChatOutbox(mapper), JooqUserRepository(jooq)),
                         JooqUserRepository(jooq),
                         MessageSendOutbox(chats, outbox, mapper),
                         tx,
@@ -181,6 +181,7 @@ class LegacyChatDeletionUpgradeTests
                 val deletions =
                     DeletionService(
                         JooqDeletionRepository(jooq, clock),
+                        chats,
                         ChatEventAudience(chats),
                         DeletionOutbox(outbox, mapper),
                         tx,

@@ -112,13 +112,13 @@ class MessageHistoryService(
             val state = state(chatId, userId)
             val cursor = messageChangeRepository.cursor(chatId, userId) ?: notFound()
             requirePageLimit(limit)
-            if (after < cursor.floor || after > cursor.revision) return@primary resetChanges(state, cursor)
-            val page = messageChangeRepository.page(chatId, after, cursor.revision, limit)
-            val current = findCurrentMessages(chatId, userId, page)
+            if (after < cursor.floor || after > cursor.lastSeq) return@primary resetChanges(state, cursor)
+            val page = messageChangeRepository.page(chatId, after, cursor.lastSeq, limit)
+            val current = findCurrentMessages(chatId, userId, page.changes)
             state.toChangesResponse(
-                changes = page.map { change -> change.toChangeResponse(current[change.messageId]) },
-                lastRevision = cursor.revision,
-                nextRevision = page.lastOrNull()?.revision ?: after,
+                changes = page.changes.map { change -> change.toChangeResponse(current[change.messageId]) },
+                lastSeq = cursor.lastSeq,
+                nextSeq = page.nextSeq,
                 resetRequired = false,
             )
         }
@@ -217,8 +217,8 @@ class MessageHistoryService(
         metrics.changesReset()
         return state.toChangesResponse(
             changes = emptyList(),
-            lastRevision = cursor.revision,
-            nextRevision = cursor.revision,
+            lastSeq = cursor.lastSeq,
+            nextSeq = cursor.lastSeq,
             resetRequired = true,
         )
     }
@@ -229,7 +229,7 @@ class MessageHistoryService(
     private fun MessageChange.toChangeResponse(current: Message?): MessageChangeResponse {
         val resolvedKind = if (kind == MessageChangeKind.UPSERT && current == null) MessageChangeKind.REMOVED else kind
         return MessageChangeResponse(
-            revision = revision.toString(),
+            seq = seq.toString(),
             kind = MessageChangeKindResponse.valueOf(resolvedKind.name),
             message = if (resolvedKind == MessageChangeKind.UPSERT) current?.toResponse() else null,
             messageId = messageId?.value,

@@ -5,6 +5,7 @@ import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.deletion.model.DeletionChat
 import com.andrewtinyakov.messenger.deletion.model.DeletionMessage
 import com.andrewtinyakov.messenger.deletion.model.DeletionScope
+import com.andrewtinyakov.messenger.deletion.model.DeletionSequences
 import com.andrewtinyakov.messenger.deletion.model.DeletionTarget
 import com.andrewtinyakov.messenger.deletion.model.StoredDeletion
 import com.andrewtinyakov.messenger.message.model.MessageId
@@ -19,15 +20,15 @@ interface DeletionRepository {
 
     fun lockChat(chatId: ChatId, userId: UserId): DeletionChat?
 
-    fun hideMessages(chatId: ChatId, userId: UserId, messages: List<DeletionMessage>): Long
+    fun hideMessages(chatId: ChatId, userId: UserId, messages: List<DeletionMessage>)
 
-    fun clearPersonal(chatId: ChatId, userId: UserId, through: Long, hide: Boolean): Long
+    fun clearPersonal(chatId: ChatId, userId: UserId, through: Long, hide: Boolean)
 
-    fun removeMessages(chatId: ChatId, messages: List<DeletionMessage>): Long
+    fun removeMessages(chatId: ChatId, messages: List<DeletionMessage>, seq: Long)
 
     fun repairClosedPurge(chatId: ChatId, through: Long)
 
-    fun clearGlobal(chatId: ChatId, userId: UserId, through: Long, close: Boolean): Long
+    fun clearGlobal(chatId: ChatId, userId: UserId, through: Long, close: Boolean, seq: Long)
 
     fun saveOperation(
         chatId: ChatId,
@@ -37,8 +38,7 @@ interface DeletionRepository {
         target: DeletionTarget,
         fingerprint: String,
         chat: DeletionChat,
-        mutationRevision: Long,
-        visibilityRevision: Long,
+        sequences: DeletionSequences,
         rows: Int,
     )
 }

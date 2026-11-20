@@ -22,4 +22,6 @@ interface MessagePinRepository {
     fun visibleIds(chatId: ChatId, viewerId: UserId): List<MessageId>
 
     fun exists(chatId: ChatId, sequence: Long, viewerId: UserId?): Boolean
+
+    fun recordSharedChange(chatId: ChatId, seq: Long)
 }

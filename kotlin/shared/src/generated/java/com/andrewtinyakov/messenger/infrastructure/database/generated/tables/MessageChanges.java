@@ -33,7 +33,6 @@ import org.jooq.Table;
 import org.jooq.TableField;
 import org.jooq.TableLike;
 import org.jooq.TableOptions;
-import org.jooq.UniqueKey;
 import org.jooq.impl.DSL;
 import org.jooq.impl.Internal;
 import org.jooq.impl.SQLDataType;
@@ -67,9 +66,9 @@ public class MessageChanges extends TableImpl<MessageChangesRecord> {
     public final TableField<MessageChangesRecord, String> CHAT_ID = createField(DSL.name("chat_id"), SQLDataType.VARCHAR(26).nullable(false), this, "");
 
     /**
-     * The column <code>public.message_changes.revision</code>.
+     * The column <code>public.message_changes.seq</code>.
      */
-    public final TableField<MessageChangesRecord, Long> REVISION = createField(DSL.name("revision"), SQLDataType.BIGINT.nullable(false), this, "");
+    public final TableField<MessageChangesRecord, Long> SEQ = createField(DSL.name("seq"), SQLDataType.BIGINT.nullable(false), this, "");
 
     /**
      * The column <code>public.message_changes.message_id</code>.
@@ -165,12 +164,7 @@ public class MessageChanges extends TableImpl<MessageChangesRecord> {
 
     @Override
     public List<Index> getIndexes() {
-        return Arrays.asList(Indexes.MESSAGE_CHANGES_RETENTION_IDX);
-    }
-
-    @Override
-    public UniqueKey<MessageChangesRecord> getPrimaryKey() {
-        return Keys.MESSAGE_CHANGES_PKEY;
+        return Arrays.asList(Indexes.MESSAGE_CHANGES_CHAT_SEQ_IDX, Indexes.MESSAGE_CHANGES_RETENTION_IDX);
     }
 
     @Override
@@ -194,7 +188,7 @@ public class MessageChanges extends TableImpl<MessageChangesRecord> {
     public List<Check<MessageChangesRecord>> getChecks() {
         return Arrays.asList(
             Internal.createCheck(this, DSL.name("message_changes_kind_check"), "(((kind)::text = ANY ((ARRAY['UPSERT'::character varying, 'REMOVED'::character varying, 'CLEARED'::character varying])::text[])))", true),
-            Internal.createCheck(this, DSL.name("message_changes_revision_check"), "((revision > 0))", true)
+            Internal.createCheck(this, DSL.name("message_changes_revision_check"), "((seq > 0))", true)
         );
     }
 

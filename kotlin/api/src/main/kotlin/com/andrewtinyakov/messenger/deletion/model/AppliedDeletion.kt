@@ -1,6 +1,6 @@
 package com.andrewtinyakov.messenger.deletion.model
 
 internal data class AppliedDeletion(
-    val revisions: DeletionRevisions,
+    val sequences: DeletionSequences,
     val deletedRows: Int,
 )

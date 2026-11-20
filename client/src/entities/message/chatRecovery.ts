@@ -982,7 +982,8 @@ export class ChatRecovery {
           if (latest.skipped) complete = false
           if (!complete) {
             // Retry a few times; after that, leave the revision unverified so the next hint repairs it.
-            if (++incompletePasses < 3 && valid()) request.phase = 'invalidated'
+            if (++incompletePasses >= 3 || !valid()) return
+            request.phase = 'invalidated'
             continue
           }
           this.state.verifySnapshot(chatId, {

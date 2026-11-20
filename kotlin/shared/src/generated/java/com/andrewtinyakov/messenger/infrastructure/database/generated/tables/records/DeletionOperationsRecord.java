@@ -133,16 +133,16 @@ public class DeletionOperationsRecord extends UpdatableRecordImpl<DeletionOperat
     }
 
     /**
-     * Setter for <code>public.deletion_operations.member_seq</code>.
+     * Setter for <code>public.deletion_operations.visibility_seq</code>.
      */
-    public void setMemberSeq(Long value) {
+    public void setVisibilitySeq(Long value) {
         set(8, value);
     }
 
     /**
-     * Getter for <code>public.deletion_operations.member_seq</code>.
+     * Getter for <code>public.deletion_operations.visibility_seq</code>.
      */
-    public Long getMemberSeq() {
+    public Long getVisibilitySeq() {
         return (Long) get(8);
     }
 
@@ -211,7 +211,7 @@ public class DeletionOperationsRecord extends UpdatableRecordImpl<DeletionOperat
     /**
      * Create a detached, initialised DeletionOperationsRecord
      */
-    public DeletionOperationsRecord(String actorId, String requestId, String chatId, String fingerprint, String scope, String target, Long throughSequence, Long seq, Long memberSeq, Long deletedRows, Long purgeRowsBefore, OffsetDateTime createdAt) {
+    public DeletionOperationsRecord(String actorId, String requestId, String chatId, String fingerprint, String scope, String target, Long throughSequence, Long seq, Long visibilitySeq, Long deletedRows, Long purgeRowsBefore, OffsetDateTime createdAt) {
         super(DeletionOperations.DELETION_OPERATIONS);
 
         setActorId(actorId);
@@ -222,7 +222,7 @@ public class DeletionOperationsRecord extends UpdatableRecordImpl<DeletionOperat
         setTarget(target);
         setThroughSequence(throughSequence);
         setSeq(seq);
-        setMemberSeq(memberSeq);
+        setVisibilitySeq(visibilitySeq);
         setDeletedRows(deletedRows);
         setPurgeRowsBefore(purgeRowsBefore);
         setCreatedAt(createdAt);

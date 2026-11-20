@@ -5,6 +5,7 @@ import com.andrewtinyakov.messenger.auth.repository.UserRepository
 import com.andrewtinyakov.messenger.chat.messaging.ChatOutbox
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.model.ChatPreferences
+import com.andrewtinyakov.messenger.chat.model.MemberChange
 import com.andrewtinyakov.messenger.chat.model.MuteEnd
 import com.andrewtinyakov.messenger.chat.repository.ChatRepository
 import com.andrewtinyakov.messenger.chat.repository.preferences.ChatPreferencesRepository
@@ -80,7 +81,7 @@ class ChatPreferencesService(
     private fun change(chatId: ChatId, userId: UserId, update: () -> Boolean): ChatPreferencesResponse =
         tx.execute {
             if (!update()) notFound()
-            val memberSeq = chatRepository.allocateMemberSequence(chatId, userId) ?: notFound()
+            val memberSeq = chatRepository.allocateMemberSequence(chatId, userId, MemberChange.OTHER) ?: notFound()
             chatOutbox.enqueueMemberPreferencesChanged(userId, chatId, memberSeq)
             checkNotNull(chatPreferencesRepository.find(chatId, userId)).toResponse(chatId.value)
         }

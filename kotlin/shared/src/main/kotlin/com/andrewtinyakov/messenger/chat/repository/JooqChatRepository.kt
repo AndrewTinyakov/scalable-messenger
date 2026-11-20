@@ -4,6 +4,7 @@ import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.Chat
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.model.ChatKind
+import com.andrewtinyakov.messenger.chat.model.MemberChange
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Routines
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHATS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHAT_MEMBERS
@@ -232,9 +233,14 @@ class JooqChatRepository(
             .fetchOne()?.nextSequence?.minus(userIds.size.toLong())
     }
 
-    override fun allocateMemberSequence(chatId: ChatId, userId: UserId): Long? =
+    override fun allocateMemberSequence(chatId: ChatId, userId: UserId, change: MemberChange): Long? =
         db.update(CHAT_MEMBERS)
             .set(CHAT_MEMBERS.MEMBER_SEQ, CHAT_MEMBERS.MEMBER_SEQ.plus(1L))
+            .set(
+                CHAT_MEMBERS.VISIBILITY_SEQ,
+                if (change == MemberChange.VISIBILITY) CHAT_MEMBERS.MEMBER_SEQ.plus(1L) else CHAT_MEMBERS.VISIBILITY_SEQ,
+            )
+            .set(CHAT_MEMBERS.PINS_SEQ, if (change == MemberChange.PINS) CHAT_MEMBERS.MEMBER_SEQ.plus(1L) else CHAT_MEMBERS.PINS_SEQ)
             .where(CHAT_MEMBERS.CHAT_ID.eq(chatId.value), CHAT_MEMBERS.USER_ID.eq(userId.value))
             .returning(CHAT_MEMBERS.MEMBER_SEQ)
             .fetchOne()?.memberSeq

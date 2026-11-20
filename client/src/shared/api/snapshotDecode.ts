@@ -4,7 +4,7 @@ import { isRecord, isSequence } from '../lib/validation'
 export const snapshotFields = [
   'snapshotSequence',
   'mutationSeq',
-  'memberSeq',
+  'visibilitySeq',
   'clearedThroughSequence',
   'globalClearedThroughSequence',
 ]

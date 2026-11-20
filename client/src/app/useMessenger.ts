@@ -275,7 +275,7 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
         return {
           snapshotSequence: state.lastSeq,
           mutationSeq: state.mutationSeq,
-          memberSeq: state.memberSeq,
+          visibilitySeq: state.visibilitySeq,
           clearedThroughSequence: state.clearedThroughSequence,
           globalClearedThroughSequence: state.globalClearedThroughSequence,
           hidden: state.hidden,

@@ -43,7 +43,7 @@ async function fixture() {
   const metadata = () => ({
     snapshotSequence: '2',
     mutationSeq: hidden ? '1' : '0',
-    memberSeq: hidden ? '1' : '0',
+    visibilitySeq: hidden ? '1' : '0',
     clearedThroughSequence: '0',
     globalClearedThroughSequence: '0',
   })
@@ -69,7 +69,7 @@ async function fixture() {
   await recovery.catchUp('chat', true)
   const oldChanges: ChangesSnapshot = {
     snapshotSequence: '2',
-    memberSeq: '0',
+    visibilitySeq: '0',
     clearedThroughSequence: '0',
     globalClearedThroughSequence: '0',
     changes: [
@@ -125,7 +125,7 @@ async function fixture() {
     get: () => features,
     hide: async () => {
       hidden = true
-      await act(async () => recovery.synchronize('chat', { mutationSeq: '1', memberSeq: '1' }))
+      await act(async () => recovery.synchronize('chat', { mutationSeq: '1', visibilitySeq: '1' }))
     },
     close: async () => {
       await act(async () => root.unmount())
@@ -145,7 +145,7 @@ describe('viewer snapshots racing with conversation callers', () => {
       await f.hide()
       f.service.messageChanges.mockImplementation(async () => ({
         ...f.oldChanges,
-        memberSeq: '1',
+        visibilitySeq: '1',
         changes: [{ ...f.oldChanges.changes[0], message: f.unavailable }],
       }))
       await act(async () => f.changing.resolve(f.oldChanges))

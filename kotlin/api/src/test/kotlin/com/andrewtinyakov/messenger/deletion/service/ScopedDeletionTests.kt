@@ -60,7 +60,7 @@ class ScopedDeletionTests
             assertEquals(listOf("reply"), secondDevice.messages.map { it.body })
             assertEquals(first.id, secondDevice.messages.single().replyToMessageId)
             assertNull(secondDevice.messages.single().replyBody)
-            assertEquals("1", secondDevice.memberSeq)
+            assertEquals("1", secondDevice.visibilitySeq)
             assertEquals(listOf("first", "reply"), history.messages(ChatId(chat), UserId(member), null, null, 100).messages.map { it.body })
             assertEquals("first", history.messages(ChatId(chat), UserId(member), null, null, 100).messages.last().replyBody)
             assertTrue(history.resolve(ChatId(chat), UserId(owner), listOf(MessageId(first.id))).messages.isEmpty())
@@ -282,7 +282,7 @@ class ScopedDeletionTests
                     chat,
                 ),
             )
-            assertEquals("2", history.visibility(ChatId(chat), UserId(member)).memberSeq)
+            assertEquals("2", history.visibility(ChatId(chat), UserId(member)).visibilitySeq)
             val request = RequestId(newId())
             deletions.clearHistory(ChatId(chat), UserId(owner), request, DeletionScope.SELF)
             assertEquals(

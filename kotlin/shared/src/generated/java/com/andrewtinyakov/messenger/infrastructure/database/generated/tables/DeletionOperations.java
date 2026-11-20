@@ -103,9 +103,9 @@ public class DeletionOperations extends TableImpl<DeletionOperationsRecord> {
     public final TableField<DeletionOperationsRecord, Long> SEQ = createField(DSL.name("seq"), SQLDataType.BIGINT.nullable(false), this, "");
 
     /**
-     * The column <code>public.deletion_operations.member_seq</code>.
+     * The column <code>public.deletion_operations.visibility_seq</code>.
      */
-    public final TableField<DeletionOperationsRecord, Long> MEMBER_SEQ = createField(DSL.name("member_seq"), SQLDataType.BIGINT.nullable(false), this, "");
+    public final TableField<DeletionOperationsRecord, Long> VISIBILITY_SEQ = createField(DSL.name("visibility_seq"), SQLDataType.BIGINT.nullable(false), this, "");
 
     /**
      * The column <code>public.deletion_operations.deleted_rows</code>.
@@ -237,7 +237,7 @@ public class DeletionOperations extends TableImpl<DeletionOperationsRecord> {
             Internal.createCheck(this, DSL.name("deletion_operations_scope_check"), "(((scope)::text = ANY ((ARRAY['SELF'::character varying, 'EVERYONE'::character varying])::text[])))", true),
             Internal.createCheck(this, DSL.name("deletion_operations_target_check"), "(((target)::text = ANY ((ARRAY['MESSAGES'::character varying, 'HISTORY'::character varying, 'CHAT'::character varying])::text[])))", true),
             Internal.createCheck(this, DSL.name("deletion_operations_through_sequence_check"), "((through_sequence >= 0))", true),
-            Internal.createCheck(this, DSL.name("deletion_operations_visibility_revision_check"), "((member_seq >= 0))", true)
+            Internal.createCheck(this, DSL.name("deletion_operations_visibility_revision_check"), "((visibility_seq >= 0))", true)
         );
     }
 

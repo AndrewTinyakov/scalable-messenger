@@ -731,7 +731,7 @@ describe('synchronizing quotes while every history slot is busy', () => {
     const metadata = () => ({
       snapshotSequence: '2',
       mutationSeq: mutated && operation !== 'SELF' ? '1' : '0',
-      memberSeq: mutated && operation === 'SELF' ? '1' : '0',
+      visibilitySeq: mutated && operation === 'SELF' ? '1' : '0',
       clearedThroughSequence: '0',
       globalClearedThroughSequence: '0',
     })

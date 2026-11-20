@@ -158,8 +158,15 @@ data class ChatStateResponse(
     val mutationFloor: String,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED, description = "Chat sequence of the latest shared edit, deletion or clear")
     val mutationSeq: String,
-    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED, description = "Counter of the viewer's private changes in this chat")
     val memberSeq: String,
+    @field:Schema(
+        requiredMode = Schema.RequiredMode.REQUIRED,
+        description = "Member sequence of the viewer's latest history visibility change",
+    )
+    val visibilitySeq: String,
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED, description = "Member sequence of the viewer's latest personal pin change")
+    val memberPinsSeq: String,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val clearedThroughSequence: String,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
@@ -180,6 +187,8 @@ fun ChatState.toResponse(): ChatStateResponse = ChatStateResponse(
     mutationFloor = mutationFloor.toString(),
     mutationSeq = mutationSeq.toString(),
     memberSeq = memberSeq.toString(),
+    visibilitySeq = visibilitySeq.toString(),
+    memberPinsSeq = memberPinsSeq.toString(),
     clearedThroughSequence = clearedThroughSequence.toString(),
     globalClearedThroughSequence = globalClearedThroughSequence.toString(),
     hidden = hidden,

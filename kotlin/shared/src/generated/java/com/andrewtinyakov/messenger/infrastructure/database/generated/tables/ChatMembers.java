@@ -107,6 +107,16 @@ public class ChatMembers extends TableImpl<ChatMembersRecord> {
      */
     public final TableField<ChatMembersRecord, OffsetDateTime> MARKED_UNREAD_AT = createField(DSL.name("marked_unread_at"), SQLDataType.TIMESTAMPWITHTIMEZONE(6), this, "");
 
+    /**
+     * The column <code>public.chat_members.visibility_seq</code>.
+     */
+    public final TableField<ChatMembersRecord, Long> VISIBILITY_SEQ = createField(DSL.name("visibility_seq"), SQLDataType.BIGINT.nullable(false).defaultValue(DSL.field(DSL.raw("0"), SQLDataType.BIGINT)), this, "");
+
+    /**
+     * The column <code>public.chat_members.pins_seq</code>.
+     */
+    public final TableField<ChatMembersRecord, Long> PINS_SEQ = createField(DSL.name("pins_seq"), SQLDataType.BIGINT.nullable(false).defaultValue(DSL.field(DSL.raw("0"), SQLDataType.BIGINT)), this, "");
+
     private ChatMembers(Name alias, Table<ChatMembersRecord> aliased) {
         this(alias, aliased, (Field<?>[]) null, null);
     }
@@ -219,7 +229,9 @@ public class ChatMembers extends TableImpl<ChatMembersRecord> {
             Internal.createCheck(this, DSL.name("chat_members_cleared_through_sequence_check"), "((cleared_through_sequence >= 0))", true),
             Internal.createCheck(this, DSL.name("chat_members_hidden_through_sequence_check"), "((hidden_through_sequence >= 0))", true),
             Internal.createCheck(this, DSL.name("chat_members_pinned_rank_check"), "(((pinned_rank >= 1) AND (pinned_rank <= 10)))", true),
-            Internal.createCheck(this, DSL.name("chat_members_visibility_revision_check"), "((member_seq >= 0))", true)
+            Internal.createCheck(this, DSL.name("chat_members_pins_seq_check"), "((pins_seq >= 0))", true),
+            Internal.createCheck(this, DSL.name("chat_members_visibility_revision_check"), "((member_seq >= 0))", true),
+            Internal.createCheck(this, DSL.name("chat_members_visibility_seq_check"), "((visibility_seq >= 0))", true)
         );
     }
 

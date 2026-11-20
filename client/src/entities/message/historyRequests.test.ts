@@ -22,17 +22,23 @@ describe('pending history requests', () => {
       replyVersion: '1',
       replyDeleted: false,
     }
-    let release!: (page: { messages: Message[]; mutationSeq: string; memberSeq: string }) => void
+    let release!: (page: {
+      messages: Message[]
+      mutationSeq: string
+      visibilitySeq: string
+    }) => void
     const loading = requests.run(
       'chat',
       () =>
-        new Promise<{ messages: Message[]; mutationSeq: string; memberSeq: string }>((resolve) => {
-          release = resolve
-        }),
+        new Promise<{ messages: Message[]; mutationSeq: string; visibilitySeq: string }>(
+          (resolve) => {
+            release = resolve
+          },
+        ),
       (page) => page.messages,
     )
     requests.patch('chat', [{ ...reply, body: 'newer edit body', messageVersion: '3' }])
-    requests.observe('chat', { mutationSeq: '1', memberSeq: '1' })
+    requests.observe('chat', { mutationSeq: '1', visibilitySeq: '1' })
     release({
       messages: [
         {
@@ -46,7 +52,7 @@ describe('pending history requests', () => {
         },
       ],
       mutationSeq: '1',
-      memberSeq: '1',
+      visibilitySeq: '1',
     })
     expect(await loading).toEqual([
       expect.objectContaining({
@@ -82,26 +88,32 @@ describe('pending history requests', () => {
   })
   it('keeps an in-flight revision fence after thousands of other chat hints', async () => {
     const requests = new HistoryRequests()
-    let release!: (page: { messages: Message[]; mutationSeq: string; memberSeq: string }) => void
+    let release!: (page: {
+      messages: Message[]
+      mutationSeq: string
+      visibilitySeq: string
+    }) => void
     const install = (page: { messages: Message[] }) => page.messages
     const loading = requests.run(
       'selected',
       () =>
-        new Promise<{ messages: Message[]; mutationSeq: string; memberSeq: string }>((resolve) => {
-          release = resolve
-        }),
+        new Promise<{ messages: Message[]; mutationSeq: string; visibilitySeq: string }>(
+          (resolve) => {
+            release = resolve
+          },
+        ),
       install,
     )
-    requests.observe('selected', { mutationSeq: '3', memberSeq: '2' })
+    requests.observe('selected', { mutationSeq: '3', visibilitySeq: '2' })
     for (let index = 0; index < 2000; index += 1)
-      requests.observe(`other-${index}`, { mutationSeq: '1', memberSeq: '1' })
-    requests.observe('selected', { mutationSeq: '1', memberSeq: '1' })
-    release({ messages: [message('1')], mutationSeq: '2', memberSeq: '1' })
+      requests.observe(`other-${index}`, { mutationSeq: '1', visibilitySeq: '1' })
+    requests.observe('selected', { mutationSeq: '1', visibilitySeq: '1' })
+    release({ messages: [message('1')], mutationSeq: '2', visibilitySeq: '1' })
     expect(await loading).toBeUndefined()
     expect(
       await requests.run(
         'selected',
-        async () => ({ messages: [message('2')], mutationSeq: '3', memberSeq: '2' }),
+        async () => ({ messages: [message('2')], mutationSeq: '3', visibilitySeq: '2' }),
         install,
       ),
     ).toEqual([message('2')])

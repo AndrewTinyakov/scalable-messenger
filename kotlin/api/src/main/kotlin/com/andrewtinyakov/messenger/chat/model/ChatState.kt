@@ -6,6 +6,8 @@ data class ChatState(
     val mutationFloor: Long,
     val mutationSeq: Long,
     val memberSeq: Long,
+    val visibilitySeq: Long,
+    val memberPinsSeq: Long,
     val clearedThroughSequence: Long,
     val globalClearedThroughSequence: Long,
     val hidden: Boolean,

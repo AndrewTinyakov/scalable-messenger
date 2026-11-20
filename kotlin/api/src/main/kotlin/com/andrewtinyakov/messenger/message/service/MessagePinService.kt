@@ -4,6 +4,7 @@ import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.Chat
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.model.ChatKind
+import com.andrewtinyakov.messenger.chat.model.MemberChange
 import com.andrewtinyakov.messenger.chat.repository.ChatRepository
 import com.andrewtinyakov.messenger.message.messaging.MessageOutbox
 import com.andrewtinyakov.messenger.message.model.Message
@@ -78,7 +79,7 @@ class MessagePinService(
 
     private fun announce(chat: Chat, userId: UserId, personalViewer: UserId?) {
         if (personalViewer != null) {
-            val memberSeq = chatRepository.allocateMemberSequence(chat.id, personalViewer) ?: notFound()
+            val memberSeq = chatRepository.allocateMemberSequence(chat.id, personalViewer, MemberChange.PINS) ?: notFound()
             messageOutbox.enqueuePinsChanged(chat, memberSeq, personalViewer)
             return
         }

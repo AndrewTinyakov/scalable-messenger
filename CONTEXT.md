@@ -23,6 +23,7 @@
 - **Message version** orders changes to one message while its original chat sequence stays the same.
 - **Mutation sequence** is the chat sequence of a chat's latest shared edit, deletion or clear. Changes are retained above the mutation floor.
 - **Member sequence** numbers one account's private changes in one chat: personal deletion and clear, hiding the chat, personal pins, mute, the unread mark and its own read-through. Other members never see it.
+- **Visibility sequence** is the member sequence of an account's latest personal deletion, clear or hide in one chat. History pages are fenced by it, not by every private change.
 - **Account sequence** numbers an account's changes that belong to no single chat: being added to or removed from a chat and chat pin order.
 - **Chat state** is one authorized snapshot of a chat's sequences, cutoffs and read positions. Devices compare it with what they hold and fetch only what moved.
 - **Personal deletion** hides content for one account across its devices, using a prefix cutoff and merged sequence exclusions. Membership remains an authorization fact.

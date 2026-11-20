@@ -256,6 +256,28 @@ class ChatSequenceTests
             assertEquals(List(4) { "7" }, second.changes.map { it.seq })
         }
 
+        @Test
+        fun `only visibility changes move the visibility sequence and only personal pins move the personal pin sequence`() {
+            val owner = user("seq-split-owner")
+            val member = user("seq-split-member")
+            val chat = group(owner, member)
+            val first = send(owner, chat, "first")
+            send(owner, chat, "second")
+
+            fun state() = chatState.state(ChatId(chat), UserId(member), minSeq = null)
+
+            reads.advance(ChatId(chat), UserId(member), 1L)
+            preferences.mute(ChatId(chat), UserId(member), null)
+            assertEquals("2", state().memberSeq)
+            assertEquals("0", state().visibilitySeq)
+            assertEquals("0", state().memberPinsSeq)
+
+            deletions.deleteMessages(ChatId(chat), UserId(member), RequestId(newId()), DeletionScope.SELF, listOf(first))
+            assertEquals("3", state().memberSeq)
+            assertEquals("3", state().visibilitySeq)
+            assertEquals("3", history.messages(ChatId(chat), UserId(member), null, null, 10).visibilitySeq)
+        }
+
         private fun group(owner: String, member: String): String = chats.createGroup(UserId(owner), "Sequences", listOf(UserId(member))).id
 
         private fun send(sender: String, chat: String, body: String): MessageId {

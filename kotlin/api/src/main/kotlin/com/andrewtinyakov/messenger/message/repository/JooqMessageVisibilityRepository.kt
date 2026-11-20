@@ -23,7 +23,7 @@ class JooqMessageVisibilityRepository(
         db.select(
             CHATS.NEXT_SEQUENCE,
             mutationSeq(chatId),
-            CHAT_MEMBERS.MEMBER_SEQ,
+            CHAT_MEMBERS.VISIBILITY_SEQ,
             CHAT_MEMBERS.CLEARED_THROUGH_SEQUENCE,
             CHATS.CLEARED_THROUGH_SEQUENCE,
             DSL.field(hidden(CHAT_MEMBERS)),
@@ -33,7 +33,7 @@ class JooqMessageVisibilityRepository(
                 VisibilitySnapshot(
                     snapshotSequence = it.value1()!! - 1,
                     mutationSeq = it.value2()!!,
-                    memberSeq = it.value3()!!,
+                    visibilitySeq = it.value3()!!,
                     clearedThroughSequence = it.value4()!!,
                     globalClearedThroughSequence = it.value5()!!,
                     hidden = it.value6() == true,

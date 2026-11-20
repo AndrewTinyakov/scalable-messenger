@@ -6,7 +6,7 @@ export type HistoryBounds = {
   hasOlder?: boolean
   hasNewer?: boolean
 }
-type Revisions = { mutationSeq: string; memberSeq: string }
+type Revisions = { mutationSeq: string; visibilitySeq: string }
 type Entry = {
   snapshot: Partial<SnapshotMetadata>
   unverified: Set<string>
@@ -55,13 +55,13 @@ export class HistoryVisibility {
   observe(chatId: string, snapshot: Partial<SnapshotMetadata>, retainedIds: string[]): boolean {
     const entry = this.touch(chatId)
     const changed =
-      BigInt(snapshot.memberSeq ?? '0') > BigInt(entry.snapshot.memberSeq ?? '0') ||
+      BigInt(snapshot.visibilitySeq ?? '0') > BigInt(entry.snapshot.visibilitySeq ?? '0') ||
       BigInt(snapshot.mutationSeq ?? '0') > BigInt(entry.snapshot.mutationSeq ?? '0')
     if (changed) entry.unverified = new Set(retainedIds)
     for (const field of [
       'snapshotSequence',
       'mutationSeq',
-      'memberSeq',
+      'visibilitySeq',
       'clearedThroughSequence',
       'globalClearedThroughSequence',
     ] as const)
@@ -101,10 +101,10 @@ export class HistoryVisibility {
         BigInt(revisions.mutationSeq) > BigInt(entry.verified?.mutationSeq ?? '0')
           ? revisions.mutationSeq
           : (entry.verified?.mutationSeq ?? '0'),
-      memberSeq:
-        BigInt(revisions.memberSeq) > BigInt(entry.verified?.memberSeq ?? '0')
-          ? revisions.memberSeq
-          : (entry.verified?.memberSeq ?? '0'),
+      visibilitySeq:
+        BigInt(revisions.visibilitySeq) > BigInt(entry.verified?.visibilitySeq ?? '0')
+          ? revisions.visibilitySeq
+          : (entry.verified?.visibilitySeq ?? '0'),
     }
   }
 

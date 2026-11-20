@@ -146,7 +146,7 @@ export function decodeDeletion(
     'target',
     'clearedThroughSequence',
     'seq',
-    'memberSeq',
+    'visibilitySeq',
     'state',
     'deletedRows',
   ])
@@ -157,7 +157,7 @@ export function decodeDeletion(
       ['ACCEPTED', 'COMPLETED'].includes(String(result.state)),
   )
   check(
-    ['clearedThroughSequence', 'seq', 'memberSeq', 'deletedRows'].every((field) =>
+    ['clearedThroughSequence', 'seq', 'visibilitySeq', 'deletedRows'].every((field) =>
       isSequence(result[field]),
     ),
   )
@@ -171,6 +171,8 @@ export function decodeChatState(value: unknown): ChatState {
     'mutationFloor',
     'mutationSeq',
     'memberSeq',
+    'visibilitySeq',
+    'memberPinsSeq',
     'clearedThroughSequence',
     'globalClearedThroughSequence',
     'ownReadThrough',

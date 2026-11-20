@@ -13,9 +13,13 @@ ALTER TABLE chats
 UPDATE chats SET last_message_sequence = next_sequence - 1;
 
 ALTER TABLE chat_members RENAME COLUMN visibility_revision TO member_seq;
+ALTER TABLE chat_members
+    ADD COLUMN visibility_seq bigint NOT NULL DEFAULT 0 CHECK (visibility_seq >= 0),
+    ADD COLUMN pins_seq bigint NOT NULL DEFAULT 0 CHECK (pins_seq >= 0);
+UPDATE chat_members SET visibility_seq = member_seq;
 
 ALTER TABLE users ADD COLUMN event_seq bigint NOT NULL DEFAULT 0 CHECK (event_seq >= 0);
 
 ALTER TABLE deletion_operations RENAME COLUMN mutation_revision TO seq;
-ALTER TABLE deletion_operations RENAME COLUMN visibility_revision TO member_seq;
-UPDATE deletion_operations SET seq = 0, member_seq = 0;
+ALTER TABLE deletion_operations RENAME COLUMN visibility_revision TO visibility_seq;
+UPDATE deletion_operations SET seq = 0, visibility_seq = 0;

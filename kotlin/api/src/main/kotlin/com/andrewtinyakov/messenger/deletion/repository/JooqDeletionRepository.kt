@@ -78,7 +78,7 @@ class JooqDeletionRepository(
     }
 
     override fun lockChat(chatId: ChatId, userId: UserId): DeletionChat? =
-        db.select(CHATS.asterisk(), CHAT_MEMBERS.MEMBER_SEQ)
+        db.select(CHATS.asterisk(), CHAT_MEMBERS.VISIBILITY_SEQ)
             .from(CHATS).join(CHAT_MEMBERS).on(CHAT_MEMBERS.CHAT_ID.eq(CHATS.ID))
             .where(CHATS.ID.eq(chatId.value), CHAT_MEMBERS.USER_ID.eq(userId.value))
             .forNoKeyUpdate().of(CHATS).fetchOne {
@@ -87,7 +87,7 @@ class JooqDeletionRepository(
                     kind = ChatKind.valueOf(chat.kind!!.name),
                     ownerId = chat.ownerId?.let(::UserId),
                     lastSequence = chat.nextSequence!! - 1,
-                    memberSeq = it.get(CHAT_MEMBERS.MEMBER_SEQ)!!,
+                    visibilitySeq = it.get(CHAT_MEMBERS.VISIBILITY_SEQ)!!,
                     purgedRows = chat.purgedRows!!,
                     deleted = chat.deletedAt != null,
                 )
@@ -262,7 +262,7 @@ class JooqDeletionRepository(
                     chat.lastSequence
                 },
             )
-            .set(DELETION_OPERATIONS.SEQ, sequences.seq).set(DELETION_OPERATIONS.MEMBER_SEQ, sequences.memberSeq)
+            .set(DELETION_OPERATIONS.SEQ, sequences.seq).set(DELETION_OPERATIONS.VISIBILITY_SEQ, sequences.visibilitySeq)
             .set(DELETION_OPERATIONS.DELETED_ROWS, rows.toLong()).set(DELETION_OPERATIONS.PURGE_ROWS_BEFORE, chat.purgedRows).execute()
         Unit
     }
@@ -281,7 +281,7 @@ private fun DeletionOperationsRecord.toModel(purgedThroughSequence: Long, purged
         target = target,
         clearedThroughSequence = throughSequence!!,
         seq = seq!!,
-        memberSeq = memberSeq!!,
+        visibilitySeq = visibilitySeq!!,
         state = if (complete) DeletionState.COMPLETED else DeletionState.ACCEPTED,
         deletedRows = if (prefix) maxOf(0L, purgedRows - purgeRowsBefore!!) else deletedRows!!,
     )

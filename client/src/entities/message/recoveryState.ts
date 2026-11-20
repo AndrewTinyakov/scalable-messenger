@@ -242,7 +242,7 @@ export class RecoveryState {
     }
   }
 
-  verifiedSnapshot(chatId: string): { mutationSeq: string; memberSeq: string } | undefined {
+  verifiedSnapshot(chatId: string): { mutationSeq: string; visibilitySeq: string } | undefined {
     return this.visibility.verified(chatId)
   }
 
@@ -250,7 +250,7 @@ export class RecoveryState {
     return { ...this.visibility.snapshot(chatId) }
   }
 
-  verifySnapshot(chatId: string, snapshot: { mutationSeq: string; memberSeq: string }): void {
+  verifySnapshot(chatId: string, snapshot: { mutationSeq: string; visibilitySeq: string }): void {
     this.visibility.verify(chatId, snapshot)
   }
 
@@ -259,7 +259,7 @@ export class RecoveryState {
   }
 
   revisionKey(chatId: string): string {
-    return `${this.mutationSeq(chatId)}:${this.visibility.snapshot(chatId).memberSeq ?? '0'}`
+    return `${this.mutationSeq(chatId)}:${this.visibility.snapshot(chatId).visibilitySeq ?? '0'}`
   }
 
   snapshotSequence(chatId: string): string {

@@ -10,7 +10,9 @@ Clients used to repair missed hints by polling four selected-chat routes every 1
 - **Member sequence.** `chat_members.member_seq` numbers one account's private changes in one chat. Its events go only to that account's user room, so other members never learn they happened and their chat sequence has no hole for them.
 - **Account sequence.** `users.event_seq` numbers changes that belong to no single chat.
 
-The only new chat column is `pins_seq`, the chat sequence of the last shared pin change. Unpinning deletes rows, so without it every check would have to refetch up to 200 pins. The mutation sequence needs no column: it is the newest `message_changes.seq`, or the mutation floor once retention has pruned the log.
+The only new chat columns are `pins_seq`, the chat sequence of the last shared pin change, and `last_message_sequence`, which decides whether a hidden chat resurfaced. Unpinning deletes rows, so without it every check would have to refetch up to 200 pins. The mutation sequence needs no column: it is the newest `message_changes.seq`, or the mutation floor once retention has pruned the log.
+
+Members record the member sequence of their last visibility change (`visibility_seq`) and last personal pin change (`pins_seq`) in the same way. An own read advances the member sequence on every read, so history and pins must not be refetched on every member change: the client re-checks retained history only when the visibility sequence moves, and pins only when a pin sequence moves.
 
 ## Client behaviour
 

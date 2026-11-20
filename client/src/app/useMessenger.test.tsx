@@ -64,6 +64,7 @@ let failDeletion: boolean
 let markedUnread: boolean
 let userSeq = 0
 let pinFailures = 0
+let stateMemberSeq: string | undefined
 let unreadMarkCalls: string[]
 
 function snapshotFor(id: string) {
@@ -71,7 +72,7 @@ function snapshotFor(id: string) {
     snapshotSequence:
       historyMessages.filter((message) => message.chatId === id).at(-1)?.sequence ?? '0',
     mutationSeq: '0',
-    memberSeq,
+    visibilitySeq: memberSeq,
     clearedThroughSequence: clearedThrough,
     globalClearedThroughSequence: '0',
   }
@@ -199,7 +200,7 @@ beforeEach(() => {
         target: body.target,
         clearedThroughSequence: '0',
         seq: '0',
-        memberSeq: '1',
+        visibilitySeq: '1',
         state: 'COMPLETED',
         deletedRows: '0',
       })
@@ -233,7 +234,9 @@ beforeEach(() => {
         pinsSeq: '0',
         mutationFloor: '0',
         mutationSeq: metadata.mutationSeq,
-        memberSeq: metadata.memberSeq,
+        memberSeq: stateMemberSeq ?? metadata.visibilitySeq,
+        visibilitySeq: metadata.visibilitySeq,
+        memberPinsSeq: '0',
         clearedThroughSequence: metadata.clearedThroughSequence,
         globalClearedThroughSequence: metadata.globalClearedThroughSequence,
         hidden,
@@ -547,6 +550,7 @@ describe('messenger request coordination', () => {
     })
     fakeUnread = 0
     paths = []
+    stateMemberSeq = '1'
     await act(async () => {
       sockets[0].event({
         type: 'reads_changed',
@@ -1506,6 +1510,45 @@ describe('messenger request coordination', () => {
     })
     expect(pinLoads()).toBe(2)
     pinFailures = 0
+  })
+
+  it('checks state after an own read without re-checking history visibility', async () => {
+    vi.useFakeTimers()
+    historyMessages = Array.from({ length: 3 }, (_, index) => ({
+      id: String(index + 1).padStart(26, '0'),
+      chatId,
+      senderId: recipient.id,
+      sequence: String(index + 1),
+      body: `Message ${index + 1}`,
+      createdAt: '2026-11-04T10:00:00Z',
+    }))
+    window.history.replaceState(null, '', `/groups/${chatId}`)
+    await renderMessenger()
+    await act(async () => {
+      sockets[0].open()
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+    paths = []
+    await act(async () => {
+      sockets[0].event({
+        type: 'reads_changed',
+        version: 1,
+        eventId: '01ARZ3NDEKTSV4RRFFQ69G5FB2',
+        room: `user:${userId}`,
+        epoch: 'epoch',
+        streamId: '6-0',
+        chatId,
+        memberSeq: '1',
+      })
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+    const routes = paths.map((path) => path.split('?')[0])
+    expect(routes.filter((path) => path.endsWith('/state'))).toHaveLength(1)
+    for (const route of ['/messages/resolve', '/messages', '/pins'])
+      expect(routes.filter((path) => path.endsWith(route))).toHaveLength(0)
+    stateMemberSeq = undefined
   })
 
   it('coalesces repeated focus work while the selected group is current', async () => {

@@ -2,6 +2,7 @@ package com.andrewtinyakov.messenger.read.service
 
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.ChatId
+import com.andrewtinyakov.messenger.chat.model.MemberChange
 import com.andrewtinyakov.messenger.chat.repository.ChatRepository
 import com.andrewtinyakov.messenger.message.model.MessageId
 import com.andrewtinyakov.messenger.read.config.ReadProperties
@@ -39,7 +40,7 @@ class ReadService(
             if (throughSequence > lastSequence) invalidInput("throughSequence", "throughSequence exceeds saved history")
             val advance = readRepository.advance(chatId, userId, throughSequence)
             if (!advance.advanced) return@execute CommittedAdvance(advance, notificationCoalesced = false)
-            val memberSeq = chatRepository.allocateMemberSequence(chatId, userId) ?: notFound()
+            val memberSeq = chatRepository.allocateMemberSequence(chatId, userId, MemberChange.OTHER) ?: notFound()
             val sharedRooms = readRepository.notificationRooms(chatId, advance.progress.readAt!!)
             if (sharedRooms.isNotEmpty()) readRepository.completeNotification(chatId, userId)
             readOutbox.enqueueReadAdvanced(chatId, userId, memberSeq, sharedRooms)

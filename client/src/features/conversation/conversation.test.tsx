@@ -208,7 +208,7 @@ describe('selected conversation features', () => {
           target,
           clearedThroughSequence: '0',
           seq: '1',
-          memberSeq: '1',
+          visibilitySeq: '1',
           state: 'COMPLETED' as const,
           deletedRows: '1',
         }),

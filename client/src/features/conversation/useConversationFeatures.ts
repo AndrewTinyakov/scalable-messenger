@@ -97,7 +97,7 @@ export function useConversationFeatures(options: Options) {
     if (BigInt(state.lastSeq) > known.seq) known.seq = BigInt(state.lastSeq)
     if (BigInt(state.memberSeq) > known.memberSeq) known.memberSeq = BigInt(state.memberSeq)
     setPinsState((previous) => ({
-      key: `${state.pinsSeq}:${state.memberSeq}:${state.mutationSeq}`,
+      key: `${state.pinsSeq}:${state.memberPinsSeq}:${state.mutationSeq}`,
       tick: previous.tick + 1,
     }))
     setSummary((previous) => ({
@@ -270,7 +270,7 @@ export function useConversationFeatures(options: Options) {
         void current.recovery.synchronize(event.chatId, {
           snapshotSequence: event.sequence,
           mutationSeq: event.seq,
-          memberSeq: event.memberSeq,
+          visibilitySeq: event.memberSeq,
         })
         return true
       }
@@ -429,7 +429,7 @@ export function useConversationFeatures(options: Options) {
       deletionRequests.current.delete(key)
       current.recovery.observe(id, {
         ...(scope === 'EVERYONE' ? { mutationSeq: result.seq } : {}),
-        memberSeq: result.memberSeq,
+        visibilitySeq: result.visibilitySeq,
         ...(scope === 'SELF'
           ? { clearedThroughSequence: result.clearedThroughSequence }
           : { globalClearedThroughSequence: result.clearedThroughSequence }),

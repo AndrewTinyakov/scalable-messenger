@@ -2816,7 +2816,7 @@ components:
           type: string
         mutationSeq:
           type: string
-        memberSeq:
+        visibilitySeq:
           type: string
         clearedThroughSequence:
           type: string
@@ -2825,10 +2825,10 @@ components:
       required:
       - clearedThroughSequence
       - globalClearedThroughSequence
-      - memberSeq
       - messages
       - mutationSeq
       - snapshotSequence
+      - visibilitySeq
     MessageResponse:
       type: object
       properties:
@@ -2954,7 +2954,7 @@ components:
           type: string
         seq:
           type: string
-        memberSeq:
+        visibilitySeq:
           type: string
         state:
           type: string
@@ -2966,12 +2966,12 @@ components:
       required:
       - clearedThroughSequence
       - deletedRows
-      - memberSeq
       - operationId
       - scope
       - seq
       - state
       - target
+      - visibilitySeq
     CreateGroupChatRequest:
       type: object
       properties:
@@ -3190,7 +3190,7 @@ components:
           type: string
         mutationSeq:
           type: string
-        memberSeq:
+        visibilitySeq:
           type: string
         clearedThroughSequence:
           type: string
@@ -3202,9 +3202,9 @@ components:
       - clearedThroughSequence
       - globalClearedThroughSequence
       - hidden
-      - memberSeq
       - mutationSeq
       - snapshotSequence
+      - visibilitySeq
     ChatStateResponse:
       type: object
       properties:
@@ -3222,6 +3222,13 @@ components:
           description: "Chat sequence of the latest shared edit, deletion or clear"
         memberSeq:
           type: string
+          description: Counter of the viewer's private changes in this chat
+        visibilitySeq:
+          type: string
+          description: Member sequence of the viewer's latest history visibility change
+        memberPinsSeq:
+          type: string
+          description: Member sequence of the viewer's latest personal pin change
         clearedThroughSequence:
           type: string
         globalClearedThroughSequence:
@@ -3240,6 +3247,7 @@ components:
       - globalClearedThroughSequence
       - hidden
       - lastSeq
+      - memberPinsSeq
       - memberSeq
       - mutationFloor
       - mutationSeq
@@ -3247,6 +3255,7 @@ components:
       - ownReadThrough
       - pinsSeq
       - userSeq
+      - visibilitySeq
     ReadSummaryResponse:
       type: object
       properties:
@@ -3318,7 +3327,7 @@ components:
           type: string
         mutationSeq:
           type: string
-        memberSeq:
+        visibilitySeq:
           type: string
         clearedThroughSequence:
           type: string
@@ -3334,11 +3343,11 @@ components:
       - coverageThroughSequence
       - globalClearedThroughSequence
       - hasMore
-      - memberSeq
       - messages
       - mutationSeq
       - nextSequence
       - snapshotSequence
+      - visibilitySeq
     MessageReaderResponse:
       type: object
       properties:
@@ -3429,7 +3438,7 @@ components:
           type: string
         mutationSeq:
           type: string
-        memberSeq:
+        visibilitySeq:
           type: string
         clearedThroughSequence:
           type: string
@@ -3440,11 +3449,11 @@ components:
       - clearedThroughSequence
       - globalClearedThroughSequence
       - lastSeq
-      - memberSeq
       - mutationSeq
       - nextSeq
       - resetRequired
       - snapshotSequence
+      - visibilitySeq
     MessageAroundResponse:
       type: object
       properties:
@@ -3464,7 +3473,7 @@ components:
           type: string
         mutationSeq:
           type: string
-        memberSeq:
+        visibilitySeq:
           type: string
         clearedThroughSequence:
           type: string
@@ -3482,10 +3491,10 @@ components:
       - globalClearedThroughSequence
       - hasNewer
       - hasOlder
-      - memberSeq
       - messages
       - mutationSeq
       - snapshotSequence
+      - visibilitySeq
     GroupMemberPageResponse:
       type: object
       properties:

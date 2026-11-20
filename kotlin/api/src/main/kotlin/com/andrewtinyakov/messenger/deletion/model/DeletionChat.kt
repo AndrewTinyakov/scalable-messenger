@@ -7,7 +7,7 @@ data class DeletionChat(
     val kind: ChatKind,
     val ownerId: UserId?,
     val lastSequence: Long,
-    val memberSeq: Long,
+    val visibilitySeq: Long,
     val purgedRows: Long,
     val deleted: Boolean,
 )

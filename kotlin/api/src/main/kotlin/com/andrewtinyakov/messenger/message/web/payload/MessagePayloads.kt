@@ -64,7 +64,7 @@ data class MessageHistoryResponse(
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val mutationSeq: String = "0",
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
-    val memberSeq: String = "0",
+    val visibilitySeq: String = "0",
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val clearedThroughSequence: String = "0",
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
@@ -150,7 +150,7 @@ data class MessageAroundResponse(
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val mutationSeq: String = "0",
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
-    val memberSeq: String = "0",
+    val visibilitySeq: String = "0",
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val clearedThroughSequence: String = "0",
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
@@ -196,7 +196,7 @@ data class MessageChangesResponse(
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val mutationSeq: String = "0",
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
-    val memberSeq: String = "0",
+    val visibilitySeq: String = "0",
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val clearedThroughSequence: String = "0",
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
@@ -217,7 +217,7 @@ data class MessageResolveResponse(
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val mutationSeq: String,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
-    val memberSeq: String,
+    val visibilitySeq: String,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val clearedThroughSequence: String,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
@@ -230,7 +230,7 @@ data class MessageVisibilityResponse(
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val mutationSeq: String,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
-    val memberSeq: String,
+    val visibilitySeq: String,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val clearedThroughSequence: String,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
@@ -242,7 +242,7 @@ data class MessageVisibilityResponse(
 fun VisibilitySnapshot.toVisibilityResponse(): MessageVisibilityResponse = MessageVisibilityResponse(
     snapshotSequence = snapshotSequence.toString(),
     mutationSeq = mutationSeq.toString(),
-    memberSeq = memberSeq.toString(),
+    visibilitySeq = visibilitySeq.toString(),
     clearedThroughSequence = clearedThroughSequence.toString(),
     globalClearedThroughSequence = globalClearedThroughSequence.toString(),
     hidden = hidden,
@@ -261,7 +261,7 @@ fun VisibilitySnapshot.toHistoryResponse(
         hasMore = hasMore,
         snapshotSequence = visibility.snapshotSequence,
         mutationSeq = visibility.mutationSeq,
-        memberSeq = visibility.memberSeq,
+        visibilitySeq = visibility.visibilitySeq,
         clearedThroughSequence = visibility.clearedThroughSequence,
         globalClearedThroughSequence = visibility.globalClearedThroughSequence,
         coverageAfterSequence = coverageAfterSequence.toString(),
@@ -284,7 +284,7 @@ fun VisibilitySnapshot.toAroundResponse(
         hasNewer = hasNewer,
         snapshotSequence = visibility.snapshotSequence,
         mutationSeq = visibility.mutationSeq,
-        memberSeq = visibility.memberSeq,
+        visibilitySeq = visibility.visibilitySeq,
         clearedThroughSequence = visibility.clearedThroughSequence,
         globalClearedThroughSequence = visibility.globalClearedThroughSequence,
         coverageAfterSequence = coverageAfterSequence.toString(),
@@ -297,7 +297,7 @@ fun VisibilitySnapshot.toResolveResponse(messages: List<Message>): MessageResolv
         messages = messages.map { it.toResponse() },
         snapshotSequence = visibility.snapshotSequence,
         mutationSeq = visibility.mutationSeq,
-        memberSeq = visibility.memberSeq,
+        visibilitySeq = visibility.visibilitySeq,
         clearedThroughSequence = visibility.clearedThroughSequence,
         globalClearedThroughSequence = visibility.globalClearedThroughSequence,
     )
@@ -316,7 +316,7 @@ fun VisibilitySnapshot.toChangesResponse(
         resetRequired = resetRequired,
         snapshotSequence = visibility.snapshotSequence,
         mutationSeq = visibility.mutationSeq,
-        memberSeq = visibility.memberSeq,
+        visibilitySeq = visibility.visibilitySeq,
         clearedThroughSequence = visibility.clearedThroughSequence,
         globalClearedThroughSequence = visibility.globalClearedThroughSequence,
     )

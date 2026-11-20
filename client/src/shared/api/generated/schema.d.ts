@@ -651,7 +651,7 @@ export interface components {
             messages: components["schemas"]["MessageResponse"][];
             snapshotSequence: string;
             mutationSeq: string;
-            memberSeq: string;
+            visibilitySeq: string;
             clearedThroughSequence: string;
             globalClearedThroughSequence: string;
         };
@@ -695,7 +695,7 @@ export interface components {
             target: "MESSAGES" | "HISTORY" | "CHAT";
             clearedThroughSequence: string;
             seq: string;
-            memberSeq: string;
+            visibilitySeq: string;
             /** @enum {string} */
             state: "ACCEPTED" | "COMPLETED";
             deletedRows: string;
@@ -786,7 +786,7 @@ export interface components {
         MessageVisibilityResponse: {
             snapshotSequence: string;
             mutationSeq: string;
-            memberSeq: string;
+            visibilitySeq: string;
             clearedThroughSequence: string;
             globalClearedThroughSequence: string;
             hidden: boolean;
@@ -800,7 +800,12 @@ export interface components {
             mutationFloor: string;
             /** @description Chat sequence of the latest shared edit, deletion or clear */
             mutationSeq: string;
+            /** @description Counter of the viewer's private changes in this chat */
             memberSeq: string;
+            /** @description Member sequence of the viewer's latest history visibility change */
+            visibilitySeq: string;
+            /** @description Member sequence of the viewer's latest personal pin change */
+            memberPinsSeq: string;
             clearedThroughSequence: string;
             globalClearedThroughSequence: string;
             hidden: boolean;
@@ -839,7 +844,7 @@ export interface components {
             hasMore: boolean;
             snapshotSequence: string;
             mutationSeq: string;
-            memberSeq: string;
+            visibilitySeq: string;
             clearedThroughSequence: string;
             globalClearedThroughSequence: string;
             coverageAfterSequence: string;
@@ -876,7 +881,7 @@ export interface components {
             resetRequired: boolean;
             snapshotSequence: string;
             mutationSeq: string;
-            memberSeq: string;
+            visibilitySeq: string;
             clearedThroughSequence: string;
             globalClearedThroughSequence: string;
         };
@@ -887,7 +892,7 @@ export interface components {
             hasNewer: boolean;
             snapshotSequence: string;
             mutationSeq: string;
-            memberSeq: string;
+            visibilitySeq: string;
             clearedThroughSequence: string;
             globalClearedThroughSequence: string;
             coverageAfterSequence: string;

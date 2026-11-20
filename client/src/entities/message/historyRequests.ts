@@ -8,25 +8,25 @@ type RequestState =
 type Request = {
   chatId: string
   state: RequestState
-  fence: { mutationSeq: string; memberSeq: string }
+  fence: { mutationSeq: string; visibilitySeq: string }
 }
 
 export class HistoryRequests {
   private readonly pending = new Set<Request>()
   private capacity?: { promise: Promise<void>; release(): void }
-  private readonly revisions = new Map<string, { mutationSeq: string; memberSeq: string }>()
+  private readonly revisions = new Map<string, { mutationSeq: string; visibilitySeq: string }>()
 
   observe(chatId: string, snapshot: Partial<SnapshotMetadata>): void {
-    const current = this.revisions.get(chatId) ?? { mutationSeq: '0', memberSeq: '0' }
+    const current = this.revisions.get(chatId) ?? { mutationSeq: '0', visibilitySeq: '0' }
     this.revisions.set(chatId, {
       mutationSeq:
         BigInt(snapshot.mutationSeq ?? '0') > BigInt(current.mutationSeq)
           ? snapshot.mutationSeq!
           : current.mutationSeq,
-      memberSeq:
-        BigInt(snapshot.memberSeq ?? '0') > BigInt(current.memberSeq)
-          ? snapshot.memberSeq!
-          : current.memberSeq,
+      visibilitySeq:
+        BigInt(snapshot.visibilitySeq ?? '0') > BigInt(current.visibilitySeq)
+          ? snapshot.visibilitySeq!
+          : current.visibilitySeq,
     })
     const observed = this.revisions.get(chatId)!
     for (const request of this.pending)
@@ -34,7 +34,7 @@ export class HistoryRequests {
         if (
           request.state.phase === 'pending' &&
           (BigInt(observed.mutationSeq) > BigInt(request.fence.mutationSeq) ||
-            BigInt(observed.memberSeq) > BigInt(request.fence.memberSeq))
+            BigInt(observed.visibilitySeq) > BigInt(request.fence.visibilitySeq))
         )
           request.state.messages = request.state.messages.map((message) =>
             message.replyToMessageId
@@ -52,10 +52,10 @@ export class HistoryRequests {
             BigInt(observed.mutationSeq) > BigInt(request.fence.mutationSeq)
               ? observed.mutationSeq
               : request.fence.mutationSeq,
-          memberSeq:
-            BigInt(observed.memberSeq) > BigInt(request.fence.memberSeq)
-              ? observed.memberSeq
-              : request.fence.memberSeq,
+          visibilitySeq:
+            BigInt(observed.visibilitySeq) > BigInt(request.fence.visibilitySeq)
+              ? observed.visibilitySeq
+              : request.fence.visibilitySeq,
         }
       }
     if (this.revisions.size > 101) this.revisions.delete(this.revisions.keys().next().value!)
@@ -67,8 +67,8 @@ export class HistoryRequests {
       !current ||
       ((snapshot.mutationSeq === undefined ||
         BigInt(snapshot.mutationSeq) >= BigInt(current.mutationSeq)) &&
-        (snapshot.memberSeq === undefined ||
-          BigInt(snapshot.memberSeq) >= BigInt(current.memberSeq)))
+        (snapshot.visibilitySeq === undefined ||
+          BigInt(snapshot.visibilitySeq) >= BigInt(current.visibilitySeq)))
     )
   }
 
@@ -100,7 +100,7 @@ export class HistoryRequests {
       chatId,
       state: { phase: 'pending', messages: [] },
       fence: {
-        ...(this.revisions.get(chatId) ?? { mutationSeq: '0', memberSeq: '0' }),
+        ...(this.revisions.get(chatId) ?? { mutationSeq: '0', visibilitySeq: '0' }),
       },
     }
     this.pending.add(request)
@@ -111,7 +111,8 @@ export class HistoryRequests {
         !this.accepts(chatId, page) ||
         (page.mutationSeq !== undefined &&
           BigInt(page.mutationSeq) < BigInt(request.fence.mutationSeq)) ||
-        (page.memberSeq !== undefined && BigInt(page.memberSeq) < BigInt(request.fence.memberSeq))
+        (page.visibilitySeq !== undefined &&
+          BigInt(page.visibilitySeq) < BigInt(request.fence.visibilitySeq))
       )
         return undefined
       if (request.state.phase === 'overflowed')

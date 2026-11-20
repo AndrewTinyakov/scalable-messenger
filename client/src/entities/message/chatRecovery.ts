@@ -826,7 +826,7 @@ export class ChatRecovery {
     this.historyRequests.observe(chatId, this.state.snapshotMetadata(chatId))
     return this.historyRequests.run(chatId, fetch, (page) => {
       this.state.reconcileSnapshot(chatId, page)
-      if (page.memberSeq !== undefined)
+      if (page.visibilitySeq !== undefined)
         this.state.resolve(
           chatId,
           page.messages.map((message) => message.id),
@@ -835,11 +835,11 @@ export class ChatRecovery {
       if (
         !this.state.verifiedSnapshot(chatId) &&
         page.mutationSeq !== undefined &&
-        page.memberSeq !== undefined
+        page.visibilitySeq !== undefined
       )
         this.state.verifySnapshot(chatId, {
           mutationSeq: page.mutationSeq,
-          memberSeq: page.memberSeq,
+          visibilitySeq: page.visibilitySeq,
         })
       return install(page)
     })
@@ -875,7 +875,7 @@ export class ChatRecovery {
     const previous = this.state.snapshotMetadata(chatId)
     if (
       (snapshot.mutationSeq !== undefined && snapshot.mutationSeq !== previous.mutationSeq) ||
-      (snapshot.memberSeq !== undefined && snapshot.memberSeq !== previous.memberSeq)
+      (snapshot.visibilitySeq !== undefined && snapshot.visibilitySeq !== previous.visibilitySeq)
     )
       resetPagingFailures(chatId)
     this.historyRequests.observe(chatId, snapshot)
@@ -937,7 +937,7 @@ export class ChatRecovery {
         const previous = this.state.verifiedSnapshot(chatId)
         const changed =
           BigInt(visibility.mutationSeq) > BigInt(previous?.mutationSeq ?? '0') ||
-          BigInt(visibility.memberSeq) > BigInt(previous?.memberSeq ?? '0')
+          BigInt(visibility.visibilitySeq) > BigInt(previous?.visibilitySeq ?? '0')
         const { snapshotSequence, ...metadata } = visibility
         this.observe(chatId, metadata)
         this.recordLatest(chatId, snapshotSequence)
@@ -981,7 +981,7 @@ export class ChatRecovery {
         }
         this.state.verifySnapshot(chatId, {
           mutationSeq: visibility.mutationSeq,
-          memberSeq: visibility.memberSeq,
+          visibilitySeq: visibility.visibilitySeq,
         })
         this.runtime!.changed()
       } while (invalidated() && valid())
@@ -1053,7 +1053,7 @@ export class ChatRecovery {
     const previous = this.state.snapshotMetadata(chatId)
     const changed =
       BigInt(snapshot.mutationSeq ?? '0') > BigInt(previous.mutationSeq ?? '0') ||
-      BigInt(snapshot.memberSeq ?? '0') > BigInt(previous.memberSeq ?? '0')
+      BigInt(snapshot.visibilitySeq ?? '0') > BigInt(previous.visibilitySeq ?? '0')
     const { snapshotSequence, ...metadata } = snapshot
     this.observe(chatId, changes.length || changed ? snapshot : metadata)
     if (snapshotSequence) this.recordLatest(chatId, snapshotSequence)

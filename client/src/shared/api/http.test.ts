@@ -21,7 +21,7 @@ describe('HTTP transport', () => {
       resetRequired: false,
       snapshotSequence: '5',
       mutationSeq: '0',
-      memberSeq: '0',
+      visibilitySeq: '0',
       clearedThroughSequence: '0',
       globalClearedThroughSequence: '0',
     }
@@ -91,7 +91,7 @@ describe('HTTP transport', () => {
       hasMore: false,
       snapshotSequence: '10',
       mutationSeq: '2',
-      memberSeq: '1',
+      visibilitySeq: '1',
       clearedThroughSequence: '3',
       globalClearedThroughSequence: '0',
       coverageAfterSequence: '3',
@@ -106,7 +106,7 @@ describe('HTTP transport', () => {
       nextSequence: '10',
     })
     for (const fields of [
-      { memberSeq: undefined },
+      { visibilitySeq: undefined },
       { snapshotSequence: 10 },
       { coverageAfterSequence: '11' },
       { coverageThroughSequence: '7' },
@@ -127,7 +127,7 @@ describe('HTTP transport', () => {
       target: 'MESSAGES',
       clearedThroughSequence: '0',
       seq: '0',
-      memberSeq: '1',
+      visibilitySeq: '1',
       state: 'COMPLETED',
       deletedRows: '1',
     }
@@ -153,7 +153,7 @@ describe('HTTP transport', () => {
       messages: [],
       snapshotSequence: '10',
       mutationSeq: '2',
-      memberSeq: '1',
+      visibilitySeq: '1',
       clearedThroughSequence: '0',
       globalClearedThroughSequence: '0',
     }

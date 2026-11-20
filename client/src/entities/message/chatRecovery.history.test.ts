@@ -18,7 +18,7 @@ describe('ChatRecovery history', () => {
         coverageAfterSequence: '0',
         coverageThroughSequence: end,
         mutationSeq: '0',
-        memberSeq: '0',
+        visibilitySeq: '0',
         clearedThroughSequence: '0',
         globalClearedThroughSequence: '0',
       })
@@ -83,7 +83,7 @@ describe('ChatRecovery history', () => {
         coverageAfterSequence: '0',
         coverageThroughSequence: '1',
         mutationSeq: '0',
-        memberSeq: '0',
+        visibilitySeq: '0',
         clearedThroughSequence: '0',
         globalClearedThroughSequence: '0',
       }),
@@ -114,7 +114,7 @@ describe('ChatRecovery history', () => {
     const metadata = {
       snapshotSequence: '1',
       mutationSeq: '0',
-      memberSeq: '0',
+      visibilitySeq: '0',
       clearedThroughSequence: '0',
       globalClearedThroughSequence: '0',
     }
@@ -151,7 +151,7 @@ describe('ChatRecovery history', () => {
     const metadata = {
       snapshotSequence: '1',
       mutationSeq: '0',
-      memberSeq: '0',
+      visibilitySeq: '0',
       clearedThroughSequence: '0',
       globalClearedThroughSequence: '0',
     }

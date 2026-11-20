@@ -30,7 +30,7 @@ class DeletionOutbox(
                     chatId = chatId.value,
                     sequence = sequences.seq.toString(),
                     seq = sequences.seq.toString().takeIf { scope == DeletionScope.EVERYONE },
-                    memberSeq = sequences.memberSeq.toString().takeIf { scope == DeletionScope.SELF },
+                    memberSeq = sequences.visibilitySeq.toString().takeIf { scope == DeletionScope.SELF },
                 ).toOutboxMessage(mapper)
             },
         )

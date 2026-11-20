@@ -3,7 +3,7 @@ import type { Message } from './model'
 export interface SnapshotMetadata {
   snapshotSequence: string
   mutationSeq: string
-  memberSeq: string
+  visibilitySeq: string
   clearedThroughSequence: string
   globalClearedThroughSequence: string
 }
@@ -26,7 +26,7 @@ export interface DeletionResult {
   target: DeleteTarget
   clearedThroughSequence: string
   seq: string
-  memberSeq: string
+  visibilitySeq: string
   state: 'ACCEPTED' | 'COMPLETED'
   deletedRows: string
 }

@@ -70,7 +70,7 @@ Only `edge` permits external routing. `app`, `data`, `monitoring` and the existi
 | api-proxy, ws-proxy | edge, app |
 | api-1, api-2, ws replicas | app, data, monitoring, grpc |
 | command processor, outbox publisher | data, monitoring |
-| postgres, postgres-observability-init | data |
+| postgres, pgbouncer, postgres-observability-init | data |
 | rabbitmq-1/2/3 | data, monitoring |
 | rabbitmq-cluster-init, redis-1 through redis-6, redis-cluster-init | data |
 | postgres-exporter, redis-exporter | data, monitoring |

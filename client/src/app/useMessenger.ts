@@ -269,9 +269,9 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
       around: (chatId, messageId, sequence) =>
         sessionApi.aroundMessage(chatId, messageId, sequence),
       visibility: async (chatId) => {
-        const freshness = features.freshness(chatId)
-        const state = await sessionApi.chatState(chatId, freshness)
-        features.observeState(chatId, state, freshness === undefined)
+        const request = features.stateRequest(chatId)
+        const state = await sessionApi.chatState(chatId, request.floors)
+        features.observeState(chatId, state, request)
         return {
           snapshotSequence: state.lastSeq,
           mutationSeq: state.mutationSeq,

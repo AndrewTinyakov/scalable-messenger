@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { Device } from './device.mjs';
 import { mergeReports } from './merge.mjs';
 import { buildPlan } from './plan.mjs';
 import { resolveReference, schedule } from './schedule.mjs';
@@ -226,4 +227,23 @@ test('shard reports merge into the same totals as one combined run', () => {
   assert.throws(() => mergeReports([report(parts[0], 0), { ...report(parts[1], 1), fingerprint: 'other plan' }]));
   assert.throws(() => mergeReports([report(parts[0], 0), { ...report(parts[1], 1), startAt: 2 }]));
   assert.throws(() => mergeReports([report(parts[0], 0), { ...report(parts[1], 1), manifestFingerprint: 'other stack' }]));
+});
+
+test('a read hint during a running check owes exactly one more primary check', async () => {
+  const state = { background: new Set(), capacity: 1, metrics: { failure: () => assert.fail('unexpected failure') } };
+  const device = new Device(state, { userId: 'u' }, 0);
+  device.selected = { id: 'chat' };
+  const calls = [];
+  let release;
+  device.sync = (id, options) => {
+    calls.push(options);
+    return calls.length === 1 ? new Promise(resolve => { release = resolve; }) : Promise.resolve();
+  };
+  const running = device.recheckReads('chat');
+  await new Promise(resolve => setImmediate(resolve));
+  device.recheckReads('chat');
+  device.recheckReads('chat');
+  release();
+  await running;
+  assert.deepEqual(calls, [{ primary: true }, { primary: true }]);
 });

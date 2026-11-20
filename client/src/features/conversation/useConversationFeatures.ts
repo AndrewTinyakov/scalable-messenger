@@ -28,6 +28,8 @@ interface Options {
 
 const STATE_CHECK_MS = 60_000
 
+export type StateRequest = { hint: number; floors?: { minSeq: string; minMemberSeq: string } }
+
 type ReadWrite =
   { phase: 'idle' | 'sending' } | { phase: 'waiting'; timer: ReturnType<typeof setTimeout> }
 
@@ -52,7 +54,7 @@ export function useConversationFeatures(options: Options) {
   const readWrite = useRef<ReadWrite>({ phase: 'idle' })
   const mutationBusy = useRef(new Set<string>())
   const reconcileRef = useRef<MutationRecovery | null>(null)
-  const knownSeq = useRef({ chatId: '', seeded: false, seq: 0n, memberSeq: 0n, primaryNext: false })
+  const knownSeq = useRef({ chatId: '', seeded: false, seq: 0n, memberSeq: 0n, primaryHint: 0 })
   const [pinsState, setPinsState] = useState({ key: '', tick: 0 })
   if (!reconcileRef.current)
     reconcileRef.current = new MutationRecovery({
@@ -70,7 +72,7 @@ export function useConversationFeatures(options: Options) {
     })
   const chatId = options.chat?.id.startsWith('draft:') ? undefined : options.chat?.id
   const checkState = useCallback((id: string, primary = false) => {
-    if (primary && knownSeq.current.chatId === id) knownSeq.current.primaryNext = true
+    if (primary && knownSeq.current.chatId === id) knownSeq.current.primaryHint += 1
     void optionsRef.current.recovery.synchronize(id)
   }, [])
   const observeCounters = useCallback((id: string, seq?: string, memberSeq?: string): boolean => {
@@ -89,11 +91,12 @@ export function useConversationFeatures(options: Options) {
     }
     return gap
   }, [])
-  const observeState = useCallback((id: string, state: ChatState, fromPrimary: boolean) => {
+  const observeState = useCallback((id: string, state: ChatState, request: StateRequest) => {
     const known = knownSeq.current
     if (known.chatId !== id) return
     known.seeded = true
-    if (fromPrimary) known.primaryNext = false
+    const fromPrimary = request.floors === undefined
+    if (fromPrimary && request.hint === known.primaryHint) known.primaryHint = 0
     if (BigInt(state.lastSeq) > known.seq) known.seq = BigInt(state.lastSeq)
     if (BigInt(state.memberSeq) > known.memberSeq) known.memberSeq = BigInt(state.memberSeq)
     setPinsState((previous) => ({
@@ -113,10 +116,14 @@ export function useConversationFeatures(options: Options) {
     if (reconcileRef.current!.behind(id, state.mutationSeq))
       void reconcileRef.current!.refresh().catch(() => {})
   }, [])
-  const freshness = useCallback((id: string) => {
+  const stateRequest = useCallback((id: string): StateRequest => {
     const known = knownSeq.current
-    if (known.chatId !== id || !known.seeded || known.primaryNext) return undefined
-    return { minSeq: known.seq.toString(), minMemberSeq: known.memberSeq.toString() }
+    if (known.chatId !== id) return { hint: 0 }
+    if (!known.seeded || known.primaryHint > 0) return { hint: known.primaryHint }
+    return {
+      hint: 0,
+      floors: { minSeq: known.seq.toString(), minMemberSeq: known.memberSeq.toString() },
+    }
   }, [])
   const flushRead = useCallback(async () => {
     if (readWrite.current.phase !== 'idle' || !optionsRef.current.connected) return
@@ -197,7 +204,7 @@ export function useConversationFeatures(options: Options) {
       seeded: false,
       seq: 0n,
       memberSeq: 0n,
-      primaryNext: false,
+      primaryHint: 0,
     }
     setPinsState((previous) => ({ key: '', tick: previous.tick + 1 }))
     setReveal(null)
@@ -453,7 +460,7 @@ export function useConversationFeatures(options: Options) {
   return {
     pinsState,
     observeState,
-    freshness,
+    stateRequest,
     revisionKey: chatId ? options.recovery.revisionKey(chatId) : '0:0',
     resolveTarget: useCallback(async (messageId: string) => {
       const current = optionsRef.current

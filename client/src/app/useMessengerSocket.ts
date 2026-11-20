@@ -202,9 +202,8 @@ export function useMessengerSocket({
         } else if (
           frame.type === 'message_changed' ||
           frame.type === 'history_changed' ||
-          // Only my own reads change my unread count, and those always reach my account room.
-          // A group-room hint means someone else read, which leaves my chat-list row as it is.
-          (frame.type === 'reads_changed' && !frame.room.startsWith('group:'))
+          // Only my own reads change my unread count; only those carry my member sequence.
+          (frame.type === 'reads_changed' && frame.memberSeq !== undefined)
         )
           invalidateSummary(frame.chatId)
         if (frame.type === 'history_changed') void refreshChats(false, true)

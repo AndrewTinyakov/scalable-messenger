@@ -70,6 +70,23 @@ export class Device {
     return this.state.http.request(this.credentials, path, method, body);
   }
 
+  // A read hint that lands while a check is running owes one more primary check once it ends.
+  recheckReads(id) {
+    const view = this.view(id);
+    if (view.readCheck) {
+      view.readCheckOwed = true;
+      return view.readCheck;
+    }
+    const selection = this.selection;
+    view.readCheck = this.backgroundTask('live.state/' + id, async () => {
+      do {
+        view.readCheckOwed = false;
+        await this.sync(id, { primary: true });
+      } while (view.readCheckOwed && this.selected?.id === id && this.selection === selection);
+    }).finally(() => { view.readCheck = null; });
+    return view.readCheck;
+  }
+
   backgroundTask(key, task) {
     if (this.refreshes.has(key)) return this.refreshes.get(key);
     if (this.state.background.size >= 256 * this.state.capacity) {
@@ -153,7 +170,7 @@ export class Device {
     if (!this.views.has(id)) {
       this.views.set(id, {
         messages: [], baseline: '0', dismissed: '0', loaded: false, reads: '0',
-        mutation: '0', visibility: '0', member: '0', pins: '0', memberPins: '0', stateAt: 0, changesAfter: null, ready: null, detached: null,
+        mutation: '0', visibility: '0', member: '0', pins: '0', memberPins: '0', stateAt: 0, readCheck: null, readCheckOwed: false, changesAfter: null, ready: null, detached: null,
       });
     }
     return this.views.get(id);
@@ -465,7 +482,7 @@ export class Device {
       const message = this.activityMessage(frame);
       if (!message || !this.applyActivity(chatId, frame.sequence, message)) this.summaryLater(chatId, type === 'sidebar_activity', frame.sequence);
     } else if (type === 'message_changed' || type === 'history_changed' ||
-        (type === 'reads_changed' && !frame.room.startsWith('group:'))) {
+        (type === 'reads_changed' && frame.memberSeq !== undefined)) {
       this.summaryLater(chatId, false);
     } else if (type === 'chat_preferences_changed') {
       if (this.directory.some(row => row.id === chatId)) this.summaryLater(chatId, false);
@@ -497,7 +514,7 @@ export class Device {
     } else if (type === 'subscribed' && this.selected?.id === chatId) {
       this.subscribedTo = chatId;
     } else if (type === 'reads_changed' && this.selected?.id === chatId) {
-      this.backgroundTask('live.state/' + chatId, () => this.sync(chatId, { primary: true }));
+      this.recheckReads(chatId);
     } else if (type === 'message_changed' || type === 'history_changed') {
       this.backgroundTask('live.visibility/' + chatId, () => this.sync(chatId));
     } else if (type === 'pins_changed' && this.selected?.id === chatId) {

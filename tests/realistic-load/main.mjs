@@ -49,6 +49,7 @@ async function coordinate(values, workers) {
   await Promise.all(parts.map(path => rm(path, { force: true })));
   const share = (raw, fallback, index) => {
     const total = Number(raw ?? fallback);
+    check(total >= workers, 'rateBelowWorkers');
     return String(Math.max(1, Math.floor(total / workers) + (index < total % workers ? 1 : 0)));
   };
   const pass = ['plan', 'manifest', 'api', 'ws', 'origin', 'compose-project'].flatMap(name =>
@@ -128,12 +129,13 @@ async function main() {
     } else {
       check(values.report, 'reportRequired');
       const manifest = await readPrivate(options.manifest);
+      const manifestFingerprint = createHash('sha256').update(JSON.stringify(manifest)).digest('hex');
       check(manifest.format === 'realistic-load-session-v1' && manifest.fingerprint === fingerprint, 'manifestMismatch');
       const { run } = await import('./run.mjs');
       const report = {
         ...await run(plan, manifest, http, metrics, { shard: { index: shardIndex, count: shardCount }, startAt }),
         fingerprint, startAt: startAt ?? null,
-        manifestFingerprint: createHash('sha256').update(JSON.stringify(manifest)).digest('hex'),
+        manifestFingerprint,
       };
       await writeFile(values.report, JSON.stringify(report, null, 2) + '\n');
       summarize(plan, report);

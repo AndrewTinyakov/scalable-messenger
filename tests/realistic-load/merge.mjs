@@ -16,7 +16,10 @@ export function mergeReports(parts) {
     plannedActions: parts.reduce((total, part) => total + part.plannedActions, 0),
     schedule: { ...sum('schedule'), peak: Math.max(...parts.map(part => part.schedule.peak)) },
     correctness: sum('correctness'),
-    ticketAdmission: sum('ticketAdmission'),
+    ticketAdmission: (({ maximumRequestsPerSecond, peakPending, ...totals }) => ({
+      ...totals, maximumRequestsPerSecond, peakPending,
+      intervalMs: maximumRequestsPerSecond ? 1000 / maximumRequestsPerSecond : first.ticketAdmission.intervalMs,
+    }))({ ...sum('ticketAdmission'), peakPending: Math.max(...parts.map(part => part.ticketAdmission.peakPending ?? 0)) }),
     failedActionSamples: parts.flatMap(part => part.failedActionSamples).slice(0, 30),
     passed: parts.every(part => part.passed),
     metrics: Measurements.merge(parts.map(part => part.rawMetrics)).report(),

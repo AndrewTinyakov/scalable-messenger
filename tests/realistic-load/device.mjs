@@ -308,10 +308,11 @@ export class Device {
 
   // Mirrors the browser: one /state check returns every counter the selected chat needs, and only the
   // parts whose counter moved are fetched.
-  async sync(id, { primary = false } = {}) {
+  async sync(id, { primary = false, seen } = {}) {
     const view = this.view(id);
     view.stateAt = performance.now();
-    const fresh = !primary && view.loaded ? { minSeq: view.baseline, minMemberSeq: view.member } : {};
+    const minSeq = seen && greater(seen, view.baseline) ? seen : view.baseline;
+    const fresh = !primary && view.loaded ? { minSeq, minMemberSeq: view.member } : {};
     const current = await this.get(chatPath(id) + '/state', fresh);
     check(isSeq(current?.lastSeq) && isSeq(current.mutationSeq) && isSeq(current.memberSeq) && isSeq(current.visibilitySeq) &&
       isSeq(current.pinsSeq) && isSeq(current.memberPinsSeq) &&
@@ -489,7 +490,7 @@ export class Device {
         if (this.selected?.id === chatId && greater(frame.sequence, view.baseline) && view.loaded) {
           this.backgroundTask('live.catchUp/' + chatId, async () => {
             await delay(1250, undefined, { signal: this.state.signal });
-            if (this.selected?.id === chatId && greater(frame.sequence, view.baseline)) await this.sync(chatId);
+            if (this.selected?.id === chatId && greater(frame.sequence, view.baseline)) await this.sync(chatId, { seen: frame.sequence });
           });
         }
       }

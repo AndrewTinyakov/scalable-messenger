@@ -212,14 +212,14 @@ test('shard reports merge into the same totals as one combined run', () => {
     format: 'messenger-realistic-load-report-v1', profile: 'p', seed: 1, shard: { index, count: 2 },
     fingerprint: 'plan', startAt: 1, manifestFingerprint: 'stack',
     plannedActions: 3, schedule: { offered: 3, peak: index + 1, pending: 0 },
-    correctness: { saved: 3, missing: index }, ticketAdmission: { admitted: 7 + 4 * index, rejected: index }, failedActionSamples: [], passed: index === 0,
+    correctness: { saved: 3, missing: index }, ticketAdmission: { admitted: 7 + 4 * index, rejected: index, maximumRequestsPerSecond: 75, intervalMs: 1000 / 75, peakPending: index + 2 }, failedActionSamples: [], passed: index === 0,
     rawMetrics: part.raw(),
   });
   const merged = mergeReports(parts.map(report));
   assert.deepEqual(merged.metrics.latencies, whole.report().latencies);
   assert.equal(merged.metrics.counts['send.saved'], 6);
   assert.deepEqual(merged.correctness, { saved: 6, missing: 1 });
-  assert.deepEqual(merged.ticketAdmission, { admitted: 18, rejected: 1 });
+  assert.deepEqual(merged.ticketAdmission, { admitted: 18, rejected: 1, maximumRequestsPerSecond: 150, intervalMs: 1000 / 150, peakPending: 3 });
   assert.equal(merged.schedule.peak, 2);
   assert.equal(merged.passed, false);
   assert.throws(() => mergeReports([report(parts[0], 0), report(parts[1], 0)]));

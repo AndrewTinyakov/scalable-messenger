@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 
+	"messenger/ws/internal/monitoring"
+
 	"messenger/ws/internal/grpcauth"
 	"messenger/ws/internal/protocol"
 	"messenger/ws/internal/roomname"
@@ -41,7 +43,7 @@ func (subscriptions *chatSubscriptions) joinSubscriptionBatch(base context.Conte
 		}
 	}
 	if len(attached) > 0 {
-		final, err := subscriptions.authorizeSubscriptionBatch(base, groupIDs)
+		final, err := subscriptions.authorizeSubscriptionBatch(base, groupIDs, monitoring.SubscriptionRefusedFinalAuthSlots)
 		defer final.release()
 		for _, chatID := range final.denied {
 			subscriptions.leave(chatID)

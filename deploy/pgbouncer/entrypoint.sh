@@ -3,6 +3,14 @@ set -eu
 config=/run/pgbouncer
 umask 077
 
+role_pool=${PGBOUNCER_POOL_SIZE:-20}
+api_pool=${PGBOUNCER_API_POOL_SIZE:-$role_pool}
+database_cap=${PGBOUNCER_MAX_DB_CONNECTIONS:-80}
+if [ "$api_pool" -gt $((database_cap - 2 * role_pool)) ]; then
+  echo "PGBOUNCER_API_POOL_SIZE=$api_pool leaves no room for the other roles within $database_cap connections" >&2
+  exit 64
+fi
+
 quote() {
   printf '"%s"' "$(printf '%s' "$1" | sed 's/"/""/g')"
 }
@@ -18,7 +26,7 @@ cat > "$config/pgbouncer.ini" <<INI
 messenger = host=${PGBOUNCER_SERVER_HOST:-postgres} port=5432 dbname=messenger
 
 [users]
-messenger_api = pool_size=${PGBOUNCER_API_POOL_SIZE:-20}
+messenger_api = pool_size=$api_pool
 
 [pgbouncer]
 listen_addr = 0.0.0.0
@@ -28,8 +36,8 @@ auth_type = scram-sha-256
 auth_file = $config/userlist.txt
 pool_mode = transaction
 max_client_conn = ${PGBOUNCER_MAX_CLIENT_CONN:-2000}
-default_pool_size = ${PGBOUNCER_POOL_SIZE:-20}
-max_db_connections = ${PGBOUNCER_MAX_DB_CONNECTIONS:-80}
+default_pool_size = $role_pool
+max_db_connections = $database_cap
 max_prepared_statements = ${PGBOUNCER_MAX_PREPARED_STATEMENTS:-1024}
 ignore_startup_parameters = extra_float_digits
 server_reset_query =

@@ -56,6 +56,7 @@ func (subscriptions *chatSubscriptions) subscribeContext(base context.Context, i
 		}
 	}
 	if subscriptions.count()+newRooms > subscriptions.config.MaxRoomsPerConnection {
+		subscriptions.metrics.RecordSubscriptionRefusal(monitoring.SubscriptionRefusedRoomLimit)
 		return errRoomLimit
 	}
 	if err := subscriptions.chargeSubscriptionAttempts(base, len(items), mode); err != nil {
@@ -108,7 +109,7 @@ func (subscriptions *chatSubscriptions) chargeSubscriptionAttempts(base context.
 
 func (subscriptions *chatSubscriptions) authorizeSubscriptions(base context.Context, groupIDs []string, mode subscriptionMode) (subscriptionAuthorization, error) {
 	if mode == batchSubscription {
-		return subscriptions.authorizeSubscriptionBatch(base, groupIDs)
+		return subscriptions.authorizeSubscriptionBatch(base, groupIDs, monitoring.SubscriptionRefusedAuthSlots)
 	}
 	return subscriptions.authorizeSingleSubscription(base, groupIDs)
 }
@@ -158,7 +159,7 @@ func (subscriptions *chatSubscriptions) authorizeSingleSubscription(base context
 	return authorization, err
 }
 
-func (subscriptions *chatSubscriptions) authorizeSubscriptionBatch(base context.Context, groupIDs []string) (subscriptionAuthorization, error) {
+func (subscriptions *chatSubscriptions) authorizeSubscriptionBatch(base context.Context, groupIDs []string, refusal monitoring.SubscriptionRefusal) (subscriptionAuthorization, error) {
 	authorization := subscriptionAuthorization{
 		rooms:   make(map[string]string, len(groupIDs)),
 		release: func() {},
@@ -173,7 +174,7 @@ func (subscriptions *chatSubscriptions) authorizeSubscriptionBatch(base context.
 		case <-subscriptions.connection.ctx.Done():
 			return authorization, subscriptions.connection.ctx.Err()
 		default:
-			subscriptions.metrics.RecordSubscriptionRefusal(monitoring.SubscriptionRefusedFinalAuthSlots)
+			subscriptions.metrics.RecordSubscriptionRefusal(refusal)
 			return authorization, errRateLimited
 		}
 	}

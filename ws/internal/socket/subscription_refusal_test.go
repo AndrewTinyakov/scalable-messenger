@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"messenger/ws/internal/config"
+	"messenger/ws/internal/monitoring"
 	"messenger/ws/internal/ticket"
 )
 
@@ -16,7 +17,7 @@ func TestFullGroupAuthorizationSlotsCountTheRefusal(t *testing.T) {
 	server.groupAuthSlots <- struct{}{}
 	t.Cleanup(func() { <-server.groupAuthSlots })
 
-	_, err := connection.subscriptions.authorizeSubscriptionBatch(context.Background(), []string{raceChatID})
+	_, err := connection.subscriptions.authorizeSubscriptionBatch(context.Background(), []string{raceChatID}, monitoring.SubscriptionRefusedFinalAuthSlots)
 
 	if !errors.Is(err, errRateLimited) {
 		t.Fatalf("error = %v, want rate limited", err)

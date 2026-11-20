@@ -91,7 +91,7 @@ async function loadFixture(project, plan, manifest, firstMessages, signal) {
     `INSERT INTO messages(id,chat_id,sequence,sender_id,body,created_at,reply_to_message_id)
       SELECT id,chat_id,sequence,sender_id,body,now()+sequence*interval '1 microsecond',reply_to_message_id
       FROM fixture_messages;`,
-    'UPDATE chats c SET next_sequence=f.size+1,last_activity_at=now() FROM fixture_chats f WHERE c.id=f.id;',
+    'UPDATE chats c SET next_sequence=f.size+1,last_message_sequence=f.size,last_activity_at=now() FROM fixture_chats f WHERE c.id=f.id;',
     'COMMIT;',
   ].join('\n');
   await docker(['exec', '-i', db, 'sh', '-c', 'exec psql -X -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'],

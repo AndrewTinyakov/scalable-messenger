@@ -153,7 +153,7 @@ export class Device {
     if (!this.views.has(id)) {
       this.views.set(id, {
         messages: [], baseline: '0', dismissed: '0', loaded: false, reads: '0',
-        mutation: '0', visibility: '0', pins: '0', stateAt: 0, changesAfter: null, ready: null, detached: null,
+        mutation: '0', visibility: '0', member: '0', pins: '0', memberPins: '0', stateAt: 0, changesAfter: null, ready: null, detached: null,
       });
     }
     return this.views.get(id);
@@ -265,7 +265,7 @@ export class Device {
 
   async latest(id) {
     const page = await this.get(chatPath(id) + '/messages', { limit: pageSize });
-    check(isSeq(page?.coverageThroughSequence) && isSeq(page?.mutationSeq) && isSeq(page?.memberSeq));
+    check(isSeq(page?.coverageThroughSequence) && isSeq(page?.mutationSeq) && isSeq(page?.visibilitySeq));
     const view = this.install(id, page, true);
     if (greater(page.coverageThroughSequence, view.baseline)) {
       view.baseline = page.coverageThroughSequence;
@@ -274,7 +274,7 @@ export class Device {
     }
     view.loaded = true;
     view.mutation = page.mutationSeq;
-    view.visibility = page.memberSeq;
+    view.visibility = page.visibilitySeq;
     for (const message of page.messages) this.state.recovered(this, message);
     return view;
   }
@@ -311,18 +311,21 @@ export class Device {
   async sync(id, { primary = false } = {}) {
     const view = this.view(id);
     view.stateAt = performance.now();
-    const fresh = !primary && view.loaded ? { minSeq: view.baseline, minMemberSeq: view.visibility } : {};
+    const fresh = !primary && view.loaded ? { minSeq: view.baseline, minMemberSeq: view.member } : {};
     const current = await this.get(chatPath(id) + '/state', fresh);
-    check(isSeq(current?.lastSeq) && isSeq(current.mutationSeq) && isSeq(current.memberSeq) && isSeq(current.pinsSeq) &&
+    check(isSeq(current?.lastSeq) && isSeq(current.mutationSeq) && isSeq(current.memberSeq) && isSeq(current.visibilitySeq) &&
+      isSeq(current.pinsSeq) && isSeq(current.memberPinsSeq) &&
       isSeq(current.ownReadThrough) && isSeq(current.otherReadThrough), 'invalidState');
     if (greater(current.ownReadThrough, view.reads)) view.reads = current.ownReadThrough;
     this.state.readNotification(this, id, { throughSequence: current.ownReadThrough, maxOtherReadSequence: current.otherReadThrough });
-    if (greater(current.pinsSeq, view.pins)) {
+    if (greater(current.memberSeq, view.member)) view.member = current.memberSeq;
+    if (greater(current.pinsSeq, view.pins) || greater(current.memberPinsSeq, view.memberPins)) {
       view.pins = current.pinsSeq;
+      view.memberPins = current.memberPinsSeq;
       await this.get(chatPath(id) + '/pins', { limit: 50 });
     }
     if (greater(current.mutationSeq, view.mutation) && view.changesAfter !== null) await this.refreshChanges(id);
-    if (greater(current.memberSeq, view.visibility)) {
+    if (greater(current.visibilitySeq, view.visibility)) {
       const ids = view.messages.map(message => message.id);
       for (let i = 0; i < ids.length; i += 100) {
         const messageIds = ids.slice(i, i + 100);
@@ -331,7 +334,7 @@ export class Device {
         view.messages = view.messages.filter(message => !messageIds.includes(message.id));
         this.install(id, { messages: fresh });
       }
-      view.visibility = current.memberSeq;
+      view.visibility = current.visibilitySeq;
       await this.latest(id);
     } else if (greater(current.lastSeq, view.baseline)) {
       await this.catchUp(id, current.lastSeq);
@@ -486,7 +489,7 @@ export class Device {
         if (this.selected?.id === chatId && greater(frame.sequence, view.baseline) && view.loaded) {
           this.backgroundTask('live.catchUp/' + chatId, async () => {
             await delay(1250, undefined, { signal: this.state.signal });
-            if (this.selected?.id === chatId && greater(frame.sequence, view.baseline)) await this.catchUp(chatId, frame.sequence);
+            if (this.selected?.id === chatId && greater(frame.sequence, view.baseline)) await this.sync(chatId);
           });
         }
       }

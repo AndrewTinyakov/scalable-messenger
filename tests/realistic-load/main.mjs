@@ -47,12 +47,15 @@ async function coordinate(values, workers) {
   const script = fileURLToPath(import.meta.url);
   const parts = Array.from({ length: workers }, (_, index) => `${values.report}.${startAt}.shard-${index}.json`);
   await Promise.all(parts.map(path => rm(path, { force: true })));
-  const share = (raw, fallback) => String(Math.max(1, Math.ceil(Number(raw ?? fallback) / workers)));
+  const share = (raw, fallback, index) => {
+    const total = Number(raw ?? fallback);
+    return String(Math.max(1, Math.floor(total / workers) + (index < total % workers ? 1 : 0)));
+  };
   const pass = ['plan', 'manifest', 'api', 'ws', 'origin', 'compose-project'].flatMap(name =>
     values[name] === undefined ? [] : ['--' + name, values[name]]).concat(values.remote ? ['--remote'] : []);
   const codes = await Promise.all(parts.map((report, index) => new Promise(resolve => {
     const child = spawn(process.execPath, [script, 'run', ...pass, '--report', report, '--shard', `${index}/${workers}`,
-      '--start-at', String(startAt), '--auth-rate', share(values['auth-rate'], 1), '--ticket-rate', share(values['ticket-rate'], 4)],
+      '--start-at', String(startAt), '--auth-rate', share(values['auth-rate'], 1, index), '--ticket-rate', share(values['ticket-rate'], 4, index)],
     { stdio: ['ignore', 'ignore', 'inherit'] });
     child.on('exit', code => resolve(code));
   })));

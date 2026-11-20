@@ -247,3 +247,26 @@ test('a read hint during a running check owes exactly one more primary check', a
   await running;
   assert.deepEqual(calls, [{ primary: true }, { primary: true }]);
 });
+
+test('an owed read check survives a failed check and a return to the same chat', async () => {
+  const failures = [];
+  const state = { background: new Set(), capacity: 1, metrics: { failure: (name, error) => failures.push(error.message) } };
+  const device = new Device(state, { userId: 'u' }, 0);
+  device.selected = { id: 'chat' };
+  const calls = [];
+  let release;
+  device.sync = () => {
+    calls.push(device.selection);
+    if (calls.length === 1) return new Promise((resolve, reject) => { release = reject; });
+    return Promise.resolve();
+  };
+  const running = device.recheckReads('chat');
+  await new Promise(resolve => setImmediate(resolve));
+  device.selection += 2;
+  device.recheckReads('chat');
+  release(new Error('state unavailable'));
+  await running;
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(calls, [0, 2]);
+  assert.deepEqual(failures, ['state unavailable']);
+});

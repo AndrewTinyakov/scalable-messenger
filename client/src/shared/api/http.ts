@@ -23,6 +23,7 @@ import {
 import {
   decodeAround,
   decodeChanges,
+  decodeChatState,
   decodeDeletion,
   decodePinnedMessages,
   decodeReadProgress,
@@ -61,6 +62,7 @@ const routes = {
   deletions: '/v1/chats/{id}/deletions',
   deletion: '/v1/chats/{id}/deletions/{operationId}',
   reads: '/v1/chats/{id}/reads',
+  state: '/v1/chats/{id}/state',
   messageReads: '/v1/chats/{id}/messages/{messageId}/reads',
   pinnedChats: '/v1/chats/pinned',
   chatPin: '/v1/chats/{id}/pin',
@@ -450,9 +452,9 @@ export const api = {
           return result
         })
       },
-      messageChanges(chatId: string, afterRevision: string) {
+      messageChanges(chatId: string, afterSeq: string) {
         return authenticated(
-          endpoint(routes.changes, { id: chatId }, { afterRevision, limit: 100 }),
+          endpoint(routes.changes, { id: chatId }, { afterSeq, limit: 100 }),
           (value) => decodeChanges(value, chatId),
         )
       },
@@ -473,6 +475,12 @@ export const api = {
       },
       deleteChat(chatId: string) {
         return authenticated(endpoint(routes.chat, { id: chatId }), noContent, { method: 'DELETE' })
+      },
+      chatState(chatId: string, minSeq?: string) {
+        return authenticated(
+          endpoint(routes.state, { id: chatId }, minSeq && minSeq !== '0' ? { minSeq } : {}),
+          decodeChatState,
+        )
       },
       reads(chatId: string) {
         return authenticated(endpoint(routes.reads, { id: chatId }), decodeReads)

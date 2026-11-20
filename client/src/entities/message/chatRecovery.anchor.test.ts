@@ -8,15 +8,15 @@ function page(
   messages: Message[],
   after: string,
   through: string,
-  mutationRevision = '0',
-  visibilityRevision = '0',
+  mutationSeq = '0',
+  memberSeq = '0',
   hasMore = true,
 ): HistorySnapshot & SnapshotMetadata & { hasMore: boolean; nextSequence: string } {
   return {
     messages,
     snapshotSequence: '1000',
-    mutationRevision,
-    visibilityRevision,
+    mutationSeq,
+    memberSeq,
     clearedThroughSequence: '0',
     globalClearedThroughSequence: '0',
     coverageAfterSequence: after,
@@ -27,8 +27,8 @@ function page(
 }
 
 function fixture() {
-  let mutationRevision = '0'
-  let visibilityRevision = '0'
+  let mutationSeq = '0'
+  let memberSeq = '0'
   let release!: (value: ReturnType<typeof page>) => void
   let started!: () => void
   const newerStarted = new Promise<void>((resolve) => {
@@ -39,9 +39,9 @@ function fixture() {
   })
   const restored = vi.fn()
   const around = vi.fn(async () =>
-    mutationRevision !== '0' || visibilityRevision !== '0'
+    mutationSeq !== '0' || memberSeq !== '0'
       ? {
-          ...page([message('132')], '67', '181', mutationRevision, visibilityRevision),
+          ...page([message('132')], '67', '181', mutationSeq, memberSeq),
           anchorMessageId: 'message-132',
           hasOlder: true,
           hasNewer: true,
@@ -52,8 +52,7 @@ function fixture() {
   const exposures: string[] = []
   recovery.configure({
     history: {
-      latest: async () =>
-        page([message('1000')], '999', '1000', mutationRevision, visibilityRevision, false),
+      latest: async () => page([message('1000')], '999', '1000', mutationSeq, memberSeq, false),
       around,
       older: async () => page([{ ...message('70'), body: 'personally erased secret' }], '68', '84'),
       after: async () => {
@@ -62,14 +61,14 @@ function fixture() {
       },
       visibility: async () => ({
         snapshotSequence: '1000',
-        mutationRevision,
-        visibilityRevision,
+        mutationSeq,
+        memberSeq,
         clearedThroughSequence: '0',
         globalClearedThroughSequence: '0',
         hidden: false,
       }),
       resolve: async (_id, ids) => ({
-        ...page([], '0', '1000', mutationRevision, visibilityRevision),
+        ...page([], '0', '1000', mutationSeq, memberSeq),
         messages: ids.includes('message-1000') ? [message('1000')] : [],
       }),
     },
@@ -83,7 +82,7 @@ function fixture() {
     }),
     changed: () => {
       if (
-        (mutationRevision !== '0' || visibilityRevision !== '0') &&
+        (mutationSeq !== '0' || memberSeq !== '0') &&
         JSON.stringify(recovery.visibleWindows()).includes('personally erased secret')
       )
         exposures.push('stale body')
@@ -102,10 +101,10 @@ function fixture() {
     newerStarted,
     release,
     change: (kind: 'mutation' | 'visibility') => {
-      if (kind === 'mutation') mutationRevision = '1'
-      else visibilityRevision = '1'
+      if (kind === 'mutation') mutationSeq = '1'
+      else memberSeq = '1'
     },
-    current: () => ({ mutationRevision, visibilityRevision }),
+    current: () => ({ mutationSeq, memberSeq }),
   }
 }
 
@@ -191,10 +190,8 @@ describe('reading anchor proof', () => {
           'personally erased secret',
         )
         for (let index = 0; index < 200; index += 1)
-          f.recovery.observe(`other-${index}`, { mutationRevision: '1', visibilityRevision: '1' })
-        f.release(
-          page([], '115', '131', f.current().mutationRevision, f.current().visibilityRevision),
-        )
+          f.recovery.observe(`other-${index}`, { mutationSeq: '1', memberSeq: '1' })
+        f.release(page([], '115', '131', f.current().mutationSeq, f.current().memberSeq))
         await vi.waitFor(() =>
           expect(f.restored).toHaveBeenCalledWith('chat', {
             messageId: 'message-132',

@@ -67,9 +67,9 @@ describe('HTTP transport', () => {
       messages: [row],
       nextSequence: '10',
       hasMore: false,
-      mutationRevision: '2',
       snapshotSequence: '10',
-      visibilityRevision: '1',
+      mutationSeq: '2',
+      memberSeq: '1',
       clearedThroughSequence: '3',
       globalClearedThroughSequence: '0',
       coverageAfterSequence: '3',
@@ -84,7 +84,7 @@ describe('HTTP transport', () => {
       nextSequence: '10',
     })
     for (const fields of [
-      { visibilityRevision: undefined },
+      { memberSeq: undefined },
       { snapshotSequence: 10 },
       { coverageAfterSequence: '11' },
       { coverageThroughSequence: '7' },
@@ -104,8 +104,8 @@ describe('HTTP transport', () => {
       scope: 'SELF',
       target: 'MESSAGES',
       clearedThroughSequence: '0',
-      mutationRevision: '0',
-      visibilityRevision: '1',
+      seq: '0',
+      memberSeq: '1',
       state: 'COMPLETED',
       deletedRows: '1',
     }
@@ -130,8 +130,8 @@ describe('HTTP transport', () => {
     const snapshot = {
       messages: [],
       snapshotSequence: '10',
-      mutationRevision: '1',
-      visibilityRevision: '1',
+      mutationSeq: '2',
+      memberSeq: '1',
       clearedThroughSequence: '0',
       globalClearedThroughSequence: '0',
     }

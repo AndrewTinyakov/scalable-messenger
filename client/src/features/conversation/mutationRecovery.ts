@@ -37,6 +37,14 @@ export class MutationRecovery {
       this.state = { phase: 'ready', chatId, revision }
   }
 
+  behind(chatId: string, mutationSeq: string): boolean {
+    return (
+      this.state.phase === 'ready' &&
+      this.state.chatId === chatId &&
+      BigInt(mutationSeq) > BigInt(this.state.revision)
+    )
+  }
+
   refresh(): Promise<void> {
     if (this.state.phase === 'refreshing') return this.state.promise
     if (this.state.phase !== 'ready') return Promise.resolve()
@@ -58,17 +66,17 @@ export class MutationRecovery {
           if (valid()) operation.revision = revision
           return
         }
-        if (BigInt(changes.nextRevision) < BigInt(operation.revision))
+        if (BigInt(changes.nextSeq) < BigInt(operation.revision))
           throw new Error('Message changes cursor moved backwards')
         if (
-          changes.nextRevision === operation.revision &&
-          BigInt(changes.lastRevision) > BigInt(changes.nextRevision)
+          changes.nextSeq === operation.revision &&
+          BigInt(changes.lastSeq) > BigInt(changes.nextSeq)
         )
           throw new Error('Message changes cursor did not advance')
         if (this.adapters.apply) {
           const applied = this.adapters.apply(chatId, changes.changes, {
             ...changes,
-            mutationRevision: changes.lastRevision,
+            mutationSeq: changes.lastSeq,
           })
           if (applied === false) continue
         } else
@@ -81,8 +89,8 @@ export class MutationRecovery {
           if (valid()) operation.revision = revision
           return
         }
-        operation.revision = changes.nextRevision
-        if (BigInt(operation.revision) >= BigInt(changes.lastRevision)) return
+        operation.revision = changes.nextSeq
+        if (BigInt(operation.revision) >= BigInt(changes.lastSeq)) return
       }
     }
     operation.promise = run().finally(() => {

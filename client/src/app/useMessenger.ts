@@ -240,22 +240,22 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     selectedId && !selectedId.startsWith('draft:') ? selectedId : undefined,
     sessionApi,
     connection === 'connected',
+    features.pinsSeq,
   )
   const pinsEventRef = useRef(pins.onEvent)
   pinsEventRef.current = pins.onEvent
   const featuresEventRef = useRef(features.onEvent)
   featuresEventRef.current = features.onEvent
-  const onFeatureEvent = useCallback(
-    (event: Parameters<typeof features.onEvent>[0]) =>
-      pinsEventRef.current(event) || featuresEventRef.current(event),
-    [],
-  )
+  const onFeatureEvent = useCallback((event: Parameters<typeof features.onEvent>[0]) => {
+    const handledByPins = pinsEventRef.current(event)
+    return featuresEventRef.current(event) || handledByPins
+  }, [])
   const withSnapshot = async (
     chatId: string,
     request: ReturnType<typeof sessionApi.latestMessages>,
   ) => {
     const result = await request
-    features.snapshot(chatId, result.mutationRevision ?? '0')
+    features.snapshot(chatId, result.mutationSeq ?? '0')
     return result
   }
 
@@ -268,7 +268,18 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
         withSnapshot(chatId, sessionApi.olderMessages(chatId, sequence, HISTORY_PAGE_SIZE)),
       around: (chatId, messageId, sequence) =>
         sessionApi.aroundMessage(chatId, messageId, sequence),
-      visibility: sessionApi.visibility,
+      visibility: async (chatId) => {
+        const state = await sessionApi.chatState(chatId, features.minSeq(chatId))
+        features.observeState(chatId, state)
+        return {
+          snapshotSequence: state.lastSeq,
+          mutationSeq: state.mutationSeq,
+          memberSeq: state.memberSeq,
+          clearedThroughSequence: state.clearedThroughSequence,
+          globalClearedThroughSequence: state.globalClearedThroughSequence,
+          hidden: state.hidden,
+        }
+      },
       resolve: sessionApi.resolveMessages,
     },
     context: (chatId) => ({

@@ -1,4 +1,5 @@
 import type { Chat } from '../../entities/chat/model'
+import type { SnapshotMetadata } from '../../entities/message/historySnapshot'
 import type { Session, User } from '../../entities/session/model'
 import { isDateTime, isId, isRecord, isSendRejectionReason, isSequence } from '../lib/validation'
 import type { components } from './generated/schema'
@@ -309,10 +310,7 @@ export function decodeMessage(
   } as components['schemas']['MessageResponse']
 }
 
-export function decodeHistory(
-  value: unknown,
-  chatId: string,
-): Required<components['schemas']['MessageHistoryResponse']> {
+export function decodeHistory(value: unknown, chatId: string): HistoryPage {
   fields(value, [
     'messages',
     'nextSequence',
@@ -330,7 +328,7 @@ export function decodeHistory(
     typeof value.hasMore !== 'boolean'
   )
     invalid()
-  decodeSnapshot(value)
+  const snapshot = decodeSnapshot(value)
   if (
     BigInt(value.coverageAfterSequence as string) >
       BigInt(value.coverageThroughSequence as string) ||
@@ -350,11 +348,11 @@ export function decodeHistory(
     new Set(messages.map((message) => message.id)).size !== messages.length
   )
     invalid()
-  return {
-    ...value,
-    messages,
-  } as Required<components['schemas']['MessageHistoryResponse']>
+  return { ...value, ...snapshot, messages } as HistoryPage
 }
+
+export type HistoryPage = Required<components['schemas']['MessageHistoryResponse']> &
+  SnapshotMetadata
 
 export type DecodedSendStatus = components['schemas']['SendStatusResponse']
 

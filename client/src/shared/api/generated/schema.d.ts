@@ -388,6 +388,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/chats/{id}/state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["state"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/chats/{id}/pins": {
         parameters: {
             query?: never;
@@ -634,8 +650,8 @@ export interface components {
         MessageResolveResponse: {
             messages: components["schemas"]["MessageResponse"][];
             snapshotSequence: string;
-            mutationRevision: string;
-            visibilityRevision: string;
+            mutationSeq: string;
+            memberSeq: string;
             clearedThroughSequence: string;
             globalClearedThroughSequence: string;
         };
@@ -678,8 +694,8 @@ export interface components {
             /** @enum {string} */
             target: "MESSAGES" | "HISTORY" | "CHAT";
             clearedThroughSequence: string;
-            mutationRevision: string;
-            visibilityRevision: string;
+            seq: string;
+            memberSeq: string;
             /** @enum {string} */
             state: "ACCEPTED" | "COMPLETED";
             deletedRows: string;
@@ -769,11 +785,29 @@ export interface components {
         };
         MessageVisibilityResponse: {
             snapshotSequence: string;
-            mutationRevision: string;
-            visibilityRevision: string;
+            mutationSeq: string;
+            memberSeq: string;
             clearedThroughSequence: string;
             globalClearedThroughSequence: string;
             hidden: boolean;
+        };
+        ChatStateResponse: {
+            /** @description Chat sequence of the latest shared event */
+            lastSeq: string;
+            /** @description Chat sequence of the latest shared pin change */
+            pinsSeq: string;
+            /** @description Changes at or below this chat sequence are no longer retained */
+            mutationFloor: string;
+            /** @description Chat sequence of the latest shared edit, deletion or clear */
+            mutationSeq: string;
+            memberSeq: string;
+            clearedThroughSequence: string;
+            globalClearedThroughSequence: string;
+            hidden: boolean;
+            ownReadThrough: string;
+            /** @description Highest read-through among other active members */
+            otherReadThrough: string;
+            userSeq: string;
         };
         ReadSummaryResponse: {
             throughSequence: string;
@@ -803,9 +837,9 @@ export interface components {
             messages: components["schemas"]["MessageResponse"][];
             nextSequence: string;
             hasMore: boolean;
-            mutationRevision: string;
             snapshotSequence: string;
-            visibilityRevision: string;
+            mutationSeq: string;
+            memberSeq: string;
             clearedThroughSequence: string;
             globalClearedThroughSequence: string;
             coverageAfterSequence: string;
@@ -827,7 +861,7 @@ export interface components {
             serverTime: string;
         };
         MessageChangeResponse: {
-            revision: string;
+            seq: string;
             /** @enum {string} */
             kind: "UPSERT" | "REMOVED" | "CLEARED";
             message: components["schemas"]["MessageResponse"] | null;
@@ -837,11 +871,12 @@ export interface components {
         };
         MessageChangesResponse: {
             changes: components["schemas"]["MessageChangeResponse"][];
-            lastRevision: string;
-            nextRevision: string;
+            lastSeq: string;
+            nextSeq: string;
             resetRequired: boolean;
             snapshotSequence: string;
-            visibilityRevision: string;
+            mutationSeq: string;
+            memberSeq: string;
             clearedThroughSequence: string;
             globalClearedThroughSequence: string;
         };
@@ -850,9 +885,9 @@ export interface components {
             messages: components["schemas"]["MessageResponse"][];
             hasOlder: boolean;
             hasNewer: boolean;
-            mutationRevision: string;
             snapshotSequence: string;
-            visibilityRevision: string;
+            mutationSeq: string;
+            memberSeq: string;
             clearedThroughSequence: string;
             globalClearedThroughSequence: string;
             coverageAfterSequence: string;
@@ -2892,6 +2927,69 @@ export interface operations {
             };
         };
     };
+    state: {
+        parameters: {
+            query?: {
+                minSeq?: string;
+            };
+            header?: {
+                "X-Messenger-User"?: string;
+                "X-Messenger-Device"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ChatStateResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
     list_1: {
         parameters: {
             query?: {
@@ -3149,7 +3247,7 @@ export interface operations {
     changes: {
         parameters: {
             query: {
-                afterRevision: string;
+                afterSeq: string;
                 limit?: number;
             };
             header?: {

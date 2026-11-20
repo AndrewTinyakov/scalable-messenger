@@ -9,13 +9,13 @@ function snapshot(
   after: string,
   through: string,
   revision = '0',
-  visibilityRevision = '0',
+  memberSeq = '0',
 ): HistorySnapshot & { nextSequence: string; hasMore: boolean } {
   return {
     messages,
     snapshotSequence: through,
-    mutationRevision: revision,
-    visibilityRevision,
+    mutationSeq: revision,
+    memberSeq,
     clearedThroughSequence: '0',
     globalClearedThroughSequence: '0',
     coverageAfterSequence: after,
@@ -34,11 +34,11 @@ describe('certified visible history', () => {
     })
     await recovery.catchUp('chat', true)
     const old = {
-      changes: [{ revision: '1', message: message('1') }],
-      lastRevision: '1',
-      nextRevision: '1',
+      changes: [{ seq: '1', message: message('1') }],
+      lastSeq: '1',
+      nextSeq: '1',
       resetRequired: false,
-      visibilityRevision: '0',
+      memberSeq: '0',
     }
     let release!: (value: typeof old) => void
     const loading = recovery.fetchChanges(
@@ -51,7 +51,7 @@ describe('certified visible history', () => {
     recovery.patch('chat', [{ ...message('1'), body: 'new edit', messageVersion: '2' }])
     release(old)
     const page = (await loading)!
-    recovery.applyChanges('chat', page.changes, { ...page, mutationRevision: page.lastRevision })
+    recovery.applyChanges('chat', page.changes, { ...page, mutationSeq: page.lastSeq })
     expect(recovery.visibleWindows().chat[0]).toMatchObject({
       body: 'new edit',
       messageVersion: '2',
@@ -220,8 +220,8 @@ describe('certified visible history', () => {
   it('evicts inactive bodies and visibility together without discarding active verification', async () => {
     const metadata = {
       snapshotSequence: '100',
-      mutationRevision: '1',
-      visibilityRevision: '1',
+      mutationSeq: '1',
+      memberSeq: '1',
       clearedThroughSequence: '0',
       globalClearedThroughSequence: '0',
     }
@@ -256,7 +256,7 @@ describe('certified visible history', () => {
     for (let index = 0; index < 250; index += 1) {
       const id = `other-${index}`
       await recovery.synchronize(id)
-      recovery.observe(id, { visibilityRevision: '2' })
+      recovery.observe(id, { memberSeq: '2' })
     }
     expect(Object.keys(recovery.visibleWindows()).length).toBeLessThanOrEqual(101)
     expect(recovery.visibleWindows()['other-0']).toBeUndefined()
@@ -278,15 +278,15 @@ describe('certified visible history', () => {
     await recovery.catchUp('chat', true)
     recovery.observe('chat', {
       snapshotSequence: '100',
-      mutationRevision: '3',
-      visibilityRevision: '2',
+      mutationSeq: '3',
+      memberSeq: '2',
       clearedThroughSequence: '80',
     })
     for (let index = 0; index < 2000; index += 1)
       recovery.observe(`other-${index}`, {
         snapshotSequence: '100',
-        mutationRevision: '1',
-        visibilityRevision: '1',
+        mutationSeq: '1',
+        memberSeq: '1',
       })
     expect(Object.keys(recovery.visibleWindows()).length).toBeLessThanOrEqual(101)
     expect(recovery.revisionKey('chat')).toBe('3:2')
@@ -303,8 +303,8 @@ describe('certified visible history', () => {
     })
     const metadata = {
       snapshotSequence: '100',
-      mutationRevision: '0',
-      visibilityRevision: '1',
+      mutationSeq: '0',
+      memberSeq: '1',
       clearedThroughSequence: '0',
       globalClearedThroughSequence: '0',
     }
@@ -325,7 +325,7 @@ describe('certified visible history', () => {
       { ...snapshot([message('80')], '70', '80'), snapshotSequence: '100' },
     )
     hidden = true
-    await recovery.synchronize('chat', { visibilityRevision: '1' })
+    await recovery.synchronize('chat', { memberSeq: '1' })
     expect(recovery.baseline('chat')).toBe('1')
     recovery.patch('chat', [{ ...message('80'), body: 'removed secret', messageVersion: '2' }])
     expect(JSON.stringify(recovery.visibleWindows())).not.toContain('removed secret')
@@ -348,8 +348,8 @@ describe('certified visible history', () => {
   it('applies certified absent sequences while keeping human reads separate', async () => {
     const resolve = vi.fn(async () => ({
       snapshotSequence: '110',
-      mutationRevision: '0',
-      visibilityRevision: '0',
+      mutationSeq: '0',
+      memberSeq: '0',
       clearedThroughSequence: '0',
       globalClearedThroughSequence: '0',
       messages: [],
@@ -406,16 +406,16 @@ describe('certified visible history', () => {
       older: async () => snapshot([], '0', '0'),
       visibility: async () => ({
         snapshotSequence: '2',
-        mutationRevision: '1',
-        visibilityRevision: '1',
+        mutationSeq: '1',
+        memberSeq: '1',
         clearedThroughSequence: '1',
         globalClearedThroughSequence: '0',
         hidden: false,
       }),
       resolve: async (_id: string, ids: string[]) => ({
         snapshotSequence: '2',
-        mutationRevision: '1',
-        visibilityRevision: '1',
+        mutationSeq: '1',
+        memberSeq: '1',
         clearedThroughSequence: '1',
         globalClearedThroughSequence: '0',
         messages: ids.includes('message-2') ? [message('2')] : [],
@@ -433,7 +433,7 @@ describe('certified visible history', () => {
       (value) => recovery.reveal('chat', value.messages, recovery.beginNavigation(), value),
     )
     page = { ...snapshot([message('2')], '0', '2', '1', '1'), clearedThroughSequence: '1' }
-    await recovery.synchronize('chat', { mutationRevision: '1', visibilityRevision: '1' })
+    await recovery.synchronize('chat', { mutationSeq: '1', memberSeq: '1' })
     release(snapshot([message('1'), message('2')], '0', '2'))
     expect(await pending).toBeUndefined()
     expect(recovery.visibleWindows().chat.map((row) => row.sequence)).toEqual(['2'])
@@ -463,7 +463,7 @@ describe('certified visible history', () => {
       'chat',
       [
         {
-          revision: '1',
+          seq: '1',
           kind: 'REMOVED',
           message: null,
           messageId: original.id,
@@ -471,7 +471,7 @@ describe('certified visible history', () => {
           clearedThroughSequence: null,
         },
       ],
-      { mutationRevision: '1' },
+      { mutationSeq: '1' },
     )
     expect(recovery.visibleWindows().chat).toHaveLength(1)
     expect(recovery.visibleWindows().chat[0].replyBody).toBeNull()

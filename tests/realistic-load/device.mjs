@@ -3,6 +3,7 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { check, Fault, greater, isId, isSeq, query, Socket } from './transport.mjs';
 
+const STATE_CHECK_MS = 60_000;
 const statusCodes = new Set(['INVALID_FRAME', 'RATE_LIMITED', 'ROOM_LIMIT', 'UNAUTHORIZED', 'DEPENDENCY_UNAVAILABLE', 'PUBLISH_UNKNOWN', 'PUBLISH_FAILED']);
 const rejections = new Set(['NOT_A_MEMBER', 'CHAT_NOT_FOUND', 'RECIPIENT_NOT_FOUND', 'INVALID_RECIPIENT', 'EMPTY_BODY',
   'BODY_TOO_LONG', 'REQUEST_ID_CONFLICT', 'PROCESSING_FAILED', 'INVALID_REPLY_TARGET', 'INVALID_FORWARD_SOURCE']);
@@ -30,7 +31,6 @@ export class Device {
   views = new Map();
   roomCursors = new Map();
   summaries = new Map();
-  readRefreshes = new Map();
   // Delivery accounting uses these to tell misses from interruptions. `connection` changes when the socket
   // closes (direct chats arrive on the account room); `selection` also changes on a chat switch (group rooms).
   connection = 0;
@@ -151,7 +151,7 @@ export class Device {
     if (!this.views.has(id)) {
       this.views.set(id, {
         messages: [], baseline: '0', dismissed: '0', loaded: false, reads: '0',
-        mutation: '0', visibility: '0', changesAfter: null, ready: null, detached: null,
+        mutation: '0', visibility: '0', pins: '0', stateAt: 0, changesAfter: null, ready: null, detached: null,
       });
     }
     return this.views.get(id);
@@ -263,7 +263,7 @@ export class Device {
 
   async latest(id) {
     const page = await this.get(chatPath(id) + '/messages', { limit: pageSize });
-    check(isSeq(page?.coverageThroughSequence) && isSeq(page?.mutationRevision) && isSeq(page?.visibilityRevision));
+    check(isSeq(page?.coverageThroughSequence) && isSeq(page?.mutationSeq) && isSeq(page?.memberSeq));
     const view = this.install(id, page, true);
     if (greater(page.coverageThroughSequence, view.baseline)) {
       view.baseline = page.coverageThroughSequence;
@@ -271,8 +271,8 @@ export class Device {
       if (this.connected) this.send({ type: 'dismissed', chatId: id, sequence: view.dismissed });
     }
     view.loaded = true;
-    view.mutation = page.mutationRevision;
-    view.visibility = page.visibilityRevision;
+    view.mutation = page.mutationSeq;
+    view.visibility = page.memberSeq;
     for (const message of page.messages) this.state.recovered(this, message);
     return view;
   }
@@ -304,11 +304,22 @@ export class Device {
     await this.latest(id);
   }
 
+  // Mirrors the browser: one /state check returns every counter the selected chat needs, and only the
+  // parts whose counter moved are fetched.
   async sync(id) {
     const view = this.view(id);
-    const current = await this.get(chatPath(id) + '/visibility');
-    check(isSeq(current?.snapshotSequence) && isSeq(current.mutationRevision) && isSeq(current.visibilityRevision));
-    if (greater(current.mutationRevision, view.mutation) || greater(current.visibilityRevision, view.visibility)) {
+    view.stateAt = performance.now();
+    const current = await this.get(chatPath(id) + '/state', greater(view.baseline, '0') ? { minSeq: view.baseline } : {});
+    check(isSeq(current?.lastSeq) && isSeq(current.mutationSeq) && isSeq(current.memberSeq) && isSeq(current.pinsSeq) &&
+      isSeq(current.ownReadThrough) && isSeq(current.otherReadThrough), 'invalidState');
+    if (greater(current.ownReadThrough, view.reads)) view.reads = current.ownReadThrough;
+    this.state.readNotification(this, id, { throughSequence: current.ownReadThrough, maxOtherReadSequence: current.otherReadThrough });
+    if (greater(current.pinsSeq, view.pins)) {
+      view.pins = current.pinsSeq;
+      await this.get(chatPath(id) + '/pins', { limit: 50 });
+    }
+    if (greater(current.mutationSeq, view.mutation) && view.changesAfter !== null) await this.refreshChanges(id);
+    if (greater(current.memberSeq, view.visibility)) {
       const ids = view.messages.map(message => message.id);
       for (let i = 0; i < ids.length; i += 100) {
         const messageIds = ids.slice(i, i + 100);
@@ -317,9 +328,10 @@ export class Device {
         view.messages = view.messages.filter(message => !messageIds.includes(message.id));
         this.install(id, { messages: fresh });
       }
+      view.visibility = current.memberSeq;
       await this.latest(id);
-    } else if (greater(current.snapshotSequence, view.baseline)) {
-      await this.catchUp(id, current.snapshotSequence);
+    } else if (greater(current.lastSeq, view.baseline)) {
+      await this.catchUp(id, current.lastSeq);
     }
   }
 
@@ -327,21 +339,21 @@ export class Device {
     const view = this.view(id);
     if (view.changesAfter === null || this.selected?.id !== id) return;
     return this.backgroundTask('live.changes/' + id, async () => {
-      let afterRevision = view.changesAfter;
-      for (let n = 0; n < 10 && afterRevision !== null && this.selected?.id === id; n++) {
-        const page = await this.get(chatPath(id) + '/messages/changes', { afterRevision, limit: 100 });
+      let afterSeq = view.changesAfter;
+      for (let n = 0; n < 10 && afterSeq !== null && this.selected?.id === id; n++) {
+        const page = await this.get(chatPath(id) + '/messages/changes', { afterSeq, limit: 100 });
         this.state.metrics.count('changes.pages');
         if (this.selected?.id !== id || view.changesAfter === null) return;
-        check(isSeq(page?.lastRevision) && isSeq(page.nextRevision) && typeof page.resetRequired === 'boolean' &&
+        check(isSeq(page?.lastSeq) && isSeq(page.nextSeq) && typeof page.resetRequired === 'boolean' &&
           Array.isArray(page.changes) && page.changes.length <= 100, 'invalidChanges');
         if (page.resetRequired) break;
-        check(!greater(afterRevision, page.nextRevision) && !greater(page.nextRevision, page.lastRevision) &&
-          (page.nextRevision !== afterRevision || page.nextRevision === page.lastRevision), 'changesCursor');
-        let previous = afterRevision;
+        check(!greater(afterSeq, page.nextSeq) && !greater(page.nextSeq, page.lastSeq) &&
+          (page.nextSeq !== afterSeq || page.nextSeq === page.lastSeq), 'changesCursor');
+        let previous = afterSeq;
         for (const change of page.changes) {
-          check(isSeq(change.revision) && greater(change.revision, previous) &&
-            !greater(change.revision, page.nextRevision), 'invalidChangeRevision');
-          previous = change.revision;
+          check(isSeq(change.seq) && !greater(previous, change.seq) &&
+            !greater(change.seq, page.nextSeq), 'invalidChangeSeq');
+          previous = change.seq;
           if (change.kind === 'UPSERT') {
             const [message] = orderedMessages({ messages: [change.message] }, id);
             check(message.id === change.messageId && message.sequence === change.sequence, 'invalidUpsert');
@@ -355,41 +367,14 @@ export class Device {
             view.messages = view.messages.filter(message => greater(message.sequence, change.clearedThroughSequence));
           }
         }
-        afterRevision = page.nextRevision;
-        view.changesAfter = afterRevision;
-        if (afterRevision === page.lastRevision) return;
+        afterSeq = page.nextSeq;
+        view.changesAfter = afterSeq;
+        if (greater(afterSeq, view.mutation)) view.mutation = afterSeq;
+        if (afterSeq === page.lastSeq) return;
       }
       if (this.selected?.id !== id) return;
       await this.sync(id);
       view.changesAfter = view.mutation;
-    });
-  }
-
-  // Mirrors the browser: one read refresh per chat, with a trailing one when a hint arrives meanwhile,
-  // so a GET whose snapshot predates the hint can't leave the frontier stale.
-  refreshReads(id) {
-    const running = this.readRefreshes.get(id);
-    if (running) {
-      running.dirty = true;
-      return running.promise;
-    }
-    const entry = { dirty: false };
-    entry.promise = this.backgroundTask('live.reads/' + id, async () => {
-      do {
-        entry.dirty = false;
-        this.state.readNotification(this, id, await this.getReads(id));
-      } while (entry.dirty && this.selected?.id === id);
-    }).finally(() => this.readRefreshes.delete(id));
-    this.readRefreshes.set(id, entry);
-    return entry.promise;
-  }
-
-  getReads(id) {
-    return this.get(chatPath(id) + '/reads').then(result => {
-      check(isSeq(result?.throughSequence) && isSeq(result.maxOtherReadSequence));
-      const view = this.view(id);
-      if (greater(result.throughSequence, view.reads)) view.reads = result.throughSequence;
-      return result;
     });
   }
 
@@ -405,12 +390,7 @@ export class Device {
       type: 'watch_presence', chatId: chat.id,
       userIds: chat.members.slice(0, 100).map(member => member.id).sort(),
     });
-    await Promise.all([
-      this.getReads(chat.id),
-      this.get(chatPath(chat.id) + '/pins', { limit: 50 }),
-      this.sync(chat.id),
-      this.refreshChanges(chat.id),
-    ]);
+    if (performance.now() - this.view(chat.id).stateAt >= STATE_CHECK_MS) await this.sync(chat.id);
   }
 
   async openChat(chat, started) {
@@ -451,9 +431,9 @@ export class Device {
     const result = await this.get(chatPath(id) + '/messages/around', {
       messageId: anchor.id, ...(restoring ? { anchorSequence: anchor.sequence } : {}), limit: pageSize,
     });
-    check(isSeq(result?.mutationRevision), 'invalidAround');
+    check(isSeq(result?.mutationSeq), 'invalidAround');
     const view = this.install(id, result, true);
-    if (greater(result.mutationRevision, view.mutation)) view.mutation = result.mutationRevision;
+    if (greater(result.mutationSeq, view.mutation)) view.mutation = result.mutationSeq;
     view.detached = view.messages.find(message => message.id === result.anchorMessageId) ?? anchor;
   }
 
@@ -510,7 +490,7 @@ export class Device {
     } else if (type === 'subscribed' && this.selected?.id === chatId) {
       this.subscribedTo = chatId;
     } else if (type === 'reads_changed' && this.selected?.id === chatId) {
-      this.refreshReads(chatId);
+      this.backgroundTask('live.state/' + chatId, () => this.sync(chatId));
     } else if (type === 'message_changed' || type === 'history_changed') {
       this.backgroundTask('live.visibility/' + chatId, () => this.sync(chatId));
     } else if (type === 'pins_changed' && this.selected?.id === chatId) {

@@ -27,6 +27,7 @@ export function useMessagePins(
   chatId: string | undefined,
   sessionApi: SessionApi,
   connected: boolean,
+  pinsSeq = '0',
 ) {
   const [state, setState] = useState<PinsState | null>(null)
   const stateRef = useRef(state)
@@ -108,20 +109,13 @@ export function useMessagePins(
     return () => clearTimeout(timer.current)
   }, [chatId, connected, refresh])
 
+  const seenPinsSeq = useRef({ chatId, pinsSeq })
   useEffect(() => {
+    const seen = seenPinsSeq.current
+    seenPinsSeq.current = { chatId, pinsSeq }
     if (!chatId || chatId.startsWith('draft:') || !connected) return
-    const timer = window.setInterval(() => void refresh(), 12000 + Math.random() * 3000)
-    const focus = () => {
-      if (document.visibilityState === 'visible') void refresh()
-    }
-    window.addEventListener('focus', focus)
-    document.addEventListener('visibilitychange', focus)
-    return () => {
-      window.clearInterval(timer)
-      window.removeEventListener('focus', focus)
-      document.removeEventListener('visibilitychange', focus)
-    }
-  }, [chatId, connected, refresh])
+    if (seen.chatId === chatId && BigInt(pinsSeq) > BigInt(seen.pinsSeq)) schedule()
+  }, [chatId, connected, pinsSeq, schedule])
 
   const loadOlder = useCallback(async () => {
     const current = stateRef.current

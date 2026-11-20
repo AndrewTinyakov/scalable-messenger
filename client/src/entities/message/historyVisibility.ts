@@ -6,7 +6,7 @@ export type HistoryBounds = {
   hasOlder?: boolean
   hasNewer?: boolean
 }
-type Revisions = { mutationRevision: string; visibilityRevision: string }
+type Revisions = { mutationSeq: string; memberSeq: string }
 type Entry = {
   snapshot: Partial<SnapshotMetadata>
   unverified: Set<string>
@@ -55,14 +55,13 @@ export class HistoryVisibility {
   observe(chatId: string, snapshot: Partial<SnapshotMetadata>, retainedIds: string[]): boolean {
     const entry = this.touch(chatId)
     const changed =
-      BigInt(snapshot.visibilityRevision ?? '0') >
-        BigInt(entry.snapshot.visibilityRevision ?? '0') ||
-      BigInt(snapshot.mutationRevision ?? '0') > BigInt(entry.snapshot.mutationRevision ?? '0')
+      BigInt(snapshot.memberSeq ?? '0') > BigInt(entry.snapshot.memberSeq ?? '0') ||
+      BigInt(snapshot.mutationSeq ?? '0') > BigInt(entry.snapshot.mutationSeq ?? '0')
     if (changed) entry.unverified = new Set(retainedIds)
     for (const field of [
       'snapshotSequence',
-      'mutationRevision',
-      'visibilityRevision',
+      'mutationSeq',
+      'memberSeq',
       'clearedThroughSequence',
       'globalClearedThroughSequence',
     ] as const)
@@ -98,14 +97,14 @@ export class HistoryVisibility {
   verify(chatId: string, revisions: Revisions): void {
     const entry = this.touch(chatId)
     entry.verified = {
-      mutationRevision:
-        BigInt(revisions.mutationRevision) > BigInt(entry.verified?.mutationRevision ?? '0')
-          ? revisions.mutationRevision
-          : (entry.verified?.mutationRevision ?? '0'),
-      visibilityRevision:
-        BigInt(revisions.visibilityRevision) > BigInt(entry.verified?.visibilityRevision ?? '0')
-          ? revisions.visibilityRevision
-          : (entry.verified?.visibilityRevision ?? '0'),
+      mutationSeq:
+        BigInt(revisions.mutationSeq) > BigInt(entry.verified?.mutationSeq ?? '0')
+          ? revisions.mutationSeq
+          : (entry.verified?.mutationSeq ?? '0'),
+      memberSeq:
+        BigInt(revisions.memberSeq) > BigInt(entry.verified?.memberSeq ?? '0')
+          ? revisions.memberSeq
+          : (entry.verified?.memberSeq ?? '0'),
     }
   }
 

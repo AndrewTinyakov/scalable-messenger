@@ -158,10 +158,9 @@ describe('history snapshots racing with unseen mutations', () => {
         changes: async (_, after) => {
           cursors.push(after)
           return {
-            changes:
-              after === '0' ? mutations.map((item) => ({ revision: '1', message: item })) : [],
-            lastRevision: '1',
-            nextRevision: '1',
+            changes: after === '0' ? mutations.map((item) => ({ seq: '1', message: item })) : [],
+            lastSeq: '1',
+            nextSeq: '1',
             resetRequired: false,
           }
         },
@@ -384,9 +383,9 @@ it.each(['edit', 'delete'])(
       changes: async (_chat, after) => {
         cursors.push(after)
         return {
-          changes: after === '0' ? [{ revision: '1', message: changed }] : [],
-          lastRevision: '1',
-          nextRevision: '1',
+          changes: after === '0' ? [{ seq: '1', message: changed }] : [],
+          lastSeq: '1',
+          nextSeq: '1',
           resetRequired: false,
         }
       },
@@ -731,8 +730,8 @@ describe('synchronizing quotes while every history slot is busy', () => {
     let mutated = false
     const metadata = () => ({
       snapshotSequence: '2',
-      mutationRevision: mutated && operation !== 'SELF' ? '1' : '0',
-      visibilityRevision: mutated && operation === 'SELF' ? '1' : '0',
+      mutationSeq: mutated && operation !== 'SELF' ? '1' : '0',
+      memberSeq: mutated && operation === 'SELF' ? '1' : '0',
       clearedThroughSequence: '0',
       globalClearedThroughSequence: '0',
     })

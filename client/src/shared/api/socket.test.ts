@@ -64,8 +64,9 @@ describe('socket event decoding', () => {
       } as Record<string, unknown>
       expect(decodeSocketEvent(JSON.stringify(fixture))).toEqual(fixture)
       if (name === 'history-changed')
-        for (const field of ['sequence', 'mutationRevision', 'visibilityRevision']) {
-          expect(decodeSocketEvent(JSON.stringify({ ...fixture, [field]: undefined }))).toBeNull()
+        for (const field of ['sequence', 'seq', 'memberSeq']) {
+          if (field === 'sequence')
+            expect(decodeSocketEvent(JSON.stringify({ ...fixture, [field]: undefined }))).toBeNull()
           expect(
             decodeSocketEvent(JSON.stringify({ ...fixture, [field]: '9223372036854775808' })),
           ).toBeNull()
@@ -116,7 +117,7 @@ describe('socket event decoding', () => {
       ...saved,
       type: 'message_changed',
       messageVersion: '2',
-      mutationRevision: '1',
+      seq: '1',
     }
     expect(decodeSocketEvent(JSON.stringify(changed))).toEqual(changed)
     for (const fields of [
@@ -239,6 +240,7 @@ describe('socket event decoding', () => {
       eventId: id,
       room: `group:${id}`,
       chatId: id,
+      seq: '7',
       epoch: 'epoch',
       streamId: '1-0',
     }
@@ -260,11 +262,13 @@ describe('socket event decoding', () => {
       room: `user:${id}`,
       chatId: id,
       memberId: id,
+      userSeq: '4',
       epoch: 'epoch',
       streamId: '1-0',
     }
     expect(decodeSocketEvent(JSON.stringify(frame))).toEqual(frame)
-    const group = { ...frame, room: `group:${id}` }
+    const { userSeq: _userSeq, ...shared } = frame
+    const group = { ...shared, room: `group:${id}`, seq: '7' }
     expect(decodeSocketEvent(JSON.stringify(group))).toEqual(group)
     expect(
       decodeSocketEvent(JSON.stringify({ ...group, room: 'group:01ARZ3NDEKTSV4RRFFQ69G5FAW' })),

@@ -8,36 +8,33 @@ type RequestState =
 type Request = {
   chatId: string
   state: RequestState
-  fence: { mutationRevision: string; visibilityRevision: string }
+  fence: { mutationSeq: string; memberSeq: string }
 }
 
 export class HistoryRequests {
   private readonly pending = new Set<Request>()
   private capacity?: { promise: Promise<void>; release(): void }
-  private readonly revisions = new Map<
-    string,
-    { mutationRevision: string; visibilityRevision: string }
-  >()
+  private readonly revisions = new Map<string, { mutationSeq: string; memberSeq: string }>()
 
   observe(chatId: string, snapshot: Partial<SnapshotMetadata>): void {
-    const current = this.revisions.get(chatId) ?? { mutationRevision: '0', visibilityRevision: '0' }
+    const current = this.revisions.get(chatId) ?? { mutationSeq: '0', memberSeq: '0' }
     this.revisions.set(chatId, {
-      mutationRevision:
-        BigInt(snapshot.mutationRevision ?? '0') > BigInt(current.mutationRevision)
-          ? snapshot.mutationRevision!
-          : current.mutationRevision,
-      visibilityRevision:
-        BigInt(snapshot.visibilityRevision ?? '0') > BigInt(current.visibilityRevision)
-          ? snapshot.visibilityRevision!
-          : current.visibilityRevision,
+      mutationSeq:
+        BigInt(snapshot.mutationSeq ?? '0') > BigInt(current.mutationSeq)
+          ? snapshot.mutationSeq!
+          : current.mutationSeq,
+      memberSeq:
+        BigInt(snapshot.memberSeq ?? '0') > BigInt(current.memberSeq)
+          ? snapshot.memberSeq!
+          : current.memberSeq,
     })
     const observed = this.revisions.get(chatId)!
     for (const request of this.pending)
       if (request.chatId === chatId) {
         if (
           request.state.phase === 'pending' &&
-          (BigInt(observed.mutationRevision) > BigInt(request.fence.mutationRevision) ||
-            BigInt(observed.visibilityRevision) > BigInt(request.fence.visibilityRevision))
+          (BigInt(observed.mutationSeq) > BigInt(request.fence.mutationSeq) ||
+            BigInt(observed.memberSeq) > BigInt(request.fence.memberSeq))
         )
           request.state.messages = request.state.messages.map((message) =>
             message.replyToMessageId
@@ -51,14 +48,14 @@ export class HistoryRequests {
               : message,
           )
         request.fence = {
-          mutationRevision:
-            BigInt(observed.mutationRevision) > BigInt(request.fence.mutationRevision)
-              ? observed.mutationRevision
-              : request.fence.mutationRevision,
-          visibilityRevision:
-            BigInt(observed.visibilityRevision) > BigInt(request.fence.visibilityRevision)
-              ? observed.visibilityRevision
-              : request.fence.visibilityRevision,
+          mutationSeq:
+            BigInt(observed.mutationSeq) > BigInt(request.fence.mutationSeq)
+              ? observed.mutationSeq
+              : request.fence.mutationSeq,
+          memberSeq:
+            BigInt(observed.memberSeq) > BigInt(request.fence.memberSeq)
+              ? observed.memberSeq
+              : request.fence.memberSeq,
         }
       }
     if (this.revisions.size > 101) this.revisions.delete(this.revisions.keys().next().value!)
@@ -68,10 +65,10 @@ export class HistoryRequests {
     const current = this.revisions.get(chatId)
     return (
       !current ||
-      ((snapshot.mutationRevision === undefined ||
-        BigInt(snapshot.mutationRevision) >= BigInt(current.mutationRevision)) &&
-        (snapshot.visibilityRevision === undefined ||
-          BigInt(snapshot.visibilityRevision) >= BigInt(current.visibilityRevision)))
+      ((snapshot.mutationSeq === undefined ||
+        BigInt(snapshot.mutationSeq) >= BigInt(current.mutationSeq)) &&
+        (snapshot.memberSeq === undefined ||
+          BigInt(snapshot.memberSeq) >= BigInt(current.memberSeq)))
     )
   }
 
@@ -103,7 +100,7 @@ export class HistoryRequests {
       chatId,
       state: { phase: 'pending', messages: [] },
       fence: {
-        ...(this.revisions.get(chatId) ?? { mutationRevision: '0', visibilityRevision: '0' }),
+        ...(this.revisions.get(chatId) ?? { mutationSeq: '0', memberSeq: '0' }),
       },
     }
     this.pending.add(request)
@@ -112,10 +109,9 @@ export class HistoryRequests {
       if (
         request.state.phase === 'cancelled' ||
         !this.accepts(chatId, page) ||
-        (page.mutationRevision !== undefined &&
-          BigInt(page.mutationRevision) < BigInt(request.fence.mutationRevision)) ||
-        (page.visibilityRevision !== undefined &&
-          BigInt(page.visibilityRevision) < BigInt(request.fence.visibilityRevision))
+        (page.mutationSeq !== undefined &&
+          BigInt(page.mutationSeq) < BigInt(request.fence.mutationSeq)) ||
+        (page.memberSeq !== undefined && BigInt(page.memberSeq) < BigInt(request.fence.memberSeq))
       )
         return undefined
       if (request.state.phase === 'overflowed')

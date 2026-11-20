@@ -826,7 +826,7 @@ export class ChatRecovery {
     this.historyRequests.observe(chatId, this.state.snapshotMetadata(chatId))
     return this.historyRequests.run(chatId, fetch, (page) => {
       this.state.reconcileSnapshot(chatId, page)
-      if (page.visibilityRevision !== undefined)
+      if (page.memberSeq !== undefined)
         this.state.resolve(
           chatId,
           page.messages.map((message) => message.id),
@@ -834,12 +834,12 @@ export class ChatRecovery {
         )
       if (
         !this.state.verifiedSnapshot(chatId) &&
-        page.mutationRevision !== undefined &&
-        page.visibilityRevision !== undefined
+        page.mutationSeq !== undefined &&
+        page.memberSeq !== undefined
       )
         this.state.verifySnapshot(chatId, {
-          mutationRevision: page.mutationRevision,
-          visibilityRevision: page.visibilityRevision,
+          mutationSeq: page.mutationSeq,
+          memberSeq: page.memberSeq,
         })
       return install(page)
     })
@@ -856,7 +856,7 @@ export class ChatRecovery {
         const page = await fetch()
         return {
           ...page,
-          mutationRevision: page.lastRevision,
+          mutationSeq: page.lastSeq,
           messages: page.changes.flatMap((change) => (change.message ? [change.message] : [])),
         }
       },
@@ -875,10 +875,8 @@ export class ChatRecovery {
   observe(chatId: string, snapshot: Partial<SnapshotMetadata>): void {
     const previous = this.state.snapshotMetadata(chatId)
     if (
-      (snapshot.mutationRevision !== undefined &&
-        snapshot.mutationRevision !== previous.mutationRevision) ||
-      (snapshot.visibilityRevision !== undefined &&
-        snapshot.visibilityRevision !== previous.visibilityRevision)
+      (snapshot.mutationSeq !== undefined && snapshot.mutationSeq !== previous.mutationSeq) ||
+      (snapshot.memberSeq !== undefined && snapshot.memberSeq !== previous.memberSeq)
     )
       resetPagingFailures(chatId)
     this.historyRequests.observe(chatId, snapshot)
@@ -939,8 +937,8 @@ export class ChatRecovery {
         if (!valid() || !this.historyRequests.accepts(chatId, visibility)) return
         const previous = this.state.verifiedSnapshot(chatId)
         const changed =
-          BigInt(visibility.mutationRevision) > BigInt(previous?.mutationRevision ?? '0') ||
-          BigInt(visibility.visibilityRevision) > BigInt(previous?.visibilityRevision ?? '0')
+          BigInt(visibility.mutationSeq) > BigInt(previous?.mutationSeq ?? '0') ||
+          BigInt(visibility.memberSeq) > BigInt(previous?.memberSeq ?? '0')
         const { snapshotSequence, ...metadata } = visibility
         this.observe(chatId, metadata)
         this.recordLatest(chatId, snapshotSequence)
@@ -983,8 +981,8 @@ export class ChatRecovery {
           continue
         }
         this.state.verifySnapshot(chatId, {
-          mutationRevision: visibility.mutationRevision,
-          visibilityRevision: visibility.visibilityRevision,
+          mutationSeq: visibility.mutationSeq,
+          memberSeq: visibility.memberSeq,
         })
         this.runtime!.changed()
       } while (invalidated() && valid())
@@ -1011,8 +1009,8 @@ export class ChatRecovery {
     return this.state.availability(chatId, this.runtime?.context(chatId).readingHistory ?? true)
   }
 
-  mutationRevision(chatId: string): string {
-    return this.state.mutationRevision(chatId)
+  mutationSeq(chatId: string): string {
+    return this.state.mutationSeq(chatId)
   }
 
   acceptsSaved(chatId: string, messageId: string, sequence: string): boolean {
@@ -1055,8 +1053,8 @@ export class ChatRecovery {
     if (!this.historyRequests.accepts(chatId, snapshot)) return false
     const previous = this.state.snapshotMetadata(chatId)
     const changed =
-      BigInt(snapshot.mutationRevision ?? '0') > BigInt(previous.mutationRevision ?? '0') ||
-      BigInt(snapshot.visibilityRevision ?? '0') > BigInt(previous.visibilityRevision ?? '0')
+      BigInt(snapshot.mutationSeq ?? '0') > BigInt(previous.mutationSeq ?? '0') ||
+      BigInt(snapshot.memberSeq ?? '0') > BigInt(previous.memberSeq ?? '0')
     const { snapshotSequence, ...metadata } = snapshot
     this.observe(chatId, changes.length || changed ? snapshot : metadata)
     if (snapshotSequence) this.recordLatest(chatId, snapshotSequence)

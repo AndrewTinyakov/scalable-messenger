@@ -1862,6 +1862,63 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/ApiProblem"
+  /v1/chats/{id}/state:
+    get:
+      tags:
+      - chat-controller
+      operationId: state
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: minSeq
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ChatStateResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
   /v1/chats/{id}/pins:
     get:
       tags:
@@ -2129,7 +2186,7 @@ paths:
         required: true
         schema:
           type: string
-      - name: afterRevision
+      - name: afterSeq
         in: query
         required: true
         schema:
@@ -2752,9 +2809,9 @@ components:
             $ref: "#/components/schemas/MessageResponse"
         snapshotSequence:
           type: string
-        mutationRevision:
+        mutationSeq:
           type: string
-        visibilityRevision:
+        memberSeq:
           type: string
         clearedThroughSequence:
           type: string
@@ -2763,10 +2820,10 @@ components:
       required:
       - clearedThroughSequence
       - globalClearedThroughSequence
+      - memberSeq
       - messages
-      - mutationRevision
+      - mutationSeq
       - snapshotSequence
-      - visibilityRevision
     MessageResponse:
       type: object
       properties:
@@ -2890,9 +2947,9 @@ components:
           - CHAT
         clearedThroughSequence:
           type: string
-        mutationRevision:
+        seq:
           type: string
-        visibilityRevision:
+        memberSeq:
           type: string
         state:
           type: string
@@ -2904,12 +2961,12 @@ components:
       required:
       - clearedThroughSequence
       - deletedRows
-      - mutationRevision
+      - memberSeq
       - operationId
       - scope
+      - seq
       - state
       - target
-      - visibilityRevision
     CreateGroupChatRequest:
       type: object
       properties:
@@ -3126,9 +3183,9 @@ components:
       properties:
         snapshotSequence:
           type: string
-        mutationRevision:
+        mutationSeq:
           type: string
-        visibilityRevision:
+        memberSeq:
           type: string
         clearedThroughSequence:
           type: string
@@ -3140,9 +3197,51 @@ components:
       - clearedThroughSequence
       - globalClearedThroughSequence
       - hidden
-      - mutationRevision
+      - memberSeq
+      - mutationSeq
       - snapshotSequence
-      - visibilityRevision
+    ChatStateResponse:
+      type: object
+      properties:
+        lastSeq:
+          type: string
+          description: Chat sequence of the latest shared event
+        pinsSeq:
+          type: string
+          description: Chat sequence of the latest shared pin change
+        mutationFloor:
+          type: string
+          description: Changes at or below this chat sequence are no longer retained
+        mutationSeq:
+          type: string
+          description: "Chat sequence of the latest shared edit, deletion or clear"
+        memberSeq:
+          type: string
+        clearedThroughSequence:
+          type: string
+        globalClearedThroughSequence:
+          type: string
+        hidden:
+          type: boolean
+        ownReadThrough:
+          type: string
+        otherReadThrough:
+          type: string
+          description: Highest read-through among other active members
+        userSeq:
+          type: string
+      required:
+      - clearedThroughSequence
+      - globalClearedThroughSequence
+      - hidden
+      - lastSeq
+      - memberSeq
+      - mutationFloor
+      - mutationSeq
+      - otherReadThrough
+      - ownReadThrough
+      - pinsSeq
+      - userSeq
     ReadSummaryResponse:
       type: object
       properties:
@@ -3210,11 +3309,11 @@ components:
           type: string
         hasMore:
           type: boolean
-        mutationRevision:
-          type: string
         snapshotSequence:
           type: string
-        visibilityRevision:
+        mutationSeq:
+          type: string
+        memberSeq:
           type: string
         clearedThroughSequence:
           type: string
@@ -3230,11 +3329,11 @@ components:
       - coverageThroughSequence
       - globalClearedThroughSequence
       - hasMore
+      - memberSeq
       - messages
-      - mutationRevision
+      - mutationSeq
       - nextSequence
       - snapshotSequence
-      - visibilityRevision
     MessageReaderResponse:
       type: object
       properties:
@@ -3277,7 +3376,7 @@ components:
     MessageChangeResponse:
       type: object
       properties:
-        revision:
+        seq:
           type: string
         kind:
           type: string
@@ -3306,7 +3405,7 @@ components:
       - kind
       - message
       - messageId
-      - revision
+      - seq
       - sequence
     MessageChangesResponse:
       type: object
@@ -3315,15 +3414,17 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/MessageChangeResponse"
-        lastRevision:
+        lastSeq:
           type: string
-        nextRevision:
+        nextSeq:
           type: string
         resetRequired:
           type: boolean
         snapshotSequence:
           type: string
-        visibilityRevision:
+        mutationSeq:
+          type: string
+        memberSeq:
           type: string
         clearedThroughSequence:
           type: string
@@ -3333,11 +3434,12 @@ components:
       - changes
       - clearedThroughSequence
       - globalClearedThroughSequence
-      - lastRevision
-      - nextRevision
+      - lastSeq
+      - memberSeq
+      - mutationSeq
+      - nextSeq
       - resetRequired
       - snapshotSequence
-      - visibilityRevision
     MessageAroundResponse:
       type: object
       properties:
@@ -3353,11 +3455,11 @@ components:
           type: boolean
         hasNewer:
           type: boolean
-        mutationRevision:
-          type: string
         snapshotSequence:
           type: string
-        visibilityRevision:
+        mutationSeq:
+          type: string
+        memberSeq:
           type: string
         clearedThroughSequence:
           type: string
@@ -3375,10 +3477,10 @@ components:
       - globalClearedThroughSequence
       - hasNewer
       - hasOlder
+      - memberSeq
       - messages
-      - mutationRevision
+      - mutationSeq
       - snapshotSequence
-      - visibilityRevision
     GroupMemberPageResponse:
       type: object
       properties:

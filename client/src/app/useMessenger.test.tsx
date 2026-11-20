@@ -55,21 +55,22 @@ let fakeUnread: number
 let holdReadRequests: boolean
 let readRequests: ((value: Response) => void)[]
 let readCalls: string[]
-let visibilityRevision: string
+let memberSeq: string
 let clearedThrough: string
 let lastSummary: Chat['lastMessage']
 let hidden: boolean
 let deletionCalls: { chatId: string; requestId: string; scope: string; target: string }[]
 let failDeletion: boolean
 let markedUnread: boolean
+let userSeq = 0
 let unreadMarkCalls: string[]
 
 function snapshotFor(id: string) {
   return {
     snapshotSequence:
       historyMessages.filter((message) => message.chatId === id).at(-1)?.sequence ?? '0',
-    mutationRevision: '0',
-    visibilityRevision,
+    mutationSeq: '0',
+    memberSeq,
     clearedThroughSequence: clearedThrough,
     globalClearedThroughSequence: '0',
   }
@@ -128,6 +129,7 @@ function chatCreated(socket: TestSocket, eventId: string) {
     epoch: 'epoch',
     streamId: '1-0',
     chatId,
+    userSeq: String(++userSeq),
   })
 }
 
@@ -164,7 +166,7 @@ beforeEach(() => {
   holdReadRequests = false
   readRequests = []
   readCalls = []
-  visibilityRevision = '0'
+  memberSeq = '0'
   clearedThrough = '0'
   hidden = false
   lastSummary = null
@@ -195,8 +197,8 @@ beforeEach(() => {
         scope: body.scope,
         target: body.target,
         clearedThroughSequence: '0',
-        mutationRevision: '0',
-        visibilityRevision: '1',
+        seq: '0',
+        memberSeq: '1',
         state: 'COMPLETED',
         deletedRows: '0',
       })
@@ -220,13 +222,26 @@ beforeEach(() => {
         nextBeforeSequence: null,
       })
     if (path.endsWith('/visibility')) return Response.json({ ...metadata, hidden })
+    if (path.endsWith('/state'))
+      return Response.json({
+        lastSeq: metadata.snapshotSequence,
+        pinsSeq: '0',
+        mutationFloor: '0',
+        mutationSeq: metadata.mutationSeq,
+        memberSeq: metadata.memberSeq,
+        clearedThroughSequence: metadata.clearedThroughSequence,
+        globalClearedThroughSequence: metadata.globalClearedThroughSequence,
+        hidden,
+        ownReadThrough: readCalls.at(-1) ?? '0',
+        otherReadThrough: '0',
+        userSeq: '0',
+      })
     if (path.endsWith('/changes'))
       return Response.json({
         ...metadata,
-        mutationRevision: undefined,
         changes: [],
-        lastRevision: '0',
-        nextRevision: '0',
+        lastSeq: '0',
+        nextSeq: '0',
         resetRequired: false,
       })
     if (path.endsWith('/resolve')) {
@@ -847,7 +862,7 @@ describe('messenger request coordination', () => {
     await act(async () => sockets[0].open())
     expect(messenger.messages[chatId]).toHaveLength(2)
     clearedThrough = '2'
-    visibilityRevision = '1'
+    memberSeq = '1'
     hidden = true
     await act(async () =>
       sockets[0].event({
@@ -859,8 +874,7 @@ describe('messenger request coordination', () => {
         streamId: '3-0',
         chatId,
         sequence: '2',
-        mutationRevision: '0',
-        visibilityRevision: '1',
+        memberSeq: '1',
       }),
     )
     expect(messenger.selectedId).toBeNull()
@@ -1012,6 +1026,7 @@ describe('messenger request coordination', () => {
         epoch: 'epoch',
         streamId: '3-0',
         chatId,
+        seq: '5',
       })
     })
     expect(messenger.chats.find((chat) => chat.id === chatId)).toMatchObject({
@@ -1046,6 +1061,7 @@ describe('messenger request coordination', () => {
           streamId: '2-0',
           chatId,
           memberId: recipient.id,
+          seq: '5',
         })
       })
 
@@ -1421,6 +1437,49 @@ describe('messenger request coordination', () => {
     expect(
       sockets[1].sent.filter((data) => JSON.parse(data).type === 'subscribe_many'),
     ).toHaveLength(1)
+  })
+
+  it('checks chat state on a sequence gap and once a minute instead of polling each feature', async () => {
+    vi.useFakeTimers()
+    window.history.replaceState(null, '', `/groups/${chatId}`)
+    await renderMessenger()
+    await act(async () => {
+      sockets[0].open()
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+    const head = BigInt(snapshotFor(chatId).snapshotSequence)
+    const pinsChanged = (seq: bigint, eventId: string) =>
+      sockets[0].event({
+        type: 'pins_changed',
+        version: 1,
+        eventId,
+        room: `group:${chatId}`,
+        epoch: 'epoch',
+        streamId: '5-0',
+        chatId,
+        seq: String(seq),
+      })
+    paths = []
+
+    await act(async () => pinsChanged(head + 1n, '01ARZ3NDEKTSV4RRFFQ69G5FB0'))
+    expect(paths.filter((path) => path.split('?')[0].endsWith('/state'))).toHaveLength(0)
+
+    await act(async () => pinsChanged(head + 3n, '01ARZ3NDEKTSV4RRFFQ69G5FB1'))
+    expect(paths.filter((path) => path.split('?')[0].endsWith('/state'))).toHaveLength(1)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000)
+    })
+
+    paths = []
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(120_000)
+    })
+    const routes = paths.map((path) => path.split('?')[0])
+    for (const route of ['/reads', '/visibility', '/changes', '/pins'])
+      expect(routes.filter((path) => path.endsWith(route))).toHaveLength(0)
+    expect(routes.filter((path) => path.endsWith('/state'))).toHaveLength(2)
   })
 
   it('coalesces repeated focus work while the selected group is current', async () => {

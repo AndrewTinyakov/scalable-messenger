@@ -69,6 +69,8 @@ export function sendSocketFrame(socket: WebSocket, frame: OutgoingSocketFrame): 
 }
 
 type LiveEvent = { eventId: string; room: string; epoch: string; streamId: string }
+/** Chat, member and account sequences a hint can carry; see ADR 0005. */
+export type EventCounters = { seq?: string; memberSeq?: string; userSeq?: string }
 
 type MessageFields = Omit<Message, 'id'> & { messageId: string }
 /** The new message a chat-list row can show without fetching it. */
@@ -94,12 +96,14 @@ export type SocketEvent = { version: 1 } & (
       type: 'history_changed'
       chatId: string
       sequence: string
-      mutationRevision: string
-      visibilityRevision: string
-    } & LiveEvent)
-  | ({ type: 'message_changed'; mutationRevision: string } & MessageFields & LiveEvent)
-  | ({ type: 'chat_deleted' | 'reads_changed'; chatId: string } & LiveEvent)
-  | ({ type: 'chat_preferences_changed' | 'pins_changed'; chatId: string } & LiveEvent)
+    } & EventCounters &
+      LiveEvent)
+  | ({ type: 'message_changed'; seq: string } & MessageFields & LiveEvent)
+  | ({
+      type: 'chat_deleted' | 'reads_changed' | 'chat_preferences_changed' | 'pins_changed'
+      chatId: string
+    } & EventCounters &
+      LiveEvent)
   | {
       type: 'presence'
       chatId: string
@@ -109,7 +113,12 @@ export type SocketEvent = { version: 1 } & (
     }
   | { type: typeof EventType.QUEUED; requestId: string; chatId?: string; recipientId?: string }
   | { type: typeof EventType.SUBSCRIBED; chatId: string; room: string }
-  | ({ type: typeof EventType.CHAT_CREATED; chatId: string; requestId?: string } & LiveEvent)
+  | ({
+      type: typeof EventType.CHAT_CREATED
+      chatId: string
+      requestId?: string
+      userSeq: string
+    } & LiveEvent)
   | ({
       type: typeof EventType.MESSAGE_SAVED
       chatId: string
@@ -137,8 +146,13 @@ export type SocketEvent = { version: 1 } & (
   | { type: typeof EventType.ERROR; requestId?: string; code: string }
   | { type: typeof EventType.RECOVERY_FAILED; chatId: string; room?: string }
   | { type: typeof EventType.SUBSCRIPTION_EXPIRED; chatId: string }
-  | ({ type: typeof EventType.MEMBER_REMOVED; chatId: string; memberId: string } & LiveEvent)
-  | ({ type: typeof EventType.MEMBERSHIP_CHANGED; chatId: string } & LiveEvent)
+  | ({
+      type: typeof EventType.MEMBER_REMOVED
+      chatId: string
+      memberId: string
+    } & EventCounters &
+      LiveEvent)
+  | ({ type: typeof EventType.MEMBERSHIP_CHANGED; chatId: string; seq: string } & LiveEvent)
 )
 
 const liveFields = ['eventId', 'room', 'epoch', 'streamId']
@@ -161,16 +175,16 @@ const messageFields = [
 const eventFields = {
   sidebar_activity: ['chatId', 'sequence', ...activityMessageFields],
   sidebar_presence: ['observedAt', 'validForMs', 'statuses'],
-  history_changed: [...liveFields, 'chatId', 'sequence', 'mutationRevision', 'visibilityRevision'],
-  message_changed: [...liveFields, ...messageFields, 'mutationRevision'],
-  chat_deleted: [...liveFields, 'chatId'],
-  reads_changed: [...liveFields, 'chatId'],
-  chat_preferences_changed: [...liveFields, 'chatId'],
-  pins_changed: [...liveFields, 'chatId'],
+  history_changed: [...liveFields, 'chatId', 'sequence', 'seq', 'memberSeq'],
+  message_changed: [...liveFields, ...messageFields, 'seq'],
+  chat_deleted: [...liveFields, 'chatId', 'seq'],
+  reads_changed: [...liveFields, 'chatId', 'memberSeq'],
+  chat_preferences_changed: [...liveFields, 'chatId', 'memberSeq', 'userSeq'],
+  pins_changed: [...liveFields, 'chatId', 'seq', 'memberSeq'],
   presence: ['chatId', 'observedAt', 'validForMs', 'statuses'],
   [EventType.QUEUED]: ['requestId', 'chatId', 'recipientId'],
   [EventType.SUBSCRIBED]: ['chatId', 'room'],
-  [EventType.CHAT_CREATED]: [...liveFields, 'chatId', 'requestId'],
+  [EventType.CHAT_CREATED]: [...liveFields, 'chatId', 'requestId', 'userSeq'],
   [EventType.MESSAGE_SAVED]: [
     ...liveFields,
     'chatId',
@@ -187,8 +201,8 @@ const eventFields = {
   [EventType.ERROR]: ['requestId', 'code'],
   [EventType.RECOVERY_FAILED]: ['chatId', 'room'],
   [EventType.SUBSCRIPTION_EXPIRED]: ['chatId'],
-  [EventType.MEMBER_REMOVED]: [...liveFields, 'chatId', 'memberId'],
-  [EventType.MEMBERSHIP_CHANGED]: [...liveFields, 'chatId'],
+  [EventType.MEMBER_REMOVED]: [...liveFields, 'chatId', 'memberId', 'seq', 'userSeq'],
+  [EventType.MEMBERSHIP_CHANGED]: [...liveFields, 'chatId', 'seq'],
 } satisfies Record<SocketEvent['type'], readonly string[]>
 
 function isRoom(value: unknown): value is string {
@@ -236,12 +250,7 @@ export function decodeSocketEvent(data: unknown): SocketEvent | null {
   let valid = false
   switch (frame.type) {
     case 'history_changed':
-      valid =
-        live &&
-        isId(frame.chatId) &&
-        isSequence(frame.sequence) &&
-        isSequence(frame.mutationRevision) &&
-        isSequence(frame.visibilityRevision)
+      valid = live && isId(frame.chatId) && isSequence(frame.sequence)
       break
     case 'sidebar_activity': {
       const present = activityMessageFields.filter((key) => key in frame).length
@@ -297,8 +306,8 @@ export function decodeSocketEvent(data: unknown): SocketEvent | null {
       if (
         !live ||
         !isId(frame.messageId) ||
-        !isSequence(frame.mutationRevision) ||
-        frame.mutationRevision === '0' ||
+        !isSequence(frame.seq) ||
+        frame.seq === '0' ||
         !isSequence(frame.messageVersion) ||
         frame.messageVersion === '0'
       )
@@ -375,5 +384,33 @@ export function decodeSocketEvent(data: unknown): SocketEvent | null {
       valid = isId(frame.chatId)
       break
   }
-  return valid ? (frame as SocketEvent) : null
+  return valid && countersValid(frame) ? (frame as SocketEvent) : null
+}
+
+const counterRules: Partial<
+  Record<string, (has: (key: keyof EventCounters) => boolean) => boolean>
+> = {
+  history_changed: (has) => (has('seq') || has('memberSeq')) && !has('userSeq'),
+  message_changed: (has) => has('seq') && !has('memberSeq') && !has('userSeq'),
+  [EventType.MEMBERSHIP_CHANGED]: (has) => has('seq') && !has('memberSeq') && !has('userSeq'),
+  chat_deleted: (has) => has('seq') && !has('memberSeq') && !has('userSeq'),
+  pins_changed: (has) => has('seq') !== has('memberSeq') && !has('userSeq'),
+  chat_preferences_changed: (has) => !has('seq') && has('memberSeq') !== has('userSeq'),
+  reads_changed: (has) => !has('seq') && !has('userSeq'),
+  [EventType.CHAT_CREATED]: (has) => has('userSeq') && !has('seq') && !has('memberSeq'),
+  [EventType.MEMBER_REMOVED]: (has) => !has('memberSeq') && has('seq') !== has('userSeq'),
+}
+
+function countersValid(frame: Record<string, unknown>): boolean {
+  const keys = ['seq', 'memberSeq', 'userSeq'] as const
+  if (keys.some((key) => key in frame && (!isSequence(frame[key]) || frame[key] === '0')))
+    return false
+  if (frame.memberSeq !== undefined && !String(frame.room).startsWith('user:')) return false
+  if (
+    frame.type === EventType.MEMBER_REMOVED &&
+    (frame.seq !== undefined) !== String(frame.room).startsWith('group:')
+  )
+    return false
+  const rule = counterRules[String(frame.type)]
+  return rule ? rule((key) => key in frame) : true
 }

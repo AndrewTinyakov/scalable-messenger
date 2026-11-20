@@ -63,6 +63,17 @@ describe('socket event decoding', () => {
         streamId: '1-0',
       } as Record<string, unknown>
       expect(decodeSocketEvent(JSON.stringify(fixture))).toEqual(fixture)
+      if (name === 'history-changed') {
+        const replay = { ...fixture, seq: undefined }
+        expect(decodeSocketEvent(JSON.stringify(replay))).toEqual(
+          JSON.parse(JSON.stringify(replay)),
+        )
+        expect(
+          decodeSocketEvent(
+            JSON.stringify({ ...fixture, memberSeq: '2', room: `group:${fixture.chatId}` }),
+          ),
+        ).toBeNull()
+      }
       if (name === 'history-changed')
         for (const field of ['sequence', 'seq', 'memberSeq']) {
           if (field === 'sequence')

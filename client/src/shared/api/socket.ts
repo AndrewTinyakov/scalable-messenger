@@ -390,7 +390,7 @@ export function decodeSocketEvent(data: unknown): SocketEvent | null {
 const counterRules: Partial<
   Record<string, (has: (key: keyof EventCounters) => boolean) => boolean>
 > = {
-  history_changed: (has) => (has('seq') || has('memberSeq')) && !has('userSeq'),
+  history_changed: (has) => !has('userSeq'),
   message_changed: (has) => has('seq') && !has('memberSeq') && !has('userSeq'),
   [EventType.MEMBERSHIP_CHANGED]: (has) => has('seq') && !has('memberSeq') && !has('userSeq'),
   chat_deleted: (has) => has('seq') && !has('memberSeq') && !has('userSeq'),

@@ -86,7 +86,13 @@ export class Device {
       }
     }).finally(() => {
       view.readCheck = null;
-      if (owed()) setTimeout(() => { if (owed()) this.recheckReads(id); }, 250).unref?.();
+      if (owed() && !view.readRetry) {
+        view.readRetry = setTimeout(() => {
+          view.readRetry = null;
+          if (owed()) this.recheckReads(id);
+        }, 250);
+        view.readRetry.unref?.();
+      }
     });
     return view.readCheck;
   }
@@ -174,7 +180,7 @@ export class Device {
     if (!this.views.has(id)) {
       this.views.set(id, {
         messages: [], baseline: '0', dismissed: '0', loaded: false, reads: '0',
-        mutation: '0', visibility: '0', member: '0', pins: '0', memberPins: '0', stateAt: 0, readCheck: null, readOwed: null, changesAfter: null, ready: null, detached: null,
+        mutation: '0', visibility: '0', member: '0', pins: '0', memberPins: '0', stateAt: 0, readCheck: null, readOwed: null, readRetry: null, changesAfter: null, ready: null, detached: null,
       });
     }
     return this.views.get(id);

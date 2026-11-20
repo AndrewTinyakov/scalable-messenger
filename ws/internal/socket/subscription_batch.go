@@ -37,14 +37,15 @@ func (subscriptions *chatSubscriptions) subscribeMany(items []protocol.Subscript
 }
 
 func (subscriptions *chatSubscriptions) subscribe(items []protocol.Subscription, mode subscriptionMode) error {
-	err := subscriptions.subscribeContext(subscriptions.connection.ctx, items, mode)
-	if errors.Is(err, roomregistry.ErrCapacity) {
-		subscriptions.metrics.RecordSubscriptionRefusal(monitoring.SubscriptionRefusedRoomLimit)
-	}
-	return err
+	return subscriptions.subscribeContext(subscriptions.connection.ctx, items, mode)
 }
 
-func (subscriptions *chatSubscriptions) subscribeContext(base context.Context, items []protocol.Subscription, mode subscriptionMode) error {
+func (subscriptions *chatSubscriptions) subscribeContext(base context.Context, items []protocol.Subscription, mode subscriptionMode) (err error) {
+	defer func() {
+		if errors.Is(err, roomregistry.ErrCapacity) {
+			subscriptions.metrics.RecordSubscriptionRefusal(monitoring.SubscriptionRefusedRoomLimit)
+		}
+	}()
 	if err := base.Err(); err != nil {
 		return err
 	}

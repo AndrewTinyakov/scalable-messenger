@@ -9,7 +9,6 @@ import {
   type HistorySnapshot,
   type MessageChange,
   type SnapshotMetadata,
-  type VisibilitySnapshot,
 } from './historySnapshot'
 import { HISTORY_PAGE_SIZE, MAX_CATCH_UP_MESSAGES } from './historyWindow'
 import type { Message } from './model'
@@ -934,69 +933,68 @@ export class ChatRecovery {
       let unusablePasses = 0
       do {
         request.phase = 'refreshing'
-        let visibility: VisibilitySnapshot
         try {
-          visibility = await this.runtime!.history.visibility!(chatId)
+          const visibility = await this.runtime!.history.visibility!(chatId)
+          if (!valid()) return
+          if (!this.historyRequests.accepts(chatId, visibility)) {
+            if (++unusablePasses >= 3) return
+            continue
+          }
+          const previous = this.state.verifiedSnapshot(chatId)
+          const changed =
+            BigInt(visibility.mutationSeq) > BigInt(previous?.mutationSeq ?? '0') ||
+            BigInt(visibility.visibilitySeq) > BigInt(previous?.visibilitySeq ?? '0')
+          const { snapshotSequence, ...metadata } = visibility
+          this.observe(chatId, metadata)
+          this.recordLatest(chatId, snapshotSequence)
+          if (visibility.hidden) {
+            this.runtime!.hidden?.(chatId)
+            return
+          }
+          if (!changed) {
+            if (BigInt(visibility.snapshotSequence) > BigInt(this.baseline(chatId)))
+              await this.catchUp(chatId, false, visibility.snapshotSequence, true)
+            continue
+          }
+          // A batch can be skipped when every history slot is busy, or dropped when a newer revision
+          // fences it. Only a pass that reconciled everything may mark this revision as verified.
+          let complete = true
+          const ids = this.state.retainedIds(chatId)
+          for (let index = 0; index < ids.length; index += 100) {
+            const batch = ids.slice(index, index + 100)
+            await this.historyRequests.waitForCapacity()
+            const installed = await this.withHistorySnapshot(
+              chatId,
+              () => this.runtime!.history.resolve!(chatId, batch),
+              (page) => {
+                if (valid()) this.state.resolve(chatId, batch, page)
+                return true
+              },
+            )
+            if (!installed) complete = false
+          }
+          if (!valid()) return
+          await this.historyRequests.waitForCapacity()
+          const latest = await this.fetchLatest(
+            chatId,
+            !this.state.isDetached(chatId) && !this.runtime!.context(chatId).readingHistory,
+          )
+          if (latest.skipped) complete = false
+          if (!complete) {
+            // Retry a few times; after that, leave the revision unverified so the next hint repairs it.
+            if (++incompletePasses < 3 && valid()) request.phase = 'invalidated'
+            continue
+          }
+          this.state.verifySnapshot(chatId, {
+            mutationSeq: visibility.mutationSeq,
+            visibilitySeq: visibility.visibilitySeq,
+          })
+          this.runtime!.changed()
+          unusablePasses = 0
         } catch (cause) {
-          if (invalidated() && ++unusablePasses < 3) continue
+          if (invalidated() && valid() && ++unusablePasses < 3) continue
           throw cause
         }
-        if (!valid()) return
-        if (!this.historyRequests.accepts(chatId, visibility)) {
-          if (++unusablePasses >= 3) return
-          continue
-        }
-        unusablePasses = 0
-        const previous = this.state.verifiedSnapshot(chatId)
-        const changed =
-          BigInt(visibility.mutationSeq) > BigInt(previous?.mutationSeq ?? '0') ||
-          BigInt(visibility.visibilitySeq) > BigInt(previous?.visibilitySeq ?? '0')
-        const { snapshotSequence, ...metadata } = visibility
-        this.observe(chatId, metadata)
-        this.recordLatest(chatId, snapshotSequence)
-        if (visibility.hidden) {
-          this.runtime!.hidden?.(chatId)
-          return
-        }
-        if (!changed) {
-          if (BigInt(visibility.snapshotSequence) > BigInt(this.baseline(chatId)))
-            await this.catchUp(chatId, false, visibility.snapshotSequence, true)
-          continue
-        }
-        // A batch can be skipped when every history slot is busy, or dropped when a newer revision
-        // fences it. Only a pass that reconciled everything may mark this revision as verified.
-        let complete = true
-        const ids = this.state.retainedIds(chatId)
-        for (let index = 0; index < ids.length; index += 100) {
-          const batch = ids.slice(index, index + 100)
-          await this.historyRequests.waitForCapacity()
-          const installed = await this.withHistorySnapshot(
-            chatId,
-            () => this.runtime!.history.resolve!(chatId, batch),
-            (page) => {
-              if (valid()) this.state.resolve(chatId, batch, page)
-              return true
-            },
-          )
-          if (!installed) complete = false
-        }
-        if (!valid()) return
-        await this.historyRequests.waitForCapacity()
-        const latest = await this.fetchLatest(
-          chatId,
-          !this.state.isDetached(chatId) && !this.runtime!.context(chatId).readingHistory,
-        )
-        if (latest.skipped) complete = false
-        if (!complete) {
-          // Retry a few times; after that, leave the revision unverified so the next hint repairs it.
-          if (++incompletePasses < 3 && valid()) request.phase = 'invalidated'
-          continue
-        }
-        this.state.verifySnapshot(chatId, {
-          mutationSeq: visibility.mutationSeq,
-          visibilitySeq: visibility.visibilitySeq,
-        })
-        this.runtime!.changed()
       } while (invalidated() && valid())
     })()
       .catch((cause) => {

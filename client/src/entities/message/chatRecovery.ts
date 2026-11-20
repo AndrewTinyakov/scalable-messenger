@@ -9,6 +9,7 @@ import {
   type HistorySnapshot,
   type MessageChange,
   type SnapshotMetadata,
+  type VisibilitySnapshot,
 } from './historySnapshot'
 import { HISTORY_PAGE_SIZE, MAX_CATCH_UP_MESSAGES } from './historyWindow'
 import type { Message } from './model'
@@ -930,11 +931,22 @@ export class ChatRecovery {
       !this.runtime!.context(chatId).removed
     request.promise = (async () => {
       let incompletePasses = 0
+      let unusablePasses = 0
       do {
         request.phase = 'refreshing'
-        const visibility = await this.runtime!.history.visibility!(chatId)
+        let visibility: VisibilitySnapshot
+        try {
+          visibility = await this.runtime!.history.visibility!(chatId)
+        } catch (cause) {
+          if (invalidated() && ++unusablePasses < 3) continue
+          throw cause
+        }
         if (!valid()) return
-        if (!this.historyRequests.accepts(chatId, visibility)) continue
+        if (!this.historyRequests.accepts(chatId, visibility)) {
+          if (++unusablePasses >= 3) return
+          continue
+        }
+        unusablePasses = 0
         const previous = this.state.verifiedSnapshot(chatId)
         const changed =
           BigInt(visibility.mutationSeq) > BigInt(previous?.mutationSeq ?? '0') ||
@@ -995,10 +1007,6 @@ export class ChatRecovery {
       })
       .finally(() => {
         if (this.synchronizing.get(chatId) === request) this.synchronizing.delete(chatId)
-        if (request.phase === 'invalidated' && valid()) {
-          void this.synchronize(chatId)
-          return
-        }
         const next = this.synchronizationQueue.entries().next().value
         if (next && !this.disposed) {
           this.synchronizationQueue.delete(next[0])

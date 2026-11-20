@@ -45,7 +45,8 @@ function summarize(plan, report) {
 async function coordinate(values, workers) {
   const startAt = Date.now() + 10_000;
   const script = fileURLToPath(import.meta.url);
-  const parts = Array.from({ length: workers }, (_, index) => `${values.report}.shard-${index}.json`);
+  const parts = Array.from({ length: workers }, (_, index) => `${values.report}.${startAt}.shard-${index}.json`);
+  await Promise.all(parts.map(path => rm(path, { force: true })));
   const share = (raw, fallback) => String(Math.max(1, Math.ceil(Number(raw ?? fallback) / workers)));
   const pass = ['plan', 'manifest', 'api', 'ws', 'origin', 'compose-project'].flatMap(name =>
     values[name] === undefined ? [] : ['--' + name, values[name]]).concat(values.remote ? ['--remote'] : []);
@@ -126,7 +127,10 @@ async function main() {
       const manifest = await readPrivate(options.manifest);
       check(manifest.format === 'realistic-load-session-v1' && manifest.fingerprint === fingerprint, 'manifestMismatch');
       const { run } = await import('./run.mjs');
-      const report = await run(plan, manifest, http, metrics, { shard: { index: shardIndex, count: shardCount }, startAt });
+      const report = {
+        ...await run(plan, manifest, http, metrics, { shard: { index: shardIndex, count: shardCount }, startAt }),
+        fingerprint, startAt: startAt ?? null,
+      };
       await writeFile(values.report, JSON.stringify(report, null, 2) + '\n');
       summarize(plan, report);
       if (!report.passed) process.exitCode = 1;

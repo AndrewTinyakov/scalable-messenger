@@ -52,7 +52,9 @@ class Run {
   }
 
   stamped(body) {
-    return this.shard.count > 1 ? body + '\u2060t' + Date.now() : body;
+    if (this.shard.count === 1) return body;
+    const stamp = '\u2060t' + Date.now();
+    return [...body].slice(0, 4000 - stamp.length).join('') + stamp;
   }
 
   notification(device, frame) {
@@ -454,7 +456,7 @@ class Run {
     const keptOpen = record => record.devices.some(peer => peer.stayedSelected(record.selections.get(peer), record.started) >= 5000);
     const readPropagationMissing = unobserved.filter(keptOpen).length;
     const readPropagationInterrupted = unobserved.length - readPropagationMissing;
-    const plannedSends = this.plan.actions.filter(action => confirmations.has(action.type)).length;
+    const plannedSends = this.actions.filter(action => confirmations.has(action.type)).length;
     return {
       plannedSends, dispatched: records.length, saved: records.length - missing,
       missing: plannedSends - records.length + missing,
@@ -470,6 +472,7 @@ class Run {
 export async function run(plan, manifest, http, metrics, { shard = { index: 0, count: 1 }, startAt } = {}) {
   const state = new Run(plan, manifest, http, metrics, shard);
   const actions = shard.count > 1 ? plan.actions.filter(action => action.actor % shard.count === shard.index) : plan.actions;
+  state.actions = actions;
   if (startAt !== undefined) {
     const wait = startAt - Date.now();
     check(wait > -1000, 'startAtPassed');

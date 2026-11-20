@@ -50,7 +50,7 @@ node tests/realistic-load/main.mjs merge --report report.json shard-0.json shard
 
 `--remote` allows endpoints other than localhost. Divide `--auth-rate` and `--ticket-rate` by the shard count yourself. Machine clocks must be synchronized, because cross-shard delivery latency is measured from the send time each message carries in sharded runs.
 
-The merged latencies and counts are exact sums of the workers' histograms. Correctness counters, such as missing recipients and read propagation, cover recipients in the sender's own shard. A recipient in another shard contributes delivery latency but not a missing-delivery check. A reply whose parent message belongs to another shard quotes the latest message in that chat instead.
+The merged latencies and counts are exact sums of the workers' histograms. `merge` rejects reports from a different plan or start time. Correctness counters, such as missing recipients and read propagation, cover recipients in the sender's own shard. A recipient in another shard contributes delivery latency but not a missing-delivery check. A reply whose parent message belongs to another shard quotes the latest message in that chat instead.
 
 ## Files
 

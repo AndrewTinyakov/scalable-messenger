@@ -375,7 +375,7 @@ export class Device {
         if (afterSeq === page.lastSeq) return;
       }
       if (this.selected?.id !== id) return;
-      await this.sync(id);
+      await this.latest(id);
       view.changesAfter = view.mutation;
     });
   }

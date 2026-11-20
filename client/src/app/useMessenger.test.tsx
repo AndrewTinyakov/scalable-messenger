@@ -65,7 +65,7 @@ let markedUnread: boolean
 let userSeq = 0
 let pinFailures = 0
 let stateMemberSeq: string | undefined
-let stateRequests: { primary: boolean; release?: () => void }[] = []
+let stateRequests: { primary: boolean; fail?: boolean; release?: () => void }[] = []
 let holdState = false
 let unreadMarkCalls: string[]
 
@@ -235,6 +235,7 @@ beforeEach(() => {
       const request: (typeof stateRequests)[number] = { primary: !url.searchParams.has('minSeq') }
       stateRequests.push(request)
       if (holdState) await new Promise<void>((resolve) => (request.release = resolve))
+      if (request.fail) return Response.json({ message: 'Unavailable' }, { status: 503 })
     }
     if (path.endsWith('/state'))
       return Response.json({
@@ -1621,6 +1622,46 @@ describe('messenger request coordination', () => {
       await vi.advanceTimersByTimeAsync(3000)
     })
     expect(paths.filter((path) => path.endsWith(`/chats/${chatId}`))).toHaveLength(0)
+  })
+
+  it('still runs the queued primary check when the running one fails', async () => {
+    vi.useFakeTimers()
+    window.history.replaceState(null, '', `/groups/${chatId}`)
+    await renderMessenger()
+    await act(async () => {
+      sockets[0].open()
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+    const readHint = (eventId: string, streamId: string) =>
+      sockets[0].event({
+        type: 'reads_changed',
+        version: 1,
+        eventId,
+        room: `group:${chatId}`,
+        epoch: 'epoch',
+        streamId,
+        chatId,
+      })
+    stateRequests = []
+    holdState = true
+    await act(async () => {
+      readHint('01ARZ3NDEKTSV4RRFFQ69G5FB6', '10-0')
+      await vi.advanceTimersByTimeAsync(10)
+    })
+    await act(async () => {
+      readHint('01ARZ3NDEKTSV4RRFFQ69G5FB7', '11-0')
+      await vi.advanceTimersByTimeAsync(10)
+    })
+    holdState = false
+    await act(async () => {
+      stateRequests[0].fail = true
+      stateRequests[0].release?.()
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+    expect(stateRequests.length).toBeGreaterThan(1)
+    expect(stateRequests.every((request) => request.primary)).toBe(true)
   })
 
   it('coalesces repeated focus work while the selected group is current', async () => {

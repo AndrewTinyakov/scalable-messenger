@@ -933,7 +933,8 @@ export class ChatRecovery {
       do {
         request.phase = 'refreshing'
         const visibility = await this.runtime!.history.visibility!(chatId)
-        if (!valid() || !this.historyRequests.accepts(chatId, visibility)) return
+        if (!valid()) return
+        if (!this.historyRequests.accepts(chatId, visibility)) continue
         const previous = this.state.verifiedSnapshot(chatId)
         const changed =
           BigInt(visibility.mutationSeq) > BigInt(previous?.mutationSeq ?? '0') ||
@@ -994,6 +995,10 @@ export class ChatRecovery {
       })
       .finally(() => {
         if (this.synchronizing.get(chatId) === request) this.synchronizing.delete(chatId)
+        if (request.phase === 'invalidated' && valid()) {
+          void this.synchronize(chatId)
+          return
+        }
         const next = this.synchronizationQueue.entries().next().value
         if (next && !this.disposed) {
           this.synchronizationQueue.delete(next[0])

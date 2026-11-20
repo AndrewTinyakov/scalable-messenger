@@ -28,7 +28,11 @@ interface Options {
 
 const STATE_CHECK_MS = 60_000
 
-export type StateRequest = { hint: number; floors?: { minSeq: string; minMemberSeq: string } }
+export type StateRequest = {
+  visit: number
+  hint: number
+  floors?: { minSeq: string; minMemberSeq: string }
+}
 
 type ReadWrite =
   { phase: 'idle' | 'sending' } | { phase: 'waiting'; timer: ReturnType<typeof setTimeout> }
@@ -54,7 +58,14 @@ export function useConversationFeatures(options: Options) {
   const readWrite = useRef<ReadWrite>({ phase: 'idle' })
   const mutationBusy = useRef(new Set<string>())
   const reconcileRef = useRef<MutationRecovery | null>(null)
-  const knownSeq = useRef({ chatId: '', seeded: false, seq: 0n, memberSeq: 0n, primaryHint: 0 })
+  const knownSeq = useRef({
+    chatId: '',
+    visit: 0,
+    seeded: false,
+    seq: 0n,
+    memberSeq: 0n,
+    primaryHint: 0,
+  })
   const [pinsState, setPinsState] = useState({ key: '', tick: 0 })
   if (!reconcileRef.current)
     reconcileRef.current = new MutationRecovery({
@@ -93,7 +104,7 @@ export function useConversationFeatures(options: Options) {
   }, [])
   const observeState = useCallback((id: string, state: ChatState, request: StateRequest) => {
     const known = knownSeq.current
-    if (known.chatId !== id) return
+    if (known.chatId !== id || known.visit !== request.visit) return
     known.seeded = true
     const fromPrimary = request.floors === undefined
     if (fromPrimary && request.hint === known.primaryHint) known.primaryHint = 0
@@ -118,9 +129,11 @@ export function useConversationFeatures(options: Options) {
   }, [])
   const stateRequest = useCallback((id: string): StateRequest => {
     const known = knownSeq.current
-    if (known.chatId !== id) return { hint: 0 }
-    if (!known.seeded || known.primaryHint > 0) return { hint: known.primaryHint }
+    if (known.chatId !== id) return { visit: -1, hint: 0 }
+    if (!known.seeded || known.primaryHint > 0)
+      return { visit: known.visit, hint: known.primaryHint }
     return {
+      visit: known.visit,
       hint: 0,
       floors: { minSeq: known.seq.toString(), minMemberSeq: known.memberSeq.toString() },
     }
@@ -201,6 +214,7 @@ export function useConversationFeatures(options: Options) {
     setSummary({ throughSequence: '0', maxOtherReadSequence: '0' })
     knownSeq.current = {
       chatId: chatId ?? '',
+      visit: knownSeq.current.visit + 1,
       seeded: false,
       seq: 0n,
       memberSeq: 0n,

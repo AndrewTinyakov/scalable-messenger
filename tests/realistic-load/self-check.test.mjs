@@ -267,7 +267,21 @@ test('an owed read check survives a failed check and a return to the same chat',
   device.recheckReads('chat');
   release(new Error('state unavailable'));
   await running;
-  await new Promise(resolve => setImmediate(resolve));
+  await new Promise(resolve => setTimeout(resolve, 300));
   assert.deepEqual(calls, [0, 2]);
   assert.deepEqual(failures, ['state unavailable']);
+});
+
+test('a lone read hint whose check fails is retried a bounded number of times', async () => {
+  const state = { background: new Set(), capacity: 1, metrics: { failure: () => {} } };
+  const device = new Device(state, { userId: 'u' }, 0);
+  device.selected = { id: 'chat' };
+  let calls = 0;
+  device.sync = () => {
+    calls++;
+    return calls < 3 ? Promise.reject(new Error('state unavailable')) : Promise.resolve();
+  };
+  device.recheckReads('chat');
+  await new Promise(resolve => setTimeout(resolve, 800));
+  assert.equal(calls, 3);
 });

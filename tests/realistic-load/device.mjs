@@ -77,11 +77,15 @@ export class Device {
     const owed = () => view.readOwed === this.selection && this.selected?.id === id;
     view.readCheck = this.backgroundTask('live.state/' + id, async () => {
       while (owed()) {
+        const selection = view.readOwed;
         view.readOwed = null;
         try {
           await this.sync(id, { primary: true });
+          view.readFailures = 0;
         } catch (error) {
           this.state.metrics.failure('live', error);
+          if (++view.readFailures < 3 && view.readOwed === null) view.readOwed = selection;
+          break;
         }
       }
     }).finally(() => {
@@ -180,7 +184,7 @@ export class Device {
     if (!this.views.has(id)) {
       this.views.set(id, {
         messages: [], baseline: '0', dismissed: '0', loaded: false, reads: '0',
-        mutation: '0', visibility: '0', member: '0', pins: '0', memberPins: '0', stateAt: 0, readCheck: null, readOwed: null, readRetry: null, changesAfter: null, ready: null, detached: null,
+        mutation: '0', visibility: '0', member: '0', pins: '0', memberPins: '0', stateAt: 0, readCheck: null, readOwed: null, readRetry: null, readFailures: 0, changesAfter: null, ready: null, detached: null,
       });
     }
     return this.views.get(id);

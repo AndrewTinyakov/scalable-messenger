@@ -415,8 +415,9 @@ class Run {
       const mutation = this.mutations.get(record.saved.id);
       add(id, record, record.device, mutation);
       if (mutation) {
-        const peer = this.roster.get(id)?.members.find(actor => actor !== record.device.actor);
-        if (peer !== undefined && peer % this.shard.count === this.shard.index) {
+        const peer = this.roster.get(id)?.members.find(actor =>
+          actor !== record.device.actor && actor % this.shard.count === this.shard.index);
+        if (peer !== undefined) {
           add(id, record, this.devices[peer][0], mutation.kind === 'SELF' ? null : mutation);
         }
       }

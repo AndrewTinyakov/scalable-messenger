@@ -856,7 +856,6 @@ export class ChatRecovery {
         const page = await fetch()
         return {
           ...page,
-          mutationSeq: page.lastSeq,
           messages: page.changes.flatMap((change) => (change.message ? [change.message] : [])),
         }
       },

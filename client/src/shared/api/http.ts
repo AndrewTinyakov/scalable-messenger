@@ -476,9 +476,9 @@ export const api = {
       deleteChat(chatId: string) {
         return authenticated(endpoint(routes.chat, { id: chatId }), noContent, { method: 'DELETE' })
       },
-      chatState(chatId: string, minSeq?: string) {
+      chatState(chatId: string, freshness?: { minSeq: string; minMemberSeq: string }) {
         return authenticated(
-          endpoint(routes.state, { id: chatId }, minSeq && minSeq !== '0' ? { minSeq } : {}),
+          endpoint(routes.state, { id: chatId }, freshness ?? {}),
           decodeChatState,
         )
       },

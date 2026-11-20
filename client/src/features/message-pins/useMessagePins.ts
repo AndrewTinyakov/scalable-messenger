@@ -27,7 +27,7 @@ export function useMessagePins(
   chatId: string | undefined,
   sessionApi: SessionApi,
   connected: boolean,
-  pinsSeq = '0',
+  pinsState: { key: string; tick: number } = { key: '', tick: 0 },
 ) {
   const [state, setState] = useState<PinsState | null>(null)
   const stateRef = useRef(state)
@@ -40,6 +40,9 @@ export function useMessagePins(
   const refreshState = useRef<PinRefresh>({ phase: 'idle' })
   const wanted = useRef(0)
 
+  const loadedKey = useRef<string | null>(null)
+  const pinsKey = useRef(pinsState.key)
+  pinsKey.current = pinsState.key
   const refresh = useCallback(async () => {
     const id = chatRef.current
     if (!id || id.startsWith('draft:')) return
@@ -57,6 +60,7 @@ export function useMessagePins(
       try {
         do {
           operation.phase = 'refreshing'
+          const key = pinsKey.current
           let page = await sessionApi.pinnedMessages(id)
           if (current !== generation.current) return
           const ids = page.pinnedMessageIds.join()
@@ -83,6 +87,7 @@ export function useMessagePins(
             ids: page.pinnedMessageIds,
             next: page.nextBeforeSequence,
           })
+          if (key) loadedKey.current = key
           if (pins.length >= wanted.current || !page.nextBeforeSequence) setLoadingOlder(false)
         } while (operation.phase === 'invalidated' && current === generation.current)
       } catch {
@@ -109,13 +114,14 @@ export function useMessagePins(
     return () => clearTimeout(timer.current)
   }, [chatId, connected, refresh])
 
-  const seenPinsSeq = useRef({ chatId, pinsSeq })
   useEffect(() => {
-    const seen = seenPinsSeq.current
-    seenPinsSeq.current = { chatId, pinsSeq }
-    if (!chatId || chatId.startsWith('draft:') || !connected) return
-    if (seen.chatId === chatId && BigInt(pinsSeq) > BigInt(seen.pinsSeq)) schedule()
-  }, [chatId, connected, pinsSeq, schedule])
+    loadedKey.current = null
+  }, [chatId])
+  useEffect(() => {
+    if (!chatId || chatId.startsWith('draft:') || !connected || !pinsState.key) return
+    if (loadedKey.current === null) loadedKey.current = pinsState.key
+    else if (loadedKey.current !== pinsState.key) schedule()
+  }, [chatId, connected, pinsState, schedule])
 
   const loadOlder = useCallback(async () => {
     const current = stateRef.current

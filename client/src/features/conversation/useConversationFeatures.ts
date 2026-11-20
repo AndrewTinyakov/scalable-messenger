@@ -52,8 +52,8 @@ export function useConversationFeatures(options: Options) {
   const readWrite = useRef<ReadWrite>({ phase: 'idle' })
   const mutationBusy = useRef(new Set<string>())
   const reconcileRef = useRef<MutationRecovery | null>(null)
-  const knownSeq = useRef({ chatId: '', seq: 0n, memberSeq: 0n })
-  const [pinsSeq, setPinsSeq] = useState('0')
+  const knownSeq = useRef({ chatId: '', seq: 0n, memberSeq: 0n, primaryNext: false })
+  const [pinsState, setPinsState] = useState({ key: '', tick: 0 })
   if (!reconcileRef.current)
     reconcileRef.current = new MutationRecovery({
       changes: (chatId, after) =>
@@ -69,7 +69,8 @@ export function useConversationFeatures(options: Options) {
       },
     })
   const chatId = options.chat?.id.startsWith('draft:') ? undefined : options.chat?.id
-  const checkState = useCallback((id: string) => {
+  const checkState = useCallback((id: string, primary = false) => {
+    if (primary && knownSeq.current.chatId === id) knownSeq.current.primaryNext = true
     void optionsRef.current.recovery.synchronize(id)
   }, [])
   const observeCounters = useCallback((id: string, seq?: string, memberSeq?: string): boolean => {
@@ -93,7 +94,10 @@ export function useConversationFeatures(options: Options) {
     if (known.chatId !== id) return
     if (BigInt(state.lastSeq) > known.seq) known.seq = BigInt(state.lastSeq)
     if (BigInt(state.memberSeq) > known.memberSeq) known.memberSeq = BigInt(state.memberSeq)
-    setPinsSeq(state.pinsSeq)
+    setPinsState((previous) => ({
+      key: `${state.pinsSeq}:${state.memberSeq}:${state.mutationSeq}`,
+      tick: previous.tick + 1,
+    }))
     setSummary((previous) => ({
       throughSequence:
         BigInt(state.ownReadThrough) > BigInt(previous.throughSequence)
@@ -104,10 +108,15 @@ export function useConversationFeatures(options: Options) {
     if (reconcileRef.current!.behind(id, state.mutationSeq))
       void reconcileRef.current!.refresh().catch(() => {})
   }, [])
-  const minSeq = useCallback(
-    (id: string) => (knownSeq.current.chatId === id ? knownSeq.current.seq.toString() : '0'),
-    [],
-  )
+  const freshness = useCallback((id: string) => {
+    const known = knownSeq.current
+    if (known.chatId !== id || known.seq === 0n) return undefined
+    if (known.primaryNext) {
+      known.primaryNext = false
+      return undefined
+    }
+    return { minSeq: known.seq.toString(), minMemberSeq: known.memberSeq.toString() }
+  }, [])
   const flushRead = useCallback(async () => {
     if (readWrite.current.phase !== 'idle' || !optionsRef.current.connected) return
     const current = optionsRef.current
@@ -182,8 +191,8 @@ export function useConversationFeatures(options: Options) {
     mutationBusy.current.clear()
     setPresence({})
     setSummary({ throughSequence: '0', maxOtherReadSequence: '0' })
-    knownSeq.current = { chatId: chatId ?? '', seq: 0n, memberSeq: 0n }
-    setPinsSeq('0')
+    knownSeq.current = { chatId: chatId ?? '', seq: 0n, memberSeq: 0n, primaryNext: false }
+    setPinsState((previous) => ({ key: '', tick: previous.tick + 1 }))
     setReveal(null)
     setJumpLoading(null)
     reconcileRef.current!.select(chatId ?? null)
@@ -253,7 +262,6 @@ export function useConversationFeatures(options: Options) {
       if (event.type === 'history_changed') {
         void current.recovery.synchronize(event.chatId, {
           snapshotSequence: event.sequence,
-          mutationSeq: event.seq,
           memberSeq: event.memberSeq,
         })
         return true
@@ -269,7 +277,7 @@ export function useConversationFeatures(options: Options) {
         return true
       }
       if (event.type === 'reads_changed') {
-        if (event.chatId === current.chat?.id) checkState(event.chatId)
+        if (event.chatId === current.chat?.id) checkState(event.chatId, true)
         return true
       }
       if (event.type === 'presence') {
@@ -296,7 +304,10 @@ export function useConversationFeatures(options: Options) {
         }))
         return true
       }
-      if (event.type === 'recovery_failed') void reconcileRef.current!.refresh().catch(() => {})
+      if (event.type === 'recovery_failed') {
+        void reconcileRef.current!.refresh().catch(() => {})
+        if (event.chatId === current.chat?.id) checkState(event.chatId)
+      }
       return false
     },
     [checkState, observeCounters],
@@ -409,7 +420,7 @@ export function useConversationFeatures(options: Options) {
         })
       deletionRequests.current.delete(key)
       current.recovery.observe(id, {
-        mutationSeq: result.seq,
+        ...(scope === 'EVERYONE' ? { mutationSeq: result.seq } : {}),
         memberSeq: result.memberSeq,
         ...(scope === 'SELF'
           ? { clearedThroughSequence: result.clearedThroughSequence }
@@ -432,9 +443,9 @@ export function useConversationFeatures(options: Options) {
   )
 
   return {
-    pinsSeq,
+    pinsState,
     observeState,
-    minSeq,
+    freshness,
     revisionKey: chatId ? options.recovery.revisionKey(chatId) : '0:0',
     resolveTarget: useCallback(async (messageId: string) => {
       const current = optionsRef.current

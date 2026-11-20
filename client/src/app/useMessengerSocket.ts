@@ -121,6 +121,7 @@ export function useMessengerSocket({
 }: MessengerSocketOptions) {
   const groupRetryRef = useRef<number | undefined>(undefined)
   const groupRetryAttemptsRef = useRef(0)
+  const userSeqRef = useRef(0n)
   const createdChatRef = useRef<string | null>(null)
 
   useEffect(() => {
@@ -188,6 +189,11 @@ export function useMessengerSocket({
         void reconcilePending(true)
       },
       onEvent: (frame, socket) => {
+        if ('userSeq' in frame && typeof frame.userSeq === 'string') {
+          const userSeq = BigInt(frame.userSeq)
+          if (userSeqRef.current > 0n && userSeq > userSeqRef.current + 1n) void refreshChats(true)
+          if (userSeq > userSeqRef.current) userSeqRef.current = userSeq
+        }
         if (frame.type === EventType.MESSAGE_SAVED || frame.type === 'sidebar_activity') {
           const message = activityMessage(frame, listChats())
           if (!message || !applyActivity(frame.chatId, frame.sequence, message))
@@ -205,6 +211,7 @@ export function useMessengerSocket({
         if (frame.type === 'chat_preferences_changed') {
           if (listChats().some((chat) => chat.id === frame.chatId)) invalidateSummary(frame.chatId)
           else void refreshChats(false, true)
+          onFeatureEvent(frame)
           return
         }
         if (onSidebarEvent(frame) || onFeatureEvent(frame)) return

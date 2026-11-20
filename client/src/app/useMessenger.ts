@@ -240,7 +240,7 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     selectedId && !selectedId.startsWith('draft:') ? selectedId : undefined,
     sessionApi,
     connection === 'connected',
-    features.pinsSeq,
+    features.pinsState,
   )
   const pinsEventRef = useRef(pins.onEvent)
   pinsEventRef.current = pins.onEvent
@@ -269,7 +269,7 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
       around: (chatId, messageId, sequence) =>
         sessionApi.aroundMessage(chatId, messageId, sequence),
       visibility: async (chatId) => {
-        const state = await sessionApi.chatState(chatId, features.minSeq(chatId))
+        const state = await sessionApi.chatState(chatId, features.freshness(chatId))
         features.observeState(chatId, state)
         return {
           snapshotSequence: state.lastSeq,

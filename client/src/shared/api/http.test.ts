@@ -13,6 +13,28 @@ afterEach(() => {
 })
 
 describe('HTTP transport', () => {
+  it('keeps the change cursor apart from the mutation sequence a history page is fenced by', async () => {
+    const page = {
+      changes: [],
+      lastSeq: '5',
+      nextSeq: '5',
+      resetRequired: false,
+      snapshotSequence: '5',
+      mutationSeq: '0',
+      memberSeq: '0',
+      clearedThroughSequence: '0',
+      globalClearedThroughSequence: '0',
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<typeof globalThis.fetch>(async () => Response.json(page)),
+    )
+    await expect(authenticated.messageChanges(session.user.id, '0')).resolves.toMatchObject({
+      lastSeq: '5',
+      mutationSeq: '0',
+    })
+  })
+
   it('decodes bounded chat summaries with sender usernames and rejects malformed previews', async () => {
     const id = session.user.id
     const message = {

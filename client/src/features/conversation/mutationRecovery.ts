@@ -76,7 +76,7 @@ export class MutationRecovery {
         if (this.adapters.apply) {
           const applied = this.adapters.apply(chatId, changes.changes, {
             ...changes,
-            mutationSeq: changes.lastSeq,
+            mutationSeq: changes.mutationSeq,
           })
           if (applied === false) continue
         } else

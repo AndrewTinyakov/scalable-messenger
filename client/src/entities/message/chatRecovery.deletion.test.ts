@@ -51,7 +51,7 @@ describe('certified visible history', () => {
     recovery.patch('chat', [{ ...message('1'), body: 'new edit', messageVersion: '2' }])
     release(old)
     const page = (await loading)!
-    recovery.applyChanges('chat', page.changes, { ...page, mutationSeq: page.lastSeq })
+    recovery.applyChanges('chat', page.changes, page)
     expect(recovery.visibleWindows().chat[0]).toMatchObject({
       body: 'new edit',
       messageVersion: '2',

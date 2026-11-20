@@ -106,7 +106,7 @@ export function decodeChanges(value: unknown, chatId: string): ChangesPage {
       (change, index) => index === 0 || BigInt(change.seq) >= BigInt(changes[index - 1].seq),
     ),
   )
-  return { ...page, ...snapshot, mutationSeq: page.lastSeq, changes } as unknown as ChangesPage
+  return { ...page, ...snapshot, changes } as unknown as ChangesPage
 }
 
 export function decodeVisibility(

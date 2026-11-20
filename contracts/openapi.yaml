@@ -1878,6 +1878,11 @@ paths:
         required: false
         schema:
           type: string
+      - name: minMemberSeq
+        in: query
+        required: false
+        schema:
+          type: string
       - name: X-Messenger-User
         in: header
         required: false

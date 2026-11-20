@@ -2931,6 +2931,7 @@ export interface operations {
         parameters: {
             query?: {
                 minSeq?: string;
+                minMemberSeq?: string;
             };
             header?: {
                 "X-Messenger-User"?: string;

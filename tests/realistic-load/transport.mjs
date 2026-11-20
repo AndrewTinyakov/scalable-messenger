@@ -52,6 +52,42 @@ export class Measurements {
     this.current()?.failure(operation, error);
   }
 
+  // A lossless form that a coordinator can add together across workers.
+  raw() {
+    return {
+      counts: this.counts, statuses: this.statuses, failures: this.failures, rss: this.rss,
+      latencies: Object.fromEntries([...this.latencies].map(([name, histogram]) =>
+        [name, { buckets: [...histogram.buckets], count: histogram.count, sum: histogram.sum, max: histogram.max }])),
+      ...(this.stages ? { stages: this.stages.map(({ metrics, ...stage }) => ({ ...stage, metrics: metrics.raw() })) } : {}),
+    };
+  }
+
+  static merge(parts) {
+    const merged = new Measurements();
+    const add = (target, source) => {
+      for (const [key, value] of Object.entries(source ?? {})) target[key] = (target[key] ?? 0) + value;
+    };
+    for (const part of parts) {
+      add(merged.counts, part.counts);
+      add(merged.statuses, part.statuses);
+      add(merged.failures, part.failures);
+      merged.rss = Math.max(merged.rss, part.rss);
+      for (const [name, raw] of Object.entries(part.latencies)) {
+        if (!merged.latencies.has(name)) merged.latencies.set(name, new Histogram());
+        const histogram = merged.latencies.get(name);
+        raw.buckets.forEach((value, index) => { histogram.buckets[index] += value; });
+        histogram.count += raw.count;
+        histogram.sum += raw.sum;
+        histogram.max = Math.max(histogram.max, raw.max);
+      }
+    }
+    if (parts[0]?.stages) {
+      merged.stages = parts[0].stages.map(({ metrics: _metrics, ...stage }, index) =>
+        ({ ...stage, metrics: Measurements.merge(parts.map(part => part.stages[index].metrics)) }));
+    }
+    return merged;
+  }
+
   report() {
     return {
       counts: this.counts, httpStatuses: this.statuses, failures: this.failures,

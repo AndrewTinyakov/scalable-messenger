@@ -24,6 +24,8 @@ export function orderedMessages(page, id, ordered = true) {
 }
 
 export class Device {
+  // Sends without a terminal result, so reconciliation never scans the whole run.
+  pendingSends = new Set();
   socket = null;
   selected = null;
   foreground = true;
@@ -438,7 +440,7 @@ export class Device {
   }
 
   async reconcile() {
-    const incomplete = [...this.state.sends.values()].filter(record => record.device === this && record.sent && !record.saved && !record.rejected);
+    const incomplete = [...this.pendingSends].filter(record => !record.saved && !record.rejected);
     if (!incomplete.length) return;
     const result = await this.change('/sends/status', 'POST', { requestIds: incomplete.slice(0, 100).map(send => send.requestId) });
     check(Array.isArray(result?.results) && result.results.length <= 100);

@@ -36,6 +36,22 @@ Setup uses register/login, group creation and the first direct send. It bulk-cop
 
 The report adds `metrics.stages`, with the latencies, statuses, counts and failures recorded during each stage, and the run prints one line per stage. Driver queue limits grow by one step for every 1,000 users. The `generator.*` histograms record the driver's timer delay, event-loop busy percentage and in-flight HTTP requests. Use them to tell a saturated driver from a slow server. A stress run is expected to fail its pass criteria once something breaks. Raise the stack's connection, ticket, upgrade and auth limits for the test IP, or the proxy breaks first.
 
+## Several processes or machines
+
+One Node process saturates at about 6,000 users. `run --workers N` splits the run across N local processes. Each worker owns the users whose index modulo N is its shard: it opens their connections and runs only their actions. The coordinator starts every worker at the same wall-clock time, divides the auth and ticket rates between them and merges their reports into `--report`.
+
+To spread load over machines, copy the plan and manifest to each machine. Pick a start time a little in the future, then run each shard against the same stack:
+
+```sh
+node tests/realistic-load/main.mjs run --plan plan.json --manifest manifest.json --report shard-0.json \
+  --shard 0/2 --start-at 1795200000000 --remote --api https://chat.example.com/api --ws wss://chat.example.com/ws --origin https://chat.example.com
+node tests/realistic-load/main.mjs merge --report report.json shard-0.json shard-1.json
+```
+
+`--remote` allows endpoints other than localhost. Divide `--auth-rate` and `--ticket-rate` by the shard count yourself. Machine clocks must be synchronized, because cross-shard delivery latency is measured from the send time each message carries in sharded runs.
+
+The merged latencies and counts are exact sums of the workers' histograms. Correctness counters, such as missing recipients and read propagation, cover recipients in the sender's own shard. A recipient in another shard contributes delivery latency but not a missing-delivery check. A reply whose parent message belongs to another shard quotes the latest message in that chat instead.
+
 ## Files
 
 - `plan.mjs` turns a profile and seed into the plan. Client timings around a chat visit are named in its `CLIENT` table.
@@ -43,6 +59,7 @@ The report adds `metrics.stages`, with the latencies, statuses, counts and failu
 - `run.mjs` replays the plan, resolves references to earlier sends and checks the results.
 - `device.mjs` is one signed-in client device: socket, selected chat, cached history and refreshes.
 - `transport.mjs` holds HTTP, WebSocket and measurement helpers; `schedule.mjs` is the open-loop scheduler.
+- `merge.mjs` adds shard reports together.
 
 ## Client flows
 

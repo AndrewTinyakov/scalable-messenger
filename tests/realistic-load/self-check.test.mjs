@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { mergeReports } from './merge.mjs';
 import { buildPlan } from './plan.mjs';
 import { resolveReference, schedule } from './schedule.mjs';
 import { Http, Measurements } from './transport.mjs';
@@ -196,4 +197,28 @@ test('stage metrics follow the clock', () => {
   assert.equal(first.httpStatuses[500], 1);
   assert.equal(second.latencies['send.ownAck'].maxMs, 7);
   assert.equal(metrics.report().latencies['send.ownAck'].count, 2);
+});
+
+test('shard reports merge into the same totals as one combined run', () => {
+  const whole = new Measurements();
+  const parts = [new Measurements(), new Measurements()];
+  for (const [index, ms] of [3, 40, 7, 900, 12, 55].entries()) {
+    whole.observe('send.recipientLive', ms);
+    whole.count('send.saved');
+    parts[index % 2].observe('send.recipientLive', ms);
+    parts[index % 2].count('send.saved');
+  }
+  const report = (part, index) => ({
+    format: 'messenger-realistic-load-report-v1', profile: 'p', seed: 1, shard: { index, count: 2 },
+    plannedActions: 3, schedule: { offered: 3, peak: index + 1, pending: 0 },
+    correctness: { saved: 3, missing: index }, failedActionSamples: [], passed: index === 0,
+    rawMetrics: part.raw(),
+  });
+  const merged = mergeReports(parts.map(report));
+  assert.deepEqual(merged.metrics.latencies, whole.report().latencies);
+  assert.equal(merged.metrics.counts['send.saved'], 6);
+  assert.deepEqual(merged.correctness, { saved: 6, missing: 1 });
+  assert.equal(merged.schedule.peak, 2);
+  assert.equal(merged.passed, false);
+  assert.throws(() => mergeReports([report(parts[0], 0), report(parts[1], 0)]));
 });

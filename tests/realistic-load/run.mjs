@@ -7,6 +7,9 @@ import { resolveReference, schedule } from './schedule.mjs';
 import { check, Fault, greater, isId, isSeq } from './transport.mjs';
 
 const confirmations = new Set(['send', 'forward', 'direct']);
+// In a sharded run the sender and the recipient can live in different processes, so a send carries its wall-clock
+// time and the receiving worker measures delivery from it.
+const SENT_AT = /\u2060t(\d{13})$/;
 
 class Run {
   sends = new Map();
@@ -21,8 +24,9 @@ class Run {
   // HTTP can return a message before its sender's confirmation indexes it; hold those sightings until then.
   early = new Map();
 
-  constructor(plan, manifest, http, metrics) {
-    Object.assign(this, { plan, manifest, http, metrics, signal: http.controller.signal, capacity: http.options.capacity ?? 1 });
+  constructor(plan, manifest, http, metrics, shard = { index: 0, count: 1 }) {
+    Object.assign(this, { plan, manifest, http, metrics, shard, signal: http.controller.signal, capacity: http.options.capacity ?? 1 });
+    this.remoteSightings = new Set();
     this.devices = manifest.devices.map((devices, actor) => devices.map(credentials => new Device(this, credentials, actor)));
     this.roster = new Map(plan.chats.map(chat => [manifest.chats[chat.id], chat]));
   }
@@ -47,9 +51,16 @@ class Run {
     record.finish(record.saved);
   }
 
+  stamped(body) {
+    return this.shard.count > 1 ? body + '\u2060t' + Date.now() : body;
+  }
+
   notification(device, frame) {
     const record = this.sends.get(frame.requestId) ?? this.messages.get(frame.messageId);
-    if (!record) return;
+    if (!record) {
+      this.remoteNotification(device, frame);
+      return;
+    }
     if (device === record.device) this.saved(record, frame, true);
     const prior = record.received.get(device);
     if (prior !== undefined) {
@@ -61,6 +72,16 @@ class Run {
     if (device !== record.device && record.expected.includes(device)) {
       this.metrics.observe('send.recipientLive', performance.now() - record.sent);
     }
+  }
+
+  remoteNotification(device, frame) {
+    const sentAt = this.shard.count > 1 && !frame.forwardedFromUserId && SENT_AT.exec(frame.body ?? '')?.[1];
+    const key = device.credentials.userId + '/' + frame.messageId;
+    if (!sentAt || frame.senderId === device.credentials.userId || this.remoteSightings.has(key)) return;
+    if (this.remoteSightings.size > 500000) this.remoteSightings.clear();
+    this.remoteSightings.add(key);
+    this.metrics.observe('send.recipientLive', Math.max(0, Date.now() - Number(sentAt)));
+    this.metrics.count('send.recipientLive.crossShard');
   }
 
   recovered(device, message) {
@@ -105,6 +126,7 @@ class Run {
         [recipient, this.roster.get(chatId)?.kind === 'GROUP' ? recipient.selection : recipient.connection])),
       sent: performance.now(), body: frame.body,
       finish: (message, rejected) => {
+        device.pendingSends.delete(record);
         if (rejected) {
           if (record.saved) this.metrics.count('correctness.conflictingTerminal');
           record.rejected = rejected;
@@ -113,6 +135,7 @@ class Run {
       },
     };
     this.sends.set(requestId, record);
+    device.pendingSends.add(record);
     let abort;
     let timeout;
     try {
@@ -141,7 +164,10 @@ class Run {
   }
 
   async reference(action, device, id) {
-    const result = await resolveReference(action.reference, key => this.byAction.get(key), device.view(id).messages);
+    // A reply's parent can belong to another shard's user; quote the latest message in the chat instead.
+    const reference = action.reference?.send !== undefined && this.shard.count > 1 && !this.byAction.has(action.reference.send)
+      ? { back: 1 } : action.reference;
+    const result = await resolveReference(reference, key => this.byAction.get(key), device.view(id).messages);
     check(result && result.chatId === id, 'unresolvedReference');
     return result;
   }
@@ -201,7 +227,7 @@ class Run {
     const result = await device.get('/users', { query: peer.username });
     check(Array.isArray(result) ? result.some(user => user.id === peer.userId) : result?.users?.some(user => user.id === peer.userId), 'lookupMissingPeer');
     const saved = await this.send(device, due, null, {
-      recipientId: peer.userId, body: messageText(action.bytes, action.textSeed),
+      recipientId: peer.userId, body: this.stamped(messageText(action.bytes, action.textSeed)),
     }, this.expected(null, action.actor, action.peer));
     this.roster.set(saved.chatId, { kind: 'DIRECT', members: [action.actor, action.peer] });
     await device.refreshDirectory();
@@ -299,7 +325,7 @@ class Run {
       case 'send': {
         const reply = action.reference && await this.reference(action, device, id);
         return this.send(device, due, id, {
-          chatId: id, body: messageText(action.bytes, action.textSeed),
+          chatId: id, body: this.stamped(messageText(action.bytes, action.textSeed)),
           ...(reply ? { replyToMessageId: reply.id } : {}),
         }, this.expected(id, action.actor));
       }
@@ -441,8 +467,14 @@ class Run {
   }
 }
 
-export async function run(plan, manifest, http, metrics) {
-  const state = new Run(plan, manifest, http, metrics);
+export async function run(plan, manifest, http, metrics, { shard = { index: 0, count: 1 }, startAt } = {}) {
+  const state = new Run(plan, manifest, http, metrics, shard);
+  const actions = shard.count > 1 ? plan.actions.filter(action => action.actor % shard.count === shard.index) : plan.actions;
+  if (startAt !== undefined) {
+    const wait = startAt - Date.now();
+    check(wait > -1000, 'startAtPassed');
+    if (wait > 0) await delay(wait, undefined, { signal: state.signal });
+  }
   // The generator samples its own health, so a saturated driver can be told apart from a slow server.
   let lastSample = performance.now();
   let lastUtilization = performance.eventLoopUtilization();
@@ -461,7 +493,7 @@ export async function run(plan, manifest, http, metrics) {
   let scheduleResult;
   let correctness;
   try {
-    scheduleResult = await schedule(plan.actions, (action, due) => state.dispatch(action, due), {
+    scheduleResult = await schedule(actions, (action, due) => state.dispatch(action, due), {
       signal: state.signal,
       lag: (ms, action) => {
         metrics.observe('schedulingLag', ms);
@@ -483,12 +515,13 @@ export async function run(plan, manifest, http, metrics) {
     !metrics.counts.lagExceeded && !correctness.missing && !correctness.pending &&
     !correctness.duplicates && !correctness.durableMismatches && !correctness.recipientsMissing;
   return {
-    format: 'messenger-realistic-load-report-v1', profile: plan.profile.name, seed: plan.seed,
+    format: 'messenger-realistic-load-report-v1', profile: plan.profile.name, seed: plan.seed, shard,
     users: plan.population.length, durationMs: plan.profile.durationMs,
     population: Object.fromEntries(plan.profile.personas.map(persona =>
       [persona.name, plan.population.filter(user => user.persona === persona.name).length])),
-    sessions: plan.sessions.length, plannedActions: plan.actions.length,
+    sessions: plan.sessions.length, plannedActions: actions.length,
     schedule: { ...scheduleResult, lagLimitMs: plan.profile.timing.lagLimitMs },
     ticketAdmission: http.tickets.report(), failedActionSamples: state.failedSamples, correctness, passed, metrics: metrics.report(),
+    ...(shard.count > 1 ? { rawMetrics: metrics.raw() } : {}),
   };
 }

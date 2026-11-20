@@ -11,6 +11,7 @@ import com.andrewtinyakov.messenger.infrastructure.outbox.outboxTransactions
 import com.andrewtinyakov.messenger.infrastructure.outbox.publication.OutboxPublicationService
 import com.andrewtinyakov.messenger.message.repository.MessageRepository
 import com.andrewtinyakov.messenger.shared.id.newId
+import com.fasterxml.jackson.annotation.JsonInclude
 import io.lettuce.core.RedisClient
 import io.lettuce.core.pubsub.RedisPubSubAdapter
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
@@ -60,8 +61,7 @@ class RoomEventPublisherIntegrationTests {
                     "room" to room,
                     "chatId" to chatId,
                     "sequence" to expected.path("sequence").asText(),
-                    "mutationRevision" to "0",
-                    "visibilityRevision" to "0",
+                    "seq" to expected.path("sequence").asText(),
                 ),
             )
             withLiveMessages(factory, "activity:$chatId") { received ->
@@ -94,8 +94,7 @@ class RoomEventPublisherIntegrationTests {
                     "room" to room,
                     "chatId" to chatId,
                     "sequence" to event.path("sequence").asText(),
-                    "mutationRevision" to "0",
-                    "visibilityRevision" to "0",
+                    "seq" to event.path("sequence").asText(),
                 ),
             )
             withLiveMessages(factory, "activity:$chatId") { received ->
@@ -142,7 +141,7 @@ class RoomEventPublisherIntegrationTests {
             val id = newId()
             val hint = """{"type":"history_changed","version":1,"eventId":"$id","room":"$room","chatId":"${room.removePrefix(
                 "group:",
-            )}","sequence":"9","mutationRevision":"0","visibilityRevision":"0"}"""
+            )}","sequence":"9","seq":"9"}"""
             val live = """{"type":"message_saved","eventId":"$id","room":"$room","body":"ephemeral message content"}"""
             val row = OutboxMessage(EventId(id), room, live, replayPayload = hint)
             val publisher = roomPublisher(ReactiveStringRedisTemplate(factory))
@@ -269,8 +268,7 @@ class RoomEventPublisherIntegrationTests {
                             "room" to room,
                             "chatId" to event.path("chatId").stringValue(),
                             "sequence" to event.path("sequence").stringValue(),
-                            "mutationRevision" to "0",
-                            "visibilityRevision" to "0",
+                            "seq" to event.path("sequence").stringValue(),
                         ),
                     )
                 } else {
@@ -522,7 +520,8 @@ class RoomEventPublisherIntegrationTests {
             redis = redis,
             properties = properties,
             outboxPublisherProperties = OutboxPublisherProperties(publishTimeout = timeout),
-            mapper = JsonMapper.builder().build(),
+            mapper = JsonMapper.builder()
+                .changeDefaultPropertyInclusion { it.withValueInclusion(JsonInclude.Include.NON_NULL) }.build(),
             publicationHydration = PublicationHydration(
                 mock(MessageRepository::class.java),
                 mock(UserRepository::class.java),

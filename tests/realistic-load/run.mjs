@@ -398,6 +398,7 @@ class Run {
     let missing = 0;
     let checked = 0;
     let mismatches = 0;
+    let unverified = 0;
     let mutationChecks = 0;
     const batches = new Map();
     const add = (id, record, device, expected) => {
@@ -415,7 +416,9 @@ class Run {
       add(id, record, record.device, mutation);
       if (mutation) {
         const peer = this.roster.get(id)?.members.find(actor => actor !== record.device.actor);
-        if (peer !== undefined) add(id, record, this.devices[peer][0], mutation.kind === 'SELF' ? null : mutation);
+        if (peer !== undefined && peer % this.shard.count === this.shard.index) {
+          add(id, record, this.devices[peer][0], mutation.kind === 'SELF' ? null : mutation);
+        }
       }
     }
     await workers([...batches.values()], 12, async ({ id, device, checks }) => {
@@ -436,7 +439,7 @@ class Run {
           }
         } catch (error) {
           this.metrics.failure('verification', error);
-          mismatches += batch.length;
+          unverified += batch.length;
         }
       }
     });
@@ -462,7 +465,7 @@ class Run {
       missing: plannedSends - records.length + missing,
       pending: records.filter(record => !record.saved && !record.rejected).length,
       duplicates: this.metrics.counts['correctness.conflictingTerminal'] ?? 0,
-      durableChecks: checked, durableMismatches: mismatches, mutationChecks,
+      durableChecks: checked, durableMismatches: mismatches, durableUnverified: unverified, mutationChecks,
       recipientsExpected, recipientsMissing, recipientsInterrupted,
       readPropagationExpected: readOperations.length, readPropagationMissing, readPropagationInterrupted,
     };

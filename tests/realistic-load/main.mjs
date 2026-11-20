@@ -48,7 +48,8 @@ async function coordinate(values, workers) {
   const parts = Array.from({ length: workers }, (_, index) => `${values.report}.${startAt}.shard-${index}.json`);
   await Promise.all(parts.map(path => rm(path, { force: true })));
   const share = (raw, fallback, index) => {
-    const total = Number(raw ?? fallback);
+    if (raw === undefined) return String(fallback);
+    const total = Number(raw);
     check(total >= workers, 'rateBelowWorkers');
     return String(Math.max(1, Math.floor(total / workers) + (index < total % workers ? 1 : 0)));
   };

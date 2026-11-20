@@ -14,7 +14,7 @@ export function mergeReports(parts) {
   return {
     ...first, shard: { index: null, count: parts.length },
     plannedActions: parts.reduce((total, part) => total + part.plannedActions, 0),
-    schedule: { ...sum('schedule'), peak: Math.max(...parts.map(part => part.schedule.peak)) },
+    schedule: { ...sum('schedule'), peak: Math.max(...parts.map(part => part.schedule.peak)), lagLimitMs: first.schedule.lagLimitMs },
     correctness: sum('correctness'),
     ticketAdmission: (({ maximumRequestsPerSecond, peakPending, ...totals }) => ({
       ...totals, maximumRequestsPerSecond, peakPending,

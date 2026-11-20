@@ -63,6 +63,7 @@ let deletionCalls: { chatId: string; requestId: string; scope: string; target: s
 let failDeletion: boolean
 let markedUnread: boolean
 let userSeq = 0
+let pinFailures = 0
 let unreadMarkCalls: string[]
 
 function snapshotFor(id: string) {
@@ -213,6 +214,10 @@ beforeEach(() => {
         mutedForever: false,
         markedUnread,
       })
+    }
+    if (path.endsWith('/pins') && pinFailures > 0) {
+      pinFailures -= 1
+      return Response.json({ message: 'Unavailable' }, { status: 503 })
     }
     if (path.endsWith('/pins'))
       return Response.json({
@@ -1480,6 +1485,27 @@ describe('messenger request coordination', () => {
     for (const route of ['/reads', '/visibility', '/changes', '/pins'])
       expect(routes.filter((path) => path.endsWith(route))).toHaveLength(0)
     expect(routes.filter((path) => path.endsWith('/state'))).toHaveLength(2)
+  })
+
+  it('retries a failed pin load after the next state check and then stays quiet', async () => {
+    vi.useFakeTimers()
+    pinFailures = 1
+    window.history.replaceState(null, '', `/groups/${chatId}`)
+    paths = []
+    await renderMessenger()
+    await act(async () => {
+      sockets[0].open()
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+    const pinLoads = () => paths.filter((path) => path.split('?')[0].endsWith('/pins')).length
+    expect(pinLoads()).toBe(2)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(61_000)
+    })
+    expect(pinLoads()).toBe(2)
+    pinFailures = 0
   })
 
   it('coalesces repeated focus work while the selected group is current', async () => {

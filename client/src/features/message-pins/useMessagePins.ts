@@ -41,6 +41,7 @@ export function useMessagePins(
   const wanted = useRef(0)
 
   const loadedKey = useRef<string | null>(null)
+  const fetched = useRef(false)
   const pinsKey = useRef(pinsState.key)
   pinsKey.current = pinsState.key
   const refresh = useCallback(async () => {
@@ -87,6 +88,7 @@ export function useMessagePins(
             ids: page.pinnedMessageIds,
             next: page.nextBeforeSequence,
           })
+          fetched.current = true
           if (key) loadedKey.current = key
           if (pins.length >= wanted.current || !page.nextBeforeSequence) setLoadingOlder(false)
         } while (operation.phase === 'invalidated' && current === generation.current)
@@ -116,11 +118,18 @@ export function useMessagePins(
 
   useEffect(() => {
     loadedKey.current = null
+    fetched.current = false
   }, [chatId])
   useEffect(() => {
     if (!chatId || chatId.startsWith('draft:') || !connected || !pinsState.key) return
-    if (loadedKey.current === null) loadedKey.current = pinsState.key
-    else if (loadedKey.current !== pinsState.key) schedule()
+    if (loadedKey.current === null) {
+      if (refreshState.current.phase !== 'idle') return
+      if (fetched.current) {
+        loadedKey.current = pinsState.key
+        return
+      }
+    }
+    if (loadedKey.current !== pinsState.key) schedule()
   }, [chatId, connected, pinsState, schedule])
 
   const loadOlder = useCallback(async () => {

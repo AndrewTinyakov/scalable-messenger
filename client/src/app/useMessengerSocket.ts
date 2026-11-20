@@ -191,7 +191,8 @@ export function useMessengerSocket({
       onEvent: (frame, socket) => {
         if ('userSeq' in frame && typeof frame.userSeq === 'string') {
           const userSeq = BigInt(frame.userSeq)
-          if (userSeqRef.current > 0n && userSeq > userSeqRef.current + 1n) void refreshChats(true)
+          if (userSeqRef.current > 0n && userSeq > userSeqRef.current + 1n)
+            void refreshChats(true, true)
           if (userSeq > userSeqRef.current) userSeqRef.current = userSeq
         }
         if (frame.type === EventType.MESSAGE_SAVED || frame.type === 'sidebar_activity') {

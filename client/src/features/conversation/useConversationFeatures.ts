@@ -52,7 +52,7 @@ export function useConversationFeatures(options: Options) {
   const readWrite = useRef<ReadWrite>({ phase: 'idle' })
   const mutationBusy = useRef(new Set<string>())
   const reconcileRef = useRef<MutationRecovery | null>(null)
-  const knownSeq = useRef({ chatId: '', seq: 0n, memberSeq: 0n, primaryNext: false })
+  const knownSeq = useRef({ chatId: '', seeded: false, seq: 0n, memberSeq: 0n, primaryNext: false })
   const [pinsState, setPinsState] = useState({ key: '', tick: 0 })
   if (!reconcileRef.current)
     reconcileRef.current = new MutationRecovery({
@@ -79,19 +79,21 @@ export function useConversationFeatures(options: Options) {
     let gap = false
     if (seq !== undefined) {
       const value = BigInt(seq)
-      gap ||= known.seq > 0n && value > known.seq + 1n
+      gap ||= known.seeded && value > known.seq + 1n
       if (value > known.seq) known.seq = value
     }
     if (memberSeq !== undefined) {
       const value = BigInt(memberSeq)
-      gap ||= known.memberSeq > 0n && value > known.memberSeq + 1n
+      gap ||= known.seeded && value > known.memberSeq + 1n
       if (value > known.memberSeq) known.memberSeq = value
     }
     return gap
   }, [])
-  const observeState = useCallback((id: string, state: ChatState) => {
+  const observeState = useCallback((id: string, state: ChatState, fromPrimary: boolean) => {
     const known = knownSeq.current
     if (known.chatId !== id) return
+    known.seeded = true
+    if (fromPrimary) known.primaryNext = false
     if (BigInt(state.lastSeq) > known.seq) known.seq = BigInt(state.lastSeq)
     if (BigInt(state.memberSeq) > known.memberSeq) known.memberSeq = BigInt(state.memberSeq)
     setPinsState((previous) => ({
@@ -103,18 +105,17 @@ export function useConversationFeatures(options: Options) {
         BigInt(state.ownReadThrough) > BigInt(previous.throughSequence)
           ? state.ownReadThrough
           : previous.throughSequence,
-      maxOtherReadSequence: state.otherReadThrough,
+      maxOtherReadSequence:
+        fromPrimary || BigInt(state.otherReadThrough) > BigInt(previous.maxOtherReadSequence)
+          ? state.otherReadThrough
+          : previous.maxOtherReadSequence,
     }))
     if (reconcileRef.current!.behind(id, state.mutationSeq))
       void reconcileRef.current!.refresh().catch(() => {})
   }, [])
   const freshness = useCallback((id: string) => {
     const known = knownSeq.current
-    if (known.chatId !== id || known.seq === 0n) return undefined
-    if (known.primaryNext) {
-      known.primaryNext = false
-      return undefined
-    }
+    if (known.chatId !== id || !known.seeded || known.primaryNext) return undefined
     return { minSeq: known.seq.toString(), minMemberSeq: known.memberSeq.toString() }
   }, [])
   const flushRead = useCallback(async () => {
@@ -191,7 +192,13 @@ export function useConversationFeatures(options: Options) {
     mutationBusy.current.clear()
     setPresence({})
     setSummary({ throughSequence: '0', maxOtherReadSequence: '0' })
-    knownSeq.current = { chatId: chatId ?? '', seq: 0n, memberSeq: 0n, primaryNext: false }
+    knownSeq.current = {
+      chatId: chatId ?? '',
+      seeded: false,
+      seq: 0n,
+      memberSeq: 0n,
+      primaryNext: false,
+    }
     setPinsState((previous) => ({ key: '', tick: previous.tick + 1 }))
     setReveal(null)
     setJumpLoading(null)
@@ -262,6 +269,7 @@ export function useConversationFeatures(options: Options) {
       if (event.type === 'history_changed') {
         void current.recovery.synchronize(event.chatId, {
           snapshotSequence: event.sequence,
+          mutationSeq: event.seq,
           memberSeq: event.memberSeq,
         })
         return true

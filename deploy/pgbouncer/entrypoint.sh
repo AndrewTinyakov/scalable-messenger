@@ -17,6 +17,9 @@ cat > "$config/pgbouncer.ini" <<INI
 [databases]
 messenger = host=${PGBOUNCER_SERVER_HOST:-postgres} port=5432 dbname=messenger
 
+[users]
+messenger_api = pool_size=${PGBOUNCER_API_POOL_SIZE:-20}
+
 [pgbouncer]
 listen_addr = 0.0.0.0
 listen_port = 6432

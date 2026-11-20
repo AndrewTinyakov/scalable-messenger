@@ -84,6 +84,7 @@ func (subscriptions *chatSubscriptions) chargeSubscriptionAttempts(base context.
 		return nil
 	}
 	if mode == batchSubscription && count > subscriptions.config.SubscribeRate {
+		subscriptions.metrics.RecordSubscriptionRefusal(monitoring.SubscriptionRefusedUserLimit)
 		return errRateLimited
 	}
 	ctx, cancel := context.WithTimeout(base, subscriptions.config.APITimeout)
@@ -99,6 +100,7 @@ func (subscriptions *chatSubscriptions) chargeSubscriptionAttempts(base context.
 		return fmt.Errorf("limit subscriptions: %w", err)
 	}
 	if !allowed {
+		subscriptions.metrics.RecordSubscriptionRefusal(monitoring.SubscriptionRefusedUserLimit)
 		return errRateLimited
 	}
 	return nil
@@ -137,6 +139,7 @@ func (subscriptions *chatSubscriptions) authorizeSingleSubscription(base context
 				cancel()
 			}
 		default:
+			subscriptions.metrics.RecordSubscriptionRefusal(monitoring.SubscriptionRefusedAuthSlots)
 			return authorization, errRateLimited
 		}
 	}
@@ -170,6 +173,7 @@ func (subscriptions *chatSubscriptions) authorizeSubscriptionBatch(base context.
 		case <-subscriptions.connection.ctx.Done():
 			return authorization, subscriptions.connection.ctx.Err()
 		default:
+			subscriptions.metrics.RecordSubscriptionRefusal(monitoring.SubscriptionRefusedFinalAuthSlots)
 			return authorization, errRateLimited
 		}
 	}

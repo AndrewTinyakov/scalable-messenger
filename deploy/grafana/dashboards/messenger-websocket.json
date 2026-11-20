@@ -936,6 +936,12 @@
           "legendFormat": "{{result}}",
           "refId": "A",
           "instant": false
+        },
+        {
+          "instant": false,
+          "expr": "sum by (reason) (rate(messenger_ws_subscription_refusals_total[$__rate_interval]))",
+          "legendFormat": "refused {{reason}}",
+          "refId": "B"
         }
       ]
     },

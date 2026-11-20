@@ -29,6 +29,14 @@ const (
 	AcknowledgementAccepted AcknowledgementOutcome = "accepted"
 )
 
+type SubscriptionRefusal string
+
+const (
+	SubscriptionRefusedUserLimit      SubscriptionRefusal = "user_limit"
+	SubscriptionRefusedAuthSlots      SubscriptionRefusal = "auth_slots"
+	SubscriptionRefusedFinalAuthSlots SubscriptionRefusal = "final_auth_slots"
+)
+
 type AuthorizationOutcome string
 
 const (

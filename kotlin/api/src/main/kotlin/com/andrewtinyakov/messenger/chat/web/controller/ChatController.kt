@@ -80,10 +80,12 @@ class ChatController(
         session: AuthenticatedSession,
         @PathVariable id: String,
         @RequestParam(required = false) minSeq: String?,
+        @RequestParam(required = false) minMemberSeq: String?,
     ): ChatStateResponse = chatStateService.state(
         chatId = ChatId.parse(id),
         userId = session.userId,
         minSeq = minSeq?.let { parseSequence(it) ?: invalidInput("minSeq", "minSeq must be a decimal sequence") },
+        minMemberSeq = minMemberSeq?.let { parseSequence(it) ?: invalidInput("minMemberSeq", "minMemberSeq must be a decimal sequence") },
     )
 
     @PostMapping("/groups")

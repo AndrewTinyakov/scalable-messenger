@@ -28,7 +28,6 @@ import java.time.Duration
         "messenger.grpc.enabled=false",
         "spring.rabbitmq.dynamic=false",
         "spring.rabbitmq.listener.simple.auto-startup=false",
-        "messenger.database.replica.name=replica",
         "messenger.database.replica.max-lag=64KB",
         "messenger.database.replica.check-interval=1h",
     ],

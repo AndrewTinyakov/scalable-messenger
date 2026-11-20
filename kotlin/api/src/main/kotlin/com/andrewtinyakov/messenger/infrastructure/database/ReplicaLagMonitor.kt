@@ -1,11 +1,13 @@
 package com.andrewtinyakov.messenger.infrastructure.database
 
-import org.jooq.DSLContext
 import org.slf4j.LoggerFactory
 import org.springframework.scheduling.annotation.Scheduled
+import java.sql.SQLException
+import javax.sql.DataSource
 
 class ReplicaLagMonitor(
-    private val db: DSLContext,
+    private val primary: DataSource,
+    private val replica: DataSource,
     private val properties: ReplicaProperties,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -17,14 +19,22 @@ class ReplicaLagMonitor(
     @Scheduled(fixedDelayString = "\${messenger.database.replica.check-interval:1s}")
     fun check() {
         healthy = try {
-            val lag = db.resultQuery(
-                "select pg_wal_lsn_diff(pg_current_wal_insert_lsn(), replay_lsn) from pg_stat_replication where application_name = ? and replay_lsn is not null",
-                properties.name,
-            ).fetchOne(0, Long::class.java)
-            lag != null && lag <= properties.maxLag.toBytes()
-        } catch (failure: RuntimeException) {
+            val replayed = lsn(replica, "select pg_last_wal_replay_lsn()::text")
+            val written = lsn(primary, "select pg_current_wal_insert_lsn()::text")
+            replayed != null && written != null && written - replayed <= properties.maxLag.toBytes()
+        } catch (failure: SQLException) {
             logger.warn("Replica lag check failed", failure)
             false
+        }
+    }
+
+    private fun lsn(source: DataSource, query: String): Long? = source.connection.use { connection ->
+        connection.createStatement().use { statement ->
+            statement.executeQuery(query).use { result ->
+                if (!result.next()) return null
+                val (high, low) = result.getString(1)?.split('/') ?: return null
+                (high.toLong(16) shl 32) + low.toLong(16)
+            }
         }
     }
 }

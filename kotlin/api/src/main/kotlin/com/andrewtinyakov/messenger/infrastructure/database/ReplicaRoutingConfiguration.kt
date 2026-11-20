@@ -1,7 +1,6 @@
 package com.andrewtinyakov.messenger.infrastructure.database
 
 import com.zaxxer.hikari.HikariDataSource
-import org.jooq.DSLContext
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.boot.context.properties.ConfigurationProperties
@@ -34,7 +33,11 @@ class ReplicaRoutingConfiguration {
     ) = ReplicaRoutingDataSource(primary, replica)
 
     @Bean
-    fun replicaLagMonitor(db: DSLContext, properties: ReplicaProperties) = ReplicaLagMonitor(db, properties)
+    fun replicaLagMonitor(
+        @Qualifier("primaryPool") primary: HikariDataSource,
+        @Qualifier("replicaPool") replica: HikariDataSource,
+        properties: ReplicaProperties,
+    ) = ReplicaLagMonitor(primary, replica, properties)
 
     @Bean
     fun replicaRoute(routing: ReplicaRoutingDataSource, lag: ReplicaLagMonitor): ReplicaRoute = object : ReplicaRoute {

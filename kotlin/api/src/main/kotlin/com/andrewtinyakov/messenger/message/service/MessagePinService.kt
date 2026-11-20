@@ -5,7 +5,6 @@ import com.andrewtinyakov.messenger.chat.model.Chat
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.model.ChatKind
 import com.andrewtinyakov.messenger.chat.repository.ChatRepository
-import com.andrewtinyakov.messenger.chat.repository.directory.ChatDirectoryRepository
 import com.andrewtinyakov.messenger.message.messaging.MessageOutbox
 import com.andrewtinyakov.messenger.message.model.Message
 import com.andrewtinyakov.messenger.message.model.MessageId
@@ -28,7 +27,6 @@ class MessagePinService(
     private val messagePinRepository: MessagePinRepository,
     private val messageRepository: MessageRepository,
     private val chatRepository: ChatRepository,
-    private val chatDirectoryRepository: ChatDirectoryRepository,
     private val messageOutbox: MessageOutbox,
     private val tx: TransactionTemplate,
 ) {
@@ -68,7 +66,7 @@ class MessagePinService(
     }
 
     fun unpinAll(chatId: ChatId, userId: UserId) = tx.executeWithoutResult {
-        val chat = chatDirectoryRepository.findById(chatId)?.takeIf { chatRepository.isMember(chatId, userId) } ?: notFound()
+        val chat = chatRepository.findByIdForUpdate(chatId)?.takeIf { chatRepository.isMember(chatId, userId) } ?: notFound()
         messagePinRepository.lock(chatId)
         notifyRemoved(chat, userId, messagePinRepository.unpinAll(chatId, userId))
     }
@@ -90,7 +88,7 @@ class MessagePinService(
     }
 
     private fun target(chatId: ChatId, userId: UserId, messageId: MessageId): Pair<Chat, Message> {
-        val chat = chatDirectoryRepository.findById(chatId) ?: notFound()
+        val chat = chatRepository.findByIdForUpdate(chatId) ?: notFound()
         val message = messageRepository.findMessage(chatId, userId, messageId)?.takeIf { it.deletedAt == null } ?: notFound()
         return chat to message
     }

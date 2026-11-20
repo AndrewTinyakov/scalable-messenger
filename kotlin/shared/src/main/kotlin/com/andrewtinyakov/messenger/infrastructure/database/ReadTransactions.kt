@@ -3,6 +3,7 @@ package com.andrewtinyakov.messenger.infrastructure.database
 import org.jooq.DSLContext
 import org.springframework.beans.factory.ObjectProvider
 import org.springframework.dao.DataAccessResourceFailureException
+import org.springframework.dao.TransientDataAccessException
 import org.springframework.stereotype.Component
 import org.springframework.transaction.CannotCreateTransactionException
 import org.springframework.transaction.PlatformTransactionManager
@@ -21,7 +22,6 @@ class ReadTransactions(
 
     fun <T> primary(snapshot: Boolean = false, block: () -> T): T = read(snapshot, block)
 
-    /** Runs on the replica, or returns null at once when no replica is configured, healthy and reachable. */
     fun <T : Any> replica(snapshot: Boolean = false, block: () -> T?): T? {
         val route = replicaRoute?.takeIf { it.available() } ?: return null.also { metrics.replicaRead(ReplicaReadOutcome.UNAVAILABLE) }
         check(!TransactionSynchronizationManager.isActualTransactionActive()) { "A replica read must start outside a transaction" }
@@ -41,6 +41,9 @@ class ReadTransactions(
             metrics.replicaRead(ReplicaReadOutcome.FAILED)
             null
         } catch (failure: CannotCreateTransactionException) {
+            metrics.replicaRead(ReplicaReadOutcome.FAILED)
+            null
+        } catch (failure: TransientDataAccessException) {
             metrics.replicaRead(ReplicaReadOutcome.FAILED)
             null
         }

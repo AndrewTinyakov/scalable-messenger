@@ -33,20 +33,25 @@ class JooqMessageChangeRepository(
             .fetchOne { MutationCursor(it.value1()!! - 1, it.value2()!!) }
 
     override fun page(chatId: ChatId, afterSeq: Long, throughSeq: Long, limit: Int): MessageChangePage {
-        val boundary = db.select(MESSAGE_CHANGES.SEQ).from(MESSAGE_CHANGES)
-            .where(changesBetween(chatId, afterSeq, throughSeq))
-            .orderBy(MESSAGE_CHANGES.SEQ, MESSAGE_CHANGES.SEQUENCE).offset(limit - 1).limit(1)
-            .fetchOne(MESSAGE_CHANGES.SEQ)
-        val nextSeq = boundary ?: throughSeq
-        val changes = db.select(
+        val rows = changes(chatId, afterSeq, throughSeq, limit + 1)
+        if (rows.size <= limit) return MessageChangePage(rows, throughSeq)
+        val overflow = rows[limit].seq
+        val complete = rows.filter { it.seq < overflow }
+        if (complete.isNotEmpty()) return MessageChangePage(complete, complete.last().seq)
+        return MessageChangePage(changes(chatId, afterSeq, overflow, null), overflow)
+    }
+
+    private fun changes(chatId: ChatId, afterSeq: Long, throughSeq: Long, limit: Int?): List<MessageChange> =
+        db.select(
             MESSAGE_CHANGES.SEQ,
             MESSAGE_CHANGES.MESSAGE_ID,
             MESSAGE_CHANGES.KIND,
             MESSAGE_CHANGES.SEQUENCE,
             MESSAGE_CHANGES.CLEARED_THROUGH_SEQUENCE,
         ).from(MESSAGE_CHANGES)
-            .where(changesBetween(chatId, afterSeq, nextSeq))
+            .where(changesBetween(chatId, afterSeq, throughSeq))
             .orderBy(MESSAGE_CHANGES.SEQ, MESSAGE_CHANGES.SEQUENCE)
+            .limit(limit ?: Int.MAX_VALUE)
             .fetch {
                 MessageChange(
                     seq = it.value1()!!,
@@ -56,8 +61,6 @@ class JooqMessageChangeRepository(
                     clearedThroughSequence = it.value5(),
                 )
             }
-        return MessageChangePage(changes, nextSeq)
-    }
 
     private fun changesBetween(chatId: ChatId, afterSeq: Long, throughSeq: Long) = MESSAGE_CHANGES.CHAT_ID.eq(chatId.value)
         .and(MESSAGE_CHANGES.SEQ.gt(afterSeq))

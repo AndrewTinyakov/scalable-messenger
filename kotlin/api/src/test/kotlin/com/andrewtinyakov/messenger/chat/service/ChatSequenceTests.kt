@@ -7,6 +7,7 @@ import com.andrewtinyakov.messenger.deletion.service.DeletionService
 import com.andrewtinyakov.messenger.message.model.MessageId
 import com.andrewtinyakov.messenger.message.model.RequestId
 import com.andrewtinyakov.messenger.message.model.pin.PinScope
+import com.andrewtinyakov.messenger.message.service.MessageHistoryService
 import com.andrewtinyakov.messenger.message.service.MessageMutationService
 import com.andrewtinyakov.messenger.message.service.MessagePinService
 import com.andrewtinyakov.messenger.message.service.MessageSendService
@@ -41,6 +42,7 @@ class ChatSequenceTests
         private val sends: MessageSendService,
         private val sendStatus: MessageSendStatusService,
         private val mapper: ObjectMapper,
+        private val history: MessageHistoryService,
     ) : MessengerIntegrationTest() {
         @Test
         fun `each shared write takes one chat sequence and its hint carries it`() {
@@ -223,6 +225,37 @@ class ChatSequenceTests
             assertEquals(chat, chats.list(UserId(member), null, 50).chats.single { it.id == chat }.id)
         }
 
+        @Test
+        fun `a chat resurfaced by a new message stays visible after that message is deleted`() {
+            val owner = user("seq-resurface-owner")
+            val member = user("seq-resurface-member")
+            val chat = group(owner, member)
+            send(owner, chat, "before")
+            deletions.deleteChat(ChatId(chat), UserId(member), RequestId(newId()), DeletionScope.SELF)
+            assertFalse(listed(member, chat))
+
+            val resurfacing = send(owner, chat, "after")
+            assertTrue(listed(member, chat))
+            deletions.deleteMessages(ChatId(chat), UserId(owner), RequestId(newId()), DeletionScope.EVERYONE, listOf(resurfacing))
+            assertTrue(listed(member, chat))
+        }
+
+        @Test
+        fun `change pages end on a whole change and never exceed the limit`() {
+            val owner = user("seq-paging-owner")
+            val member = user("seq-paging-member")
+            val chat = group(owner, member)
+            val edited = send(owner, chat, "edited")
+            val removed = (1..4).map { send(owner, chat, "removed $it") }
+            mutations.edit(ChatId(chat), UserId(owner), edited, "edited again", 1L)
+            deletions.deleteMessages(ChatId(chat), UserId(owner), RequestId(newId()), DeletionScope.EVERYONE, removed)
+
+            val first = history.changes(ChatId(chat), UserId(owner), after = 0, limit = 3)
+            assertEquals(listOf("6"), first.changes.map { it.seq })
+            val second = history.changes(ChatId(chat), UserId(owner), after = first.nextSeq.toLong(), limit = 4)
+            assertEquals(List(4) { "7" }, second.changes.map { it.seq })
+        }
+
         private fun group(owner: String, member: String): String = chats.createGroup(UserId(owner), "Sequences", listOf(UserId(member))).id
 
         private fun send(sender: String, chat: String, body: String): MessageId {
@@ -230,6 +263,9 @@ class ChatSequenceTests
             sends.process(command(sender, request, body, chat = chat))
             return MessageId(sendStatus.status(UserId(sender), RequestId(request)).messageId!!)
         }
+
+        private fun listed(user: String, chat: String): Boolean =
+            chats.list(UserId(user), null, 100).chats.any { it.id == chat }
 
         private fun head(chat: String): Long = column(chat, "next_sequence") - 1
 

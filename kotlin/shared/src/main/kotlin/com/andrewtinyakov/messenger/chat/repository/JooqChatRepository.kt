@@ -213,6 +213,10 @@ class JooqChatRepository(
                     CHATS.LAST_ACTIVITY_AT
                 },
             )
+            .set(
+                CHATS.LAST_MESSAGE_SEQUENCE,
+                if (recordActivity) CHATS.NEXT_SEQUENCE.plus(userIds.size.toLong() - 1) else CHATS.LAST_MESSAGE_SEQUENCE,
+            )
             .where(CHATS.ID.eq(chatId.value), CHATS.DELETED_AT.isNull)
             .and(
                 DSL.field(

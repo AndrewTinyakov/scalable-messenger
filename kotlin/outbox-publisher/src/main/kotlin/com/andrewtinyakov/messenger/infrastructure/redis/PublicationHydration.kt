@@ -103,7 +103,6 @@ class PublicationHydration(
             room = row.room,
             chatId = reference.chatId,
             sequence = reference.sequence,
-            seq = reference.sequence,
         ),
     )
 

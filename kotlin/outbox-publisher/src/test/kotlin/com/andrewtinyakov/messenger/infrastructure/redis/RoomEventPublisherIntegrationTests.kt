@@ -61,7 +61,6 @@ class RoomEventPublisherIntegrationTests {
                     "room" to room,
                     "chatId" to chatId,
                     "sequence" to expected.path("sequence").asText(),
-                    "seq" to expected.path("sequence").asText(),
                 ),
             )
             withLiveMessages(factory, "activity:$chatId") { received ->
@@ -94,7 +93,6 @@ class RoomEventPublisherIntegrationTests {
                     "room" to room,
                     "chatId" to chatId,
                     "sequence" to event.path("sequence").asText(),
-                    "seq" to event.path("sequence").asText(),
                 ),
             )
             withLiveMessages(factory, "activity:$chatId") { received ->
@@ -141,7 +139,7 @@ class RoomEventPublisherIntegrationTests {
             val id = newId()
             val hint = """{"type":"history_changed","version":1,"eventId":"$id","room":"$room","chatId":"${room.removePrefix(
                 "group:",
-            )}","sequence":"9","seq":"9"}"""
+            )}","sequence":"9"}"""
             val live = """{"type":"message_saved","eventId":"$id","room":"$room","body":"ephemeral message content"}"""
             val row = OutboxMessage(EventId(id), room, live, replayPayload = hint)
             val publisher = roomPublisher(ReactiveStringRedisTemplate(factory))

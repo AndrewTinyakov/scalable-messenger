@@ -19,7 +19,7 @@ func validateEventCounters(e Event) error {
 	var valid bool
 	switch e.Type {
 	case EventHistoryChanged:
-		valid = (seq || member) && !user
+		valid = !(seq && member) && !user
 	case EventMessageChanged, EventMembershipChanged, EventChatDeleted:
 		valid = seq && !member && !user
 	case EventPinsChanged:

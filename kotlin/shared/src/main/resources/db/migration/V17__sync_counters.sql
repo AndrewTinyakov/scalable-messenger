@@ -8,7 +8,9 @@ CREATE INDEX message_changes_chat_seq_idx ON message_changes(chat_id, seq, seque
 
 ALTER TABLE chats
     DROP COLUMN mutation_revision,
-    ADD COLUMN pins_seq bigint NOT NULL DEFAULT 0 CHECK (pins_seq >= 0);
+    ADD COLUMN pins_seq bigint NOT NULL DEFAULT 0 CHECK (pins_seq >= 0),
+    ADD COLUMN last_message_sequence bigint NOT NULL DEFAULT 0 CHECK (last_message_sequence >= 0);
+UPDATE chats SET last_message_sequence = next_sequence - 1;
 
 ALTER TABLE chat_members RENAME COLUMN visibility_revision TO member_seq;
 
@@ -16,3 +18,4 @@ ALTER TABLE users ADD COLUMN event_seq bigint NOT NULL DEFAULT 0 CHECK (event_se
 
 ALTER TABLE deletion_operations RENAME COLUMN mutation_revision TO seq;
 ALTER TABLE deletion_operations RENAME COLUMN visibility_revision TO member_seq;
+UPDATE deletion_operations SET seq = 0, member_seq = 0;

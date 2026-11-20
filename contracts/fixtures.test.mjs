@@ -193,7 +193,7 @@ test('bodyless recovery hints and viewer-resolved live replies share strict fixt
   assert.equal(socketHint({ ...fixture, epoch: 'epoch', streamId: '1-0' }), true);
   assert.equal(hint({ ...fixture, body: 'removed text' }), false);
   assert.equal(hint({ ...fixture, mutationRevision: '1' }), false);
-  assert.equal(hint({ ...fixture, seq: undefined }), false);
+  assert.equal(hint({ ...fixture, seq: undefined }), true, 'a replayed saved message carries no counter');
   assert.equal(hint({ ...fixture, seq: undefined, memberSeq: '2' }), true, JSON.stringify(hint.errors));
   assert.equal(hint({ ...fixture, seq: '0' }), false);
   assert.equal(socketHint({ ...fixture, memberSeq: '2', epoch: 'epoch', streamId: '1-0' }), true, 'replay coalescing can merge shared and private hints');

@@ -1,4 +1,5 @@
 $schema: http://json-schema.org/draft-07/schema#
+description: A shared change carries seq, a personal change memberSeq, and a replayed saved message neither.
 title: SocketHistoryChangedV1
 type: object
 additionalProperties: false
@@ -11,11 +12,6 @@ required:
   - sequence
   - epoch
   - streamId
-anyOf:
-  - required:
-      - seq
-  - required:
-      - memberSeq
 properties:
   type:
     const: history_changed

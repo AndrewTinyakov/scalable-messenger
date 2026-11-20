@@ -86,7 +86,7 @@ export class Device {
       }
     }).finally(() => {
       view.readCheck = null;
-      if (owed()) this.recheckReads(id);
+      if (owed()) setTimeout(() => { if (owed()) this.recheckReads(id); }, 250).unref?.();
     });
     return view.readCheck;
   }

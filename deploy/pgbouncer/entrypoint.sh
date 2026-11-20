@@ -6,6 +6,14 @@ umask 077
 role_pool=${PGBOUNCER_POOL_SIZE:-20}
 api_pool=${PGBOUNCER_API_POOL_SIZE:-$role_pool}
 database_cap=${PGBOUNCER_MAX_DB_CONNECTIONS:-80}
+for size in "$role_pool" "$api_pool" "$database_cap"; do
+  case $size in
+    '' | *[!0-9]* | 0*)
+      echo "Pool sizes must be positive integers" >&2
+      exit 64
+      ;;
+  esac
+done
 if [ "$api_pool" -gt $((database_cap - 2 * role_pool)) ]; then
   echo "PGBOUNCER_API_POOL_SIZE=$api_pool leaves no room for the other roles within $database_cap connections" >&2
   exit 64

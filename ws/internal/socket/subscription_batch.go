@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	roomregistry "messenger/ws/internal/room"
+
 	"messenger/ws/internal/grpcauth"
 	"messenger/ws/internal/monitoring"
 	"messenger/ws/internal/protocol"
@@ -35,7 +37,11 @@ func (subscriptions *chatSubscriptions) subscribeMany(items []protocol.Subscript
 }
 
 func (subscriptions *chatSubscriptions) subscribe(items []protocol.Subscription, mode subscriptionMode) error {
-	return subscriptions.subscribeContext(subscriptions.connection.ctx, items, mode)
+	err := subscriptions.subscribeContext(subscriptions.connection.ctx, items, mode)
+	if errors.Is(err, roomregistry.ErrCapacity) {
+		subscriptions.metrics.RecordSubscriptionRefusal(monitoring.SubscriptionRefusedRoomLimit)
+	}
+	return err
 }
 
 func (subscriptions *chatSubscriptions) subscribeContext(base context.Context, items []protocol.Subscription, mode subscriptionMode) error {

@@ -20,6 +20,8 @@ export class Run {
   reads = new Map();
   readFrontiers = new Map();
   readResults = new Set();
+  readWork = new Map();
+  verificationMetrics = new Measurements();
   diagnostics = [];
   background = new Set();
   failedActions = 0;
@@ -36,11 +38,12 @@ export class Run {
   }
 
   saved(record, result, live) {
+    const metrics = this.acceptingEvents === false ? this.verificationMetrics : this.metrics;
     check(isId(result.messageId) && isId(result.chatId) && isSeq(result.sequence), 'invalidSaved');
     check(!record.chatId || record.chatId === result.chatId, 'wrongSendChat');
     if (record.rejected || (record.saved && record.saved.id !== result.messageId) ||
         (this.messages.has(result.messageId) && this.messages.get(result.messageId) !== record)) {
-      this.metrics.count('correctness.conflictingTerminal');
+      metrics.count('correctness.conflictingTerminal');
       return;
     }
     if (record.saved) return;
@@ -51,7 +54,7 @@ export class Run {
     this.messages.set(result.messageId, record);
     for (const [device, at] of this.early.get(result.messageId) ?? []) this.observeRecovered(record, device, result.messageId, at);
     this.early.delete(result.messageId);
-    this.metrics.observe(live ? 'send.ownAck' : 'send.statusConfirmation', performance.now() - record.sent);
+    metrics.observe(live ? 'send.ownAck' : 'send.statusConfirmation', performance.now() - record.sent);
     record.finish(record.saved);
   }
 
@@ -112,6 +115,7 @@ export class Run {
     for (const record of this.reads.get(id) ?? []) {
       // Only a peer that kept the chat open since the read counts; a later reopen measures navigation, not propagation.
       if (record.observed || !record.devices.includes(device) || record.selections.get(device) !== device.selection) continue;
+      if (record.actor !== device.actor && this.roster.get(id)?.kind !== 'DIRECT') continue;
       const value = record.actor === device.actor ? status.throughSequence : status.maxOtherReadSequence;
       if (greater(record.through, value)) continue;
       record.observed = true;
@@ -189,7 +193,14 @@ export class Run {
     return result;
   }
 
-  async read(device, id) {
+  read(device, id) {
+    const key = device.actor + '/' + id;
+    const next = (this.readWork.get(key) ?? Promise.resolve()).catch(() => {}).then(() => this.readAccount(device, id));
+    this.readWork.set(key, next);
+    return next.finally(() => { if (this.readWork.get(key) === next) this.readWork.delete(key); });
+  }
+
+  async readAccount(device, id) {
     if (!device.foreground || device.selected?.id !== id) return;
     const view = device.view(id);
     await view.ready;
@@ -204,7 +215,8 @@ export class Run {
       return;
     }
     view.reads = through;
-    const peers = this.expected(id, device.actor).filter(candidate => candidate !== device && candidate.selected?.id === id);
+    const peers = this.expected(id, device.actor).filter(candidate => candidate !== device && candidate.selected?.id === id &&
+      (candidate.actor === device.actor || this.roster.get(id)?.kind === 'DIRECT'));
     const record = {
       actor: device.actor, through, started: performance.now(), devices: peers, confirmed: false,
       selections: new Map(peers.map(peer => [peer, peer.selection])),
@@ -215,8 +227,8 @@ export class Run {
       const progress = await device.change(chatPath(id) + '/reads', 'POST', { throughSequence: through });
       check(isSeq(progress?.throughSequence) && !greater(through, progress.throughSequence), 'readDidNotAdvance');
       const result = key + '/' + progress.throughSequence + '/' + progress.readAt;
-      record.confirmed = !this.readResults.has(result);
-      this.readResults.add(result);
+      record.confirmed = progress.throughSequence === through && !this.readResults.has(result);
+      if (record.confirmed) this.readResults.add(result);
       if (greater(progress.throughSequence, this.readFrontiers.get(key) ?? '0')) this.readFrontiers.set(key, progress.throughSequence);
       this.metrics.count(record.confirmed ? 'read.frontierConfirmed' : 'read.noop');
       if (record.confirmed && record.observed) this.metrics.observe('read.propagated', record.observedAt - record.started);
@@ -244,7 +256,7 @@ export class Run {
       }
       mutation.status = 'confirmed';
     } catch (error) {
-      mutation.status = error.code === 'network' || /^http5/.test(error.code) ? 'uncertain' : 'rejected';
+      mutation.status = mutation.kind !== 'edit' || error.code === 'network' || /^http5/.test(error.code) ? 'uncertain' : 'rejected';
       throw error;
     }
     if (mutation.kind !== 'edit') {
@@ -296,14 +308,14 @@ export class Run {
     }
     switch (type) {
       case 'appOpen': return device.startup(true, due);
-      case 'appClose': return device.close();
+      case 'appClose': device.appRevision++; return device.close();
       case 'sidebar': return device.sidebar();
       case 'background': device.foreground = false; return;
       case 'foreground':
         device.foreground = true;
         return Promise.all([
           device.get('/auth/session'), device.refreshDirectory(), device.reconcile(),
-          device.catchUp(id), device.refreshFeatures(device.selected),
+          device.catchUp(id), device.refreshFeatures(device.selected, true),
         ]);
       case 'disconnect': return device.disconnect();
       case 'reconnect':
@@ -313,7 +325,7 @@ export class Run {
           await delay(250, undefined, { signal: this.signal });
           device.sidebar();
         });
-        await Promise.all([device.catchUp(id), device.refreshFeatures(device.selected), device.reconcile()]);
+        await Promise.all([device.catchUp(id), device.refreshFeatures(device.selected, true), device.reconcile()]);
         this.metrics.observe('reconnect.caughtUp', performance.now() - due);
         return;
       case 'chatOpen': return device.openChat(await this.knownChat(device, id), due);
@@ -400,10 +412,15 @@ export class Run {
         delete device.credentials.cookie;
         await device.close();
       });
-      case 'login': return device.session(async () => {
-        await authenticate(this.http, device.credentials, 'login');
-        return device.startup(false, due);
-      });
+      case 'login': {
+        const revision = device.appRevision;
+        return device.session(async () => {
+          check(revision === device.appRevision, 'socketClosed');
+          await authenticate(this.http, device.credentials, 'login');
+          check(revision === device.appRevision, 'socketClosed');
+          return device.startup(false, due);
+        });
+      }
       default: throw new Fault('unknownAction');
     }
   }
@@ -429,9 +446,10 @@ export class Run {
 
   async finishTraffic() {
     this.measurementCutoff = new Map(this.devices.flat().map(device => [device, { connection: device.connection, selection: device.selection }]));
+    this.acceptingEvents = false;
+    this.metrics.freeze();
     await Promise.all(this.devices.flat().map(device => device.close()));
     while (this.background.size) await Promise.all([...this.background]);
-    this.acceptingEvents = false;
   }
 
   async verify() {
@@ -478,22 +496,22 @@ export async function run(plan, manifest, http, metrics, { shard = { index: 0, c
       limit: 512 * state.capacity,
     });
     while (state.background.size) await Promise.all([...state.background]);
+    clearInterval(rssTimer);
+    sampleRss();
     await state.finishTraffic();
-    state.verificationMetrics = new Measurements();
     state.verificationHttp = new Http(http.options, state.verificationMetrics);
     correctness = await state.verify();
   } finally {
     await Promise.all(state.devices.flat().map(device => device.close()));
     while (state.background.size) await Promise.all([...state.background]);
     clearInterval(rssTimer);
-    sampleRss();
     state.verificationHttp?.controller.abort();
   }
-  const passed = state.failedActions === 0 && Object.keys(metrics.failures).length === 0 &&
+  const passed = state.failedActions === 0 && Object.keys(metrics.failures).length === 0 && Object.keys(state.verificationMetrics.failures).length === 0 &&
     !metrics.counts.lagExceeded && !correctness.missing && !correctness.pending &&
     !correctness.duplicates && !correctness.durableMismatches && !correctness.durableUnverified && !correctness.recipientsMissing && !correctness.readPropagationMissing;
   return {
-    format: 'messenger-realistic-load-report-v1', profile: plan.profile.name, seed: plan.seed, shard,
+    format: 'messenger-realistic-load-report-v2', profile: plan.profile.name, seed: plan.seed, shard,
     users: plan.population.length, durationMs: plan.profile.durationMs,
     population: Object.fromEntries(plan.profile.personas.map(persona =>
       [persona.name, plan.population.filter(user => user.persona === persona.name).length])),

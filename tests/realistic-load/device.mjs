@@ -58,6 +58,7 @@ export class Device {
   connectionWork = Promise.resolve();
   sessionWork = Promise.resolve();
   connectionRevision = 0;
+  appRevision = 0;
 
   constructor(state, credentials, actor) {
     Object.assign(this, { state, credentials, actor });
@@ -242,7 +243,13 @@ export class Device {
   connect(revision = this.connectionRevision) {
     return this.connectionChange(async () => {
       check(revision === this.connectionRevision, 'socketClosed');
-      await this.socket?.close();
+      if (this.socket) {
+        this.connection++;
+        this.endSelection();
+        this.subscribedTo = null;
+        this.watch.clear();
+        await this.socket.close();
+      }
       const socket = new Socket(this.state.http, this.credentials, frame => this.onFrame(frame));
       this.socket = socket;
       try {
@@ -264,13 +271,13 @@ export class Device {
     this.watch.clear();
     return this.connectionChange(async () => {
       const socket = this.socket;
-      this.socket = null;
       await socket?.close();
+      if (this.socket === socket) this.socket = null;
     });
   }
 
-  async startup(restore, started) {
-    const revision = this.connectionRevision;
+  async startup(restore, started, revision = this.connectionRevision) {
+    check(revision === this.connectionRevision, 'socketClosed');
     this.phase = 'opening';
     this.foreground = true;
     if (restore) {
@@ -281,6 +288,7 @@ export class Device {
       this.refreshDirectory().then(() => this.state.metrics.observe('appOpen.sidebarReady', performance.now() - started)),
       this.connect(revision),
     ]);
+    check(revision === this.connectionRevision, 'socketClosed');
     this.phase = 'open';
     this.backgroundTask('sidebar.initial', async () => {
       await delay(250, undefined, { signal: this.state.signal });
@@ -369,6 +377,7 @@ export class Device {
     const minSeq = seen && greater(seen, view.baseline) ? seen : view.baseline;
     const fresh = !primary && view.loaded ? { minSeq, minMemberSeq: view.member } : {};
     const current = await this.get(chatPath(id) + '/state', fresh);
+    await view.ready;
     check(isSeq(current?.lastSeq) && isSeq(current.mutationSeq) && isSeq(current.memberSeq) && isSeq(current.visibilitySeq) &&
       isSeq(current.pinsSeq) && isSeq(current.memberPinsSeq) &&
       isSeq(current.ownReadThrough) && isSeq(current.otherReadThrough), 'invalidState');
@@ -440,8 +449,8 @@ export class Device {
     });
   }
 
-  async refreshFeatures(chat) {
-    if (!this.connected) return;
+  async refreshFeatures(chat, force = false) {
+    if (!chat || !this.connected) return;
     if (chat.members.length === 0) {
       const details = await this.get(chatPath(chat.id));
       check(details?.id === chat.id && Array.isArray(details.members), 'invalidChatMembers');
@@ -452,7 +461,7 @@ export class Device {
       type: 'watch_presence', chatId: chat.id,
       userIds: chat.members.slice(0, 100).map(member => member.id).sort(),
     });
-    if (this.view(chat.id).stateAt === null || performance.now() - this.view(chat.id).stateAt >= STATE_CHECK_MS) await this.sync(chat.id);
+    if (force || this.view(chat.id).stateAt === null || performance.now() - this.view(chat.id).stateAt >= STATE_CHECK_MS) await this.sync(chat.id, { primary: force });
   }
 
   async openChat(chat, started) {
@@ -482,7 +491,7 @@ export class Device {
         this.refreshChanges(chat.id);
       }
     })();
-    const features = this.refreshFeatures(chat);
+    const features = this.refreshFeatures(chat, true);
     const unread = chat.markedUnread || this.directory.find(row => row.id === chat.id)?.markedUnread;
     await Promise.all([view.ready, features, ...(unread ? [
       this.change(chatPath(chat.id) + '/unread-mark', 'DELETE'),

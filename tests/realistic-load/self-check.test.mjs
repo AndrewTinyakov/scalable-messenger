@@ -210,11 +210,11 @@ test('shard reports merge into the same totals as one combined run', () => {
     parts[index % 2].count('send.saved');
   }
   const report = (part, index) => ({
-    format: 'messenger-realistic-load-report-v1', profile: 'p', seed: 1, shard: { index, count: 2 },
+    format: 'messenger-realistic-load-report-v2', profile: 'p', seed: 1, shard: { index, count: 2 },
     fingerprint: 'plan', startAt: 1, manifestFingerprint: 'stack',
     plannedActions: 3, schedule: { offered: 3, peak: index + 1, pending: 0, lagLimitMs: 1500 },
     correctness: { saved: 3, missing: index }, ticketAdmission: { admitted: 7 + 4 * index, rejected: index, maximumRequestsPerSecond: 75, intervalMs: 1000 / 75, peakPending: index + 2 }, failedActionSamples: [], passed: index === 0,
-    rawMetrics: part.raw(),
+    rawMetrics: part.raw(), verificationRawMetrics: new Measurements().raw(),
   });
   const merged = mergeReports(parts.map(report));
   assert.deepEqual(merged.metrics.latencies, whole.report().latencies);
@@ -310,4 +310,42 @@ test('a selected recovery failure checks primary state as well as uncertain send
   device.onFrame({ type: 'recovery_failed', chatId: 'chat' });
   await Promise.all([...state.background]);
   assert.deepEqual(calls, [['chat', { primary: true }]]);
+});
+
+test('initial state waits for the in-flight history page before deciding on catch-up', async () => {
+  const state = { background: new Set(), capacity: 1, metrics: new Measurements(), recovered() {}, readNotification() {} };
+  const device = new Device(state, {}, 0);
+  device.socket = { opened: true, ws: { readyState: WebSocket.OPEN }, send() {} };
+  device.offerWatch = () => {};
+  let release;
+  let stateRead;
+  const observed = new Promise(resolve => { stateRead = resolve; });
+  const blocked = new Promise(resolve => { release = resolve; });
+  let pages = 0;
+  device.get = async path => {
+    if (path.endsWith('/state')) {
+      stateRead();
+      return { lastSeq: '1', mutationSeq: '0', memberSeq: '0', visibilitySeq: '0', pinsSeq: '0', memberPinsSeq: '0', ownReadThrough: '0', otherReadThrough: '0' };
+    }
+    if (path.includes('/messages/changes')) return { lastSeq: '0', nextSeq: '0', hasMore: false, resetRequired: false, changes: [] };
+    assert.match(path, /\/messages$/);
+    pages++;
+    await blocked;
+    return { messages: [], coverageThroughSequence: '1', mutationSeq: '0', visibilitySeq: '0' };
+  };
+  const opening = device.openChat({ id: 'chat', kind: 'DIRECT', members: [{ id: 'peer' }] }, performance.now());
+  await observed;
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(pages, 1);
+  release();
+  await opening;
+  while (state.background.size) await Promise.all([...state.background]);
+  assert.equal(pages, 1);
+});
+
+test('merging old and corrected reports fails regardless of input order', () => {
+  const metrics = new Measurements().raw();
+  const current = { format: 'messenger-realistic-load-report-v2', rawMetrics: metrics, verificationRawMetrics: metrics };
+  const old = { format: 'messenger-realistic-load-report-v1', rawMetrics: metrics };
+  for (const parts of [[current, old], [old, current]]) assert.throws(() => mergeReports(parts), { code: 'shardReports' });
 });

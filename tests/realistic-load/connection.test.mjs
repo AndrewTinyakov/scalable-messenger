@@ -6,7 +6,7 @@ import test from 'node:test';
 import { Device } from './device.mjs';
 import { Measurements } from './transport.mjs';
 
-test('overlapping connects retain ownership of every socket through shutdown', async () => {
+async function withPeer(acknowledge, work) {
   const sockets = new Set();
   const server = http.createServer();
   server.on('upgrade', (request, socket) => {
@@ -14,7 +14,8 @@ test('overlapping connects retain ownership of every socket through shutdown', a
     socket.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ' + accept + '\r\nSec-WebSocket-Protocol: messenger\r\n\r\n');
     sockets.add(socket);
     socket.on('close', () => sockets.delete(socket));
-    socket.on('data', bytes => { if ((bytes[0] & 15) === 8) socket.end(Buffer.from([0x88, 0])); });
+    socket.on('end', () => socket.end());
+    socket.on('data', bytes => { if (acknowledge && (bytes[0] & 15) === 8) socket.end(Buffer.from([0x88, 0])); });
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const controller = new AbortController();
@@ -23,8 +24,7 @@ test('overlapping connects retain ownership of every socket through shutdown', a
     controller, metrics, request: async () => ({ token: 'fixture' }) }, metrics };
   const device = new Device(state, {}, 0);
   try {
-    await Promise.all([device.connect(), device.connect()]);
-    await device.close();
+    await work(device);
     await Promise.all([...sockets].map(socket => once(socket, 'close', { signal: AbortSignal.timeout(1000) })));
     assert.equal(device.socket, null);
     assert.equal(sockets.size, 0);
@@ -33,5 +33,25 @@ test('overlapping connects retain ownership of every socket through shutdown', a
     for (const socket of sockets) socket.destroy();
     await new Promise(resolve => server.close(resolve));
   }
+}
+
+test('overlapping connects retain ownership and end replaced delivery lifecycles', { timeout: 5000 }, async () => {
+  await withPeer(true, async device => {
+    await Promise.all([device.connect(), device.connect()]);
+    assert.equal(device.connection, 1);
+    assert.equal(device.selection, 1);
+    await device.close();
+  });
 });
 
+test('shutdown terminates a socket whose peer ignores the close handshake', { timeout: 5000 }, async () => {
+  await withPeer(false, async device => {
+    await device.connect();
+    const ws = device.socket.ws;
+    const closing = device.close();
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.ok(device.socket);
+    await closing;
+    assert.equal(ws.readyState, WebSocket.CLOSED);
+  });
+});

@@ -15,6 +15,7 @@ class Verification {
   constructor(state) {
     this.state = state;
     this.http = state.verificationHttp ?? state.http;
+    this.metrics = state.verificationMetrics ?? state.metrics;
   }
 
   sample(kind, fields) {
@@ -23,26 +24,36 @@ class Verification {
 
   async request(device, path, method = 'GET', body) {
     const actor = device.actor;
-    if (!this.credentials.has(actor)) this.credentials.set(actor, { ...device.credentials });
-    let credentials = await this.credentials.get(actor);
-    try {
-      return await this.http.request(credentials, path, method, body);
-    } catch (error) {
-      if (error.code !== 'http401') throw error;
-      if (this.credentials.get(actor) !== credentials) {
-        credentials = await this.credentials.get(actor);
-      } else if (!this.sessions.has(credentials)) {
-        const replacement = { ...credentials, cookie: undefined, deviceId: 'verify-' + ulid() };
-        const refreshing = authenticate(this.http, replacement, 'login').then(() => {
-          this.sessions.add(replacement);
-          this.credentials.set(actor, replacement);
-          return replacement;
-        });
-        this.credentials.set(actor, refreshing);
-        credentials = await refreshing;
-      } else throw error;
-      return this.http.request(credentials, path, method, body);
+    let cached;
+    try { cached = await this.credentials.get(actor); } catch {}
+    const candidates = [cached, device.credentials, ...(this.state.devices[actor] ?? []).map(peer => peer.credentials)];
+    const tried = new Set();
+    for (const candidate of candidates) {
+      if (!candidate || tried.has(candidate.cookie)) continue;
+      tried.add(candidate.cookie);
+      const credentials = { ...candidate };
+      try {
+        const result = await this.http.request(credentials, path, method, body);
+        this.credentials.set(actor, credentials);
+        return result;
+      } catch (error) {
+        if (error.code !== 'http401') throw error;
+      }
     }
+    let refreshing = this.credentials.get(actor);
+    if (!refreshing || typeof refreshing.then !== 'function') {
+      const replacement = { ...device.credentials, cookie: undefined, deviceId: 'verify-' + ulid() };
+      refreshing = authenticate(this.http, replacement, 'login').then(() => {
+        this.sessions.add(replacement);
+        this.credentials.set(actor, replacement);
+        return replacement;
+      }).catch(error => {
+        if (this.credentials.get(actor) === refreshing) this.credentials.delete(actor);
+        throw error;
+      });
+      this.credentials.set(actor, refreshing);
+    }
+    return this.http.request(await refreshing, path, method, body);
   }
 
   async reconcile() {
@@ -64,10 +75,10 @@ class Verification {
               const record = this.state.sends.get(row.requestId);
               if (!record || record.device !== device) continue;
               if (row.result?.status === 'SAVED') this.state.saved(record, row.result, false);
-              if (row.result?.status === 'REJECTED') record.finish(null, row.result.reason ?? 'rejectedByStatus');
+              if (row.result?.status === 'REJECTED') record.finish(null, 'rejectedByStatus');
             }
           } catch (error) {
-            this.state.metrics.failure('verification.status', error);
+            this.metrics.failure('verification.status', error);
             this.sample('statusUnavailable', { userId: device.credentials.userId, code: error.code ?? 'unexpected', requestIds: batch.map(row => row.requestId) });
           }
         }
@@ -124,7 +135,7 @@ class Verification {
         }
       } catch (error) {
         unverified++;
-        this.state.metrics.failure('verification.mutation', error);
+        this.metrics.failure('verification.mutation', error);
         this.sample('mutationUnavailable', { messageId: record.saved.id, chatId: record.saved.chatId, userId: record.device.credentials.userId, code: error.code ?? 'unexpected' });
       }
     }
@@ -152,7 +163,7 @@ class Verification {
           }
         } catch (error) {
           unverified += batch.length;
-          this.state.metrics.failure('verification', error);
+          this.metrics.failure('verification', error);
           this.sample('resolveUnavailable', { chatId: id, userId: device.credentials.userId, code: error.code ?? 'unexpected', messageIds: batch.map(row => row.record.saved.id) });
         }
       }
@@ -182,7 +193,7 @@ class Verification {
     return {
       plannedSends, dispatched: records.length, saved, missing: plannedSends - saved,
       pending: records.filter(record => !record.saved && !record.rejected).length,
-      duplicates: this.state.metrics.counts['correctness.conflictingTerminal'] ?? 0,
+      duplicates: (this.state.metrics.counts['correctness.conflictingTerminal'] ?? 0) + (this.metrics.counts['correctness.conflictingTerminal'] ?? 0),
       durableChecks: checked, durableMismatches: mismatches, durableUnverified: unverified, mutationChecks,
       recipientsExpected: records.reduce((total, record) => total + record.expected.filter(device => device !== record.device).length, 0),
       recipientsMissing: unreceived.filter(row => row.active).length, recipientsInterrupted: unreceived.filter(row => !row.active).length,

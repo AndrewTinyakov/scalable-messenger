@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Run } from './run.mjs';
-import { Fault, Measurements } from './transport.mjs';
+import { Fault, Http, Measurements } from './transport.mjs';
 import { ulid } from '../support/fixtures.mjs';
 
 function fixture(request) {
@@ -23,7 +23,7 @@ function track(state, device, chat, sequence = null) {
   return record;
 }
 
-test('verification counts a confirmation that arrives while resolving earlier rows', async () => {
+test('verification retains the cutoff before the first durable resolve', async () => {
   let release;
   let entered;
   const started = new Promise(resolve => { entered = resolve; });
@@ -43,9 +43,10 @@ test('verification counts a confirmation that arrives while resolving earlier ro
   state.saved(second, { chatId: chat, messageId: ulid(), sequence: '2' }, true);
   release();
   const result = await verifying;
-  assert.equal(result.saved + result.missing, 2);
-  assert.equal(result.saved, result.durableChecks);
-  assert.equal(result.pending, result.saved === 2 ? 0 : 1);
+  assert.equal(result.saved, 1);
+  assert.equal(result.missing, 1);
+  assert.equal(result.pending, 1);
+  assert.equal(result.durableChecks, 1);
 });
 
 test('a duplicate account read does not create a propagation expectation', async () => {
@@ -181,4 +182,199 @@ test('scheduled login cannot replace a session until logout cleanup finishes', a
   release();
   await Promise.all([logout, login]);
   assert.equal(device.credentials.cookie, 'new');
+});
+
+test('a returned frontier above the requested read cannot claim an advance', async () => {
+  const { state, chat, device } = fixture(async () => ({ throughSequence: '9', readAt: '2026-01-01T00:00:00Z' }));
+  device.selected = { id: chat };
+  device.view(chat).messages = [{ sequence: '8', senderId: state.devices[1][0].credentials.userId }];
+  await state.read(device, chat);
+  assert.equal(state.reads.get(chat).length, 0);
+  assert.equal(state.readResults.size, 0);
+  assert.equal(state.readFrontiers.get('0/' + chat), '9');
+});
+
+test('overlapping same-account read writes retain the actual advancing operation', async () => {
+  let release;
+  let entered;
+  const started = new Promise(resolve => { entered = resolve; });
+  const blocked = new Promise(resolve => { release = resolve; });
+  let calls = 0;
+  const { state, chat, device } = fixture(async () => {
+    calls++;
+    entered();
+    await blocked;
+    return { throughSequence: '9', readAt: '2026-01-01T00:00:00Z' };
+  });
+  const twin = new device.constructor(state, { userId: device.credentials.userId }, 0);
+  state.devices[0].push(twin);
+  for (const peer of [device, twin]) {
+    peer.selected = { id: chat };
+    peer.view(chat).messages = [{ sequence: '9', senderId: state.devices[1][0].credentials.userId }];
+  }
+  state.expected = () => [device, twin];
+  const first = state.read(device, chat);
+  await started;
+  const second = state.read(twin, chat);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls, 1);
+  release();
+  await Promise.all([first, second]);
+  assert.equal(calls, 1);
+  assert.equal(state.reads.get(chat).length, 1);
+  assert.equal(state.reads.get(chat)[0].devices.includes(twin), true);
+});
+
+test('an unrelated group member cannot satisfy a reader propagation check', async () => {
+  const { state, chat, device } = fixture(async () => ({ throughSequence: '8', readAt: '2026-01-01T00:00:00Z' }));
+  state.roster.get(chat).kind = 'GROUP';
+  const peer = state.devices[1][0];
+  device.selected = peer.selected = { id: chat };
+  device.view(chat).messages = [{ sequence: '8', senderId: peer.credentials.userId }];
+  state.expected = () => [device, peer];
+  await state.read(device, chat);
+  state.readNotification(peer, chat, { throughSequence: '0', maxOtherReadSequence: '8' });
+  const record = state.reads.get(chat)[0];
+  assert.equal(record.devices.length, 0);
+  assert.equal(record.observed, undefined);
+});
+
+test('app close fences a scheduled login whose authentication is still pending', async () => {
+  let release;
+  let entered;
+  const started = new Promise(resolve => { entered = resolve; });
+  const blocked = new Promise(resolve => { release = resolve; });
+  const { state, device, user } = fixture(async (credentials, path) => {
+    assert.equal(path, '/auth/login');
+    entered();
+    await blocked;
+    return { user: { id: user, username: credentials.username }, deviceId: credentials.deviceId };
+  });
+  Object.assign(device.credentials, { username: 'fixture', deviceId: 'fixture' });
+  let startups = 0;
+  device.startup = async () => { startups++; };
+  const login = state.perform({ type: 'login', actor: 0, device: 0, chat: null });
+  await started;
+  await state.perform({ type: 'appClose', actor: 0, device: 0, chat: null });
+  release();
+  await assert.rejects(login, { code: 'socketClosed' });
+  assert.equal(startups, 0);
+  assert.equal(device.phase, 'closed');
+  assert.equal(device.socket, null);
+});
+
+test('status reconciliation cannot expose a server-supplied rejection reason', async () => {
+  const marker = 'private-response-text';
+  const { state, chat, device } = fixture(async () => ({ results: [{ requestId: record.requestId,
+    result: { status: 'REJECTED', reason: marker } }] }));
+  const record = track(state, device, chat);
+  record.finish = (_, reason) => { record.rejected = reason; };
+  await state.verify();
+  assert.equal(record.rejected, 'rejectedByStatus');
+  assert.doesNotMatch(JSON.stringify(state.diagnostics), /private-response-text/);
+});
+
+test('final reconciliation and failures leave the frozen workload metrics unchanged', async () => {
+  const messageId = ulid();
+  const { state, chat, device } = fixture(async (_, path) => {
+    if (path === '/sends/status') return { results: [{ requestId: record.requestId,
+      result: { status: 'SAVED', messageId, chatId: chat, sequence: '1' } }] };
+    throw new Fault('http503');
+  });
+  const record = track(state, device, chat);
+  state.metrics.startStages([{ atMs: 0, users: 1 }]);
+  await state.finishTraffic();
+  const before = JSON.stringify(state.metrics.raw());
+  const result = await state.verify();
+  assert.equal(result.saved, 1);
+  assert.equal(result.durableUnverified, 1);
+  assert.equal(JSON.stringify(state.metrics.raw()), before);
+  assert.equal(state.verificationMetrics.report().latencies['send.statusConfirmation'].count, 1);
+  assert.equal(state.verificationMetrics.failures['verification/http503'], 1);
+});
+
+test('verification tries a healthy sibling session before a fresh login', async () => {
+  let logins = 0;
+  const { state, chat, device, user } = fixture(async (credentials, path) => {
+    if (path === '/auth/login') { logins++; throw new Fault('http429'); }
+    if (credentials.cookie !== 'healthy') throw new Fault('http401');
+    return { messages: [{ id: record.saved.id, chatId: chat, senderId: user,
+      sequence: '1', messageVersion: '1', body: 'fixture body' }] };
+  });
+  device.credentials.cookie = 'revoked';
+  state.devices[0].push(new device.constructor(state, { userId: user, cookie: 'healthy' }, 0));
+  const record = track(state, device, chat, '1');
+  const result = await state.verify();
+  assert.equal(result.durableChecks, 1);
+  assert.equal(result.durableUnverified, 0);
+  assert.equal(logins, 0);
+});
+
+test('a failed verifier refresh does not poison later batches', async () => {
+  let logins = 0;
+  const { state, chat, device, user } = fixture(async (credentials, path, method, body) => {
+    if (path === '/auth/login') {
+      if (++logins === 1) throw new Fault('http429');
+      credentials.cookie = 'fresh';
+      return { user: { id: user, username: credentials.username }, deviceId: credentials.deviceId };
+    }
+    if (path === '/auth/logout') return null;
+    if (credentials.cookie !== 'fresh') throw new Fault('http401');
+    return { messages: [{ id: body.messageIds[0], chatId: chat, senderId: user,
+      sequence: '2', messageVersion: '1', body: 'fixture body' }] };
+  });
+  Object.assign(device.credentials, { cookie: 'revoked', username: 'fixture' });
+  const record = track(state, device, chat, '1');
+  state.mutations.set(record.saved.id, { kind: 'SELF', device, status: 'uncertain', requestId: ulid() });
+  const second = track(state, device, chat, '2');
+  const result = await state.verify();
+  assert.equal(logins, 2);
+  assert.equal(result.durableUnverified, 1);
+  assert.equal(result.durableChecks, 1);
+  assert.equal(result.durableMismatches, 0);
+  assert.equal(second.saved.sequence, '2');
+});
+
+test('a committed deletion stays uncertain when its retry returns unauthorized', async ({ mock }) => {
+  const { state, chat, device, user } = fixture(async (_, path) => {
+    const mutation = state.mutations.get(record.saved.id);
+    if (path.endsWith('/deletions/' + mutation.requestId)) return { operationId: mutation.requestId, scope: 'EVERYONE' };
+    return { messages: [] };
+  });
+  const record = track(state, device, chat, '1');
+  state.reference = async () => ({ id: record.saved.id, body: record.body, messageVersion: '1' });
+  const http = new Http({ api: 'http://localhost/api', origin: 'http://localhost', authRate: 1, ticketRate: 1 }, new Measurements());
+  let attempts = 0;
+  mock.method(globalThis, 'fetch', async () => {
+    if (++attempts === 1) throw new TypeError('response lost after commit');
+    return new Response(null, { status: 401 });
+  });
+  device.change = (...args) => http.request(device.credentials, ...args);
+  try {
+    await assert.rejects(state.editOrDelete(device, { type: 'deleteEveryone' }, chat, '/chats/' + chat), { code: 'http401' });
+    assert.equal(attempts, 2);
+    assert.equal(state.mutations.get(record.saved.id).status, 'uncertain');
+    const result = await state.verify();
+    assert.equal(result.mutationChecks, 2);
+    assert.equal(result.durableMismatches, 0);
+    assert.equal(result.durableUnverified, 0);
+  } finally {
+    http.controller.abort();
+  }
+});
+
+test('foreground and reconnect force recent selected-chat state recovery', async () => {
+  const { state, chat, device } = fixture(async () => null);
+  const selected = { id: chat, kind: 'DIRECT', members: [{ id: 'peer' }] };
+  device.selected = selected;
+  device.view(chat).stateAt = performance.now();
+  device.socket = { opened: true, ws: { readyState: WebSocket.OPEN }, send() {} };
+  device.offerWatch = () => {};
+  device.connect = async () => {};
+  device.catchUp = device.refreshDirectory = device.reconcile = async () => {};
+  device.backgroundTask = () => {};
+  const checks = [];
+  device.sync = async (id, options) => { checks.push([id, options]); };
+  for (const type of ['foreground', 'reconnect']) await state.perform({ type, actor: 0, device: 0, chat: 0 }, performance.now());
+  assert.deepEqual(checks, [[chat, { primary: true }], [chat, { primary: true }]]);
 });

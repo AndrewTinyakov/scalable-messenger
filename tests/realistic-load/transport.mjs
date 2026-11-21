@@ -1,3 +1,4 @@
+import WebSocket from 'ws';
 import { setTimeout as delay } from 'node:timers/promises';
 import { TicketAdmission } from '../features-load/tickets.mjs';
 import { Histogram } from '../features-load/metrics.mjs';
@@ -19,6 +20,8 @@ export class Measurements {
   stages = null;
   stage = null;
 
+  freeze() { this.frozen = true; }
+
   startStages(stages, started = performance.now()) {
     this.stages = stages.map(stage => ({ ...stage, metrics: new Measurements() }));
     this.stageStarted = started;
@@ -31,22 +34,26 @@ export class Measurements {
   }
 
   count(name, amount = 1) {
+    if (this.frozen) return;
     this.counts[name] = (this.counts[name] ?? 0) + amount;
     this.current()?.count(name, amount);
   }
 
   status(code) {
+    if (this.frozen) return;
     this.statuses[code] = (this.statuses[code] ?? 0) + 1;
     this.current()?.status(code);
   }
 
   observe(name, ms) {
+    if (this.frozen) return;
     if (!this.latencies.has(name)) this.latencies.set(name, new Histogram());
     this.latencies.get(name).observe(Math.max(0, ms));
     this.current()?.observe(name, ms);
   }
 
   failure(operation, error) {
+    if (this.frozen) return;
     const key = operation + '/' + (error instanceof Fault ? error.code : 'unexpected');
     this.failures[key] = (this.failures[key] ?? 0) + 1;
     this.current()?.failure(operation, error);
@@ -220,9 +227,8 @@ export class Socket {
     const ticket = await this.http.request(this.credentials, '/auth/ws-ticket', 'POST');
     check(typeof ticket?.token === 'string' && ticket.token.length <= 4096);
     check(!this.closed, 'socketClosed');
-    const ws = new WebSocket(this.http.options.ws, {
-      protocols: ['messenger', `messenger-ticket.${ticket.token}`],
-      headers: { Origin: this.http.options.origin },
+    const ws = new WebSocket(this.http.options.ws, ['messenger', `messenger-ticket.${ticket.token}`], {
+      headers: { Origin: this.http.options.origin }, maxPayload: 65536, perMessageDeflate: false,
     });
     this.ws = ws;
     ws.addEventListener('message', ({ data }) => {
@@ -275,7 +281,7 @@ export class Socket {
     const ws = this.ws;
     if (!ws || ws.readyState === WebSocket.CLOSED) return;
     await new Promise(resolve => {
-      const timer = setTimeout(resolve, 2000);
+      const timer = setTimeout(() => ws.terminate(), 2000);
       ws.addEventListener('close', () => { clearTimeout(timer); resolve(); }, { once: true });
       ws.close();
     });

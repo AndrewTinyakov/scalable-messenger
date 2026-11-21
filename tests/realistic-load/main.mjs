@@ -64,8 +64,7 @@ async function coordinate(values, workers) {
   const reports = await Promise.all(parts.map(path => json(path, 512 * 2 ** 20).catch(() => null)));
   check(reports.every((report, index) => report && codes[index] === (report.passed ? 0 : 1)), `shardFailed:${codes.join(',')}`);
   const merged = mergeReports(reports);
-  await Promise.all(parts.map(path => rm(path, { force: true })));
-  return merged;
+  return { merged, parts };
 }
 
 async function main() {
@@ -96,8 +95,9 @@ async function main() {
   check(Number.isInteger(workers) && workers >= 1 && workers <= 64 && !(workers > 1 && values.shard), 'workers');
   if (command === 'run' && workers > 1) {
     check(values.report, 'reportRequired');
-    const report = await coordinate(values, workers);
+    const { merged: report, parts } = await coordinate(values, workers);
     await writeFile(values.report, JSON.stringify(report, null, 2) + '\n');
+    await Promise.all(parts.map(path => rm(path, { force: true })));
     summarize(plan, report);
     if (!report.passed) process.exitCode = 1;
     return;

@@ -10,6 +10,13 @@ export class Fault extends Error {
   }
 }
 
+export async function join(tasks) {
+  const results = await Promise.allSettled(tasks);
+  const failed = results.find(result => result.status === 'rejected');
+  if (failed) throw failed.reason;
+  return results.map(result => result.value);
+}
+
 export class Measurements {
   counts = Object.create(null);
   statuses = Object.create(null);
@@ -232,6 +239,7 @@ export class Socket {
     });
     this.ws = ws;
     ws.addEventListener('message', ({ data }) => {
+      if (this.closed) return;
       try {
         check(typeof data === 'string' && Buffer.byteLength(data) <= 65536, 'frameLimit');
         const frame = JSON.parse(data);

@@ -6,7 +6,7 @@ import test from 'node:test';
 import { Device } from './device.mjs';
 import { Measurements } from './transport.mjs';
 
-async function withPeer(acknowledge, work) {
+async function withPeer(acknowledge, work, onClosing) {
   const sockets = new Set();
   const server = http.createServer();
   server.on('upgrade', (request, socket) => {
@@ -15,7 +15,11 @@ async function withPeer(acknowledge, work) {
     sockets.add(socket);
     socket.on('close', () => sockets.delete(socket));
     socket.on('end', () => socket.end());
-    socket.on('data', bytes => { if (acknowledge && (bytes[0] & 15) === 8) socket.end(Buffer.from([0x88, 0])); });
+    socket.on('data', bytes => {
+      if ((bytes[0] & 15) !== 8) return;
+      onClosing?.(socket);
+      if (acknowledge) socket.end(Buffer.from([0x88, 0]));
+    });
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const controller = new AbortController();
@@ -53,5 +57,20 @@ test('shutdown terminates a socket whose peer ignores the close handshake', { ti
     assert.ok(device.socket);
     await closing;
     assert.equal(ws.readyState, WebSocket.CLOSED);
+  });
+});
+
+test('retired socket frames cannot acknowledge the replacement subscription', { timeout: 5000 }, async () => {
+  const chatId = '00000000000000000000000001';
+  await withPeer(true, async device => {
+    device.selected = { id: chatId };
+    await device.connect();
+    await device.connect();
+    assert.equal(device.subscribedTo, null);
+    assert.deepEqual(Object.keys(device.state.metrics.failures), []);
+    await device.close();
+  }, socket => {
+    const payload = Buffer.from(JSON.stringify({ version: 1, type: 'subscribed', chatId }));
+    socket.write(Buffer.concat([Buffer.from([0x81, payload.length]), payload]));
   });
 });

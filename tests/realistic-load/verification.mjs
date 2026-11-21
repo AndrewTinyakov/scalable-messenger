@@ -40,6 +40,17 @@ class Verification {
         if (error.code !== 'http401') throw error;
       }
     }
+    for (;;) {
+      let current;
+      try { current = await this.credentials.get(actor); } catch {}
+      if (!current || tried.has(current.cookie)) break;
+      tried.add(current.cookie);
+      try {
+        return await this.http.request(current, path, method, body);
+      } catch (error) {
+        if (error.code !== 'http401') throw error;
+      }
+    }
     let refreshing = this.credentials.get(actor);
     if (!refreshing || typeof refreshing.then !== 'function') {
       const replacement = { ...device.credentials, cookie: undefined, deviceId: 'verify-' + ulid() };
@@ -94,7 +105,7 @@ class Verification {
     if (mutation.kind === 'edit') return mutation;
     try {
       const status = await this.request(mutation.device, chatPath(record.saved.chatId) + '/deletions/' + mutation.requestId);
-      check(status?.operationId === mutation.requestId && status.scope === mutation.kind, 'invalidDeletionStatus');
+      check(status?.operationId === mutation.requestId && status.scope === mutation.kind && status.target === 'MESSAGES', 'invalidDeletionStatus');
       return { ...mutation, status: 'confirmed' };
     } catch (error) {
       if (error.code === 'http404') return null;
@@ -170,12 +181,14 @@ class Verification {
     });
     const readOperations = [...this.state.reads.values()].flat().filter(record => record.confirmed && record.devices.length);
     const unobserved = readOperations.filter(record => !record.observed);
-    const keptOpen = record => record.devices.some(peer => peer.stayedSelected(record.selections.get(peer), record.started) >= 5000);
+    const selectedFor = (peer, record) => this.state.measurementCutoff?.get(peer)?.selection === record.selections.get(peer)
+      ? this.state.trafficCutoff - record.started : peer.stayedSelected(record.selections.get(peer), record.started);
+    const keptOpen = record => record.devices.some(peer => selectedFor(peer, record) >= 5000);
     const missingReads = unobserved.filter(keptOpen);
     for (const record of missingReads) this.sample('readPropagationMissing', {
       readerId: this.state.devices[record.actor][0].credentials.userId, throughSequence: record.through,
       chatId: [...this.state.reads].find(([, rows]) => rows.includes(record))?.[0],
-      peers: record.devices.map(peer => ({ userId: peer.credentials.userId, selectedSeconds: peer.stayedSelected(record.selections.get(peer), record.started) / 1000 })),
+      peers: record.devices.map(peer => ({ userId: peer.credentials.userId, selectedSeconds: selectedFor(peer, record) / 1000 })),
     });
     const unreceived = records.flatMap(record => record.expected.filter(device => device !== record.device && !record.received.has(device))
       .map(device => ({ record, device, active: (record.group

@@ -5,7 +5,7 @@ import { chatPath, Device, orderedMessages, pageSize } from './device.mjs';
 import { authenticate, messageText, workers } from './setup.mjs';
 import { resolveReference, schedule } from './schedule.mjs';
 import { verifyRun } from './verification.mjs';
-import { check, Fault, greater, Http, isId, isSeq, Measurements } from './transport.mjs';
+import { check, Fault, greater, Http, isId, isSeq, join, Measurements } from './transport.mjs';
 
 const confirmations = new Set(['send', 'forward', 'direct']);
 // In a sharded run the sender and the recipient can live in different processes, so a send carries its wall-clock
@@ -19,7 +19,6 @@ export class Run {
   mutations = new Map();
   reads = new Map();
   readFrontiers = new Map();
-  readResults = new Set();
   readWork = new Map();
   verificationMetrics = new Measurements();
   diagnostics = [];
@@ -65,6 +64,7 @@ export class Run {
   }
 
   notification(device, frame) {
+    if (this.acceptingEvents === false) return;
     const record = this.sends.get(frame.requestId) ?? this.messages.get(frame.messageId);
     if (!record) {
       this.remoteNotification(device, frame);
@@ -84,6 +84,7 @@ export class Run {
   }
 
   remoteNotification(device, frame) {
+    if (this.acceptingEvents === false) return;
     const sentAt = this.shard.count > 1 && !frame.forwardedFromUserId && SENT_AT.exec(frame.body ?? '')?.[1];
     const key = device.credentials.userId + '/' + frame.messageId;
     if (!sentAt || frame.senderId === device.credentials.userId || this.remoteSightings.has(key)) return;
@@ -94,6 +95,7 @@ export class Run {
   }
 
   recovered(device, message) {
+    if (this.acceptingEvents === false) return;
     const record = this.messages.get(message.id);
     if (record) {
       this.observeRecovered(record, device, message.id, performance.now());
@@ -104,12 +106,14 @@ export class Run {
   }
 
   observeRecovered(record, device, messageId, at) {
+    if (this.acceptingEvents === false) return;
     if (record.received.has(device) || !record.expected.includes(device)) return;
     record.received.set(device, messageId);
     this.metrics.observe('send.recipientRecovered', Math.max(0, at - record.sent));
   }
 
   readNotification(device, id, status) {
+    if (this.acceptingEvents === false) return;
     const key = device.actor + '/' + id;
     if (isSeq(status.throughSequence) && greater(status.throughSequence, this.readFrontiers.get(key) ?? '0')) this.readFrontiers.set(key, status.throughSequence);
     for (const record of this.reads.get(id) ?? []) {
@@ -141,7 +145,7 @@ export class Run {
       finish: (message, rejected) => {
         device.pendingSends.delete(record);
         if (rejected) {
-          if (record.saved) this.metrics.count('correctness.conflictingTerminal');
+          if (record.saved) (this.acceptingEvents === false ? this.verificationMetrics : this.metrics).count('correctness.conflictingTerminal');
           record.rejected = rejected;
         }
         finish(message);
@@ -226,9 +230,7 @@ export class Run {
     try {
       const progress = await device.change(chatPath(id) + '/reads', 'POST', { throughSequence: through });
       check(isSeq(progress?.throughSequence) && !greater(through, progress.throughSequence), 'readDidNotAdvance');
-      const result = key + '/' + progress.throughSequence + '/' + progress.readAt;
-      record.confirmed = progress.throughSequence === through && !this.readResults.has(result);
-      if (record.confirmed) this.readResults.add(result);
+      record.confirmed = progress.throughSequence === through;
       if (greater(progress.throughSequence, this.readFrontiers.get(key) ?? '0')) this.readFrontiers.set(key, progress.throughSequence);
       this.metrics.count(record.confirmed ? 'read.frontierConfirmed' : 'read.noop');
       if (record.confirmed && record.observed) this.metrics.observe('read.propagated', record.observedAt - record.started);
@@ -289,12 +291,12 @@ export class Run {
     await device.refreshDirectory();
     await device.openChat(chat, performance.now());
     const path = chatPath(chat.id);
-    await Promise.all([device.get(path), device.get(path + '/members', { limit: 50 })]);
+    await join([device.get(path), device.get(path + '/members', { limit: 50 })]);
     await device.get('/users', { query: added.username });
     await device.change(path + '/members', 'POST', { memberIds: [added.userId] });
-    await Promise.all([device.get(path), device.get(path + '/members', { limit: 50 })]);
+    await join([device.get(path), device.get(path + '/members', { limit: 50 })]);
     await device.change(path + '/members/' + added.userId, 'DELETE');
-    await Promise.all([device.get(path), device.get(path + '/members', { limit: 50 })]);
+    await join([device.get(path), device.get(path + '/members', { limit: 50 })]);
   }
 
   async perform(action, due) {
@@ -313,7 +315,7 @@ export class Run {
       case 'background': device.foreground = false; return;
       case 'foreground':
         device.foreground = true;
-        return Promise.all([
+        return join([
           device.get('/auth/session'), device.refreshDirectory(), device.reconcile(),
           device.catchUp(id), device.refreshFeatures(device.selected, true),
         ]);
@@ -325,7 +327,7 @@ export class Run {
           await delay(250, undefined, { signal: this.signal });
           device.sidebar();
         });
-        await Promise.all([device.catchUp(id), device.refreshFeatures(device.selected, true), device.reconcile()]);
+        await join([device.catchUp(id), device.refreshFeatures(device.selected, true), device.reconcile()]);
         this.metrics.observe('reconnect.caughtUp', performance.now() - due);
         return;
       case 'chatOpen': return device.openChat(await this.knownChat(device, id), due);
@@ -384,7 +386,7 @@ export class Run {
           chatId: id, body: message.body,
           forwardFromChatId: source, forwardFromMessageId: message.id,
         }, this.expected(id, action.actor));
-        const [saved] = await Promise.all([sent, device.openChat(destination, performance.now())]);
+        const [saved] = await join([sent, device.openChat(destination, performance.now())]);
         return saved;
       }
       case 'edit':
@@ -445,11 +447,12 @@ export class Run {
   }
 
   async finishTraffic() {
+    this.trafficCutoff = performance.now();
     this.measurementCutoff = new Map(this.devices.flat().map(device => [device, { connection: device.connection, selection: device.selection }]));
     this.acceptingEvents = false;
     this.metrics.freeze();
-    await Promise.all(this.devices.flat().map(device => device.close()));
-    while (this.background.size) await Promise.all([...this.background]);
+    await join(this.devices.flat().map(device => device.close()));
+    while (this.background.size) await join([...this.background]);
   }
 
   async verify() {
@@ -495,15 +498,15 @@ export async function run(plan, manifest, http, metrics, { shard = { index: 0, c
       failed: (action, error) => { state.failedActions++; metrics.failure('scheduler.' + action.type, error); },
       limit: 512 * state.capacity,
     });
-    while (state.background.size) await Promise.all([...state.background]);
+    while (state.background.size) await join([...state.background]);
     clearInterval(rssTimer);
     sampleRss();
     await state.finishTraffic();
     state.verificationHttp = new Http(http.options, state.verificationMetrics);
     correctness = await state.verify();
   } finally {
-    await Promise.all(state.devices.flat().map(device => device.close()));
-    while (state.background.size) await Promise.all([...state.background]);
+    await join(state.devices.flat().map(device => device.close()));
+    while (state.background.size) await join([...state.background]);
     clearInterval(rssTimer);
     state.verificationHttp?.controller.abort();
   }

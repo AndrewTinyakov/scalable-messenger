@@ -1,7 +1,7 @@
 // One signed-in client device: its socket, selected chat, cached history and background refreshes.
 // It sends the same requests and frames as the browser client for each user-visible flow.
 import { setTimeout as delay } from 'node:timers/promises';
-import { check, Fault, greater, isId, isSeq, query, Socket } from './transport.mjs';
+import { check, Fault, greater, isId, isSeq, join, query, Socket } from './transport.mjs';
 
 const STATE_CHECK_MS = 60_000;
 const statusCodes = new Set(['INVALID_FRAME', 'RATE_LIMITED', 'ROOM_LIMIT', 'UNAUTHORIZED', 'DEPENDENCY_UNAVAILABLE', 'PUBLISH_UNKNOWN', 'PUBLISH_FAILED']);
@@ -139,7 +139,7 @@ export class Device {
         await delay(jitter ? 700 + this.actor % 1300 : 500, undefined, { signal: this.state.signal });
         const batch = [...this.summaries].slice(0, 10);
         for (const [chat] of batch) this.summaries.delete(chat);
-        await Promise.all(batch.map(async ([chat, wanted]) => {
+        await join(batch.map(async ([chat, wanted]) => {
           const row = this.directory.find(item => item.id === chat);
           if (wanted !== null && row && !greater(wanted, row.lastSequence)) return;
           try {
@@ -250,7 +250,9 @@ export class Device {
         this.watch.clear();
         await this.socket.close();
       }
-      const socket = new Socket(this.state.http, this.credentials, frame => this.onFrame(frame));
+      const socket = new Socket(this.state.http, this.credentials, frame => {
+        if (this.socket === socket && revision === this.connectionRevision) this.onFrame(frame);
+      });
       this.socket = socket;
       try {
         await socket.open();
@@ -284,7 +286,7 @@ export class Device {
       const result = await this.get('/auth/session');
       check(result?.userId === this.credentials.userId && result.deviceId === this.credentials.deviceId, 'wrongSession');
     }
-    await Promise.all([
+    await join([
       this.refreshDirectory().then(() => this.state.metrics.observe('appOpen.sidebarReady', performance.now() - started)),
       this.connect(revision),
     ]);
@@ -342,7 +344,23 @@ export class Device {
     return view;
   }
 
-  async catchUp(id, required = '0') {
+  catchUp(id, required = '0') {
+    const view = this.view(id);
+    if (greater(required, view.catchUpRequired ?? '0')) view.catchUpRequired = required;
+    if (view.catchingUp) return view.catchingUp;
+    const work = (async () => {
+      await view.ready?.catch(() => {});
+      do {
+        const wanted = view.catchUpRequired ?? '0';
+        await this.loadCatchUp(id, wanted);
+        check(!greater(wanted, view.baseline), 'catchUpGap');
+      } while (greater(view.catchUpRequired ?? '0', view.baseline));
+    })();
+    view.catchingUp = work.finally(() => { view.catchingUp = null; });
+    return view.catchingUp;
+  }
+
+  async loadCatchUp(id, required) {
     const view = this.view(id);
     if (!view.loaded || view.detached) {
       await this.latest(id);
@@ -377,7 +395,7 @@ export class Device {
     const minSeq = seen && greater(seen, view.baseline) ? seen : view.baseline;
     const fresh = !primary && view.loaded ? { minSeq, minMemberSeq: view.member } : {};
     const current = await this.get(chatPath(id) + '/state', fresh);
-    await view.ready;
+    await view.ready?.catch(() => {});
     check(isSeq(current?.lastSeq) && isSeq(current.mutationSeq) && isSeq(current.memberSeq) && isSeq(current.visibilitySeq) &&
       isSeq(current.pinsSeq) && isSeq(current.memberPinsSeq) &&
       isSeq(current.ownReadThrough) && isSeq(current.otherReadThrough), 'invalidState');
@@ -461,7 +479,7 @@ export class Device {
       type: 'watch_presence', chatId: chat.id,
       userIds: chat.members.slice(0, 100).map(member => member.id).sort(),
     });
-    if (force || this.view(chat.id).stateAt === null || performance.now() - this.view(chat.id).stateAt >= STATE_CHECK_MS) await this.sync(chat.id, { primary: force });
+    if (force || this.view(chat.id).stateAt === null || performance.now() - this.view(chat.id).stateAt >= STATE_CHECK_MS) await this.sync(chat.id);
   }
 
   async openChat(chat, started) {
@@ -493,7 +511,7 @@ export class Device {
     })();
     const features = this.refreshFeatures(chat, true);
     const unread = chat.markedUnread || this.directory.find(row => row.id === chat.id)?.markedUnread;
-    await Promise.all([view.ready, features, ...(unread ? [
+    await join([view.ready, features, ...(unread ? [
       this.change(chatPath(chat.id) + '/unread-mark', 'DELETE'),
     ] : [])]);
   }
@@ -571,7 +589,7 @@ export class Device {
         await this.get(chatPath(chatId) + '/pins', { limit: 50 });
       });
     } else if (type === 'recovery_failed') {
-      this.backgroundTask('live.recovery/' + chatId, () => Promise.all([this.selected?.id === chatId ? this.sync(chatId, { primary: true }) : this.catchUp(chatId), this.reconcile()]));
+      this.backgroundTask('live.recovery/' + chatId, () => join([this.selected?.id === chatId ? this.sync(chatId, { primary: true }) : this.catchUp(chatId), this.reconcile()]));
     } else if (type === 'subscription_expired' && this.selected?.id === chatId) {
       this.subscribe(this.selected);
     } else if ((type === 'send_rejected' || type === 'error') && frame.requestId) {

@@ -190,7 +190,6 @@ test('a returned frontier above the requested read cannot claim an advance', asy
   device.view(chat).messages = [{ sequence: '8', senderId: state.devices[1][0].credentials.userId }];
   await state.read(device, chat);
   assert.equal(state.reads.get(chat).length, 0);
-  assert.equal(state.readResults.size, 0);
   assert.equal(state.readFrontiers.get('0/' + chat), '9');
 });
 
@@ -338,7 +337,7 @@ test('a failed verifier refresh does not poison later batches', async () => {
 test('a committed deletion stays uncertain when its retry returns unauthorized', async ({ mock }) => {
   const { state, chat, device, user } = fixture(async (_, path) => {
     const mutation = state.mutations.get(record.saved.id);
-    if (path.endsWith('/deletions/' + mutation.requestId)) return { operationId: mutation.requestId, scope: 'EVERYONE' };
+    if (path.endsWith('/deletions/' + mutation.requestId)) return { operationId: mutation.requestId, scope: 'EVERYONE', target: 'MESSAGES' };
     return { messages: [] };
   });
   const record = track(state, device, chat, '1');
@@ -376,5 +375,5 @@ test('foreground and reconnect force recent selected-chat state recovery', async
   const checks = [];
   device.sync = async (id, options) => { checks.push([id, options]); };
   for (const type of ['foreground', 'reconnect']) await state.perform({ type, actor: 0, device: 0, chat: 0 }, performance.now());
-  assert.deepEqual(checks, [[chat, { primary: true }], [chat, { primary: true }]]);
+  assert.deepEqual(checks, [[chat, undefined], [chat, undefined]]);
 });

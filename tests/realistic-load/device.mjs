@@ -23,6 +23,12 @@ export function orderedMessages(page, id, ordered = true) {
   return page.messages;
 }
 
+function mergeMessages(before, after) {
+  const unique = new Map(before.map(message => [message.id, message]));
+  for (const message of after) unique.set(message.id, message);
+  return [...unique.values()].sort((a, b) => greater(a.sequence, b.sequence) ? 1 : -1).slice(-150);
+}
+
 export class Device {
   // Sends without a terminal result, so reconciliation never scans the whole run.
   pendingSends = new Set();
@@ -188,7 +194,7 @@ export class Device {
     if (!this.views.has(id)) {
       this.views.set(id, {
         messages: [], baseline: '0', dismissed: '0', loaded: false, reads: '0',
-        mutation: '0', visibility: '0', member: '0', pins: '0', memberPins: '0', stateAt: null, readCheck: null, readOwed: null, readRetry: null, readFailures: 0, changesAfter: null, ready: null, detached: null,
+        mutation: '0', visibility: '0', member: '0', pins: '0', memberPins: '0', stateAt: null, readCheck: null, readOwed: null, readRetry: null, readFailures: 0, changesAfter: null, changesSelection: -1, ready: null, detached: null,
       });
     }
     return this.views.get(id);
@@ -319,12 +325,7 @@ export class Device {
   install(id, page, replace = false) {
     const view = this.view(id);
     const messages = orderedMessages(page, id);
-    if (replace) view.messages = messages;
-    else {
-      const unique = new Map(view.messages.map(message => [message.id, message]));
-      for (const message of messages) unique.set(message.id, message);
-      view.messages = [...unique.values()].sort((a, b) => greater(a.sequence, b.sequence) ? 1 : -1).slice(-150);
-    }
+    view.messages = replace ? messages : mergeMessages(view.messages, messages);
     return view;
   }
 
@@ -332,11 +333,11 @@ export class Device {
     const selection = this.selection;
     const page = await this.get(chatPath(id) + '/messages', { limit: pageSize });
     check(isSeq(page?.coverageThroughSequence) && isSeq(page?.mutationSeq) && isSeq(page?.visibilitySeq));
+    const messages = orderedMessages(page, id);
     const view = this.view(id);
-    if (view.changesAfter !== null && (selection !== this.selection || greater(view.mutation, page.mutationSeq) || greater(view.visibility, page.visibilitySeq))) return view;
+    if (view.changesAfter !== null && (view.changesSelection > selection || greater(view.mutation, page.mutationSeq) || greater(view.visibility, page.visibilitySeq))) return null;
     const ahead = view.messages.filter(message => greater(message.sequence, page.coverageThroughSequence));
-    this.install(id, page, true);
-    if (ahead.length) this.install(id, { messages: ahead });
+    view.messages = mergeMessages(messages, ahead);
     if (greater(page.coverageThroughSequence, view.baseline)) {
       view.baseline = page.coverageThroughSequence;
       view.dismissed = view.baseline;
@@ -348,6 +349,7 @@ export class Device {
     for (const message of page.messages) this.state.recovered(this, message);
     if (this.selected?.id === id && this.selection === selection && view.changesAfter === null) {
       view.changesAfter = page.mutationSeq;
+      view.changesSelection = selection;
       this.refreshChanges(id);
     }
     return view;
@@ -373,10 +375,18 @@ export class Device {
     return view.catchingUp;
   }
 
+  async refreshSnapshot(id, required = '0') {
+    const view = this.view(id);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (await this.latest(id) || !greater(required, view.baseline)) return;
+    }
+    throw new Fault('catchUpSnapshotStale');
+  }
+
   async loadCatchUp(id, required) {
     const view = this.view(id);
     if (!view.loaded || view.detached || this.selected?.id === id && view.changesAfter === null) {
-      await this.latest(id);
+      await this.refreshSnapshot(id, required);
       return;
     }
     const baseline = view.baseline;
@@ -397,7 +407,7 @@ export class Device {
       check(greater(page.nextSequence, afterSeq), 'catchUpCursor');
       afterSeq = page.nextSequence;
     }
-    await this.latest(id);
+    await this.refreshSnapshot(id, required);
   }
 
   // Mirrors the browser: one /state check returns every counter the selected chat needs, and only the
@@ -432,7 +442,7 @@ export class Device {
         this.install(id, { messages: fresh });
       }
       view.visibility = current.visibilitySeq;
-      await this.latest(id);
+      await this.refreshSnapshot(id, current.lastSeq);
     } else if (!view.loaded || greater(current.lastSeq, view.baseline)) {
       await this.catchUp(id, current.lastSeq);
     }
@@ -512,6 +522,7 @@ export class Device {
     this.subscribe(chat);
     const view = this.view(chat.id);
     view.changesAfter = null;
+    view.changesSelection = -1;
     const selection = this.selection;
     const ready = (async () => {
       try {
@@ -522,6 +533,7 @@ export class Device {
         this.state.metrics.observe('chatOpen.firstPageReady', performance.now() - started);
         if (this.selected?.id === chat.id && this.selection === selection && view.changesAfter === null) {
           view.changesAfter = view.mutation;
+          view.changesSelection = selection;
           this.refreshChanges(chat.id);
         }
       } finally {

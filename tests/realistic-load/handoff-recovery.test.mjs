@@ -89,7 +89,7 @@ for (const kind of ['edit', 'delete', 'selfDelete']) {
   });
 }
 
-for (const ordering of ['selected', 'left while loading', 'opened after protection', 'jumped after disconnect']) {
+for (const ordering of ['selected', 'left while loading', 'opened after protection', 'jumped after disconnect', 'jumped during fallback']) {
 test('handoff retains the new anchor and one page budget at the pagination limit: ' + ordering, { timeout: 10_000 }, async () => {
   const { state, device, chatId, otherId, chat, other, row } = fixture();
   const anchorRows = Array.from({ length: 50 }, (_, i) => row(i + 1));
@@ -97,6 +97,7 @@ test('handoff retains the new anchor and one page budget at the pagination limit
   Object.assign(view, { messages: [row(99)], loaded: true, baseline: '99', mutation: '0', changesAfter: '99', changesSelection: 0 });
   const twentieth = gate();
   const around = gate();
+  const fallback = gate();
   let pageRequests = 0;
   let latestRequests = 0;
   let completed = false;
@@ -121,7 +122,10 @@ test('handoff retains the new anchor and one page budget at the pagination limit
       if (end === 1049) Object.assign(messages.at(-1), { replyToMessageId: anchorRows[0].id, replySenderId: messages.at(-1).senderId, replyBody: anchorRows[0].body });
       return { messages, coverageThroughSequence: String(end), snapshotSequence: '1200', visibilitySeq: '0', nextSequence: String(end), hasMore: true };
     }
-    if (!isOther) latestRequests++;
+    if (!isOther) {
+      latestRequests++;
+      if (ordering === 'jumped during fallback') { fallback.entered(); await fallback.blocked; }
+    }
     return { messages: isOther ? [] : Array.from({ length: 50 }, (_, i) => row(1151 + i)), coverageThroughSequence: isOther ? '0' : '1200', mutationSeq: isOther ? '0' : '1200', visibilitySeq: '0' };
   };
   let opening;
@@ -140,7 +144,8 @@ test('handoff retains the new anchor and one page budget at the pagination limit
   const result = device.catchUp(chatId, '1100').then(() => { completed = true; return null; }, error => { completed = true; return error; });
   await twentieth.requested;
   view.detached = anchorRows[0];
-  if (ordering === 'jumped after disconnect') {
+  const jumping = ordering.startsWith('jumped');
+  if (jumping) {
     await device.disconnect();
     opening = state.perform({ type: 'jump', actor: 0, device: 0, chat: 0, reference: { quotedBack: 1 } }, performance.now());
   } else {
@@ -149,24 +154,30 @@ test('handoff retains the new anchor and one page budget at the pagination limit
     else opening = device.openChat(chat, performance.now());
   }
   await around.requested;
-  const restoredOwner = ordering === 'jumped after disconnect' ? device.selection : view.changesSelection;
-  if (ordering === 'left while loading' || ordering === 'jumped after disconnect') await device.openChat(other, performance.now());
-  if (ordering !== 'jumped after disconnect') twentieth.release();
+  const restoredOwner = jumping ? device.selection : view.changesSelection;
+  if (ordering === 'left while loading' || jumping) await device.openChat(other, performance.now());
+  if (ordering === 'jumped during fallback') {
+    twentieth.release();
+    await fallback.requested;
+  } else if (!jumping) twentieth.release();
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(completed, false);
-  assert.equal(latestRequests, 0);
+  assert.equal(latestRequests, ordering === 'jumped during fallback' ? 1 : 0);
   around.release();
   await opening;
+  const installed = view.installedWindow;
   if (ordering === 'jumped after disconnect') twentieth.release();
+  if (ordering === 'jumped during fallback') fallback.release();
   const error = await result;
   while (state.background.size) await Promise.all([...state.background]);
   assert.equal(error?.code, 'catchUpGap');
   assert.equal(pageRequests, 20);
-  assert.equal(latestRequests, 0);
+  assert.equal(latestRequests, ordering === 'jumped during fallback' ? 1 : 0);
   assert.equal(view.messages.length, 50);
   assert.equal(view.messages[0].id, anchorRows[0].id);
   assert.equal(view.detached.id, anchorRows[0].id);
-  assert.equal(view.changesSelection, ordering === 'jumped after disconnect' ? 0 : restoredOwner);
+  assert.equal(view.changesSelection, jumping ? 0 : restoredOwner);
+  assert.equal(view.installedWindow, installed);
   assert.equal(view.installedWindow?.selection, restoredOwner);
 });
 }

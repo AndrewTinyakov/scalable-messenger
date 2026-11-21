@@ -332,12 +332,13 @@ export class Device {
     return view;
   }
 
-  async latest(id) {
+  async latest(id, protection = null) {
     const selection = this.selection;
     const page = await this.get(chatPath(id) + '/messages', { limit: pageSize });
     check(isSeq(page?.coverageThroughSequence) && isSeq(page?.mutationSeq) && isSeq(page?.visibilitySeq));
     const messages = orderedMessages(page, id);
     const view = this.view(id);
+    if (protection && (protection.owner !== windowOwner(view) || protection.installed !== view.installedWindow)) return null;
     if (windowOwner(view) > selection || view.changesAfter !== null && (greater(view.mutation, page.coverageThroughSequence) || greater(view.visibility, page.visibilitySeq))) return null;
     const ahead = view.messages.filter(message => greater(message.sequence, page.coverageThroughSequence));
     view.messages = mergeMessages(messages, ahead);
@@ -402,7 +403,7 @@ export class Device {
         check(recovery.remainingPages > 0, 'catchUpGap');
         return this.catchUpPages(id, required, recovery);
       }
-      if (await this.latest(id)) {
+      if (await this.latest(id, protection)) {
         recovery.hasMore = false;
         return;
       }

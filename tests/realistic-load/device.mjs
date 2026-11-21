@@ -30,7 +30,7 @@ function mergeMessages(before, after) {
 }
 
 const windowOwner = view => Math.max(view.changesSelection, view.installedWindow?.selection ?? -1);
-const recoveryState = selection => ({ selection, remainingPages: 20, window: null, hasMore: false });
+const recoveryState = (selection, view) => ({ selection, installation: view.installedWindow, remainingPages: 20, window: null, hasMore: false });
 
 export class Device {
   // Sends without a terminal result, so reconciliation never scans the whole run.
@@ -342,7 +342,8 @@ export class Device {
     if (windowOwner(view) > selection || view.changesAfter !== null && (greater(view.mutation, page.coverageThroughSequence) || greater(view.visibility, page.visibilitySeq))) return null;
     const ahead = view.messages.filter(message => greater(message.sequence, page.coverageThroughSequence));
     view.messages = mergeMessages(messages, ahead);
-    view.installedWindow = { selection };
+    const installation = { selection };
+    view.installedWindow = installation;
     if (greater(page.coverageThroughSequence, view.baseline)) {
       view.baseline = page.coverageThroughSequence;
       view.dismissed = view.baseline;
@@ -357,14 +358,14 @@ export class Device {
       view.changesSelection = selection;
       this.refreshChanges(id);
     }
-    return view;
+    return installation;
   }
 
   catchUp(id, required = '0') {
     const view = this.view(id);
     if (greater(required, view.catchUpRequired ?? '0')) view.catchUpRequired = required;
     if (view.catchingUp) return view.catchingUp;
-    const recovery = recoveryState(this.selection);
+    const recovery = recoveryState(this.selection, view);
     const work = (async () => {
       try {
         await view.ready?.catch(() => {});
@@ -383,17 +384,17 @@ export class Device {
 
   async protectWindow(id, recovery) {
     const view = this.view(id);
-    if (windowOwner(view) <= recovery.selection) return { owner: windowOwner(view), installed: view.installedWindow };
+    if (windowOwner(view) <= recovery.selection && view.installedWindow === recovery.installation) return { owner: windowOwner(view), installed: view.installedWindow };
     const ready = view.ready;
     await ready?.catch(() => {});
     if (view.ready && view.ready !== ready) return false;
-    if (view.installedWindow?.selection > recovery.selection && recovery.window?.installation !== view.installedWindow) {
+    if (view.installedWindow && view.installedWindow !== recovery.installation && recovery.window?.installation !== view.installedWindow) {
       recovery.window = { installation: view.installedWindow, ids: new Set(view.messages.map(message => message.id)) };
     }
     return { owner: windowOwner(view), installed: view.installedWindow };
   }
 
-  async refreshSnapshot(id, required = '0', recovery = recoveryState(this.selection)) {
+  async refreshSnapshot(id, required = '0', recovery = recoveryState(this.selection, this.view(id))) {
     const view = this.view(id);
     for (let attempt = 0; attempt < 3; attempt++) {
       const protection = await this.protectWindow(id, recovery);
@@ -403,17 +404,18 @@ export class Device {
         check(recovery.remainingPages > 0, 'catchUpGap');
         return this.catchUpPages(id, required, recovery);
       }
-      if (await this.latest(id, protection)) {
+      const installation = await this.latest(id, protection);
+      if (installation) {
+        recovery.installation = installation;
         recovery.hasMore = false;
         return;
       }
       if (!recovery.hasMore && !greater(required, view.baseline)) return;
-      check(recovery.remainingPages > 0 || protection.installed === view.installedWindow, 'catchUpGap');
     }
     throw new Fault('catchUpSnapshotStale');
   }
 
-  async loadCatchUp(id, required, recovery = recoveryState(this.selection)) {
+  async loadCatchUp(id, required, recovery = recoveryState(this.selection, this.view(id))) {
     const view = this.view(id);
     if (windowOwner(view) > recovery.selection || !view.loaded || view.detached || this.selected?.id === id && view.changesAfter === null) {
       await this.refreshSnapshot(id, required, recovery);
@@ -422,7 +424,7 @@ export class Device {
     return this.catchUpPages(id, required, recovery);
   }
 
-  async catchUpPages(id, required, recovery = recoveryState(this.selection)) {
+  async catchUpPages(id, required, recovery = recoveryState(this.selection, this.view(id))) {
     const view = this.view(id);
     const baseline = view.baseline;
     let afterSeq = baseline;

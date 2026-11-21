@@ -89,7 +89,7 @@ for (const kind of ['edit', 'delete', 'selfDelete']) {
   });
 }
 
-for (const ordering of ['selected', 'left while loading', 'opened after protection', 'jumped after disconnect', 'jumped during fallback', 'jumped in same selection during fallback']) {
+for (const ordering of ['selected', 'left while loading', 'opened after protection', 'jumped after disconnect', 'jumped during fallback', 'jumped in same selection during fallback', 'jumped in same selection during page']) {
 test('handoff retains the new anchor and one page budget at the pagination limit: ' + ordering, { timeout: 10_000 }, async () => {
   const { state, device, chatId, otherId, chat, other, row } = fixture();
   const anchorRows = Array.from({ length: 50 }, (_, i) => row(i + 1));
@@ -101,7 +101,7 @@ test('handoff retains the new anchor and one page budget at the pagination limit
   let pageRequests = 0;
   let latestRequests = 0;
   let completed = false;
-  const sameSelection = ordering === 'jumped in same selection during fallback';
+  const sameSelection = ordering.startsWith('jumped in same selection');
   const duringFallback = ordering.endsWith('during fallback');
   device.get = async (path, args) => {
     const isOther = path.includes(otherId);
@@ -170,7 +170,7 @@ test('handoff retains the new anchor and one page budget at the pagination limit
   around.release();
   await opening;
   const installed = view.installedWindow;
-  if (ordering === 'jumped after disconnect') twentieth.release();
+  if (ordering === 'jumped after disconnect' || ordering === 'jumped in same selection during page') twentieth.release();
   if (duringFallback) fallback.release();
   const error = await result;
   while (state.background.size) await Promise.all([...state.background]);
@@ -178,6 +178,7 @@ test('handoff retains the new anchor and one page budget at the pagination limit
   assert.equal(pageRequests, 20);
   assert.equal(latestRequests, duringFallback ? 1 : 0);
   assert.equal(view.messages.length, 50);
+  assert.deepEqual(view.messages.map(message => message.id), anchorRows.map(message => message.id));
   assert.equal(view.messages[0].id, anchorRows[0].id);
   assert.equal(view.detached.id, anchorRows[0].id);
   assert.equal(view.changesSelection, jumping ? 0 : restoredOwner);

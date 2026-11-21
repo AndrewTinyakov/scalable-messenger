@@ -250,8 +250,9 @@ test('an older changes reset cannot reseed the cursor of a reopened anchor view'
   assert.deepEqual(Object.keys(state.metrics.failures), []);
 });
 
+for (const baseline of ['99', '100']) {
 for (const resetBeforeAnchor of [true, false]) {
-  test('a reset snapshot cannot skip a newer edit when it returns ' + (resetBeforeAnchor ? 'before' : 'after') + ' the reopened anchor', { timeout: 10_000 }, async () => {
+  test('a reset snapshot cannot skip a newer edit when it returns ' + (resetBeforeAnchor ? 'before' : 'after') + ' the reopened anchor from baseline ' + baseline, { timeout: 10_000 }, async () => {
     const chatId = ulid();
     const otherId = ulid();
     const userId = ulid();
@@ -264,7 +265,7 @@ for (const resetBeforeAnchor of [true, false]) {
     const chat = { id: chatId, kind: 'DIRECT', members: [] };
     const other = { id: otherId, kind: 'DIRECT', members: [] };
     device.selected = chat;
-    Object.assign(device.view(chatId), { messages: rows.slice(54), loaded: true, baseline: '100', mutation: '2', changesAfter: '1', changesSelection: 0, detached: rows[0] });
+    Object.assign(device.view(chatId), { messages: rows.slice(54).filter(row => BigInt(row.sequence) <= BigInt(baseline)), loaded: true, baseline, mutation: '2', changesAfter: '1', changesSelection: 0, detached: rows[0] });
     const gates = Array.from({ length: 3 }, () => {
       let release;
       let entered;
@@ -290,23 +291,29 @@ for (const resetBeforeAnchor of [true, false]) {
         return { messages: rows.slice(0, 50), mutationSeq: '2', anchorMessageId: rows[0].id };
       }
       assert.match(path, /\/messages$/);
+      if (args?.afterSeq) return { messages: rows.filter(row => BigInt(row.sequence) > BigInt(args.afterSeq)), coverageThroughSequence: '101', nextSequence: '101', hasMore: false };
       if (!isOther) {
         const gate = gates[snapshots++];
-        assert.ok(gate);
-        gate.entered();
-        await gate.blocked;
+        if (gate && snapshots <= 2) { gate.entered(); await gate.blocked; }
       }
       return { messages: isOther ? [] : rows.slice(54), coverageThroughSequence: isOther ? '0' : '101', mutationSeq: isOther ? '0' : editCommitted ? '101' : '2', visibilitySeq: '0' };
     };
     const resetting = device.refreshChanges(chatId);
     await gates[0].requested;
-    const catchingUp = device.catchUp(chatId, '100');
+    let caughtUp = false;
+    const catchingUp = device.catchUp(chatId, '100').then(() => { caughtUp = true; });
     await gates[1].requested;
     await device.openChat(other, performance.now());
     const reopening = device.openChat(chat, performance.now());
     await gates[2].requested;
     editCommitted = true;
     if (resetBeforeAnchor) { gates[0].release(); await resetting; }
+    if (baseline === '99') {
+      gates[1].release();
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(caughtUp, false);
+      assert.equal(snapshots, 2);
+    }
     gates[2].release();
     await reopening;
     await new Promise(resolve => setImmediate(resolve));
@@ -320,6 +327,9 @@ for (const resetBeforeAnchor of [true, false]) {
     assert.equal(device.view(chatId).messages[0].sequence, '1');
     assert.equal(device.view(chatId).messages[0].body, 'edited-at-101');
     assert.equal(device.view(chatId).changesSelection, device.selection);
+    assert.equal(device.view(chatId).baseline, baseline === '99' ? '101' : '100');
+    assert.equal(snapshots, 2);
     assert.deepEqual(Object.keys(state.metrics.failures), []);
   });
+}
 }

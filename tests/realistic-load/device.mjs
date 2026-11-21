@@ -359,12 +359,13 @@ export class Device {
     const view = this.view(id);
     if (greater(required, view.catchUpRequired ?? '0')) view.catchUpRequired = required;
     if (view.catchingUp) return view.catchingUp;
+    const selection = this.selection;
     const work = (async () => {
       try {
         await view.ready?.catch(() => {});
         do {
           const wanted = view.catchUpRequired ?? '0';
-          await this.loadCatchUp(id, wanted);
+          await this.loadCatchUp(id, wanted, selection);
           check(!greater(wanted, view.baseline), 'catchUpGap');
         } while (greater(view.catchUpRequired ?? '0', view.baseline) || this.selected?.id === id && view.changesAfter === null);
       } finally {
@@ -375,20 +376,31 @@ export class Device {
     return view.catchingUp;
   }
 
-  async refreshSnapshot(id, required = '0') {
+  async refreshSnapshot(id, required = '0', selection = this.selection) {
     const view = this.view(id);
     for (let attempt = 0; attempt < 3; attempt++) {
+      if (view.changesSelection > selection) {
+        const ready = view.ready;
+        await ready?.catch(() => {});
+        if (view.ready && view.ready !== ready) continue;
+        if (view.loaded && view.changesAfter !== null) return this.catchUpPages(id, required);
+      }
       if (await this.latest(id) || !greater(required, view.baseline)) return;
     }
     throw new Fault('catchUpSnapshotStale');
   }
 
-  async loadCatchUp(id, required) {
+  async loadCatchUp(id, required, selection = this.selection) {
     const view = this.view(id);
-    if (!view.loaded || view.detached || this.selected?.id === id && view.changesAfter === null) {
-      await this.refreshSnapshot(id, required);
+    if (view.changesSelection > selection || !view.loaded || view.detached || this.selected?.id === id && view.changesAfter === null) {
+      await this.refreshSnapshot(id, required, selection);
       return;
     }
+    return this.catchUpPages(id, required);
+  }
+
+  async catchUpPages(id, required) {
+    const view = this.view(id);
     const baseline = view.baseline;
     let afterSeq = baseline;
     for (let pageNumber = 0; pageNumber < 20; pageNumber++) {

@@ -332,7 +332,11 @@ export class Device {
     const selection = this.selection;
     const page = await this.get(chatPath(id) + '/messages', { limit: pageSize });
     check(isSeq(page?.coverageThroughSequence) && isSeq(page?.mutationSeq) && isSeq(page?.visibilitySeq));
-    const view = this.install(id, page, true);
+    const view = this.view(id);
+    if (view.changesAfter !== null && (selection !== this.selection || greater(view.mutation, page.mutationSeq) || greater(view.visibility, page.visibilitySeq))) return view;
+    const ahead = view.messages.filter(message => greater(message.sequence, page.coverageThroughSequence));
+    this.install(id, page, true);
+    if (ahead.length) this.install(id, { messages: ahead });
     if (greater(page.coverageThroughSequence, view.baseline)) {
       view.baseline = page.coverageThroughSequence;
       view.dismissed = view.baseline;

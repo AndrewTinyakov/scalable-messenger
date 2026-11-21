@@ -360,7 +360,7 @@ export class Device {
           const wanted = view.catchUpRequired ?? '0';
           await this.loadCatchUp(id, wanted);
           check(!greater(wanted, view.baseline), 'catchUpGap');
-        } while (greater(view.catchUpRequired ?? '0', view.baseline));
+        } while (greater(view.catchUpRequired ?? '0', view.baseline) || this.selected?.id === id && view.changesAfter === null);
       } finally {
         if (view.catchingUp === work) view.catchingUp = null;
       }
@@ -371,7 +371,7 @@ export class Device {
 
   async loadCatchUp(id, required) {
     const view = this.view(id);
-    if (!view.loaded || view.detached) {
+    if (!view.loaded || view.detached || this.selected?.id === id && view.changesAfter === null) {
       await this.latest(id);
       return;
     }
@@ -408,6 +408,7 @@ export class Device {
     check(isSeq(current?.lastSeq) && isSeq(current.mutationSeq) && isSeq(current.memberSeq) && isSeq(current.visibilitySeq) &&
       isSeq(current.pinsSeq) && isSeq(current.memberPinsSeq) &&
       isSeq(current.ownReadThrough) && isSeq(current.otherReadThrough), 'invalidState');
+    if (this.selected?.id === id && view.changesAfter === null) await this.catchUp(id, current.lastSeq);
     if (greater(current.ownReadThrough, view.reads)) view.reads = current.ownReadThrough;
     this.state.readNotification(this, id, { throughSequence: current.ownReadThrough, maxOtherReadSequence: current.otherReadThrough });
     if (greater(current.memberSeq, view.member)) view.member = current.memberSeq;

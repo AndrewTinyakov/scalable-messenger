@@ -99,7 +99,7 @@ test('immediate selected state checks retain sequence floors', async () => {
   const state = fixture(async () => {});
   const device = state.devices[0][0];
   const id = ulid();
-  Object.assign(device.view(id), { loaded: true, baseline: '4', member: '3', stateAt: performance.now() });
+  Object.assign(device.view(id), { loaded: true, baseline: '4', member: '3', changesAfter: '0', stateAt: performance.now() });
   const selected = { id, kind: 'DIRECT', members: [{ id: ulid() }] };
   device.selected = selected;
   device.socket = { opened: true, ws: { readyState: WebSocket.OPEN } };

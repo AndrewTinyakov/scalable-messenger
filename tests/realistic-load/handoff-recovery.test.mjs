@@ -89,7 +89,8 @@ for (const kind of ['edit', 'delete', 'selfDelete']) {
   });
 }
 
-test('handoff retains the new anchor and one page budget at the pagination limit', { timeout: 10_000 }, async () => {
+for (const ordering of ['selected', 'left while loading', 'opened after protection']) {
+test('handoff retains the new anchor and one page budget at the pagination limit: ' + ordering, { timeout: 10_000 }, async () => {
   const { state, device, chatId, otherId, chat, other, row } = fixture();
   const anchorRows = Array.from({ length: 50 }, (_, i) => row(i + 1));
   const view = device.view(chatId);
@@ -121,12 +122,28 @@ test('handoff retains the new anchor and one page budget at the pagination limit
     if (!isOther) latestRequests++;
     return { messages: isOther ? [] : Array.from({ length: 50 }, (_, i) => row(1151 + i)), coverageThroughSequence: isOther ? '0' : '1200', mutationSeq: isOther ? '0' : '1200', visibilitySeq: '0' };
   };
+  let opening;
+  if (ordering === 'opened after protection') {
+    device.directory = [chat, other];
+    const protect = device.protectWindow.bind(device);
+    let triggered = false;
+    device.protectWindow = (id, recovery) => protect(id, recovery).then(result => {
+      if (id === chatId && recovery.remainingPages === 0 && !triggered) {
+        triggered = true;
+        opening = state.perform({ type: 'chatOpen', actor: 0, device: 0, chat: 0 }, performance.now());
+      }
+      return result;
+    });
+  }
   const result = device.catchUp(chatId, '1100').then(() => { completed = true; return null; }, error => { completed = true; return error; });
   await twentieth.requested;
   view.detached = anchorRows[0];
   await device.openChat(other, performance.now());
-  const opening = device.openChat(chat, performance.now());
+  if (ordering === 'opened after protection') twentieth.release();
+  else opening = device.openChat(chat, performance.now());
   await around.requested;
+  const restoredOwner = view.changesSelection;
+  if (ordering === 'left while loading') await device.openChat(other, performance.now());
   twentieth.release();
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(completed, false);
@@ -141,5 +158,42 @@ test('handoff retains the new anchor and one page budget at the pagination limit
   assert.equal(view.messages.length, 50);
   assert.equal(view.messages[0].id, anchorRows[0].id);
   assert.equal(view.detached.id, anchorRows[0].id);
-  assert.equal(view.changesSelection, device.selection);
+  assert.equal(view.changesSelection, restoredOwner);
+  assert.equal(view.installedSelection, restoredOwner);
+});
+}
+
+test('a late around response cannot replace the window of a newer open', { timeout: 10_000 }, async () => {
+  const { state, device, chatId, otherId, chat, other, row } = fixture();
+  const olderRows = Array.from({ length: 50 }, (_, i) => row(i + 1));
+  const newerRows = Array.from({ length: 46 }, (_, i) => row(i + 55));
+  const view = device.view(chatId);
+  Object.assign(view, { messages: newerRows, loaded: true, baseline: '100', mutation: '2', changesAfter: '2', changesSelection: 0, installedSelection: 0 });
+  const older = gate();
+  device.get = async path => {
+    const isOther = path.includes(otherId);
+    if (path.endsWith('/messages/changes')) {
+      const seq = isOther ? '0' : '101';
+      return { lastSeq: seq, nextSeq: seq, resetRequired: false, changes: [] };
+    }
+    if (path.endsWith('/messages/around')) {
+      older.entered();
+      await older.blocked;
+      return { messages: olderRows, mutationSeq: '2', anchorMessageId: olderRows[0].id };
+    }
+    assert.match(path, /\/messages$/);
+    return { messages: isOther ? [] : newerRows, coverageThroughSequence: isOther ? '0' : '101', mutationSeq: isOther ? '0' : '101', visibilitySeq: '0' };
+  };
+  const jumping = device.around(chatId, olderRows[0]);
+  await older.requested;
+  await device.openChat(other, performance.now());
+  await device.openChat(chat, performance.now());
+  while (state.background.size) await Promise.all([...state.background]);
+  const owner = view.installedSelection;
+  older.release();
+  await jumping;
+  assert.equal(view.messages[0].sequence, '55');
+  assert.equal(view.installedSelection, owner);
+  assert.equal(view.changesSelection, owner);
+  assert.equal(view.changesAfter, '101');
 });

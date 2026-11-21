@@ -196,7 +196,7 @@ export class Device {
     if (!this.views.has(id)) {
       this.views.set(id, {
         messages: [], baseline: '0', dismissed: '0', loaded: false, reads: '0',
-        mutation: '0', visibility: '0', member: '0', pins: '0', memberPins: '0', stateAt: null, readCheck: null, readOwed: null, readRetry: null, readFailures: 0, changesAfter: null, changesSelection: -1, ready: null, detached: null,
+        mutation: '0', visibility: '0', member: '0', pins: '0', memberPins: '0', stateAt: null, readCheck: null, readOwed: null, readRetry: null, readFailures: 0, changesAfter: null, changesSelection: -1, installedSelection: -1, ready: null, detached: null,
       });
     }
     return this.views.get(id);
@@ -340,6 +340,7 @@ export class Device {
     if (view.changesSelection > selection || view.changesAfter !== null && (greater(view.mutation, page.coverageThroughSequence) || greater(view.visibility, page.visibilitySeq))) return null;
     const ahead = view.messages.filter(message => greater(message.sequence, page.coverageThroughSequence));
     view.messages = mergeMessages(messages, ahead);
+    view.installedSelection = selection;
     if (greater(page.coverageThroughSequence, view.baseline)) {
       view.baseline = page.coverageThroughSequence;
       view.dismissed = view.baseline;
@@ -380,20 +381,21 @@ export class Device {
 
   async protectWindow(id, recovery) {
     const view = this.view(id);
-    if (view.changesSelection <= recovery.selection) return true;
+    if (view.changesSelection <= recovery.selection) return { owner: view.changesSelection, installed: view.installedSelection };
     const ready = view.ready;
     await ready?.catch(() => {});
     if (view.ready && view.ready !== ready) return false;
-    if (view.loaded && view.changesAfter !== null && recovery.window?.selection !== view.changesSelection) {
-      recovery.window = { selection: view.changesSelection, ids: new Set(view.messages.map(message => message.id)) };
+    if (view.installedSelection > recovery.selection && recovery.window?.selection !== view.installedSelection) {
+      recovery.window = { selection: view.installedSelection, ids: new Set(view.messages.map(message => message.id)) };
     }
-    return true;
+    return { owner: view.changesSelection, installed: view.installedSelection };
   }
 
   async refreshSnapshot(id, required = '0', recovery = recoveryState(this.selection)) {
     const view = this.view(id);
     for (let attempt = 0; attempt < 3; attempt++) {
-      if (!await this.protectWindow(id, recovery)) continue;
+      const protection = await this.protectWindow(id, recovery);
+      if (!protection || protection.owner !== view.changesSelection || protection.installed !== view.installedSelection) continue;
       if (recovery.window) {
         if (!recovery.hasMore && !greater(required, view.baseline)) return;
         check(recovery.remainingPages > 0, 'catchUpGap');
@@ -424,11 +426,13 @@ export class Device {
     while (recovery.remainingPages > 0) {
       let accepted = false;
       for (let attempt = 0; attempt < 3; attempt++) {
-        if (!await this.protectWindow(id, recovery)) continue;
+        let protection = await this.protectWindow(id, recovery);
+        if (!protection || protection.owner !== view.changesSelection || protection.installed !== view.installedSelection) continue;
         const page = await this.get(chatPath(id) + '/messages', { afterSeq, limit: pageSize });
         check(isSeq(page?.coverageThroughSequence) && isSeq(page?.nextSequence) && typeof page.hasMore === 'boolean');
         const messages = orderedMessages(page, id);
-        if (!await this.protectWindow(id, recovery)) continue;
+        protection = await this.protectWindow(id, recovery);
+        if (!protection || protection.owner !== view.changesSelection || protection.installed !== view.installedSelection) continue;
         if (recovery.window) {
           check(isSeq(page.snapshotSequence) && isSeq(page.visibilitySeq), 'invalidHistorySnapshot');
           if (greater(view.mutation, page.snapshotSequence) || greater(view.visibility, page.visibilitySeq)) continue;
@@ -600,11 +604,15 @@ export class Device {
   }
 
   async around(id, anchor, restoring = false) {
+    const selection = this.selection;
     const result = await this.get(chatPath(id) + '/messages/around', {
       messageId: anchor.id, ...(restoring ? { anchorSequence: anchor.sequence } : {}), limit: pageSize,
     });
     check(isSeq(result?.mutationSeq), 'invalidAround');
-    const view = this.install(id, result, true);
+    const view = this.view(id);
+    if (view.changesSelection > selection) return;
+    this.install(id, result, true);
+    view.installedSelection = selection;
     if (greater(result.mutationSeq, view.mutation)) view.mutation = result.mutationSeq;
     view.detached = view.messages.find(message => message.id === result.anchorMessageId) ?? anchor;
   }

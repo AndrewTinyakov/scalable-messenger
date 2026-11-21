@@ -249,3 +249,77 @@ test('an older changes reset cannot reseed the cursor of a reopened anchor view'
   assert.equal(device.view(chatId).detached.id, rows[0].id);
   assert.deepEqual(Object.keys(state.metrics.failures), []);
 });
+
+for (const resetBeforeAnchor of [true, false]) {
+  test('a reset snapshot cannot skip a newer edit when it returns ' + (resetBeforeAnchor ? 'before' : 'after') + ' the reopened anchor', { timeout: 10_000 }, async () => {
+    const chatId = ulid();
+    const otherId = ulid();
+    const userId = ulid();
+    const rows = Array.from({ length: 100 }, (_, i) => ({ id: ulid(), chatId, senderId: userId, sequence: String(i + 1), messageVersion: '1', body: 'row-' + (i + 1) }));
+    const edited = { ...rows[0], messageVersion: '2', body: 'edited-at-101' };
+    const state = new Run({ chats: [] }, { devices: [[{ userId }]], chats: [chatId, otherId] }, {
+      options: {}, controller: new AbortController(),
+    }, new Measurements());
+    const device = state.devices[0][0];
+    const chat = { id: chatId, kind: 'DIRECT', members: [] };
+    const other = { id: otherId, kind: 'DIRECT', members: [] };
+    device.selected = chat;
+    Object.assign(device.view(chatId), { messages: rows.slice(54), loaded: true, baseline: '100', mutation: '2', changesAfter: '1', changesSelection: 0, detached: rows[0] });
+    const gates = Array.from({ length: 3 }, () => {
+      let release;
+      let entered;
+      const blocked = new Promise(resolve => { release = resolve; });
+      const requested = new Promise(resolve => { entered = resolve; });
+      return { release, entered, blocked, requested };
+    });
+    let snapshots = 0;
+    let changes = 0;
+    let editCommitted = false;
+    const cursors = [];
+    device.get = async (path, args) => {
+      const isOther = path.includes(otherId);
+      if (path.endsWith('/messages/changes')) {
+        if (isOther) return { lastSeq: '0', nextSeq: '0', resetRequired: false, changes: [] };
+        cursors.push(args.afterSeq);
+        if (++changes === 1) return { lastSeq: '100', nextSeq: '100', resetRequired: true, changes: [] };
+        return { lastSeq: '101', nextSeq: '101', resetRequired: false, changes: args.afterSeq !== '101' ? [{ kind: 'UPSERT', seq: '101', sequence: '1', messageId: edited.id, message: edited }] : [] };
+      }
+      if (path.endsWith('/messages/around')) {
+        gates[2].entered();
+        await gates[2].blocked;
+        return { messages: rows.slice(0, 50), mutationSeq: '2', anchorMessageId: rows[0].id };
+      }
+      assert.match(path, /\/messages$/);
+      if (!isOther) {
+        const gate = gates[snapshots++];
+        assert.ok(gate);
+        gate.entered();
+        await gate.blocked;
+      }
+      return { messages: isOther ? [] : rows.slice(54), coverageThroughSequence: isOther ? '0' : '101', mutationSeq: isOther ? '0' : editCommitted ? '101' : '2', visibilitySeq: '0' };
+    };
+    const resetting = device.refreshChanges(chatId);
+    await gates[0].requested;
+    const catchingUp = device.catchUp(chatId, '100');
+    await gates[1].requested;
+    await device.openChat(other, performance.now());
+    const reopening = device.openChat(chat, performance.now());
+    await gates[2].requested;
+    editCommitted = true;
+    if (resetBeforeAnchor) { gates[0].release(); await resetting; }
+    gates[2].release();
+    await reopening;
+    await new Promise(resolve => setImmediate(resolve));
+    assert.ok(cursors.includes('2'));
+    assert.equal(device.view(chatId).messages[0].body, 'edited-at-101');
+    assert.equal(device.view(chatId).changesAfter, '101');
+    if (!resetBeforeAnchor) { gates[0].release(); await resetting; }
+    gates[1].release();
+    await catchingUp;
+    while (state.background.size) await Promise.all([...state.background]);
+    assert.equal(device.view(chatId).messages[0].sequence, '1');
+    assert.equal(device.view(chatId).messages[0].body, 'edited-at-101');
+    assert.equal(device.view(chatId).changesSelection, device.selection);
+    assert.deepEqual(Object.keys(state.metrics.failures), []);
+  });
+}

@@ -335,7 +335,7 @@ export class Device {
     check(isSeq(page?.coverageThroughSequence) && isSeq(page?.mutationSeq) && isSeq(page?.visibilitySeq));
     const messages = orderedMessages(page, id);
     const view = this.view(id);
-    if (view.changesAfter !== null && (view.changesSelection > selection || greater(view.mutation, page.coverageThroughSequence) || greater(view.visibility, page.visibilitySeq))) return null;
+    if (view.changesSelection > selection || view.changesAfter !== null && (greater(view.mutation, page.coverageThroughSequence) || greater(view.visibility, page.visibilitySeq))) return null;
     const ahead = view.messages.filter(message => greater(message.sequence, page.coverageThroughSequence));
     view.messages = mergeMessages(messages, ahead);
     if (greater(page.coverageThroughSequence, view.baseline)) {
@@ -452,7 +452,7 @@ export class Device {
     const selection = this.selection;
     const view = this.view(id);
     if (view.changesAfter === null || this.selected?.id !== id) return;
-    return this.backgroundTask('live.changes/' + id, async () => {
+    return this.backgroundTask('live.changes/' + id + '/' + selection, async () => {
       let afterSeq = view.changesAfter;
       for (let n = 0; n < 10 && afterSeq !== null && this.selected?.id === id && this.selection === selection; n++) {
         const page = await this.get(chatPath(id) + '/messages/changes', { afterSeq, limit: 100 });
@@ -527,8 +527,8 @@ export class Device {
     this.subscribe(chat);
     const view = this.view(chat.id);
     view.changesAfter = null;
-    view.changesSelection = -1;
     const selection = this.selection;
+    view.changesSelection = selection;
     const ready = (async () => {
       try {
         if (view.detached) {

@@ -373,7 +373,7 @@ export class Device {
           const wanted = view.catchUpRequired ?? '0';
           await this.loadCatchUp(id, wanted, recovery);
           check(!greater(wanted, view.baseline), 'catchUpGap');
-          check(this.selected?.id !== id || view.changesAfter !== null || view.ready !== null, 'catchUpCursorMissing');
+          check(this.selected?.id !== id || view.changesAfter !== null || view.ready !== null || !recovery.window, 'catchUpCursorMissing');
         } while (greater(view.catchUpRequired ?? '0', view.baseline) || this.selected?.id === id && view.changesAfter === null);
       } finally {
         if (view.catchingUp === work) view.catchingUp = null;

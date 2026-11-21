@@ -84,7 +84,8 @@ for (const trigger of ['disconnect during initial history', 'failed reopen with 
   });
 }
 
-test('recovery stops when a failed reopen leaves a protected window without a change cursor', { timeout: 10_000 }, async () => {
+for (const replacement of [true, false]) {
+test('a failed reopen ends recovery or repairs its cursor depending on a replacement window: ' + replacement, { timeout: 10_000 }, async () => {
   const chatId = ulid();
   const otherId = ulid();
   const userId = ulid();
@@ -104,6 +105,7 @@ test('recovery stops when a failed reopen leaves a protected window without a ch
   const blocked = new Promise(resolve => { release = resolve; });
   let failNext = false;
   let requests = 0;
+  let snapshots = 0;
   device.get = async (path, args) => {
     requests++;
     const isOther = path.includes(otherId);
@@ -117,6 +119,7 @@ test('recovery stops when a failed reopen leaves a protected window without a ch
       return { messages: [rows[1]], coverageThroughSequence: '2', snapshotSequence: '2', visibilitySeq: '0', nextSequence: '2', hasMore: false };
     }
     if (!isOther && failNext) { failNext = false; throw new Fault('http503'); }
+    if (!isOther) snapshots++;
     return { messages: isOther ? [] : rows, coverageThroughSequence: seq, mutationSeq: seq, visibilitySeq: '0' };
   };
   const load = device.loadCatchUp.bind(device);
@@ -126,22 +129,25 @@ test('recovery stops when a failed reopen leaves a protected window without a ch
     return load(...args);
   };
   const recovering = device.catchUp(chatId, '2');
-  const outcome = assert.rejects(recovering, { code: 'catchUpCursorMissing' });
+  const outcome = replacement ? assert.rejects(recovering, { code: 'catchUpCursorMissing' }) : recovering;
   await requested;
   await device.openChat(other, performance.now());
-  await device.openChat(chat, performance.now());
+  if (replacement) await device.openChat(chat, performance.now());
   while (state.background.size) await Promise.all([...state.background]);
   const installation = view.installedWindow;
-  await device.openChat(other, performance.now());
+  if (replacement) await device.openChat(other, performance.now());
   failNext = true;
   await assert.rejects(device.openChat(chat, performance.now()), { code: 'http503' });
   assert.equal(view.changesAfter, null);
   const before = requests;
+  const snapshotsBefore = snapshots;
   release();
   await outcome;
-  assert.equal(requests, before);
+  if (replacement) assert.equal(requests, before);
+  assert.equal(snapshots - snapshotsBefore, replacement ? 0 : 1);
   assert.equal(view.catchingUp, null);
-  assert.equal(view.installedWindow, installation);
+  if (replacement) assert.equal(view.installedWindow, installation);
+  else assert.equal(view.changesAfter, '2');
   assert.deepEqual(view.messages.map(message => message.id), rows.map(message => message.id));
   await device.sync(chatId, { primary: true });
   while (state.background.size) await Promise.all([...state.background]);
@@ -149,3 +155,4 @@ test('recovery stops when a failed reopen leaves a protected window without a ch
   assert.equal(view.baseline, '2');
   assert.deepEqual(view.messages.map(message => message.id), rows.map(message => message.id));
 });
+}

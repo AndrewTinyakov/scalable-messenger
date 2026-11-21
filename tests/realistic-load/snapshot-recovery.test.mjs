@@ -291,7 +291,7 @@ for (const resetBeforeAnchor of [true, false]) {
         return { messages: rows.slice(0, 50), mutationSeq: '2', anchorMessageId: rows[0].id };
       }
       assert.match(path, /\/messages$/);
-      if (args?.afterSeq) return { messages: rows.filter(row => BigInt(row.sequence) > BigInt(args.afterSeq)), coverageThroughSequence: '101', nextSequence: '101', hasMore: false };
+      if (args?.afterSeq) return { messages: rows.filter(row => BigInt(row.sequence) > BigInt(args.afterSeq)), coverageThroughSequence: '101', snapshotSequence: '101', visibilitySeq: '0', nextSequence: '101', hasMore: false };
       if (!isOther) {
         const gate = gates[snapshots++];
         if (gate && snapshots <= 2) { gate.entered(); await gate.blocked; }

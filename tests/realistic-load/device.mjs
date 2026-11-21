@@ -29,6 +29,8 @@ function mergeMessages(before, after) {
   return [...unique.values()].sort((a, b) => greater(a.sequence, b.sequence) ? 1 : -1).slice(-150);
 }
 
+const recoveryState = selection => ({ selection, remainingPages: 20, window: null, hasMore: false });
+
 export class Device {
   // Sends without a terminal result, so reconciliation never scans the whole run.
   pendingSends = new Set();
@@ -359,13 +361,13 @@ export class Device {
     const view = this.view(id);
     if (greater(required, view.catchUpRequired ?? '0')) view.catchUpRequired = required;
     if (view.catchingUp) return view.catchingUp;
-    const selection = this.selection;
+    const recovery = recoveryState(this.selection);
     const work = (async () => {
       try {
         await view.ready?.catch(() => {});
         do {
           const wanted = view.catchUpRequired ?? '0';
-          await this.loadCatchUp(id, wanted, selection);
+          await this.loadCatchUp(id, wanted, recovery);
           check(!greater(wanted, view.baseline), 'catchUpGap');
         } while (greater(view.catchUpRequired ?? '0', view.baseline) || this.selected?.id === id && view.changesAfter === null);
       } finally {
@@ -376,50 +378,82 @@ export class Device {
     return view.catchingUp;
   }
 
-  async refreshSnapshot(id, required = '0', selection = this.selection) {
+  async protectWindow(id, recovery) {
+    const view = this.view(id);
+    if (view.changesSelection <= recovery.selection) return true;
+    const ready = view.ready;
+    await ready?.catch(() => {});
+    if (view.ready && view.ready !== ready) return false;
+    if (view.loaded && view.changesAfter !== null && recovery.window?.selection !== view.changesSelection) {
+      recovery.window = { selection: view.changesSelection, ids: new Set(view.messages.map(message => message.id)) };
+    }
+    return true;
+  }
+
+  async refreshSnapshot(id, required = '0', recovery = recoveryState(this.selection)) {
     const view = this.view(id);
     for (let attempt = 0; attempt < 3; attempt++) {
-      if (view.changesSelection > selection) {
-        const ready = view.ready;
-        await ready?.catch(() => {});
-        if (view.ready && view.ready !== ready) continue;
-        if (view.loaded && view.changesAfter !== null) return this.catchUpPages(id, required);
+      if (!await this.protectWindow(id, recovery)) continue;
+      if (recovery.window) {
+        if (!recovery.hasMore && !greater(required, view.baseline)) return;
+        check(recovery.remainingPages > 0, 'catchUpGap');
+        return this.catchUpPages(id, required, recovery);
       }
-      if (await this.latest(id) || !greater(required, view.baseline)) return;
+      if (await this.latest(id)) {
+        recovery.hasMore = false;
+        return;
+      }
+      if (!recovery.hasMore && !greater(required, view.baseline)) return;
     }
     throw new Fault('catchUpSnapshotStale');
   }
 
-  async loadCatchUp(id, required, selection = this.selection) {
+  async loadCatchUp(id, required, recovery = recoveryState(this.selection)) {
     const view = this.view(id);
-    if (view.changesSelection > selection || !view.loaded || view.detached || this.selected?.id === id && view.changesAfter === null) {
-      await this.refreshSnapshot(id, required, selection);
+    if (view.changesSelection > recovery.selection || !view.loaded || view.detached || this.selected?.id === id && view.changesAfter === null) {
+      await this.refreshSnapshot(id, required, recovery);
       return;
     }
-    return this.catchUpPages(id, required);
+    return this.catchUpPages(id, required, recovery);
   }
 
-  async catchUpPages(id, required) {
+  async catchUpPages(id, required, recovery = recoveryState(this.selection)) {
     const view = this.view(id);
     const baseline = view.baseline;
     let afterSeq = baseline;
-    for (let pageNumber = 0; pageNumber < 20; pageNumber++) {
-      const page = await this.get(chatPath(id) + '/messages', { afterSeq, limit: pageSize });
-      check(isSeq(page?.coverageThroughSequence) && isSeq(page?.nextSequence) && typeof page.hasMore === 'boolean');
-      this.install(id, page);
-      for (const message of page.messages) this.state.recovered(this, message);
-      if (greater(page.coverageThroughSequence, view.baseline)) view.baseline = page.coverageThroughSequence;
-      if (!page.hasMore) {
-        check(!greater(required, view.baseline), 'catchUpGap');
-        if (this.connected && greater(view.baseline, baseline) && greater(view.baseline, view.dismissed)) {
-          this.send({ type: 'applied', chatId: id, sequence: view.baseline });
+    while (recovery.remainingPages > 0) {
+      let accepted = false;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        if (!await this.protectWindow(id, recovery)) continue;
+        const page = await this.get(chatPath(id) + '/messages', { afterSeq, limit: pageSize });
+        check(isSeq(page?.coverageThroughSequence) && isSeq(page?.nextSequence) && typeof page.hasMore === 'boolean');
+        const messages = orderedMessages(page, id);
+        if (!await this.protectWindow(id, recovery)) continue;
+        if (recovery.window) {
+          check(isSeq(page.snapshotSequence) && isSeq(page.visibilitySeq), 'invalidHistorySnapshot');
+          if (greater(view.mutation, page.snapshotSequence) || greater(view.visibility, page.visibilitySeq)) continue;
         }
-        return;
+        const visible = recovery.window ? messages.filter(message => recovery.window.ids.has(message.id)) : messages;
+        view.messages = mergeMessages(view.messages, visible);
+        for (const message of messages) this.state.recovered(this, message);
+        recovery.remainingPages--;
+        recovery.hasMore = page.hasMore;
+        if (greater(page.coverageThroughSequence, view.baseline)) view.baseline = page.coverageThroughSequence;
+        if (!page.hasMore) {
+          check(!greater(required, view.baseline), 'catchUpGap');
+          if (this.connected && greater(view.baseline, baseline) && greater(view.baseline, view.dismissed)) {
+            this.send({ type: 'applied', chatId: id, sequence: view.baseline });
+          }
+          return;
+        }
+        check(greater(page.nextSequence, afterSeq), 'catchUpCursor');
+        afterSeq = page.nextSequence;
+        accepted = true;
+        break;
       }
-      check(greater(page.nextSequence, afterSeq), 'catchUpCursor');
-      afterSeq = page.nextSequence;
+      check(accepted, 'catchUpSnapshotStale');
     }
-    await this.refreshSnapshot(id, required);
+    await this.refreshSnapshot(id, required, recovery);
   }
 
   // Mirrors the browser: one /state check returns every counter the selected chat needs, and only the

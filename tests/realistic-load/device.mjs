@@ -329,6 +329,7 @@ export class Device {
   }
 
   async latest(id) {
+    const selection = this.selection;
     const page = await this.get(chatPath(id) + '/messages', { limit: pageSize });
     check(isSeq(page?.coverageThroughSequence) && isSeq(page?.mutationSeq) && isSeq(page?.visibilitySeq));
     const view = this.install(id, page, true);
@@ -341,6 +342,10 @@ export class Device {
     view.mutation = page.mutationSeq;
     view.visibility = page.visibilitySeq;
     for (const message of page.messages) this.state.recovered(this, message);
+    if (this.selected?.id === id && this.selection === selection && view.changesAfter === null) {
+      view.changesAfter = page.mutationSeq;
+      this.refreshChanges(id);
+    }
     return view;
   }
 
@@ -487,7 +492,7 @@ export class Device {
   }
 
   async openChat(chat, started) {
-    if (this.selected?.id === chat.id && (this.view(chat.id).ready || this.view(chat.id).loaded)) {
+    if (this.selected?.id === chat.id && (this.view(chat.id).ready || this.view(chat.id).changesAfter !== null)) {
       await this.view(chat.id).ready;
       this.state.metrics.observe('chatOpen.firstPageReady', performance.now() - started);
       return;
@@ -502,27 +507,28 @@ export class Device {
     this.subscribe(chat);
     const view = this.view(chat.id);
     view.changesAfter = null;
-    view.ready = (async () => {
-      if (view.detached) {
-        const anchor = view.detached;
-        await this.around(chat.id, anchor, true);
-      } else await this.latest(chat.id);
-      this.state.metrics.observe('chatOpen.firstPageReady', performance.now() - started);
-      if (this.selected?.id === chat.id) {
-        view.changesAfter = view.mutation;
-        this.refreshChanges(chat.id);
+    const selection = this.selection;
+    const ready = (async () => {
+      try {
+        if (view.detached) {
+          const anchor = view.detached;
+          await this.around(chat.id, anchor, true);
+        } else await this.latest(chat.id);
+        this.state.metrics.observe('chatOpen.firstPageReady', performance.now() - started);
+        if (this.selected?.id === chat.id && this.selection === selection && view.changesAfter === null) {
+          view.changesAfter = view.mutation;
+          this.refreshChanges(chat.id);
+        }
+      } finally {
+        if (view.ready === ready) view.ready = null;
       }
     })();
-    const ready = view.ready;
+    view.ready = ready;
     const features = this.refreshFeatures(chat, true);
     const unread = chat.markedUnread || this.directory.find(row => row.id === chat.id)?.markedUnread;
-    try {
-      await join([ready, features, ...(unread ? [
-        this.change(chatPath(chat.id) + '/unread-mark', 'DELETE'),
-      ] : [])]);
-    } finally {
-      if (view.ready === ready) view.ready = null;
-    }
+    await join([ready, features, ...(unread ? [
+      this.change(chatPath(chat.id) + '/unread-mark', 'DELETE'),
+    ] : [])]);
   }
 
   async around(id, anchor, restoring = false) {

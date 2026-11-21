@@ -78,7 +78,7 @@ test('state recovery can retry history after the initial open failed', async () 
     if (++pages === 1) throw new Fault('http503');
     return page('2');
   };
-  device.subscribe = () => {};
+  device.subscribe = device.refreshChanges = () => {};
   await assert.rejects(device.openChat(selected, performance.now()), { code: 'http503' });
   await device.sync(id);
   assert.equal(pages, 2);
@@ -301,4 +301,76 @@ test('same-chat open retries a failed initial page before state recovery', async
   assert.equal(pages, 2);
   assert.equal(device.view(id).loaded, true);
   assert.equal(device.view(id).ready, null);
+});
+
+test('a settled history error is retired while unread cleanup still drains', async () => {
+  const state = fixture(async () => {});
+  const device = state.devices[0][0];
+  const id = ulid();
+  const selected = { id, kind: 'DIRECT', members: [], markedUnread: true };
+  state.manifest.chats.push(id);
+  state.roster.set(id, { kind: 'DIRECT', members: [0] });
+  const deletion = deferred();
+  let pages = 0;
+  let reads = 0;
+  device.subscribe = device.refreshChanges = () => {};
+  device.get = async path => {
+    if (path.endsWith('/state')) return counters('1');
+    if (++pages === 1) throw new Fault('invalidJson');
+    return page('1');
+  };
+  device.change = async (path, method) => {
+    if (method === 'DELETE') return deletion.promise;
+    reads++;
+    return { throughSequence: '1' };
+  };
+  let finished = false;
+  const opening = device.openChat(selected, performance.now()).catch(error => { finished = true; return error; });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(finished, false);
+  assert.equal(device.view(id).ready, null);
+  await device.sync(id);
+  await device.openChat(selected, performance.now());
+  device.view(id).messages = [{ sequence: '1', senderId: ulid() }];
+  await state.perform({ type: 'read', actor: 0, device: 0, chat: 0 });
+  assert.equal(reads, 1);
+  assert.equal(finished, false);
+  deletion.resolve();
+  assert.equal((await opening).code, 'invalidJson');
+});
+
+test('selected history repair resumes mutation changes from its snapshot cursor', async () => {
+  const state = fixture(async () => {});
+  const device = state.devices[0][0];
+  const id = ulid();
+  const original = { id: ulid(), chatId: id, senderId: ulid(), sequence: '1', messageVersion: '1', body: 'original' };
+  let edited = false;
+  let pages = 0;
+  let changes = 0;
+  device.subscribe = () => {};
+  device.get = async (path, args) => {
+    if (path.endsWith('/state')) return { ...counters(edited ? '2' : '1'), mutationSeq: edited ? '2' : '1' };
+    if (path.endsWith('/messages/changes')) {
+      changes++;
+      return edited ? { lastSeq: '2', nextSeq: '2', resetRequired: false, changes: [{ kind: 'UPSERT', seq: '2', sequence: '1', messageId: original.id,
+        message: { ...original, body: 'edited', messageVersion: '2' } }] } : { lastSeq: '1', nextSeq: '1', resetRequired: false, changes: [] };
+    }
+    if (++pages === 1) throw new Fault('invalidJson');
+    if (args.afterSeq) return page('2');
+    return { ...page('1'), mutationSeq: '1', messages: [original] };
+  };
+  const selected = { id, kind: 'DIRECT', members: [] };
+  await assert.rejects(device.openChat(selected, performance.now()), { code: 'invalidJson' });
+  await device.sync(id);
+  while (state.background.size) await Promise.all([...state.background]);
+  assert.equal(device.view(id).changesAfter, '1');
+  await device.openChat(selected, performance.now());
+  edited = true;
+  device.onFrame({ type: 'message_changed', chatId: id });
+  while (state.background.size) await Promise.all([...state.background]);
+  assert.ok(changes >= 2);
+  assert.equal(device.view(id).changesAfter, '2');
+  assert.equal(device.view(id).messages[0].body, 'edited');
+  assert.equal(device.view(id).messages[0].messageVersion, '2');
+  assert.deepEqual(Object.keys(state.metrics.failures), []);
 });

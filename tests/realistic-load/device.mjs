@@ -368,11 +368,12 @@ export class Device {
     const recovery = recoveryState(this.selection, view);
     const work = (async () => {
       try {
-        await view.ready?.catch(() => {});
         do {
+          await view.ready?.catch(() => {});
           const wanted = view.catchUpRequired ?? '0';
           await this.loadCatchUp(id, wanted, recovery);
           check(!greater(wanted, view.baseline), 'catchUpGap');
+          check(this.selected?.id !== id || view.changesAfter !== null || view.ready !== null, 'catchUpCursorMissing');
         } while (greater(view.catchUpRequired ?? '0', view.baseline) || this.selected?.id === id && view.changesAfter === null);
       } finally {
         if (view.catchingUp === work) view.catchingUp = null;

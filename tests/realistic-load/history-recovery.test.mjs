@@ -83,3 +83,69 @@ for (const trigger of ['disconnect during initial history', 'failed reopen with 
     await device.close();
   });
 }
+
+test('recovery stops when a failed reopen leaves a protected window without a change cursor', { timeout: 10_000 }, async () => {
+  const chatId = ulid();
+  const otherId = ulid();
+  const userId = ulid();
+  const rows = [1, 2].map(sequence => ({ id: ulid(), chatId, senderId: userId, sequence: String(sequence), messageVersion: '1', body: 'row-' + sequence }));
+  const state = new Run({ chats: [] }, { devices: [[{ userId }]], chats: [chatId, otherId] }, {
+    options: {}, controller: new AbortController(),
+  }, new Measurements());
+  const device = state.devices[0][0];
+  const chat = { id: chatId, kind: 'DIRECT', members: [] };
+  const other = { id: otherId, kind: 'DIRECT', members: [] };
+  device.selected = chat;
+  const view = device.view(chatId);
+  Object.assign(view, { messages: [rows[0]], loaded: true, baseline: '1', mutation: '1', changesAfter: '1', changesSelection: 0, installedWindow: { selection: 0 } });
+  let enter;
+  let release;
+  const requested = new Promise(resolve => { enter = resolve; });
+  const blocked = new Promise(resolve => { release = resolve; });
+  let failNext = false;
+  let requests = 0;
+  device.get = async (path, args) => {
+    requests++;
+    const isOther = path.includes(otherId);
+    const seq = isOther ? '0' : '2';
+    if (path.endsWith('/state')) return { lastSeq: seq, mutationSeq: seq, memberSeq: '0', visibilitySeq: '0', pinsSeq: '0', memberPinsSeq: '0', ownReadThrough: '0', otherReadThrough: '0' };
+    if (path.endsWith('/messages/changes')) return { lastSeq: seq, nextSeq: seq, resetRequired: false, changes: [] };
+    assert.match(path, /\/messages$/);
+    if (args?.afterSeq) {
+      enter();
+      await blocked;
+      return { messages: [rows[1]], coverageThroughSequence: '2', snapshotSequence: '2', visibilitySeq: '0', nextSequence: '2', hasMore: false };
+    }
+    if (!isOther && failNext) { failNext = false; throw new Fault('http503'); }
+    return { messages: isOther ? [] : rows, coverageThroughSequence: seq, mutationSeq: seq, visibilitySeq: '0' };
+  };
+  const load = device.loadCatchUp.bind(device);
+  let iterations = 0;
+  device.loadCatchUp = (...args) => {
+    if (++iterations > 5) throw new Fault('recoveryRepeatedWithoutProgress');
+    return load(...args);
+  };
+  const recovering = device.catchUp(chatId, '2');
+  const outcome = assert.rejects(recovering, { code: 'catchUpCursorMissing' });
+  await requested;
+  await device.openChat(other, performance.now());
+  await device.openChat(chat, performance.now());
+  while (state.background.size) await Promise.all([...state.background]);
+  const installation = view.installedWindow;
+  await device.openChat(other, performance.now());
+  failNext = true;
+  await assert.rejects(device.openChat(chat, performance.now()), { code: 'http503' });
+  assert.equal(view.changesAfter, null);
+  const before = requests;
+  release();
+  await outcome;
+  assert.equal(requests, before);
+  assert.equal(view.catchingUp, null);
+  assert.equal(view.installedWindow, installation);
+  assert.deepEqual(view.messages.map(message => message.id), rows.map(message => message.id));
+  await device.sync(chatId, { primary: true });
+  while (state.background.size) await Promise.all([...state.background]);
+  assert.equal(view.changesAfter, '2');
+  assert.equal(view.baseline, '2');
+  assert.deepEqual(view.messages.map(message => message.id), rows.map(message => message.id));
+});

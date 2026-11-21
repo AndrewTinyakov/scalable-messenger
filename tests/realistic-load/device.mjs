@@ -408,6 +408,7 @@ export class Device {
         return;
       }
       if (!recovery.hasMore && !greater(required, view.baseline)) return;
+      check(recovery.remainingPages > 0 || protection.installed === view.installedWindow, 'catchUpGap');
     }
     throw new Fault('catchUpSnapshotStale');
   }

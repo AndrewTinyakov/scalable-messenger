@@ -89,7 +89,7 @@ for (const kind of ['edit', 'delete', 'selfDelete']) {
   });
 }
 
-for (const ordering of ['selected', 'left while loading', 'opened after protection', 'jumped after disconnect', 'jumped during fallback']) {
+for (const ordering of ['selected', 'left while loading', 'opened after protection', 'jumped after disconnect', 'jumped during fallback', 'jumped in same selection during fallback']) {
 test('handoff retains the new anchor and one page budget at the pagination limit: ' + ordering, { timeout: 10_000 }, async () => {
   const { state, device, chatId, otherId, chat, other, row } = fixture();
   const anchorRows = Array.from({ length: 50 }, (_, i) => row(i + 1));
@@ -101,8 +101,11 @@ test('handoff retains the new anchor and one page budget at the pagination limit
   let pageRequests = 0;
   let latestRequests = 0;
   let completed = false;
+  const sameSelection = ordering === 'jumped in same selection during fallback';
+  const duringFallback = ordering.endsWith('during fallback');
   device.get = async (path, args) => {
     const isOther = path.includes(otherId);
+    if (path.endsWith('/state')) return { lastSeq: '1200', mutationSeq: '0', visibilitySeq: '0', memberSeq: '0', pinsSeq: '0', memberPinsSeq: '0', ownReadThrough: '0', otherReadThrough: '0' };
     if (path.endsWith('/messages/changes')) {
       const seq = isOther ? '0' : '1200';
       return { lastSeq: seq, nextSeq: seq, resetRequired: false, changes: [] };
@@ -124,7 +127,7 @@ test('handoff retains the new anchor and one page budget at the pagination limit
     }
     if (!isOther) {
       latestRequests++;
-      if (ordering === 'jumped during fallback') { fallback.entered(); await fallback.blocked; }
+      if (duringFallback) { fallback.entered(); await fallback.blocked; }
     }
     return { messages: isOther ? [] : Array.from({ length: 50 }, (_, i) => row(1151 + i)), coverageThroughSequence: isOther ? '0' : '1200', mutationSeq: isOther ? '0' : '1200', visibilitySeq: '0' };
   };
@@ -141,12 +144,13 @@ test('handoff retains the new anchor and one page budget at the pagination limit
       return result;
     });
   }
-  const result = device.catchUp(chatId, '1100').then(() => { completed = true; return null; }, error => { completed = true; return error; });
+  const recovery = sameSelection ? device.sync(chatId, { primary: true }) : device.catchUp(chatId, '1100');
+  const result = recovery.then(() => { completed = true; return null; }, error => { completed = true; return error; });
   await twentieth.requested;
   view.detached = anchorRows[0];
   const jumping = ordering.startsWith('jumped');
   if (jumping) {
-    await device.disconnect();
+    if (!sameSelection) await device.disconnect();
     opening = state.perform({ type: 'jump', actor: 0, device: 0, chat: 0, reference: { quotedBack: 1 } }, performance.now());
   } else {
     await device.openChat(other, performance.now());
@@ -155,30 +159,31 @@ test('handoff retains the new anchor and one page budget at the pagination limit
   }
   await around.requested;
   const restoredOwner = jumping ? device.selection : view.changesSelection;
-  if (ordering === 'left while loading' || jumping) await device.openChat(other, performance.now());
-  if (ordering === 'jumped during fallback') {
+  if (ordering === 'left while loading' || jumping && !sameSelection) await device.openChat(other, performance.now());
+  if (duringFallback) {
     twentieth.release();
     await fallback.requested;
   } else if (!jumping) twentieth.release();
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(completed, false);
-  assert.equal(latestRequests, ordering === 'jumped during fallback' ? 1 : 0);
+  assert.equal(latestRequests, duringFallback ? 1 : 0);
   around.release();
   await opening;
   const installed = view.installedWindow;
   if (ordering === 'jumped after disconnect') twentieth.release();
-  if (ordering === 'jumped during fallback') fallback.release();
+  if (duringFallback) fallback.release();
   const error = await result;
   while (state.background.size) await Promise.all([...state.background]);
   assert.equal(error?.code, 'catchUpGap');
   assert.equal(pageRequests, 20);
-  assert.equal(latestRequests, ordering === 'jumped during fallback' ? 1 : 0);
+  assert.equal(latestRequests, duringFallback ? 1 : 0);
   assert.equal(view.messages.length, 50);
   assert.equal(view.messages[0].id, anchorRows[0].id);
   assert.equal(view.detached.id, anchorRows[0].id);
   assert.equal(view.changesSelection, jumping ? 0 : restoredOwner);
   assert.equal(view.installedWindow, installed);
   assert.equal(view.installedWindow?.selection, restoredOwner);
+  if (sameSelection) assert.equal(device.selection, 0);
 });
 }
 

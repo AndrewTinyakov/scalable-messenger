@@ -106,7 +106,7 @@ export class Run {
   }
 
   observeRecovered(record, device, messageId, at) {
-    if (this.acceptingEvents === false) return;
+    if (this.acceptingEvents === false && at > this.trafficCutoff) return;
     if (record.received.has(device) || !record.expected.includes(device)) return;
     record.received.set(device, messageId);
     this.metrics.observe('send.recipientRecovered', Math.max(0, at - record.sent));

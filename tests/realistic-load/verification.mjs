@@ -24,8 +24,9 @@ class Verification {
 
   async request(device, path, method = 'GET', body) {
     const actor = device.actor;
+    const cacheAtStart = this.credentials.get(actor);
     let cached;
-    try { cached = await this.credentials.get(actor); } catch {}
+    try { cached = await cacheAtStart; } catch {}
     const candidates = [cached, device.credentials, ...(this.state.devices[actor] ?? []).map(peer => peer.credentials)];
     const tried = new Set();
     for (const candidate of candidates) {
@@ -34,7 +35,7 @@ class Verification {
       const credentials = { ...candidate };
       try {
         const result = await this.http.request(credentials, path, method, body);
-        this.credentials.set(actor, credentials);
+        if (this.credentials.get(actor) === cacheAtStart) this.credentials.set(actor, credentials);
         return result;
       } catch (error) {
         if (error.code !== 'http401') throw error;

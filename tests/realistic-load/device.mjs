@@ -349,14 +349,18 @@ export class Device {
     if (greater(required, view.catchUpRequired ?? '0')) view.catchUpRequired = required;
     if (view.catchingUp) return view.catchingUp;
     const work = (async () => {
-      await view.ready?.catch(() => {});
-      do {
-        const wanted = view.catchUpRequired ?? '0';
-        await this.loadCatchUp(id, wanted);
-        check(!greater(wanted, view.baseline), 'catchUpGap');
-      } while (greater(view.catchUpRequired ?? '0', view.baseline));
+      try {
+        await view.ready?.catch(() => {});
+        do {
+          const wanted = view.catchUpRequired ?? '0';
+          await this.loadCatchUp(id, wanted);
+          check(!greater(wanted, view.baseline), 'catchUpGap');
+        } while (greater(view.catchUpRequired ?? '0', view.baseline));
+      } finally {
+        if (view.catchingUp === work) view.catchingUp = null;
+      }
     })();
-    view.catchingUp = work.finally(() => { view.catchingUp = null; });
+    view.catchingUp = work;
     return view.catchingUp;
   }
 
@@ -419,7 +423,7 @@ export class Device {
       }
       view.visibility = current.visibilitySeq;
       await this.latest(id);
-    } else if (greater(current.lastSeq, view.baseline)) {
+    } else if (!view.loaded || greater(current.lastSeq, view.baseline)) {
       await this.catchUp(id, current.lastSeq);
     }
   }
@@ -483,7 +487,7 @@ export class Device {
   }
 
   async openChat(chat, started) {
-    if (this.selected?.id === chat.id) {
+    if (this.selected?.id === chat.id && (this.view(chat.id).ready || this.view(chat.id).loaded)) {
       await this.view(chat.id).ready;
       this.state.metrics.observe('chatOpen.firstPageReady', performance.now() - started);
       return;
@@ -509,11 +513,16 @@ export class Device {
         this.refreshChanges(chat.id);
       }
     })();
+    const ready = view.ready;
     const features = this.refreshFeatures(chat, true);
     const unread = chat.markedUnread || this.directory.find(row => row.id === chat.id)?.markedUnread;
-    await join([view.ready, features, ...(unread ? [
-      this.change(chatPath(chat.id) + '/unread-mark', 'DELETE'),
-    ] : [])]);
+    try {
+      await join([ready, features, ...(unread ? [
+        this.change(chatPath(chat.id) + '/unread-mark', 'DELETE'),
+      ] : [])]);
+    } finally {
+      if (view.ready === ready) view.ready = null;
+    }
   }
 
   async around(id, anchor, restoring = false) {

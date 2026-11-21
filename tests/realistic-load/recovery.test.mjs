@@ -84,6 +84,15 @@ test('state recovery can retry history after the initial open failed', async () 
   assert.equal(pages, 2);
   assert.equal(device.view(id).loaded, true);
   assert.equal(device.view(id).baseline, '2');
+  state.manifest.chats.push(id);
+  state.roster.set(id, { kind: 'DIRECT', members: [0] });
+  device.refreshChanges = () => {};
+  await device.openChat(selected, performance.now());
+  device.view(id).messages = [{ sequence: '2', senderId: ulid() }];
+  let reads = 0;
+  device.change = async () => { reads++; return { throughSequence: '2' }; };
+  await state.perform({ type: 'read', actor: 0, device: 0, chat: 0 });
+  assert.equal(reads, 1);
 });
 
 test('immediate selected state checks retain sequence floors', async () => {
@@ -187,4 +196,109 @@ test('read propagation dwell stops at the traffic cutoff before slow shutdown', 
   assert.equal(result.readPropagationExpected, 1);
   assert.equal(result.readPropagationMissing, 0);
   assert.equal(result.readPropagationInterrupted, 1);
+});
+
+test('catch-up accepts a new target in the completion microtask', async () => {
+  const state = fixture(async () => {});
+  const device = state.devices[0][0];
+  const id = ulid();
+  const view = device.view(id);
+  Object.assign(view, { loaded: true, baseline: '1' });
+  const blocked = deferred();
+  let pages = 0;
+  device.loadCatchUp = () => ++pages === 1 ? blocked.promise.then(() => { view.baseline = '2'; }) : Promise.resolve().then(() => { view.baseline = '3'; });
+  const first = device.catchUp(id, '2');
+  await new Promise(resolve => setImmediate(resolve));
+  let late;
+  blocked.promise.then(() => queueMicrotask(() => { late = device.catchUp(id, '3'); }));
+  blocked.resolve();
+  await first;
+  await late;
+  assert.equal(pages, 2);
+  assert.equal(view.baseline, '3');
+});
+
+test('final status credits receipts buffered before the cutoff', async () => {
+  const chatId = ulid();
+  const messageId = ulid();
+  let record;
+  const state = fixture(async (_, path) => path === '/sends/status' ? { results: [{ requestId: record.requestId,
+    result: { status: 'SAVED', chatId, messageId, sequence: '1' } }] } : { messages: [{ id: messageId, chatId,
+    senderId: state.devices[0][0].credentials.userId, sequence: '1', messageVersion: '1', body: 'fixture' }] });
+  state.actions = [{ type: 'send' }];
+  const device = state.devices[0][0];
+  const peer = new device.constructor(state, { userId: device.credentials.userId }, 0);
+  state.devices[0].push(peer);
+  device.requireSocket = () => ({ send() {} });
+  const sending = state.send(device, performance.now(), chatId, { body: 'fixture' }, [peer]);
+  record = [...state.sends.values()][0];
+  state.recovered(peer, { id: messageId });
+  record.finish(null);
+  await assert.rejects(sending, { code: 'sendPending' });
+  await state.finishTraffic();
+  const frozen = JSON.stringify(state.metrics.raw());
+  const result = await state.verify();
+  assert.equal(result.saved, 1);
+  assert.equal(result.recipientsExpected, 1);
+  assert.equal(result.recipientsMissing, 0);
+  assert.equal(result.durableChecks, 1);
+  assert.equal(JSON.stringify(state.metrics.raw()), frozen);
+});
+
+test('a late successful old session cannot replace a refreshed verifier credential', async () => {
+  const oldSuccess = deferred();
+  const slowUnauthorized = deferred();
+  const ids = [ulid(), ulid(), ulid()];
+  let logins = 0;
+  const records = [];
+  const state = fixture(async (credentials, path) => {
+    if (path === '/auth/logout') return null;
+    if (path === '/auth/login') {
+      if (++logins > 1) throw new Fault('http429');
+      credentials.cookie = 'fresh';
+      return { user: { id: credentials.userId, username: credentials.username }, deviceId: credentials.deviceId };
+    }
+    const row = records.find(record => path.includes(record.chatId));
+    if (credentials.cookie === 'old') {
+      if (row.chatId === ids[0]) await oldSuccess.promise;
+      else {
+        if (row.chatId === ids[2]) await slowUnauthorized.promise;
+        throw new Fault('http401');
+      }
+    } else if (row.chatId === ids[1]) {
+      oldSuccess.resolve();
+      setImmediate(slowUnauthorized.resolve);
+    }
+    return { messages: [{ id: row.saved.id, chatId: row.chatId, senderId: credentials.userId, sequence: '1', messageVersion: '1', body: 'fixture' }] };
+  });
+  state.actions = ids.map(() => ({ type: 'send' }));
+  const device = state.devices[0][0];
+  for (const id of ids) {
+    const record = { requestId: ulid(), chatId: id, device, saved: { id: ulid(), chatId: id, sequence: '1' }, body: 'fixture', received: new Map(), expected: [] };
+    records.push(record);
+    state.sends.set(record.requestId, record);
+  }
+  const result = await state.verify();
+  assert.equal(logins, 1);
+  assert.equal(result.durableChecks, 3);
+  assert.equal(result.durableUnverified, 0);
+  assert.equal(result.durableMismatches, 0);
+});
+
+test('same-chat open retries a failed initial page before state recovery', async () => {
+  const state = fixture(async () => {});
+  const device = state.devices[0][0];
+  const id = ulid();
+  const selected = { id, kind: 'DIRECT', members: [] };
+  device.subscribe = device.refreshChanges = () => {};
+  let pages = 0;
+  device.get = async () => {
+    if (++pages === 1) throw new Fault('invalidJson');
+    return page('0');
+  };
+  await assert.rejects(device.openChat(selected, performance.now()), { code: 'invalidJson' });
+  await device.openChat(selected, performance.now());
+  assert.equal(pages, 2);
+  assert.equal(device.view(id).loaded, true);
+  assert.equal(device.view(id).ready, null);
 });

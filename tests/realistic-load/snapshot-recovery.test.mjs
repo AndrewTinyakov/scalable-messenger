@@ -5,7 +5,7 @@ import { Fault, Measurements } from './transport.mjs';
 import { ulid } from '../support/fixtures.mjs';
 
 for (const liveCount of [1, 101, 170]) {
-test('a reconnect snapshot retains acknowledged live rows within the cache limit: ' + liveCount, async () => {
+test('a reconnect snapshot retains acknowledged live rows within the cache limit: ' + liveCount, { timeout: 10_000 }, async () => {
   const chatId = ulid();
   const userId = ulid();
   const senderId = ulid();
@@ -55,7 +55,7 @@ test('a reconnect snapshot retains acknowledged live rows within the cache limit
 });
 }
 
-test('a late recovery snapshot cannot overwrite history installed by a newer open', async () => {
+test('a late recovery snapshot cannot overwrite history installed by a newer open', { timeout: 10_000 }, async () => {
   const chatId = ulid();
   const userId = ulid();
   const senderId = ulid();
@@ -104,7 +104,7 @@ test('a late recovery snapshot cannot overwrite history installed by a newer ope
   await device.close();
 });
 
-test('changing chats does not discard a valid snapshot for the earlier chat', async () => {
+test('changing chats does not discard a valid snapshot for the earlier chat', { timeout: 10_000 }, async () => {
   const chatId = ulid();
   const otherId = ulid();
   const userId = ulid();
@@ -125,14 +125,15 @@ test('changing chats does not discard a valid snapshot for the earlier chat', as
   let entered;
   const blocked = new Promise(resolve => { release = resolve; });
   const requested = new Promise(resolve => { entered = resolve; });
+  let snapshots = 0;
   device.get = async path => {
     const isOther = path.includes(otherId);
     const seq = isOther ? '0' : '3';
-    if (path.endsWith('/state')) return { lastSeq: seq, mutationSeq: seq, visibilitySeq: '0', memberSeq: '0', pinsSeq: '0', memberPinsSeq: '0', ownReadThrough: '0', otherReadThrough: '0' };
+    if (path.endsWith('/state')) return { lastSeq: seq, mutationSeq: '0', visibilitySeq: '0', memberSeq: '0', pinsSeq: '0', memberPinsSeq: '0', ownReadThrough: '0', otherReadThrough: '0' };
     if (path.endsWith('/messages/changes')) return { lastSeq: seq, nextSeq: seq, resetRequired: false, changes: [] };
     assert.match(path, /\/messages$/);
-    if (!isOther) { entered(); await blocked; }
-    return { messages: isOther ? [] : rows, coverageThroughSequence: seq, mutationSeq: seq, visibilitySeq: '0' };
+    if (!isOther) { snapshots++; entered(); await blocked; }
+    return { messages: isOther ? [] : rows, coverageThroughSequence: seq, mutationSeq: '0', visibilitySeq: '0' };
   };
   device.onFrame({ type: 'recovery_failed', chatId });
   await requested;
@@ -142,6 +143,7 @@ test('changing chats does not discard a valid snapshot for the earlier chat', as
   release();
   await reconnect;
   while (state.background.size) await Promise.all([...state.background]);
+  assert.equal(snapshots, 1);
   assert.equal(device.selected.id, otherId);
   assert.equal(device.view(chatId).baseline, '3');
   assert.deepEqual(device.view(chatId).messages.map(message => message.sequence), ['1', '2', '3']);
@@ -150,7 +152,7 @@ test('changing chats does not discard a valid snapshot for the earlier chat', as
 });
 
 for (const recoverable of [true, false]) {
-  test('stale snapshots ' + (recoverable ? 'retry to required coverage' : 'fail after bounded retries without changing cache'), async () => {
+  test('stale snapshots ' + (recoverable ? 'retry to required coverage' : 'fail after bounded retries without changing cache'), { timeout: 10_000 }, async () => {
     const chatId = ulid();
     const userId = ulid();
     const message = { id: ulid(), chatId, senderId: userId, sequence: '1', messageVersion: '4', body: 'version-4' };
@@ -181,3 +183,69 @@ for (const recoverable of [true, false]) {
     assert.equal(view.changesAfter, '4');
   });
 }
+
+test('an older changes reset cannot reseed the cursor of a reopened anchor view', { timeout: 10_000 }, async () => {
+  const chatId = ulid();
+  const otherId = ulid();
+  const userId = ulid();
+  const rows = Array.from({ length: 100 }, (_, i) => ({ id: ulid(), chatId, senderId: userId, sequence: String(i + 1), messageVersion: '1', body: 'row-' + (i + 1) }));
+  const state = new Run({ chats: [] }, { devices: [[{ userId }]], chats: [chatId, otherId] }, {
+    options: {}, controller: new AbortController(),
+  }, new Measurements());
+  const device = state.devices[0][0];
+  const chat = { id: chatId, kind: 'DIRECT', members: [] };
+  const other = { id: otherId, kind: 'DIRECT', members: [] };
+  device.selected = chat;
+  Object.assign(device.view(chatId), { messages: rows.slice(54), loaded: true, baseline: '100', mutation: '2', changesAfter: '1', changesSelection: 0, detached: rows[0] });
+  const gates = Array.from({ length: 3 }, () => {
+    let release;
+    let entered;
+    const blocked = new Promise(resolve => { release = resolve; });
+    const requested = new Promise(resolve => { entered = resolve; });
+    return { release, entered, blocked, requested };
+  });
+  let snapshots = 0;
+  let changes = 0;
+  device.get = async path => {
+    const isOther = path.includes(otherId);
+    if (path.endsWith('/state')) return { lastSeq: '100', mutationSeq: '2', visibilitySeq: '0', memberSeq: '0', pinsSeq: '0', memberPinsSeq: '0', ownReadThrough: '0', otherReadThrough: '0' };
+    if (path.endsWith('/messages/changes')) {
+      const seq = isOther ? '0' : '100';
+      return { lastSeq: seq, nextSeq: seq, resetRequired: !isOther && ++changes === 1, changes: [] };
+    }
+    if (path.endsWith('/messages/around')) {
+      gates[2].entered();
+      await gates[2].blocked;
+      return { messages: rows.slice(0, 50), mutationSeq: '2', anchorMessageId: rows[0].id };
+    }
+    assert.match(path, /\/messages$/);
+    if (!isOther) {
+      const gate = gates[snapshots++];
+      assert.ok(gate);
+      gate.entered();
+      await gate.blocked;
+    }
+    return { messages: isOther ? [] : rows.slice(54), coverageThroughSequence: isOther ? '0' : '100', mutationSeq: isOther ? '0' : '2', visibilitySeq: '0' };
+  };
+  const resetting = device.refreshChanges(chatId);
+  await gates[0].requested;
+  const catchingUp = device.catchUp(chatId, '100');
+  await gates[1].requested;
+  await device.openChat(other, performance.now());
+  const reopening = device.openChat(chat, performance.now());
+  await gates[2].requested;
+  gates[0].release();
+  await resetting;
+  assert.equal(device.view(chatId).changesAfter, null);
+  gates[2].release();
+  await reopening;
+  assert.equal(device.view(chatId).messages[0].sequence, '1');
+  gates[1].release();
+  await catchingUp;
+  while (state.background.size) await Promise.all([...state.background]);
+  await device.sync(chatId, { primary: true });
+  assert.equal(device.view(chatId).messages[0].sequence, '1');
+  assert.equal(device.view(chatId).changesSelection, device.selection);
+  assert.equal(device.view(chatId).detached.id, rows[0].id);
+  assert.deepEqual(Object.keys(state.metrics.failures), []);
+});

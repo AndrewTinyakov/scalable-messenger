@@ -335,7 +335,7 @@ export class Device {
     check(isSeq(page?.coverageThroughSequence) && isSeq(page?.mutationSeq) && isSeq(page?.visibilitySeq));
     const messages = orderedMessages(page, id);
     const view = this.view(id);
-    if (view.changesAfter !== null && (view.changesSelection > selection || greater(view.mutation, page.mutationSeq) || greater(view.visibility, page.visibilitySeq))) return null;
+    if (view.changesAfter !== null && (view.changesSelection > selection || greater(view.mutation, page.coverageThroughSequence) || greater(view.visibility, page.visibilitySeq))) return null;
     const ahead = view.messages.filter(message => greater(message.sequence, page.coverageThroughSequence));
     view.messages = mergeMessages(messages, ahead);
     if (greater(page.coverageThroughSequence, view.baseline)) {
@@ -449,14 +449,15 @@ export class Device {
   }
 
   refreshChanges(id) {
+    const selection = this.selection;
     const view = this.view(id);
     if (view.changesAfter === null || this.selected?.id !== id) return;
     return this.backgroundTask('live.changes/' + id, async () => {
       let afterSeq = view.changesAfter;
-      for (let n = 0; n < 10 && afterSeq !== null && this.selected?.id === id; n++) {
+      for (let n = 0; n < 10 && afterSeq !== null && this.selected?.id === id && this.selection === selection; n++) {
         const page = await this.get(chatPath(id) + '/messages/changes', { afterSeq, limit: 100 });
         this.state.metrics.count('changes.pages');
-        if (this.selected?.id !== id || view.changesAfter === null) return;
+        if (this.selected?.id !== id || this.selection !== selection || view.changesAfter === null) return;
         check(isSeq(page?.lastSeq) && isSeq(page.nextSeq) && typeof page.resetRequired === 'boolean' &&
           Array.isArray(page.changes) && page.changes.length <= 100, 'invalidChanges');
         if (page.resetRequired) break;
@@ -482,12 +483,16 @@ export class Device {
         }
         afterSeq = page.nextSeq;
         view.changesAfter = afterSeq;
+        view.changesSelection = selection;
         if (greater(afterSeq, view.mutation)) view.mutation = afterSeq;
         if (afterSeq === page.lastSeq) return;
       }
-      if (this.selected?.id !== id) return;
-      await this.latest(id);
-      view.changesAfter = view.mutation;
+      if (this.selected?.id !== id || this.selection !== selection) return;
+      const installed = await this.latest(id);
+      if (installed && this.selected?.id === id && this.selection === selection) {
+        view.changesAfter = view.mutation;
+        view.changesSelection = selection;
+      }
     });
   }
 

@@ -69,6 +69,8 @@ jobs:
           npm run generate:asyncapi:go
           git add --intent-to-add kotlin/shared/src/generated/asyncapi/kotlin ws/internal/generated/messaging client/src/shared/api/generated/socket-vocabulary.ts
           git diff --exit-code -- kotlin/shared/src/generated/asyncapi/kotlin ws/internal/generated/messaging client/src/shared/api/generated/socket-vocabulary.ts
+      - name: Check realistic load driver
+        run: node --test tests/realistic-load/*.test.mjs
       - name: Compile and lint Kotlin
         run: ./kotlin/gradlew -p kotlin :api:classes :command-processor:classes :outbox-publisher:classes ktlintCheck --no-daemon
       - name: Run Kotlin transaction and publication tests

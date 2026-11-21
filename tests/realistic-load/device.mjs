@@ -55,6 +55,9 @@ export class Device {
   watch = new Map();
   watchAfter = 0;
   phase = 'closed';
+  connectionWork = Promise.resolve();
+  sessionWork = Promise.resolve();
+  connectionRevision = 0;
 
   constructor(state, credentials, actor) {
     Object.assign(this, { state, credentials, actor });
@@ -184,7 +187,7 @@ export class Device {
     if (!this.views.has(id)) {
       this.views.set(id, {
         messages: [], baseline: '0', dismissed: '0', loaded: false, reads: '0',
-        mutation: '0', visibility: '0', member: '0', pins: '0', memberPins: '0', stateAt: 0, readCheck: null, readOwed: null, readRetry: null, readFailures: 0, changesAfter: null, ready: null, detached: null,
+        mutation: '0', visibility: '0', member: '0', pins: '0', memberPins: '0', stateAt: null, readCheck: null, readOwed: null, readRetry: null, readFailures: 0, changesAfter: null, ready: null, detached: null,
       });
     }
     return this.views.get(id);
@@ -224,29 +227,50 @@ export class Device {
     this.offerWatch({ type: 'watch_sidebar', chatIds: this.directory.slice(0, 14).map(chat => chat.id).sort() });
   }
 
-  async connect() {
-    const socket = new Socket(this.state.http, this.credentials, frame => this.onFrame(frame));
-    this.socket = socket;
-    try {
-      await socket.open();
-    } catch (error) {
-      await socket.close();
-      if (this.socket === socket) this.socket = null;
-      throw error;
-    }
+  session(work) {
+    const next = this.sessionWork.then(work);
+    this.sessionWork = next.catch(() => {});
+    return next;
   }
 
-  async disconnect() {
-    const socket = this.socket;
-    this.socket = null;
+  connectionChange(work) {
+    const next = this.connectionWork.then(work);
+    this.connectionWork = next.catch(() => {});
+    return next;
+  }
+
+  connect(revision = this.connectionRevision) {
+    return this.connectionChange(async () => {
+      check(revision === this.connectionRevision, 'socketClosed');
+      await this.socket?.close();
+      const socket = new Socket(this.state.http, this.credentials, frame => this.onFrame(frame));
+      this.socket = socket;
+      try {
+        await socket.open();
+        check(revision === this.connectionRevision, 'socketClosed');
+      } catch (error) {
+        await socket.close();
+        if (this.socket === socket) this.socket = null;
+        throw error;
+      }
+    });
+  }
+
+  disconnect() {
+    this.connectionRevision++;
     this.connection++;
     this.endSelection();
     this.subscribedTo = null;
     this.watch.clear();
-    await socket?.close();
+    return this.connectionChange(async () => {
+      const socket = this.socket;
+      this.socket = null;
+      await socket?.close();
+    });
   }
 
   async startup(restore, started) {
+    const revision = this.connectionRevision;
     this.phase = 'opening';
     this.foreground = true;
     if (restore) {
@@ -255,7 +279,7 @@ export class Device {
     }
     await Promise.all([
       this.refreshDirectory().then(() => this.state.metrics.observe('appOpen.sidebarReady', performance.now() - started)),
-      this.connect(),
+      this.connect(revision),
     ]);
     this.phase = 'open';
     this.backgroundTask('sidebar.initial', async () => {
@@ -428,7 +452,7 @@ export class Device {
       type: 'watch_presence', chatId: chat.id,
       userIds: chat.members.slice(0, 100).map(member => member.id).sort(),
     });
-    if (performance.now() - this.view(chat.id).stateAt >= STATE_CHECK_MS) await this.sync(chat.id);
+    if (this.view(chat.id).stateAt === null || performance.now() - this.view(chat.id).stateAt >= STATE_CHECK_MS) await this.sync(chat.id);
   }
 
   async openChat(chat, started) {
@@ -489,6 +513,7 @@ export class Device {
   }
 
   onFrame(frame) {
+    if (this.state.acceptingEvents === false) return;
     const { metrics } = this.state;
     const { type, chatId } = frame;
     metrics.count('frame.' + type);
@@ -537,7 +562,7 @@ export class Device {
         await this.get(chatPath(chatId) + '/pins', { limit: 50 });
       });
     } else if (type === 'recovery_failed') {
-      this.backgroundTask('live.recovery/' + chatId, () => Promise.all([this.catchUp(chatId), this.reconcile(), this.refreshChanges(chatId)]));
+      this.backgroundTask('live.recovery/' + chatId, () => Promise.all([this.selected?.id === chatId ? this.sync(chatId, { primary: true }) : this.catchUp(chatId), this.reconcile()]));
     } else if (type === 'subscription_expired' && this.selected?.id === chatId) {
       this.subscribe(this.selected);
     } else if ((type === 'send_rejected' || type === 'error') && frame.requestId) {

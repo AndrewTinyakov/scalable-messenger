@@ -62,9 +62,10 @@ async function coordinate(values, workers) {
     child.on('exit', code => resolve(code));
   })));
   const reports = await Promise.all(parts.map(path => json(path, 512 * 2 ** 20).catch(() => null)));
-  check(reports.every(Boolean), `shardFailed:${codes.join(',')}`);
+  check(reports.every((report, index) => report && codes[index] === (report.passed ? 0 : 1)), `shardFailed:${codes.join(',')}`);
+  const merged = mergeReports(reports);
   await Promise.all(parts.map(path => rm(path, { force: true })));
-  return mergeReports(reports);
+  return merged;
 }
 
 async function main() {

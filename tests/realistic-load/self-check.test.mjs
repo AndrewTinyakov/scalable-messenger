@@ -285,3 +285,29 @@ test('a lone read hint whose check fails is retried a bounded number of times', 
   await new Promise(resolve => setTimeout(resolve, 800));
   assert.equal(calls, 3);
 });
+
+test('the first selected chat checks state before the periodic interval elapses', async () => {
+  const state = { background: new Set(), metrics: new Measurements() };
+  const device = new Device(state, {}, 0);
+  const chat = { id: 'chat', members: [{ id: 'member' }] };
+  device.selected = chat;
+  device.socket = { opened: true, ws: { readyState: WebSocket.OPEN } };
+  device.offerWatch = () => {};
+  const calls = [];
+  device.sync = async id => { calls.push(id); device.view(id).stateAt = performance.now(); };
+  await device.refreshFeatures(chat);
+  await device.refreshFeatures(chat);
+  assert.deepEqual(calls, ['chat']);
+});
+
+test('a selected recovery failure checks primary state as well as uncertain sends', async () => {
+  const state = { background: new Set(), capacity: 1, metrics: new Measurements() };
+  const device = new Device(state, {}, 0);
+  device.selected = { id: 'chat' };
+  const calls = [];
+  device.sync = async (id, options) => { calls.push([id, options]); };
+  device.reconcile = async () => {};
+  device.onFrame({ type: 'recovery_failed', chatId: 'chat' });
+  await Promise.all([...state.background]);
+  assert.deepEqual(calls, [['chat', { primary: true }]]);
+});

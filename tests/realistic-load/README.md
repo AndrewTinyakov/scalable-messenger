@@ -102,6 +102,18 @@ The report includes histogram counts, means, percentile bounds and maxima, plus 
 Server-free checks:
 
 ```sh
-node --test tests/realistic-load/self-check.test.mjs
+node --test tests/realistic-load/*.test.mjs
 for file in tests/realistic-load/*.mjs; do node --check "$file"; done
 ```
+
+## Verification and comparison limits
+
+Reads share the confirmed account frontier across that actor's devices. A known no-op does not create a propagation expectation, and repeated responses for the same frontier and first-read timestamp count once. Failed writes are reported as failures and do not count as confirmed advances. Initial chat opens and selected-chat recovery fetch state. A confirmed frontier observed by a selected peer is the propagation sample; an unrelated group member's aggregate read maximum cannot identify which member read it.
+
+Forwards select seeded history that workload mutations do not edit. This gives the body comparison an independent, stable expected value. A failed mutation response remains uncertain. Verification resolves deletion operation IDs and accepts an uncertain edit only in its original or requested version with the matching body. The failed workload action remains a failure even when its durable effect is reconciled.
+
+After all offered actions drain, sockets close and pending sends get up to three status passes, in batches of at most 100. Verification then copies the terminal records so its counters share one cutoff. Revoked verification credentials are replaced with a new session for the same account. Verification HTTP metrics are separate from timed workload metrics. The pass criteria include missing read propagation and unverified durable checks.
+
+Reports retain up to 20 diagnostic samples per failure kind per worker. Samples contain IDs, sequences, versions, fixed error codes and SHA-256 body hashes. They contain no cookies, passwords or message text. Failed shard merges preserve the source reports. Connections and login/logout operations retain ownership through shutdown.
+
+The corrected driver changes request mix and correctness accounting. Historical reports are useful context, but rerun both candidates with the same corrected driver before claiming a performance change. Compare repeated, interleaved pool runs under equivalent host conditions. Record runtime/image identities, CPU, memory pressure, swap activity and storage latency; a shared machine with materially different calibration costs does not establish a pool-size or code regression.

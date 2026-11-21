@@ -4,19 +4,23 @@ import { ulid } from '../support/fixtures.mjs';
 import { chatPath, Device, orderedMessages, pageSize } from './device.mjs';
 import { authenticate, messageText, workers } from './setup.mjs';
 import { resolveReference, schedule } from './schedule.mjs';
-import { check, Fault, greater, isId, isSeq } from './transport.mjs';
+import { verifyRun } from './verification.mjs';
+import { check, Fault, greater, Http, isId, isSeq, Measurements } from './transport.mjs';
 
 const confirmations = new Set(['send', 'forward', 'direct']);
 // In a sharded run the sender and the recipient can live in different processes, so a send carries its wall-clock
 // time and the receiving worker measures delivery from it.
 const SENT_AT = /\u2060t(\d{13})$/;
 
-class Run {
+export class Run {
   sends = new Map();
   messages = new Map();
   byAction = new Map();
   mutations = new Map();
   reads = new Map();
+  readFrontiers = new Map();
+  readResults = new Set();
+  diagnostics = [];
   background = new Set();
   failedActions = 0;
   failedSamples = [];
@@ -103,13 +107,16 @@ class Run {
   }
 
   readNotification(device, id, status) {
+    const key = device.actor + '/' + id;
+    if (isSeq(status.throughSequence) && greater(status.throughSequence, this.readFrontiers.get(key) ?? '0')) this.readFrontiers.set(key, status.throughSequence);
     for (const record of this.reads.get(id) ?? []) {
       // Only a peer that kept the chat open since the read counts; a later reopen measures navigation, not propagation.
       if (record.observed || !record.devices.includes(device) || record.selections.get(device) !== device.selection) continue;
       const value = record.actor === device.actor ? status.throughSequence : status.maxOtherReadSequence;
       if (greater(record.through, value)) continue;
       record.observed = true;
-      this.metrics.observe('read.propagated', performance.now() - record.started);
+      record.observedAt = performance.now();
+      if (record.confirmed) this.metrics.observe('read.propagated', record.observedAt - record.started);
     }
   }
 
@@ -190,38 +197,60 @@ class Run {
     const message = view.messages.findLast(message => message.senderId !== device.credentials.userId);
     if (!message || !greater(message.sequence, view.reads)) return;
     const through = message.sequence;
+    const key = device.actor + '/' + id;
+    if (!greater(through, this.readFrontiers.get(key) ?? '0')) {
+      this.metrics.count('read.noop');
+      view.reads = through;
+      return;
+    }
     view.reads = through;
     const peers = this.expected(id, device.actor).filter(candidate => candidate !== device && candidate.selected?.id === id);
     const record = {
-      actor: device.actor, through, started: performance.now(), devices: peers,
+      actor: device.actor, through, started: performance.now(), devices: peers, confirmed: false,
       selections: new Map(peers.map(peer => [peer, peer.selection])),
     };
-    if (record.devices.length > 0) {
-      if (!this.reads.has(id)) this.reads.set(id, []);
-      this.reads.get(id).push(record);
+    if (!this.reads.has(id)) this.reads.set(id, []);
+    this.reads.get(id).push(record);
+    try {
+      const progress = await device.change(chatPath(id) + '/reads', 'POST', { throughSequence: through });
+      check(isSeq(progress?.throughSequence) && !greater(through, progress.throughSequence), 'readDidNotAdvance');
+      const result = key + '/' + progress.throughSequence + '/' + progress.readAt;
+      record.confirmed = !this.readResults.has(result);
+      this.readResults.add(result);
+      if (greater(progress.throughSequence, this.readFrontiers.get(key) ?? '0')) this.readFrontiers.set(key, progress.throughSequence);
+      this.metrics.count(record.confirmed ? 'read.frontierConfirmed' : 'read.noop');
+      if (record.confirmed && record.observed) this.metrics.observe('read.propagated', record.observedAt - record.started);
+      this.metrics.observe('read.accepted', performance.now() - record.started);
+    } finally {
+      if (!record.confirmed) this.reads.set(id, this.reads.get(id).filter(candidate => candidate !== record));
     }
-    const progress = await device.change(chatPath(id) + '/reads', 'POST', { throughSequence: through });
-    check(isSeq(progress?.throughSequence) && !greater(through, progress.throughSequence), 'readDidNotAdvance');
-    this.metrics.observe('read.accepted', performance.now() - record.started);
   }
 
   async editOrDelete(device, action, id, path) {
     const message = await this.reference(action, device, id);
-    if (action.type === 'edit') {
-      const body = messageText(action.bytes, action.textSeed);
-      const edited = await device.change(path + '/messages/' + message.id, 'PATCH', { body, expectedVersion: message.messageVersion });
-      check(edited?.id === message.id && edited.body === body && isSeq(edited.messageVersion) &&
-        greater(edited.messageVersion, message.messageVersion), 'editDidNotAdvance');
-      this.mutations.set(message.id, { kind: 'edit', version: edited.messageVersion, body, device });
-      return;
+    const mutation = { kind: action.type === 'edit' ? 'edit' : action.type === 'deleteSelf' ? 'SELF' : 'EVERYONE',
+      device, status: 'pending', before: { body: message.body, version: message.messageVersion },
+      ...(action.type === 'edit' ? { body: messageText(action.bytes, action.textSeed), version: String(BigInt(message.messageVersion) + 1n) } : { requestId: ulid() }) };
+    this.mutations.set(message.id, mutation);
+    try {
+      if (mutation.kind === 'edit') {
+        const edited = await device.change(path + '/messages/' + message.id, 'PATCH', { body: mutation.body, expectedVersion: message.messageVersion });
+        check(edited?.id === message.id && edited.body === mutation.body && isSeq(edited.messageVersion) &&
+          greater(edited.messageVersion, message.messageVersion), 'editDidNotAdvance');
+        mutation.version = edited.messageVersion;
+      } else {
+        const result = await device.change(path + '/deletions', 'POST', { requestId: mutation.requestId, scope: mutation.kind, target: 'MESSAGES', messageIds: [message.id] });
+        check(result?.operationId === mutation.requestId && result.scope === mutation.kind && result.target === 'MESSAGES', 'deletionResult');
+      }
+      mutation.status = 'confirmed';
+    } catch (error) {
+      mutation.status = error.code === 'network' || /^http5/.test(error.code) ? 'uncertain' : 'rejected';
+      throw error;
     }
-    const scope = action.type === 'deleteSelf' ? 'SELF' : 'EVERYONE';
-    const requestId = ulid();
-    const result = await device.change(path + '/deletions', 'POST', { requestId, scope, target: 'MESSAGES', messageIds: [message.id] });
-    check(result?.operationId === requestId && result.scope === scope && result.target === 'MESSAGES', 'deletionResult');
-    this.mutations.set(message.id, { kind: scope, device, requestId });
-    await device.sync(id);
-    await device.refreshDirectory();
+    if (mutation.kind !== 'edit') {
+      await device.sync(id);
+      await device.refreshDirectory();
+    }
   }
 
   async direct(device, action, due) {
@@ -335,7 +364,10 @@ class Run {
         const source = this.manifest.chats[action.source];
         const destination = device.selected;
         await device.openChat(await this.knownChat(device, source), performance.now());
-        const message = await this.reference(action, device, source);
+        const seed = this.plan.chats[action.source].history.length;
+        const page = await device.get(chatPath(source) + '/messages', { beforeSeq: String(seed + 1), limit: pageSize });
+        const message = orderedMessages(page, source).at(-1);
+        check(message && !greater(message.sequence, String(seed)), 'forwardSourceUnavailable');
         const sent = this.send(device, due, id, {
           chatId: id, body: message.body,
           forwardFromChatId: source, forwardFromMessageId: message.id,
@@ -363,14 +395,15 @@ class Run {
       case 'lookup': return device.get('/users', { query: this.manifest.devices[action.peer][0].username });
       case 'direct': return this.direct(device, action, due);
       case 'group': return this.group(device, action);
-      case 'logout':
+      case 'logout': return device.session(async () => {
         await device.change('/auth/logout', 'POST');
-        await device.close();
         delete device.credentials.cookie;
-        return;
-      case 'login':
+        await device.close();
+      });
+      case 'login': return device.session(async () => {
         await authenticate(this.http, device.credentials, 'login');
         return device.startup(false, due);
+      });
       default: throw new Fault('unknownAction');
     }
   }
@@ -394,83 +427,17 @@ class Run {
     return task;
   }
 
-  async verify() {
-    let missing = 0;
-    let checked = 0;
-    let mismatches = 0;
-    let unverified = 0;
-    let mutationChecks = 0;
-    const batches = new Map();
-    const add = (id, record, device, expected) => {
-      const key = device.credentials.userId + '/' + id;
-      if (!batches.has(key)) batches.set(key, { id, device, checks: new Map() });
-      batches.get(key).checks.set(record.saved.id, { record, expected });
-    };
-    for (const record of this.sends.values()) {
-      if (!record.saved) {
-        missing++;
-        continue;
-      }
-      const id = record.saved.chatId;
-      const mutation = this.mutations.get(record.saved.id);
-      add(id, record, record.device, mutation);
-      if (mutation) {
-        const peer = this.roster.get(id)?.members.find(actor =>
-          actor !== record.device.actor && actor % this.shard.count === this.shard.index);
-        if (peer !== undefined) {
-          add(id, record, this.devices[peer][0], mutation.kind === 'SELF' ? null : mutation);
-        }
-      }
-    }
-    await workers([...batches.values()], 12, async ({ id, device, checks }) => {
-      const rows = [...checks.entries()];
-      for (let start = 0; start < rows.length; start += 100) {
-        const batch = rows.slice(start, start + 100);
-        try {
-          const page = await device.change(chatPath(id) + '/messages/resolve', 'POST', { messageIds: batch.map(([messageId]) => messageId) });
-          const messages = new Map(orderedMessages(page, id, false).map(message => [message.id, message]));
-          for (const [messageId, { record, expected }] of batch) {
-            const message = messages.get(messageId);
-            checked++;
-            if (expected) mutationChecks++;
-            const present = expected?.kind === 'SELF' || expected?.kind === 'EVERYONE' ? !message
-              : message?.sequence === record.saved.sequence && message.body === (expected?.body ?? record.body) &&
-                (!expected || message.messageVersion === expected.version);
-            if (!present) mismatches++;
-          }
-        } catch (error) {
-          this.metrics.failure('verification', error);
-          unverified += batch.length;
-        }
-      }
-    });
-    const records = [...this.sends.values()];
-    const recipientsExpected = records.reduce((total, record) => total + record.expected.filter(device => device !== record.device).length, 0);
-    // A recipient that closed its socket or switched chats before the frame arrived was interrupted,
-    // not missed: the browser recovers those through HTTP when the chat is opened again.
-    const unreceived = records.flatMap(record => record.expected
-      .filter(device => device !== record.device && !record.received.has(device))
-      .map(device => (record.group ? device.selection : device.connection) === record.lifecycles.get(device)));
-    const recipientsMissing = unreceived.filter(Boolean).length;
-    const recipientsInterrupted = unreceived.length - recipientsMissing;
-    const readOperations = [...this.reads.values()].flat();
-    // A read is missed when some peer kept the chat open past the 2 s server batch plus delivery and never
-    // saw it. When every peer left sooner, it was interrupted: the browser shows it on the next opening.
-    const unobserved = readOperations.filter(record => !record.observed);
-    const keptOpen = record => record.devices.some(peer => peer.stayedSelected(record.selections.get(peer), record.started) >= 5000);
-    const readPropagationMissing = unobserved.filter(keptOpen).length;
-    const readPropagationInterrupted = unobserved.length - readPropagationMissing;
-    const plannedSends = this.actions.filter(action => confirmations.has(action.type)).length;
-    return {
-      plannedSends, dispatched: records.length, saved: records.length - missing,
-      missing: plannedSends - records.length + missing,
-      pending: records.filter(record => !record.saved && !record.rejected).length,
-      duplicates: this.metrics.counts['correctness.conflictingTerminal'] ?? 0,
-      durableChecks: checked, durableMismatches: mismatches, durableUnverified: unverified, mutationChecks,
-      recipientsExpected, recipientsMissing, recipientsInterrupted,
-      readPropagationExpected: readOperations.length, readPropagationMissing, readPropagationInterrupted,
-    };
+  async finishTraffic() {
+    this.measurementCutoff = new Map(this.devices.flat().map(device => [device, { connection: device.connection, selection: device.selection }]));
+    await Promise.all(this.devices.flat().map(device => device.close()));
+    while (this.background.size) await Promise.all([...this.background]);
+    this.acceptingEvents = false;
   }
+
+  async verify() {
+    return verifyRun(this);
+  }
+
 }
 
 export async function run(plan, manifest, http, metrics, { shard = { index: 0, count: 1 }, startAt } = {}) {
@@ -511,16 +478,20 @@ export async function run(plan, manifest, http, metrics, { shard = { index: 0, c
       limit: 512 * state.capacity,
     });
     while (state.background.size) await Promise.all([...state.background]);
+    await state.finishTraffic();
+    state.verificationMetrics = new Measurements();
+    state.verificationHttp = new Http(http.options, state.verificationMetrics);
     correctness = await state.verify();
   } finally {
     await Promise.all(state.devices.flat().map(device => device.close()));
     while (state.background.size) await Promise.all([...state.background]);
     clearInterval(rssTimer);
     sampleRss();
+    state.verificationHttp?.controller.abort();
   }
   const passed = state.failedActions === 0 && Object.keys(metrics.failures).length === 0 &&
     !metrics.counts.lagExceeded && !correctness.missing && !correctness.pending &&
-    !correctness.duplicates && !correctness.durableMismatches && !correctness.recipientsMissing;
+    !correctness.duplicates && !correctness.durableMismatches && !correctness.durableUnverified && !correctness.recipientsMissing && !correctness.readPropagationMissing;
   return {
     format: 'messenger-realistic-load-report-v1', profile: plan.profile.name, seed: plan.seed, shard,
     users: plan.population.length, durationMs: plan.profile.durationMs,
@@ -528,6 +499,8 @@ export async function run(plan, manifest, http, metrics, { shard = { index: 0, c
       [persona.name, plan.population.filter(user => user.persona === persona.name).length])),
     sessions: plan.sessions.length, plannedActions: actions.length,
     schedule: { ...scheduleResult, lagLimitMs: plan.profile.timing.lagLimitMs },
+    diagnostics: state.diagnostics, verificationMetrics: state.verificationMetrics.report(),
+    ...(shard.count > 1 ? { verificationRawMetrics: state.verificationMetrics.raw() } : {}),
     ticketAdmission: http.tickets.report(), failedActionSamples: state.failedSamples, correctness, passed, metrics: metrics.report(),
     ...(shard.count > 1 ? { rawMetrics: metrics.raw() } : {}),
   };

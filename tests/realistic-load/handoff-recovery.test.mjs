@@ -89,7 +89,7 @@ for (const kind of ['edit', 'delete', 'selfDelete']) {
   });
 }
 
-for (const ordering of ['selected', 'left while loading', 'opened after protection', 'jumped after disconnect', 'jumped during fallback', 'jumped in same selection during fallback', 'jumped in same selection during page']) {
+for (const ordering of ['selected', 'left while loading', 'opened after protection', 'jumped after disconnect', 'jumped during fallback', 'jumped in same selection during fallback', 'jumped in same selection during page', 'jumped in same selection during final fallback']) {
 test('handoff retains the new anchor and one page budget at the pagination limit: ' + ordering, { timeout: 10_000 }, async () => {
   const { state, device, chatId, otherId, chat, other, row } = fixture();
   const anchorRows = Array.from({ length: 50 }, (_, i) => row(i + 1));
@@ -102,12 +102,14 @@ test('handoff retains the new anchor and one page budget at the pagination limit
   let latestRequests = 0;
   let completed = false;
   const sameSelection = ordering.startsWith('jumped in same selection');
-  const duringFallback = ordering.endsWith('during fallback');
+  const duringFallback = ordering.includes('fallback');
+  const finalFallback = ordering.endsWith('final fallback');
+  const fallbackRequests = duringFallback ? finalFallback ? 3 : 1 : 0;
   device.get = async (path, args) => {
     const isOther = path.includes(otherId);
     if (path.endsWith('/state')) return { lastSeq: '1200', mutationSeq: '0', visibilitySeq: '0', memberSeq: '0', pinsSeq: '0', memberPinsSeq: '0', ownReadThrough: '0', otherReadThrough: '0' };
     if (path.endsWith('/messages/changes')) {
-      const seq = isOther ? '0' : '1200';
+      const seq = isOther ? '0' : String(1200 + (finalFallback ? latestRequests : 0));
       return { lastSeq: seq, nextSeq: seq, resetRequired: false, changes: [] };
     }
     if (path.endsWith('/messages/around')) {
@@ -127,7 +129,8 @@ test('handoff retains the new anchor and one page budget at the pagination limit
     }
     if (!isOther) {
       latestRequests++;
-      if (duringFallback) { fallback.entered(); await fallback.blocked; }
+      if (finalFallback && latestRequests < 3) await device.refreshChanges(chatId);
+      else if (duringFallback) { fallback.entered(); await fallback.blocked; }
     }
     return { messages: isOther ? [] : Array.from({ length: 50 }, (_, i) => row(1151 + i)), coverageThroughSequence: isOther ? '0' : '1200', mutationSeq: isOther ? '0' : '1200', visibilitySeq: '0' };
   };
@@ -166,7 +169,7 @@ test('handoff retains the new anchor and one page budget at the pagination limit
   } else if (!jumping) twentieth.release();
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(completed, false);
-  assert.equal(latestRequests, duringFallback ? 1 : 0);
+  assert.equal(latestRequests, fallbackRequests);
   around.release();
   await opening;
   const installed = view.installedWindow;
@@ -176,7 +179,7 @@ test('handoff retains the new anchor and one page budget at the pagination limit
   while (state.background.size) await Promise.all([...state.background]);
   assert.equal(error?.code, 'catchUpGap');
   assert.equal(pageRequests, 20);
-  assert.equal(latestRequests, duringFallback ? 1 : 0);
+  assert.equal(latestRequests, fallbackRequests);
   assert.equal(view.messages.length, 50);
   assert.deepEqual(view.messages.map(message => message.id), anchorRows.map(message => message.id));
   assert.equal(view.messages[0].id, anchorRows[0].id);

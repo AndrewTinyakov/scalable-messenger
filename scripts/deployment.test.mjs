@@ -86,6 +86,22 @@ test('public proxies reject broad trust ranges and inexact or insecure browser o
   assert.equal(configureEdge(directory, { MESSENGER_CLIENT_ORIGIN: 'https://messenger.localhost' }).status, 0)
 }))
 
+test('the edge accepts bracketed IPv6 origins with or without a port and rejects unsafe authorities', () => temporary((directory) => {
+  for (const origin of ['https://[::1]', 'https://[2001:db8::10]:8443', 'https://[::ffff:192.0.2.1]']) {
+    const result = configureEdge(directory, { ...edge, MESSENGER_CLIENT_ORIGIN: origin })
+    assert.equal(result.status, 0, result.stderr)
+    assert.ok(readFileSync(`${directory}/client-origin.inc`, 'utf8').includes(`"${origin}" "${origin}";`))
+  }
+  for (const origin of [
+    'https://::1', 'https://[::1', 'https://[::1]]', 'https://[::1]extra',
+    'https://[::1]:', 'https://[::1]:https', 'https://[::1]:8443:443',
+    'https://[fe80::1%25en0]', 'https://[::1]/', 'https://[::1]?', 'https://[::1]#',
+    'https://[::1]";', 'https://[::1]$host', 'https://[::1]\\', 'https://[::1]\n[::2]',
+  ]) {
+    assert.notEqual(configureEdge(directory, { ...edge, MESSENGER_CLIENT_ORIGIN: origin }).status, 0, origin)
+  }
+}))
+
 test('development secrets persist across runs, preserve existing values and use restricted files', () => temporary((directory) => {
   const original = `WS_TICKET_SECRET=${'a'.repeat(64)}\nMESSENGER_API_PORT=18881\n`
   writeFileSync(`${directory}/.env`, original)
@@ -96,6 +112,7 @@ test('development secrets persist across runs, preserve existing values and use 
   assert.ok(env.startsWith(original))
   const values = Object.fromEntries(env.trim().split('\n').map((line) => line.split('=')))
   assert.match(values.REDIS_PASSWORD, /^[a-f0-9]{64}$/)
+  assert.equal(values.MESSENGER_SESSION_COOKIE_SECURE, 'true')
   assert.notEqual(values.POSTGRES_API_PASSWORD, values.POSTGRES_COMMAND_PASSWORD)
   assert.equal(readFileSync(`${directory}/.local/secrets/metrics-password`, 'utf8').trim(), values.METRICS_PASSWORD)
   assert.equal(statSync(`${directory}/.env`).mode & 0o777, 0o600)

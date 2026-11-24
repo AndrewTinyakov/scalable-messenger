@@ -37,6 +37,7 @@ import java.util.Base64
 private const val CHROME_MAC =
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 private const val FIREFOX_WINDOWS = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0"
+private const val CLIENT_ORIGIN = "http://localhost:5173"
 
 @SpringBootTest(
     classes = [ApiApplication::class],
@@ -44,6 +45,7 @@ private const val FIREFOX_WINDOWS = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; r
     properties = [
         "spring.security.user.password=test-monitoring-password",
         "messenger.auth.login-throttle.base-delay=10m",
+        "messenger.web.cors.allowed-origins[0]=$CLIENT_ORIGIN",
         "messenger.grpc.enabled=false",
         "spring.rabbitmq.dynamic=false",
         "spring.rabbitmq.listener.simple.auto-startup=false",
@@ -259,11 +261,20 @@ class AuthSessionHttpTests {
             val blocked = send(post("/api/v1/auth/login", credentials(username, "wrong-password")))
             assertEquals(429, blocked.statusCode(), username)
             assertTrue(blocked.headers().firstValue("Retry-After").orElseThrow().toLong() in 590..600)
+            assertEquals(CLIENT_ORIGIN, blocked.headers().firstValue("Access-Control-Allow-Origin").orElseThrow())
+            assertEquals("true", blocked.headers().firstValue("Access-Control-Allow-Credentials").orElseThrow())
+            assertEquals("Retry-After", blocked.headers().firstValue("Access-Control-Expose-Headers").orElseThrow())
             mapper.readTree(blocked.body())
         }
 
         assertEquals(bodies[0], bodies[1])
         assertEquals("TOO_MANY_ATTEMPTS", bodies[0].path("code").stringValue())
+
+        val request = post("/api/v1/auth/login", credentials(existing, "wrong-password"))
+        val rejected = send(request.setHeader("Origin", "http://localhost:5174"))
+        assertEquals(403, rejected.statusCode())
+        assertFalse(rejected.headers().firstValue("Access-Control-Allow-Origin").isPresent)
+        assertFalse(rejected.headers().firstValue("Access-Control-Expose-Headers").isPresent)
     }
 
     @Test
@@ -313,7 +324,7 @@ class AuthSessionHttpTests {
     private fun post(path: String, body: String = ""): HttpRequest.Builder =
         browser(builder(path)).header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(body))
 
-    private fun browser(request: HttpRequest.Builder) = request.header("Origin", "http://localhost:5173").header("X-Messenger-CSRF", "1")
+    private fun browser(request: HttpRequest.Builder) = request.header("Origin", CLIENT_ORIGIN).header("X-Messenger-CSRF", "1")
 
     private fun builder(path: String): HttpRequest.Builder =
         HttpRequest.newBuilder(URI.create("http://localhost:$port$path")).timeout(Duration.ofSeconds(10))

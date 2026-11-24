@@ -10,7 +10,7 @@ function isLoopback(url: URL): boolean {
 }
 
 function hasExtras(url: URL): boolean {
-  return Boolean(url.username || url.password || url.search || url.hash)
+  return Boolean(url.username || url.password || /[?#]/.test(url.href))
 }
 
 export function parseTransportEndpoints(

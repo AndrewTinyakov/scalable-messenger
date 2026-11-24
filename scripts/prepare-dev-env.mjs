@@ -26,7 +26,7 @@ const passwords = [
 let additions = ''
 for (const [key, value] of [
   ...passwords.map((key) => [key, randomBytes(32).toString('hex')]),
-  ['MESSENGER_SESSION_COOKIE_SECURE', 'false'],
+  ['MESSENGER_SESSION_COOKIE_SECURE', 'true'],
   ['MESSENGER_GRPC_GID', String(process.getgid())],
 ]) {
   if (values.has(key)) {

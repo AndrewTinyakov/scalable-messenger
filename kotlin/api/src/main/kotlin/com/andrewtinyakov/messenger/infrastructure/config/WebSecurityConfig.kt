@@ -5,6 +5,7 @@ import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.core.Ordered
 import org.springframework.core.annotation.Order
+import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpMethod
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
 import org.springframework.security.config.http.SessionCreationPolicy
@@ -23,6 +24,7 @@ class WebSecurityConfig {
             allowedMethods = properties.cors.allowedMethods
             allowedHeaders = properties.cors.allowedHeaders
             allowCredentials = properties.cors.allowCredentials
+            exposedHeaders = listOf(HttpHeaders.RETRY_AFTER)
         }
         val source = UrlBasedCorsConfigurationSource().apply { registerCorsConfiguration("/**", cors) }
         http

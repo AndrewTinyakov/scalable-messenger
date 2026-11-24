@@ -15,9 +15,14 @@ if [ -n "$origin" ]; then
     http://?*|https://?*) ;;
     *) echo 'MESSENGER_CLIENT_ORIGIN must be an exact HTTP or HTTPS origin' >&2; exit 1 ;;
   esac
-  case "${origin#*://}" in
-    *[!a-z0-9.:-]*|.*|*:|*::*) echo 'MESSENGER_CLIENT_ORIGIN must be an exact lowercase origin without a path' >&2; exit 1 ;;
+  authority=${origin#*://}
+  case "$authority" in
+    *[!][a-z0-9.:-]*) echo 'MESSENGER_CLIENT_ORIGIN contains unsafe characters' >&2; exit 1 ;;
   esac
+  if ! printf '%s\n' "$authority" | LC_ALL=C grep -Eq '^([a-z0-9-][a-z0-9.-]*|\[[0-9a-f:.]*:[0-9a-f:.]*\])(:[0-9]+)?$'; then
+    echo 'MESSENGER_CLIENT_ORIGIN must be an exact lowercase origin without a path' >&2
+    exit 1
+  fi
   if [ "$public_scheme" = https ] && [ "${origin%%://*}" != https ]; then
     echo 'An HTTPS deployment requires an HTTPS MESSENGER_CLIENT_ORIGIN' >&2
     exit 1

@@ -40,6 +40,17 @@ describe('transport endpoints', () => {
     }
   })
 
+  it.each(['?', '#'])('rejects either endpoint with an empty %s delimiter', (delimiter) => {
+    const api = 'https://api.example.com/api'
+    const ws = 'wss://ws.example.com/ws'
+    expect(() => parseTransportEndpoints(api + delimiter, ws)).toThrow(
+      'Invalid Messenger transport configuration',
+    )
+    expect(() => parseTransportEndpoints(api, ws + delimiter)).toThrow(
+      'Invalid Messenger transport configuration',
+    )
+  })
+
   it('allows plain HTTP for builds only when both endpoints are loopback', () => {
     const options = { requireTlsOutsideLoopback: true }
     expect(

@@ -27,7 +27,7 @@ Configure the CDN with:
 
 - **Origin access.** Keep the bucket or origin private and allow only the CDN to read it (for CloudFront, origin access control).
 - **SPA fallback.** Serve `/index.html` with status 200 for paths that are not files, so client-side routes such as `/users/{id}` load. For S3 behind CloudFront, map 403 and 404 origin errors to `/index.html` with 200.
-- **Caching.** `Cache-Control: public, max-age=31536000, immutable` for `/assets/*`; `Cache-Control: no-cache` for `index.html` and every other path.
+- **Caching.** Set `Cache-Control: public, max-age=31536000, immutable` for `/assets/*` and `Cache-Control: no-cache` for `index.html` and every other path. In CloudFront, use a cache policy with a minimum TTL of 0 for HTML so it honors `no-cache`.
 - **Response headers** on every response:
 
   | Header | Value |
@@ -40,7 +40,18 @@ Configure the CDN with:
 
 - **HTTPS only.** Redirect HTTP to HTTPS at the CDN.
 
-To release, upload `assets/` first, then `favicon.svg` and `index.html`, and invalidate `/index.html` (or `/*`). Keep previous `assets/` files for at least a day so tabs opened before the release can still load them. Old tabs keep their sockets and keep working against the same API and WS endpoints.
+To release, upload `assets/` first, then `favicon.svg` and `index.html`. With CloudFront custom error responses, invalidate `/*` so cached copies of the old HTML at `/`, `/index.html`, and deep links are all evicted. Keep the 403 and 404 error caching TTL low. Keep previous `assets/` files for at least a day so tabs opened before the release can still load them. Old tabs keep their sockets and keep working against the same API and WS endpoints.
+
+### Retire the previous frontend
+
+After the CDN and the separate API and WS hosts serve traffic, remove the old `client` and `nginx-exporter-client` containers. First verify that the old frontend receives no traffic, including any WebSocket connections it still proxies. Run the command from the previous release with the same Compose project name, environment file and Compose files used for that deployment. For example, if it used the production override:
+
+```sh
+docker compose -p messenger --env-file /secure/messenger.env \
+  -f compose.yaml -f compose.production.yaml rm --stop --force nginx-exporter-client client
+```
+
+The service names limit the cleanup to those two containers. Use the current Compose files for later updates.
 
 ## API and WS load balancer
 
@@ -56,7 +67,7 @@ MESSENGER_TRUSTED_PROXY_CIDRS=192.0.2.0/24 2001:db8:1234::/64
 MESSENGER_BIND_ADDRESS=10.0.1.20
 ```
 
-`MESSENGER_CLIENT_ORIGIN` is the exact browser origin: scheme and lowercase host, no path or trailing slash. The API's CORS and CSRF checks and the WS gateway's Origin check accept only this value. The API proxy also uses it to add CORS headers to the errors nginx itself generates (429, 502, 503, 504), so the browser can still read those statuses and retry; responses from the API carry the API's own CORS headers. With `MESSENGER_PUBLIC_SCHEME=https`, the proxies refuse to start unless the origin is HTTPS.
+`MESSENGER_CLIENT_ORIGIN` is the exact browser origin, including the scheme, lowercase host and non-default port if present. Omit the path and trailing slash. The API's CORS and CSRF checks and the WS gateway's Origin check accept only this value. The API proxy adds CORS headers to nginx-generated 429, 502, 503 and 504 responses. The API adds its own CORS headers and exposes `Retry-After` to the allowed origin on application-generated 429 responses. Browsers still require a successful preflight before sending a request that needs one. When a preflight fails, JavaScript sees a fetch failure. With `MESSENGER_PUBLIC_SCHEME=https`, the API proxy requires an HTTPS origin.
 
 Replace the example CIDRs with the actual source addresses nginx sees from the LB. The values are space-separated IP CIDRs. Trust only LB addresses, never all addresses or an entire shared VPC. If the LB reaches a published port through host NAT, verify the source address observed inside nginx before choosing the CIDR. Reserve a dedicated LB source if NAT collapses trusted and untrusted traffic into the same peer.
 
@@ -66,7 +77,7 @@ Nginx uses recursive real-IP processing only for configured trusted peers. It re
 
 Login, registration and WS-ticket rate limits count requests per client IP. CORS preflight (`OPTIONS`) requests do not count, so the cross-origin page gets the same budget a same-origin page had.
 
-`MESSENGER_PUBLIC_SCHEME` is explicit and defaults to `http` in base Compose. The production override fixes it to `https` on both proxies, forwards HTTPS to the API and sends `Strict-Transport-Security: max-age=31536000`. It also fixes the API's Secure cookie setting to true and requires `MESSENGER_CLIENT_ORIGIN` and `MESSENGER_TRUSTED_PROXY_CIDRS`.
+`MESSENGER_PUBLIC_SCHEME` defaults to `https` in base Compose for local Portless TLS. Both proxies forward the HTTPS scheme and port 443 and send `Strict-Transport-Security: max-age=31536000`. The production override fixes the scheme to `https` and the API's Secure cookie setting to true, and requires `MESSENGER_CLIENT_ORIGIN` and `MESSENGER_TRUSTED_PROXY_CIDRS`.
 
 ```sh
 docker compose --env-file /secure/messenger.env \
@@ -75,11 +86,11 @@ docker compose --env-file /secure/messenger.env \
   -f compose.yaml -f compose.production.yaml up --build -d
 ```
 
-The application, gateway and proxies reject invalid origin configuration at startup. `compose config` checks interpolation and structure; it does not establish LB reachability or validate certificate termination.
+The API and gateway validate the configured origin at startup. The API proxy checks that the origin is safe to insert in nginx configuration. Use `compose config` to check interpolation and structure, then verify load balancer reachability and TLS separately.
 
 ## Credentials and first initialization
 
-For development, `scripts/dev-up.sh` requires Node.js 24.15 or later, Go, OpenSSL and Docker Compose. On first run `scripts/prepare-dev-env.mjs` generates independent 32-byte random hexadecimal credentials for Postgres admin, migrator, API, command processor, outbox publisher and exporter, Redis, RabbitMQ, the Erlang cluster cookie, metrics, Grafana and WS tickets. It appends missing settings to the ignored `.env` file, preserves existing values and sets mode `0600`. Development sets `MESSENGER_SESSION_COOKIE_SECURE=false` for local HTTP. Base Compose's fallback remains true.
+For development, `scripts/dev-up.sh` requires Node.js 24.15 or later, Go, OpenSSL and Docker Compose. On first run `scripts/prepare-dev-env.mjs` generates independent 32-byte random hexadecimal credentials for Postgres admin, migrator, API, command processor, outbox publisher and exporter, Redis, RabbitMQ, the Erlang cluster cookie, metrics, Grafana and WS tickets. It appends missing settings to the ignored `.env` file, preserves existing values and sets mode `0600`. The generated `MESSENGER_SESSION_COOKIE_SECURE=true` matches the HTTPS workflow. To migrate an older `.env`, follow the [local setup instructions](../README.md).
 
 The launcher mirrors the metrics password into ignored `.local/secrets/metrics-password` with mode `0640`. Prometheus mounts that file read-only and joins the host service-credential group through `MESSENGER_GRPC_GID`. The containing directory has mode `0750`. Existing gRPC material stays in ignored `.local/grpc`. `scripts/dev-up.sh --prepare-only` prepares local credentials without starting containers. Do not use the development certificate authority for production.
 

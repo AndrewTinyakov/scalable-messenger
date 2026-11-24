@@ -27,7 +27,11 @@ VITE_WS_URL=wss://ws.messenger.localhost/ws npm run build
 portless run --name messenger --prefix '' npm run preview
 ```
 
-`--prefix ''` keeps `https://messenger.localhost` in a Git worktree, matching Compose's default `MESSENGER_CLIENT_ORIGIN`. For a parallel worktree, pass a prefix such as `--prefix feature` to both Vite commands and use `https://feature.messenger.localhost` as `MESSENGER_CLIENT_ORIGIN`. Give the proxies matching names such as `api.feature.messenger` and `ws.feature.messenger`, alias them to the worktree's published ports, and set `VITE_API_BASE_URL` and `VITE_WS_URL` for dev and build. Run `scripts/dev-up.sh` again to apply backend settings.
+`--prefix ''` keeps `https://messenger.localhost` in a Git worktree, matching Compose's default `MESSENGER_CLIENT_ORIGIN`.
+
+To run a second stack alongside the primary one, set a unique `COMPOSE_PROJECT_NAME` such as `messenger-feature` in the second worktree's `.env` before running `scripts/dev-up.sh`. Give it unused API, WS, and monitoring host ports and unused Compose subnets with matching IP prefixes and API proxy address. A separate project keeps its containers and database volume independent. [Network settings](docs/deployment.md#network-and-host-isolation)
+
+For that stack, set `MESSENGER_CLIENT_ORIGIN=https://feature.messenger.localhost` and use `--prefix feature` for both Vite commands. Alias `api.feature.messenger` and `ws.feature.messenger` to the second stack's published API and WS ports. Set `VITE_API_BASE_URL` and `VITE_WS_URL` to those aliases for both dev and build.
 
 Portless terminates TLS, and the proxies tell upstream services the public scheme is HTTPS. For static hosting and production routing, see the [deployment guide](docs/deployment.md). For explicit HTTP test settings, see the [cross-system test guide](tests/README.md).
 

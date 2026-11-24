@@ -27,7 +27,8 @@ async function json(path, limit) {
 
 function endpoint(raw, protocols, remote) {
   const url = new URL(raw);
-  check(protocols.includes(url.protocol) && (remote || ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)) &&
+  const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) || url.hostname.endsWith('.localhost');
+  check(protocols.includes(url.protocol) && (remote || loopback) &&
     !url.username && !url.password && !url.search && !url.hash, 'localhostEndpointRequired');
   return url.href.replace(/\/$/, '');
 }
@@ -110,7 +111,7 @@ async function main() {
   const options = {
     api: endpoint(values.api ?? 'http://localhost:8081/api', ['http:', 'https:'], values.remote),
     ws: endpoint(values.ws ?? 'ws://localhost:8082/ws', ['ws:', 'wss:'], values.remote),
-    origin: endpoint(values.origin ?? 'http://localhost:8080', ['http:', 'https:'], values.remote),
+    origin: endpoint(values.origin ?? 'https://messenger.localhost', ['http:', 'https:'], values.remote),
     manifest: privateOutputPath(values.manifest),
     composeProject: values['compose-project'] ?? 'messenger',
     authRate: Number(values['auth-rate'] ?? 1),

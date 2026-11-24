@@ -36,7 +36,7 @@ x-api: &api
     METRICS_PASSWORD: ${METRICS_PASSWORD:?Run scripts/dev-up.sh}
     SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: ${MESSENGER_API_DB_POOL:-16}
     MESSENGER_HTTP_PROXY_PATTERN: '${MESSENGER_HTTP_PROXY_PATTERN:-10\.246\.0\.10}'
-    CLIENT_ORIGIN: ${MESSENGER_CLIENT_ORIGIN:-http://localhost:8080}
+    CLIENT_ORIGIN: ${MESSENGER_CLIENT_ORIGIN:-https://messenger.localhost}
     SESSION_COOKIE_SECURE: ${MESSENGER_SESSION_COOKIE_SECURE:-true}
     WS_TICKET_SECRET: ${WS_TICKET_SECRET:?Run scripts/dev-up.sh to generate a local secret}
     MESSENGER_GRPC_CA_FILE: /run/messenger-grpc/ca.pem
@@ -72,7 +72,7 @@ x-ws: &ws
     RABBITMQ_URLS: amqp://messenger:${RABBITMQ_PASSWORD:?Run scripts/dev-up.sh}@rabbitmq-1:5672/,amqp://messenger:${RABBITMQ_PASSWORD:?Run scripts/dev-up.sh}@rabbitmq-2:5672/,amqp://messenger:${RABBITMQ_PASSWORD:?Run scripts/dev-up.sh}@rabbitmq-3:5672/
     REDIS_URL: redis://:${REDIS_PASSWORD:?Run scripts/dev-up.sh}@redis-1:6379/0
     REDIS_CLUSTER_NODES: redis-1:6379,redis-2:6379,redis-3:6379
-    WS_ALLOWED_ORIGIN: ${MESSENGER_CLIENT_ORIGIN:-http://localhost:8080}
+    WS_ALLOWED_ORIGIN: ${MESSENGER_CLIENT_ORIGIN:-https://messenger.localhost}
     WS_MAX_CONNECTIONS: ${WS_MAX_CONNECTIONS:-10000}
     WS_MAX_ROOMS: ${WS_MAX_ROOMS:-100000}
     WS_MAX_MEMBERSHIPS: ${WS_MAX_MEMBERSHIPS:-1000000}
@@ -469,7 +469,7 @@ services:
       TICKET_IP_BURST: ${MESSENGER_TICKET_IP_BURST:-20}
       MESSENGER_PUBLIC_SCHEME: ${MESSENGER_PUBLIC_SCHEME:-http}
       MESSENGER_TRUSTED_PROXY_CIDRS: ${MESSENGER_TRUSTED_PROXY_CIDRS:-}
-      MESSENGER_FRONT_PROXY_CIDR: ${MESSENGER_EDGE_IP_PREFIX:-10.247.0}.10/32
+      MESSENGER_CLIENT_ORIGIN: ${MESSENGER_CLIENT_ORIGIN:-https://messenger.localhost}
       MESSENGER_CONNECTION_LIMIT: ${MESSENGER_CONNECTION_LIMIT:-200}
       NGINX_ENVSUBST_FILTER: '^(AUTH_IP_|TICKET_IP_|WS_UPGRADE_|MESSENGER_CONNECTION_LIMIT$)'
     ulimits:
@@ -502,7 +502,6 @@ services:
       WS_UPGRADE_BURST: ${MESSENGER_WS_UPGRADE_BURST:-100}
       MESSENGER_PUBLIC_SCHEME: ${MESSENGER_PUBLIC_SCHEME:-http}
       MESSENGER_TRUSTED_PROXY_CIDRS: ${MESSENGER_TRUSTED_PROXY_CIDRS:-}
-      MESSENGER_FRONT_PROXY_CIDR: ${MESSENGER_EDGE_IP_PREFIX:-10.247.0}.10/32
       MESSENGER_CONNECTION_LIMIT: ${MESSENGER_CONNECTION_LIMIT:-200}
       NGINX_ENVSUBST_FILTER: '^(AUTH_IP_|TICKET_IP_|WS_UPGRADE_|MESSENGER_CONNECTION_LIMIT$)'
     ulimits:
@@ -513,26 +512,6 @@ services:
       - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
       ws: { condition: service_healthy }
-    restart: unless-stopped
-
-  client:
-    <<: *public-nginx
-    networks:
-      edge:
-        ipv4_address: ${MESSENGER_EDGE_IP_PREFIX:-10.247.0}.10
-    build:
-      context: ./client
-    environment:
-      MESSENGER_API_BASE_URL: ${MESSENGER_API_BASE_URL:-http://localhost:8081/api}
-      MESSENGER_WS_URL: ${MESSENGER_WS_URL:-ws://localhost:8082/ws}
-      MESSENGER_PUBLIC_SCHEME: ${MESSENGER_PUBLIC_SCHEME:-http}
-      MESSENGER_TRUSTED_PROXY_CIDRS: ${MESSENGER_TRUSTED_PROXY_CIDRS:-}
-      MESSENGER_CONNECTION_LIMIT: ${MESSENGER_CONNECTION_LIMIT:-200}
-    volumes:
-      - ./deploy/nginx/configure-edge.sh:/docker-entrypoint.d/19-configure-edge.sh:ro
-    ports:
-      - '${MESSENGER_BIND_ADDRESS:-127.0.0.1}:${MESSENGER_PORT:-8080}:80'
-    depends_on: [api-proxy, ws-proxy]
     restart: unless-stopped
 
   cadvisor:
@@ -666,13 +645,6 @@ services:
       - grafana-data:/var/lib/grafana
     depends_on:
       - prometheus
-    restart: unless-stopped
-
-  nginx-exporter-client:
-    networks: [edge, monitoring]
-    image: nginx/nginx-prometheus-exporter:1.5.1
-    command: [--nginx.scrape-uri=http://client:8083/stub_status]
-    depends_on: [client]
     restart: unless-stopped
 
   nginx-exporter-api:

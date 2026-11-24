@@ -15,7 +15,7 @@ const expected = {
   'rabbitmq-queues': 3,
   redis: 6,
   postgres: 1,
-  ingress: 3,
+  ingress: 2,
   containers: 1,
   prometheus: 1,
   alertmanager: 1,

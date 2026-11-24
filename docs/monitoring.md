@@ -5,7 +5,7 @@ The Compose deployment includes Prometheus at http://localhost:9090, Grafana at 
 Start the monitoring services in the same Compose project as the application. For the browser deployment:
 
 ```sh
-docker compose --env-file .env --env-file .env.browser -p messenger-browser up -d --no-deps prometheus grafana alertmanager alert-inbox cadvisor redis-exporter postgres-exporter nginx-exporter-client nginx-exporter-api nginx-exporter-ws
+docker compose --env-file .env --env-file .env.browser -p messenger-browser up -d --no-deps prometheus grafana alertmanager alert-inbox cadvisor redis-exporter postgres-exporter nginx-exporter-api nginx-exporter-ws
 npm run monitoring:check
 ```
 

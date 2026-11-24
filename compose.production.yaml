@@ -11,18 +11,11 @@ services:
     environment:
       WS_ALLOWED_ORIGIN: ${MESSENGER_CLIENT_ORIGIN:?Set the exact public HTTPS origin}
   api-proxy:
-    ports: !reset []
     environment:
-      MESSENGER_PUBLIC_SCHEME: https
-  ws-proxy:
-    ports: !reset []
-    environment:
-      MESSENGER_PUBLIC_SCHEME: https
-  client:
-    environment:
-      MESSENGER_PRODUCTION: 'true'
       MESSENGER_PUBLIC_SCHEME: https
       MESSENGER_CLIENT_ORIGIN: ${MESSENGER_CLIENT_ORIGIN:?Set the exact public HTTPS origin}
-      MESSENGER_API_BASE_URL: ${MESSENGER_API_BASE_URL:?Set https://your-host/api}
-      MESSENGER_WS_URL: ${MESSENGER_WS_URL:?Set wss://your-host/ws}
+      MESSENGER_TRUSTED_PROXY_CIDRS: ${MESSENGER_TRUSTED_PROXY_CIDRS:?Set the load balancer source CIDRs}
+  ws-proxy:
+    environment:
+      MESSENGER_PUBLIC_SCHEME: https
       MESSENGER_TRUSTED_PROXY_CIDRS: ${MESSENGER_TRUSTED_PROXY_CIDRS:?Set the load balancer source CIDRs}

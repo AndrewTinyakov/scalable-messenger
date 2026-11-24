@@ -191,7 +191,7 @@ tests:
           - labels: 'messenger:minimum_scrape_targets{job="postgres"}'
             value: 1
           - labels: 'messenger:minimum_scrape_targets{job="ingress"}'
-            value: 3
+            value: 2
           - labels: 'messenger:minimum_scrape_targets{job="containers"}'
             value: 1
           - labels: 'messenger:minimum_scrape_targets{job="alertmanager"}'

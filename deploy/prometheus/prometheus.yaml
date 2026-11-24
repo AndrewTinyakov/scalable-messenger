@@ -90,8 +90,6 @@ scrape_configs:
 
   - job_name: ingress
     static_configs:
-      - targets: [nginx-exporter-client:9113]
-        labels: {tier: client}
       - targets: [nginx-exporter-api:9113]
         labels: {tier: api}
       - targets: [nginx-exporter-ws:9113]

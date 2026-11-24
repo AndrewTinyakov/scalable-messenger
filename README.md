@@ -8,7 +8,25 @@ Start the local Docker Compose stack:
 scripts/dev-up.sh
 ```
 
-Open http://localhost:8080. Ports bind to localhost by default. The launcher generates ignored local credentials and uses private infrastructure networks. For TLS termination, secrets and production routing, follow [the deployment guide](docs/deployment.md).
+Compose runs the backend and publishes the API proxy on `127.0.0.1:8081` and the WS proxy on `127.0.0.1:8082`. The React app runs separately with npm and Vite, and talks to both proxies directly, as it does from a CDN in production. Give the proxies and the app [Portless](https://github.com/vercel-labs/portless) names on one site:
+
+```sh
+portless alias api.messenger 8081
+portless alias ws.messenger 8082
+cd client
+npm ci
+portless run --name messenger npm run dev
+```
+
+Open https://messenger.localhost. Vite serves hot reload there and the app calls https://api.messenger.localhost/api and wss://ws.messenger.localhost/ws. To check the production build instead, build it for the same endpoints and serve `dist`:
+
+```sh
+VITE_API_BASE_URL=https://api.messenger.localhost/api \
+VITE_WS_URL=wss://ws.messenger.localhost/ws npm run build
+portless run --name messenger npm run preview
+```
+
+Compose's `MESSENGER_CLIENT_ORIGIN` defaults to `https://messenger.localhost`. If Portless gives the app another name, for example a worktree prefix, set `MESSENGER_CLIENT_ORIGIN` in `.env` to the app's URL from `portless get`, set `VITE_API_BASE_URL` and `VITE_WS_URL` to the proxies' URLs, and recreate `api-1`, `api-2`, `ws` and `api-proxy`. Ports bind to localhost by default. The launcher generates ignored local credentials and uses private infrastructure networks. For the static CDN, TLS termination, secrets and production routing, follow [the deployment guide](docs/deployment.md).
 
 Local startup requires Node.js 24.15 or later, Go, OpenSSL and Docker Compose. Secrets live in ignored `.env` and `.local/secrets`; existing values persist across runs. Use `scripts/dev-up.sh --prepare-only` to prepare configuration without starting the stack. The launcher creates development-only gRPC certificates in the ignored `.local/grpc` directory and preserves valid existing material. Partial, expired, mismatched or incorrectly permissioned material fails startup. These credentials are for local development.
 
@@ -24,7 +42,7 @@ rm -rf .local/grpc
 scripts/dev-up.sh
 ```
 
-The browser and HTTP API must be on the same site for the session cookie. Secure cookies are the default and use the `__Host-messenger_session` name; local HTTP development sets `MESSENGER_SESSION_COOKIE_SECURE=false`, which uses `messenger_session` under the API path. Configure the exact browser origin.
+The browser page and the HTTP API must be on the same site (for example `example.com` and `api.example.com`) for the session cookie. Secure cookies are the default and use the `__Host-messenger_session` name; local HTTP development sets `MESSENGER_SESSION_COOKIE_SECURE=false`, which uses `messenger_session` under the API path. Configure the exact browser origin.
 
 Sessions are opaque tokens stored as SHA-256 hashes. A session expires 30 days after its last use; requests extend it at most once a day and re-issue the cookie. Users can list their signed-in devices, sign out one or all others, and change their password, which signs out every other device and gives this browser a new session token; the old token keeps working for one minute so requests already in flight succeed. Each revocation closes that session's sockets; a browser whose socket is closed checks its HTTP session before signing out. Renewal changes only the server-side expiry and never re-sends the cookie, which lasts 400 days (the browser maximum), so a continuously active user signs in again after 400 days. After five failed logins for one username from one client address, further attempts from that address back off from 1 second up to 15 minutes, with the same response for unknown usernames. Failures from one address do not block other addresses. Monitoring endpoints alone accept HTTP Basic credentials.
 

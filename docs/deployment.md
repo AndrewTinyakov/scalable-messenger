@@ -1,37 +1,72 @@
 # Deploying Messenger
 
-Use Docker Compose v2.24.4 or later for the production override's `!reset` port removal. A TLS load balancer terminates HTTPS and forwards HTTP to the `client` nginx container. The same client image accepts deployment URLs at startup, without rebuilding JavaScript.
+Messenger runs as three public endpoints on one registrable domain:
 
-## Public entry point
+| Public origin | Serves | Route |
+| --- | --- | --- |
+| `https://example.com` | React static files | Static CDN, for example a private S3 bucket behind CloudFront |
+| `https://api.example.com` | `/api/v1/*`, `/healthz` | TLS load balancer → `api-proxy` → `api-1` or `api-2` |
+| `https://ws.example.com` | `/ws`, `/healthz` | TLS load balancer → `ws-proxy` → a WS replica |
 
-The load balancer needs one route for the exact browser origin, for example `https://chat.example.com`.
+Compose runs only the API and WS side. The frontend is a plain directory of files, so deploying it never touches open sockets, and restarting the proxies never touches the frontend. Keep the API host on the same registrable domain as the page: the session cookie is host-only on the API host with `SameSite=Strict`, which browsers send on same-site cross-origin requests only.
 
-| Public path | Route inside Compose |
-| --- | --- |
-| `/`, `/assets/*`, `/runtime-config.js` | client nginx |
-| `/api/v1/*` | client nginx → api-proxy → api-1 or api-2 |
-| `/ws` | client nginx → ws-proxy → a WS replica |
-| `/healthz` | client nginx, HTTP 200 for LB liveness |
+## Static frontend
 
-Preserve the original Host header and support WebSocket upgrades. Set the LB idle timeout above nginx's 75-second socket timeout. Redirect port 80 to HTTPS on port 443 at the TLS terminator. `/healthz` checks nginx, not downstream readiness. Compose checks gateway `/readyz`; use private `/api/actuator/health` for API readiness. Actuator and stub-status routes must never be LB routes.
+Build the frontend with the public endpoints. The values are compiled into the bundle and into the page's Content-Security-Policy `connect-src`, so build once per environment:
+
+```sh
+npm --prefix client ci
+VITE_API_BASE_URL=https://api.example.com/api \
+VITE_WS_URL=wss://ws.example.com/ws \
+  npm --prefix client run build
+```
+
+The build fails when either value is missing, when it contains credentials, a query or a fragment, when HTTP is mixed with WSS (or HTTPS with WS), or when a non-loopback endpoint is not HTTPS/WSS. `client/dist` contains `index.html`, `favicon.svg` and content-hashed files under `assets/`. Nothing in it is specific to a cloud provider.
+
+Configure the CDN with:
+
+- **Origin access.** Keep the bucket or origin private and allow only the CDN to read it (for CloudFront, origin access control).
+- **SPA fallback.** Serve `/index.html` with status 200 for paths that are not files, so client-side routes such as `/users/{id}` load. For S3 behind CloudFront, map 403 and 404 origin errors to `/index.html` with 200.
+- **Caching.** `Cache-Control: public, max-age=31536000, immutable` for `/assets/*`; `Cache-Control: no-cache` for `index.html` and every other path.
+- **Response headers** on every response:
+
+  | Header | Value |
+  | --- | --- |
+  | `Strict-Transport-Security` | `max-age=31536000` |
+  | `Content-Security-Policy` | `frame-ancestors 'none'` (the build's `<meta>` policy covers the rest; a CDN may also send the full policy, `default-src 'self'; connect-src 'self' https://api.example.com wss://ws.example.com; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`) |
+  | `X-Content-Type-Options` | `nosniff` |
+  | `Referrer-Policy` | `no-referrer` |
+  | `Permissions-Policy` | `camera=(), microphone=(), geolocation=()` |
+
+- **HTTPS only.** Redirect HTTP to HTTPS at the CDN.
+
+To release, upload `assets/` first, then `favicon.svg` and `index.html`, and invalidate `/index.html` (or `/*`). Keep previous `assets/` files for at least a day so tabs opened before the release can still load them. Old tabs keep their sockets and keep working against the same API and WS endpoints.
+
+## API and WS load balancer
+
+Terminate TLS for `api.example.com` and `ws.example.com` at a load balancer and forward HTTP to the published proxy ports, `MESSENGER_API_PORT` (default 8081) and `MESSENGER_WS_PORT` (default 8082). Both proxies answer `/healthz` with 200 for LB liveness; it checks nginx, not downstream readiness. Compose checks gateway `/readyz`; use private `/api/actuator/health` for API readiness. Actuator and stub-status routes must never be LB routes.
+
+Preserve the original Host header, support WebSocket upgrades on the WS host, and set the LB idle timeout above nginx's 75-second socket timeout. Redirect port 80 to HTTPS on port 443.
 
 Set these values in the deployment's protected environment file:
 
 ```dotenv
-MESSENGER_CLIENT_ORIGIN=https://chat.example.com
-MESSENGER_API_BASE_URL=https://chat.example.com/api
-MESSENGER_WS_URL=wss://chat.example.com/ws
+MESSENGER_CLIENT_ORIGIN=https://example.com
 MESSENGER_TRUSTED_PROXY_CIDRS=192.0.2.0/24 2001:db8:1234::/64
 MESSENGER_BIND_ADDRESS=10.0.1.20
 ```
 
+`MESSENGER_CLIENT_ORIGIN` is the exact browser origin: scheme and lowercase host, no path or trailing slash. The API's CORS and CSRF checks and the WS gateway's Origin check accept only this value. The API proxy also uses it to add CORS headers to the errors nginx itself generates (429, 502, 503, 504), so the browser can still read those statuses and retry; responses from the API carry the API's own CORS headers. With `MESSENGER_PUBLIC_SCHEME=https`, the proxies refuse to start unless the origin is HTTPS.
+
 Replace the example CIDRs with the actual source addresses nginx sees from the LB. The values are space-separated IP CIDRs. Trust only LB addresses, never all addresses or an entire shared VPC. If the LB reaches a published port through host NAT, verify the source address observed inside nginx before choosing the CIDR. Reserve a dedicated LB source if NAT collapses trusted and untrusted traffic into the same peer.
 
-Firewall the published nginx port so only the LB and private health check sources can reach it. Docker's published-port rules can bypass host firewall frontends such as UFW. Enforce the rule in the cloud firewall or Docker forwarding chain as appropriate. `MESSENGER_BIND_ADDRESS` defaults to `127.0.0.1`; select a private host address for a remote LB. Never publish Postgres, Redis, RabbitMQ, actuator, exporters or gRPC.
+Firewall the published proxy ports so only the LB and private health check sources can reach them. Docker's published-port rules can bypass host firewall frontends such as UFW. Enforce the rule in the cloud firewall or Docker forwarding chain as appropriate. `MESSENGER_BIND_ADDRESS` defaults to `127.0.0.1`; select a private host address for a remote LB. Never publish Postgres, Redis, RabbitMQ, actuator, exporters or gRPC.
 
-Nginx uses recursive real-IP processing only for configured trusted peers. It replaces forwarded address, host, port and scheme headers before proxying, and removes `Forwarded`. Rate and connection limits use the resulting real client IP. An untrusted peer cannot choose its limiter key using X-Forwarded-For. The LB must append the actual source IP to X-Forwarded-For or replace that header. The internal API and WS proxies also trust the front nginx's reserved edge address. Spring's native forwarded-header processing trusts only the reserved API-proxy app address, `10.246.0.10` by default, rather than arbitrary app or private CIDRs.
+Nginx uses recursive real-IP processing only for configured trusted peers. It replaces forwarded address, host, port and scheme headers before proxying, and removes `Forwarded`. Rate and connection limits use the resulting real client IP. An untrusted peer cannot choose its limiter key using X-Forwarded-For. The LB must append the actual source IP to X-Forwarded-For or replace that header. Spring's native forwarded-header processing trusts only the reserved API-proxy app address, `10.246.0.10` by default, rather than arbitrary app or private CIDRs.
 
-`MESSENGER_PUBLIC_SCHEME` is explicit and defaults to `http` in base Compose. The production override fixes it to `https` on all three nginx services, forwards HTTPS to the API and sends `Strict-Transport-Security: max-age=31536000`. It fixes the API's Secure cookie setting to true and removes the development API/WS published ports. Client startup rejects HTTP, WS, mixed HTTPS/WS, path-bearing browser origins and origins inconsistent with the single public route.
+Login, registration and WS-ticket rate limits count requests per client IP. CORS preflight (`OPTIONS`) requests do not count, so the cross-origin page gets the same budget a same-origin page had.
+
+`MESSENGER_PUBLIC_SCHEME` is explicit and defaults to `http` in base Compose. The production override fixes it to `https` on both proxies, forwards HTTPS to the API and sends `Strict-Transport-Security: max-age=31536000`. It also fixes the API's Secure cookie setting to true and requires `MESSENGER_CLIENT_ORIGIN` and `MESSENGER_TRUSTED_PROXY_CIDRS`.
 
 ```sh
 docker compose --env-file /secure/messenger.env \
@@ -40,7 +75,7 @@ docker compose --env-file /secure/messenger.env \
   -f compose.yaml -f compose.production.yaml up --build -d
 ```
 
-The application and client reject invalid origin configuration at startup. `compose config` checks interpolation and structure; it does not establish LB reachability or validate certificate termination.
+The application, gateway and proxies reject invalid origin configuration at startup. `compose config` checks interpolation and structure; it does not establish LB reachability or validate certificate termination.
 
 ## Credentials and first initialization
 
@@ -66,7 +101,6 @@ Only `edge` permits external routing. `app`, `data`, `monitoring` and the existi
 
 | Service | Networks |
 | --- | --- |
-| client | edge |
 | api-proxy, ws-proxy | edge, app |
 | api-1, api-2, ws replicas | app, data, monitoring, grpc |
 | command processor, outbox publisher | data, monitoring |
@@ -74,7 +108,7 @@ Only `edge` permits external routing. `app`, `data`, `monitoring` and the existi
 | rabbitmq-1/2/3 | data, monitoring |
 | rabbitmq-cluster-init, redis-1 through redis-6, redis-cluster-init | data |
 | postgres-exporter, redis-exporter | data, monitoring |
-| nginx-exporter-client/api/ws | edge, monitoring |
+| nginx-exporter-api/ws | edge, monitoring |
 | prometheus, alertmanager, alert-inbox, grafana | monitoring |
 | monitoring-access, loopback publisher | edge, monitoring |
 | cadvisor, opt-in | monitoring |
@@ -83,7 +117,7 @@ The public application nginx containers cannot connect directly to datastores or
 
 The reserved defaults are `10.245.0.0/24` for data, `10.246.0.0/24` for app and `10.247.0.0/24` for edge. Choose unused ranges if they overlap existing networks. Change `MESSENGER_SUBNET` and `MESSENGER_REDIS_IP_PREFIX` together, `MESSENGER_APP_SUBNET` and `MESSENGER_APP_IP_PREFIX` together, and `MESSENGER_EDGE_SUBNET` and `MESSENGER_EDGE_IP_PREFIX` together. When changing app addresses, also change `MESSENGER_HTTP_PROXY_PATTERN` to a regex matching only API-proxy's reserved `.10` address. Dynamic addresses use the upper half of each subnet; reserved service addresses use the lower half.
 
-Public nginx containers drop all capabilities, add only those required for port binding and worker/cache ownership, prohibit privilege escalation and use a read-only filesystem with temporary config, runtime and cache mounts. Header/body/send timeouts, upstream keepalive, request and connection limits apply at the edge. `MESSENGER_CONNECTION_LIMIT` defaults to 200 simultaneous active requests or sockets per client IP at each nginx layer. Set it for legitimate shared NAT traffic and capacity tests.
+Public nginx containers drop all capabilities, add only those required for port binding and worker/cache ownership, prohibit privilege escalation and use a read-only filesystem with temporary config, runtime and cache mounts. Header/body/send timeouts, upstream keepalive, request and connection limits apply at the edge. `MESSENGER_CONNECTION_LIMIT` defaults to 200 simultaneous active requests or sockets per client IP at each proxy. Set it for legitimate shared NAT traffic and capacity tests.
 
 cAdvisor is disabled unless `--profile container-metrics` is selected. It has no privileged flag and mounts only rootfs, sysfs, Docker storage and the specific containerd socket, not `/var/run` or the Docker API socket. The containerd socket still grants sensitive host access. Enable it only on a trusted Linux host after verifying useful metrics under its host's cgroup/runtime setup. Some hosts need additional access; decide that explicitly before enabling the profile. The existing `npm run monitoring:check` expects cAdvisor and the old fixed Grafana password, so provide the generated `GRAFANA_ADMIN_PASSWORD` and enable the profile on a compatible host when using that check.
 

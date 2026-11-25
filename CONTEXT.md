@@ -19,7 +19,12 @@
 - **History coverage** is an authoritative snapshot's examined sequence interval. A device can apply its returned rows and certified absences without treating those absences as human reads.
 - **Read through** is an account's declaration that the messages up to a chat sequence have been read. It is shared across devices and does not prove that each message crossed a viewport.
 - **First read time** is the server acceptance time when an account first advanced through a message. Timestamp details are available for seven days after that message was created.
-- **Online** means at least one established connection was observed for a user. An unavailable or stale observation is unknown.
+- **Active connection** is a connection whose client is currently visible and receiving input. A hidden, unfocused or inactive client is idle.
+- **Online** means at least one of a user's connections is active, on any device.
+- **Last seen** is the most recent time a user was online. Viewers see either the exact time or a coarse bucket, depending on presence visibility.
+- **Presence visibility** is the level at which one account may observe another's presence: full, coarse or none. It is decided per viewer and subject, independently of any particular chat.
+- **Presence watch** is a connection's bounded set of user IDs whose presence transitions it receives.
+- **Group online count** is the number of a small group's members, visible to the viewer, who are online. Large groups show only their member count.
 - **Message version** orders changes to one message while its original chat sequence stays the same.
 - **Mutation sequence** is the chat sequence of a chat's latest shared edit, deletion or clear. Changes are retained above the mutation floor.
 - **Member sequence** numbers one account's private changes in one chat: personal deletion and clear, hiding the chat, personal pins, mute, the unread mark and its own read-through. Other members never see it.
@@ -37,7 +42,7 @@
 - **Last message summary** is the latest viewer-visible message among a chat's newest 256 stored candidates, with its identity, sequence, sender ID and current username, creation time, and a preview of at most 160 Unicode characters. A null summary means no candidate in that window is visible; older visible history can still exist. Summary reads do not advance human reads or device recovery.
 - **Window unread count** counts visible messages by other authors above the account's read-through in the newest 256 stored candidates. A saturated window makes the count a lower bound, including when that bound is zero; it does not measure a sequence difference.
 - **Chat activity** is the time of the most recent accepted send in a chat. Empty chats use the viewer's membership join time when ordered in the directory.
-- **Sidebar watch** is a bounded selection of visible chat rows whose direct peers' presence and group activity are observed separately from the selected conversation.
+- **Sidebar watch** is a bounded selection of chat rows whose group activity is observed separately from the selected conversation. Presence is observed through the presence watch.
 - **Sidebar activity hint** is a bodyless indication that a watched group has accepted a message. It requests an authoritative summary refresh and proves neither application nor human reading.
 
 - **Pinned chat** is an account's ordered sidebar shortcut, at most ten per account. Pinned chats lead the first directory page; activity keysets cover only unpinned chats. Hiding a chat for yourself unpins it.

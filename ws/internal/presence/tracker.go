@@ -194,12 +194,13 @@ func (t *Tracker) write(ctx context.Context) {
 			t.pending[userID] = online
 			continue
 		}
+		user := t.users[userID]
 		if online {
 			delete(t.cleared, userID)
-		} else if _, known := t.cleared[userID]; !known {
+		} else if user != nil {
 			t.cleared[userID] = time.Now()
 		}
-		if user := t.users[userID]; user != nil {
+		if user != nil {
 			if !user.online && user.active == 0 && user.grace == nil {
 				delete(t.users, userID)
 			}

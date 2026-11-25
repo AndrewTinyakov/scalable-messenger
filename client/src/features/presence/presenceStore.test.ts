@@ -118,6 +118,26 @@ it('refreshes the online count after a membership change and coalesces rate-limi
   expect(resets()).toBe(resetsBefore + 1)
 })
 
+it('waits out the rate-limit backoff and replays a refused release', async () => {
+  store.watch('sidebar', sidebar, [id(1)])
+  await vi.advanceTimersByTimeAsync(1000)
+  const before = sent.length
+  store.onEvent({ type: 'error', version: 1, code: 'RATE_LIMITED' })
+  store.watch('sidebar', sidebar, [id(1), id(2)])
+  await vi.advanceTimersByTimeAsync(2900)
+  expect(sent.length).toBe(before)
+  await vi.advanceTimersByTimeAsync(200)
+  expect(sent[before]).toMatchObject({ type: 'watch_presence', reset: true, add: [id(1), id(2)] })
+  store.setReleased(true)
+  const released = sent.length
+  store.onEvent({ type: 'error', version: 1, code: 'RATE_LIMITED' })
+  await vi.advanceTimersByTimeAsync(3100)
+  expect(sent.slice(released)).toEqual([
+    { type: 'watch_presence', version: 1, reset: true, add: [] },
+    { type: 'watch_online_count', version: 1 },
+  ])
+})
+
 it('paces the online count with presence and keys it by group size', async () => {
   const chat = id(9)
   store.watchOnlineCount(chat, 3)

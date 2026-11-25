@@ -42,12 +42,13 @@ export class PresenceStore {
   private statuses = new Map<string, PresenceView>()
   private onlineCounts = new Map<string, { online: number; members: number }>()
   private countWanted: string | undefined
-  private countSent: string | undefined
+  /** The count watch the gateway has; null when it must be sent again. */
+  private countSent: string | undefined | null
   private listeners = new Set<() => void>()
   private snapshot: PresenceSnapshot = { statuses: this.statuses, onlineCounts: this.onlineCounts }
   private send: ((frame: OutgoingSocketFrame) => void) | null = null
   private released = false
-  private resync = false
+  private resyncAt: number | undefined
   private timer?: ReturnType<typeof setTimeout>
   private timerAt = Infinity
   private lastSentAt = -Infinity
@@ -85,16 +86,19 @@ export class PresenceStore {
 
   /** Starts a fresh watch on a new connection, or stops sending when null. */
   connect(send: ((frame: OutgoingSocketFrame) => void) | null) {
+    this.countSent = this.countWanted === undefined ? undefined : null
     this.send = send
     this.sent.clear()
     this.removals.clear()
-    this.countSent = undefined
-    this.resync = false
+    this.resyncAt = undefined
     this.clearTimer()
     if (!send) return
     const add = this.released ? [] : [...this.desired()]
     send({ type: 'watch_presence', version: 1, reset: true, add })
-    if (this.released) send({ type: 'watch_online_count', version: 1 })
+    if (this.released) {
+      send({ type: 'watch_online_count', version: 1 })
+      this.countSent = undefined
+    }
     add.forEach((id) => this.sent.add(id))
     this.lastSentAt = this.now()
     this.schedule(this.now())
@@ -110,16 +114,13 @@ export class PresenceStore {
   onEvent(event: SocketEvent): boolean {
     if (event.type === 'error' && event.code === 'RATE_LIMITED' && !event.requestId) {
       // The gateway may have refused a watch; send the whole set again later.
-      if (!this.resync) {
-        this.resync = true
-        this.countSent = undefined
-        this.schedule(this.now() + RATE_LIMIT_RETRY_MS)
-      }
+      this.resyncAt ??= this.now() + RATE_LIMIT_RETRY_MS
+      this.schedule(this.resyncAt)
       return false
     }
     if (event.type === 'membership_changed' || event.type === 'member_removed') {
       if (this.countWanted?.startsWith(`${event.chatId}:`)) {
-        this.countSent = undefined
+        this.countSent = null
         this.schedule(this.now())
       }
       return false
@@ -193,8 +194,16 @@ export class PresenceStore {
 
   private flush() {
     const send = this.send
-    if (!send || this.released) return
+    if (!send) return
     const now = this.now()
+    if (this.resyncAt !== undefined) {
+      if (now < this.resyncAt) return this.schedule(this.resyncAt)
+      this.connect(send)
+      // A refused clear may have left the gateway counting an old group.
+      if (this.countSent === undefined) this.countSent = null
+      return this.schedule(this.now())
+    }
+    if (this.released) return
     const desired = this.desired()
     const add = [...desired].filter((id) => !this.sent.has(id))
     for (const id of desired) this.removals.delete(id)
@@ -215,12 +224,6 @@ export class PresenceStore {
       this.countSent = this.countWanted
       this.lastSentAt = now
       this.schedule(now)
-      return
-    }
-    if (this.resync) {
-      this.resync = false
-      this.lastSentAt = now
-      this.connect(send)
       return
     }
     remove.forEach((id) => {

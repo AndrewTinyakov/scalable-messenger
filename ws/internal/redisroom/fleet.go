@@ -70,21 +70,18 @@ func (c *Client) UnindexConnections(ctx context.Context, userID, gateway string)
 	return c.redis.SRem(ctx, gatewayUsersKey(gateway), userID).Err()
 }
 
-// IndexConnections adds a user to this gateway's cleanup index.
-func (c *Client) IndexConnections(ctx context.Context, userID, gateway string) error {
-	return c.redis.SAdd(ctx, gatewayUsersKey(gateway), userID).Err()
-}
-
 // SetConnections writes this gateway's absolute connection count for a user.
 func (c *Client) SetConnections(ctx context.Context, userID, gateway string, count int) error {
 	if !validConnectionUserID(userID) || gateway == "" || count < 0 {
 		return errors.New("invalid connection count")
 	}
+	if count > 0 {
+		if err := c.redis.SAdd(ctx, gatewayUsersKey(gateway), userID).Err(); err != nil {
+			return err
+		}
+	}
 	if err := setConnectionsScript.Run(ctx, c.redis, []string{connectionCountKey(userID)}, gateway, count).Err(); err != nil {
 		return fmt.Errorf("set connections: %w", err)
-	}
-	if count > 0 {
-		return c.redis.SAdd(ctx, gatewayUsersKey(gateway), userID).Err()
 	}
 	return nil
 }

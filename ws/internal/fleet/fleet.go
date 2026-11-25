@@ -12,7 +12,6 @@ import (
 type Store interface {
 	AdmitConnection(context.Context, string, string, int) (bool, error)
 	ReleaseConnections(context.Context, string, string, int) error
-	IndexConnections(context.Context, string, string) error
 	UnindexConnections(context.Context, string, string) error
 	SetConnections(context.Context, string, string, int) error
 	Heartbeat(context.Context, string, time.Duration) (registered, dead bool, err error)
@@ -37,7 +36,8 @@ type Config struct {
 
 // Fleet owns this gateway's identity and its per-user connection counts.
 // Redis holds one count per user and gateway, changed only when a
-// connection opens or closes, never while sockets are idle.
+// connection opens or closes, never while sockets are idle. All Redis
+// changes for one user run under that user's lock, so they apply in order.
 type Fleet struct {
 	store    Store
 	cleaners []Cleaner
@@ -50,11 +50,41 @@ type Fleet struct {
 	released map[string]int
 	rewrite  map[string]bool
 	unindex  map[string]bool
+	locks    map[string]*userLock
 	renewed  []func(string)
 }
 
+type userLock struct {
+	sync.Mutex
+	holders int
+}
+
 func New(store Store, config Config, logger *slog.Logger) *Fleet {
-	return &Fleet{store: store, config: config, logger: logger, wake: make(chan struct{}, 1), id: newID(), counts: make(map[string]int), released: make(map[string]int), rewrite: make(map[string]bool), unindex: make(map[string]bool)}
+	return &Fleet{
+		store: store, config: config, logger: logger, wake: make(chan struct{}, 1), id: newID(),
+		counts: make(map[string]int), released: make(map[string]int), rewrite: make(map[string]bool),
+		unindex: make(map[string]bool), locks: make(map[string]*userLock),
+	}
+}
+
+func (f *Fleet) lockUser(userID string) func() {
+	f.mu.Lock()
+	lock := f.locks[userID]
+	if lock == nil {
+		lock = &userLock{}
+		f.locks[userID] = lock
+	}
+	lock.holders++
+	f.mu.Unlock()
+	lock.Lock()
+	return func() {
+		lock.Unlock()
+		f.mu.Lock()
+		if lock.holders--; lock.holders == 0 {
+			delete(f.locks, userID)
+		}
+		f.mu.Unlock()
+	}
 }
 
 func newID() string {
@@ -86,6 +116,8 @@ func (f *Fleet) OnRenewed(callback func(string)) {
 }
 
 func (f *Fleet) Admit(ctx context.Context, userID string) (bool, error) {
+	unlock := f.lockUser(userID)
+	defer unlock()
 	f.mu.Lock()
 	f.counts[userID]++
 	id := f.id
@@ -107,23 +139,19 @@ func (f *Fleet) Admit(ctx context.Context, userID string) (bool, error) {
 	return admitted, err
 }
 
-func (f *Fleet) Release(userID string) { f.release(userID, true) }
-
-// release forgets one local connection. Redis is decremented rather than
-// overwritten so concurrent admissions on this gateway keep their count.
-func (f *Fleet) release(userID string, write bool) {
+// Release forgets one local connection. Redis is decremented rather than
+// overwritten so other connections keep their count.
+func (f *Fleet) Release(userID string) {
 	f.mu.Lock()
 	if f.counts[userID]--; f.counts[userID] <= 0 {
 		delete(f.counts, userID)
 	}
-	if write && !f.rewrite[userID] {
+	if !f.rewrite[userID] {
 		f.released[userID]++
 	}
 	f.unindex[userID] = true
 	f.mu.Unlock()
-	if write {
-		f.signal()
-	}
+	f.signal()
 }
 
 func (f *Fleet) signal() {
@@ -167,54 +195,52 @@ func (f *Fleet) writeCounts(ctx context.Context) {
 		case <-retry.C:
 		}
 		f.mu.Lock()
-		id, released, rewrite := f.id, f.released, make(map[string]int, len(f.rewrite))
-		f.released = make(map[string]int)
-		for userID := range f.rewrite {
-			rewrite[userID] = f.counts[userID]
+		users := make(map[string]bool, len(f.released)+len(f.rewrite)+len(f.unindex))
+		for _, pending := range []map[string]bool{f.rewrite, f.unindex} {
+			for userID := range pending {
+				users[userID] = true
+			}
 		}
-		clear(f.rewrite)
+		for userID := range f.released {
+			users[userID] = true
+		}
 		f.mu.Unlock()
-		for userID, closed := range released {
-			if err := f.write(ctx, func(ctx context.Context) error { return f.store.ReleaseConnections(ctx, userID, id, closed) }); err != nil {
-				f.mu.Lock()
-				f.released[userID] += closed
-				f.mu.Unlock()
-			}
+		for userID := range users {
+			f.writeUser(ctx, userID)
 		}
-		for userID, count := range rewrite {
-			if err := f.write(ctx, func(ctx context.Context) error { return f.store.SetConnections(ctx, userID, id, count) }); err != nil {
-				f.mu.Lock()
-				f.rewrite[userID] = true
-				f.mu.Unlock()
-			}
-		}
-		f.unindexIdle(ctx, id)
 	}
 }
 
-// unindexIdle drops users without local connections from the cleanup index.
-// A connection admitted meanwhile indexes the user again before it counts,
-// so the index is restored if the removal raced with it.
-func (f *Fleet) unindexIdle(ctx context.Context, id string) {
+// writeUser brings Redis in line with one user's local connections. It
+// holds the user's lock, so no admission for that user runs meanwhile.
+func (f *Fleet) writeUser(ctx context.Context, userID string) {
+	unlock := f.lockUser(userID)
+	defer unlock()
 	f.mu.Lock()
-	var idle []string
-	for userID := range f.unindex {
-		if f.counts[userID] == 0 && f.released[userID] == 0 && !f.rewrite[userID] {
-			idle = append(idle, userID)
-			delete(f.unindex, userID)
-		}
-	}
+	id, count, closed, rewrite, unindex := f.id, f.counts[userID], f.released[userID], f.rewrite[userID], f.unindex[userID]
+	delete(f.released, userID)
+	delete(f.rewrite, userID)
+	delete(f.unindex, userID)
 	f.mu.Unlock()
-	for _, userID := range idle {
-		if f.write(ctx, func(ctx context.Context) error { return f.store.UnindexConnections(ctx, userID, id) }) != nil {
-			continue
-		}
+	var err error
+	switch {
+	case rewrite:
+		err = f.write(ctx, func(ctx context.Context) error { return f.store.SetConnections(ctx, userID, id, count) })
+	case closed > 0:
+		err = f.write(ctx, func(ctx context.Context) error { return f.store.ReleaseConnections(ctx, userID, id, closed) })
+	}
+	if err == nil && unindex && count == 0 {
+		err = f.write(ctx, func(ctx context.Context) error { return f.store.UnindexConnections(ctx, userID, id) })
+	}
+	if err != nil {
 		f.mu.Lock()
-		restored := f.counts[userID] > 0
-		f.mu.Unlock()
-		if restored {
-			_ = f.write(ctx, func(ctx context.Context) error { return f.store.IndexConnections(ctx, userID, id) })
+		if rewrite {
+			f.rewrite[userID] = true
+		} else if closed > 0 {
+			f.released[userID] += closed
 		}
+		f.unindex[userID] = f.unindex[userID] || unindex
+		f.mu.Unlock()
 	}
 }
 

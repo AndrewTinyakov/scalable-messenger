@@ -39,15 +39,16 @@ func (h *Hub) WatchOnlineCount(ctx context.Context, w Watcher, chatID string) er
 	return h.resolveCount(ctx, wt, chatID, -1, generation)
 }
 
-func (h *Hub) refreshCount(wt *watch) {
+// refreshCount authorizes the given roster again unless it was replaced.
+func (h *Hub) refreshCount(wt *watch, count *onlineCount) {
 	h.mu.Lock()
-	count := wt.count
+	if count == nil || wt.count != count {
+		h.mu.Unlock()
+		return
+	}
 	wt.counted++
 	generation := wt.counted
 	h.mu.Unlock()
-	if count == nil {
-		return
-	}
 	h.wg.Add(1)
 	go func() {
 		defer h.wg.Done()

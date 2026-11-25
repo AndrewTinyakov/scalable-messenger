@@ -40,7 +40,6 @@ type watch struct {
 	renewing    bool
 	recheck     bool
 	authorized  uint64
-	renewal     uint64
 	count       *onlineCount
 	counted     uint64
 }
@@ -120,18 +119,15 @@ func (h *Hub) Watch(ctx context.Context, w Watcher, add, remove []string, reset 
 	}
 	generation := wt.authorized
 	h.mu.Unlock()
-	if len(requested) > 0 {
-		visibility, err := h.auth.PresenceVisibility(ctx, w.PresenceSession(), requested)
-		if err != nil {
-			return err
-		}
-		unknown := h.grant(wt, requested, visibility, generation)
-		if err := h.load(ctx, unknown); err != nil {
-			return err
-		}
+	defer h.flushWatch(wt)
+	if len(requested) == 0 {
+		return nil
 	}
-	h.flushWatch(wt)
-	return nil
+	visibility, err := h.auth.PresenceVisibility(ctx, w.PresenceSession(), requested)
+	if err != nil {
+		return err
+	}
+	return h.load(ctx, h.grant(wt, requested, visibility, generation))
 }
 
 // SetVisible pauses status delivery while the socket's page is hidden.
@@ -166,12 +162,13 @@ func (h *Hub) Revalidate(w Watcher) {
 	if wt.count != nil {
 		wt.count.expires = now
 	}
-	ids, renew := h.startRenewalLocked(wt)
+	ids, generation, renew := h.startRenewalLocked(wt)
+	count := wt.count
 	h.mu.Unlock()
 	if renew {
-		h.renew(wt, ids)
+		h.renew(wt, ids, generation)
 	}
-	h.refreshCount(wt)
+	h.refreshCount(wt, count)
 }
 
 func (h *Hub) Remove(w Watcher) {
@@ -293,24 +290,25 @@ func (h *Hub) markLocked(s *subject, now time.Time) {
 
 // startRenewalLocked claims the socket's renewal, or asks the running one
 // to check again when it finishes.
-func (h *Hub) startRenewalLocked(wt *watch) ([]string, bool) {
-	wt.renewal = wt.authorized
+func (h *Hub) startRenewalLocked(wt *watch) ([]string, uint64, bool) {
 	if wt.renewing {
 		wt.recheck = true
-		return nil, false
+		return nil, 0, false
 	}
 	if len(wt.grants) == 0 {
-		return nil, false
+		return nil, 0, false
 	}
 	ids := make([]string, 0, len(wt.grants))
 	for id := range wt.grants {
 		ids = append(ids, id)
 	}
 	wt.renewing = true
-	return ids, true
+	return ids, wt.authorized, true
 }
 
-func (h *Hub) renew(wt *watch, ids []string) {
+// renew authorizes the socket's grants again. Its result is fenced by the
+// generation captured when it started.
+func (h *Hub) renew(wt *watch, ids []string, generation uint64) {
 	h.wg.Add(1)
 	go func() {
 		defer h.wg.Done()
@@ -327,7 +325,6 @@ func (h *Hub) renew(wt *watch, ids []string) {
 					current = append(current, id)
 				}
 			}
-			generation := wt.renewal
 			h.mu.Unlock()
 			h.grant(wt, current, visibility, generation)
 		}
@@ -335,13 +332,15 @@ func (h *Hub) renew(wt *watch, ids []string) {
 		wt.renewing = false
 		recheck := wt.recheck
 		wt.recheck = false
-		next, again := []string(nil), false
+		var next []string
+		var nextGeneration uint64
+		again := false
 		if recheck {
-			next, again = h.startRenewalLocked(wt)
+			next, nextGeneration, again = h.startRenewalLocked(wt)
 		}
 		h.mu.Unlock()
 		if again {
-			h.renew(wt, next)
+			h.renew(wt, next, nextGeneration)
 			return
 		}
 		h.flushWatch(wt)
@@ -363,30 +362,35 @@ func (h *Hub) sweep(now time.Time) {
 	}
 	h.metrics.PresenceSubjects.Set(float64(len(h.subjects)))
 	type renewal struct {
-		wt  *watch
-		ids []string
+		wt         *watch
+		ids        []string
+		generation uint64
+	}
+	type countRefresh struct {
+		wt    *watch
+		count *onlineCount
 	}
 	var renewals []renewal
-	var counts []*watch
+	var counts []countRefresh
 	for _, wt := range h.watches {
 		if wt.count != nil && !now.Before(wt.count.expires) {
-			counts = append(counts, wt)
+			counts = append(counts, countRefresh{wt, wt.count})
 		}
 		expired := false
 		for _, g := range wt.grants {
 			expired = expired || !now.Before(g.expires)
 		}
 		if expired && !wt.renewing {
-			ids, _ := h.startRenewalLocked(wt)
-			renewals = append(renewals, renewal{wt, ids})
+			ids, generation, _ := h.startRenewalLocked(wt)
+			renewals = append(renewals, renewal{wt, ids, generation})
 		}
 	}
 	h.mu.Unlock()
 	for _, r := range renewals {
-		h.renew(r.wt, r.ids)
+		h.renew(r.wt, r.ids, r.generation)
 	}
-	for _, wt := range counts {
-		h.refreshCount(wt)
+	for _, c := range counts {
+		h.refreshCount(c.wt, c.count)
 	}
 	if len(unknown) > 0 {
 		ctx, cancel := context.WithTimeout(h.ctx, h.config.Timeout)

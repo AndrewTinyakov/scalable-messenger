@@ -69,13 +69,6 @@ func (s *fakeStore) ReleaseConnections(_ context.Context, userID, gateway string
 	return nil
 }
 
-func (s *fakeStore) IndexConnections(_ context.Context, userID, gateway string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.users[gateway][userID] = true
-	return nil
-}
-
 func (s *fakeStore) UnindexConnections(_ context.Context, userID, gateway string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

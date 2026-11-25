@@ -68,16 +68,54 @@ it('keeps each consumer of a source independent', async () => {
 it('fills the global cap with members before the sidebar and evicts only what it must', async () => {
   store.watch('header', header, [id(1)])
   store.watch('sidebar', sidebar, range(2000, 200))
-  store.watch('members', {}, range(1000, 300))
+  store.watch('members', {}, range(1000, 350))
   await vi.advanceTimersByTimeAsync(1000)
   expect(added()).toHaveLength(MAX_WATCHED)
   expect(added()).toContain(id(1))
-  expect(added()).toEqual(expect.arrayContaining(range(1000, 300)))
+  expect(added()).toEqual(expect.arrayContaining(range(1000, 350)))
+  store.watch('members', {}, [])
   store.watch('sidebar', sidebar, range(3000, 20))
   await vi.advanceTimersByTimeAsync(1000)
   const last = watches().at(-1)!
   expect(last.add).toHaveLength(20)
   expect(last.remove).toHaveLength(20)
+})
+
+it('gives online count changes a turn while presence keeps changing', async () => {
+  for (let n = 0; n < 5; n++) {
+    store.watch('sidebar', sidebar, [id(100 + n)])
+    if (n === 1) store.watchOnlineCount(id(9), 3)
+    await vi.advanceTimersByTimeAsync(1000)
+  }
+  expect(sent.some((frame) => frame.type === 'watch_online_count')).toBe(true)
+})
+
+it('refreshes the online count after a membership change and coalesces rate-limit resyncs', async () => {
+  store.watch('sidebar', sidebar, [id(1)])
+  store.watchOnlineCount(id(9), 3)
+  await vi.advanceTimersByTimeAsync(2000)
+  const counts = () => sent.filter((frame) => frame.type === 'watch_online_count').length
+  const before = counts()
+  store.onEvent({
+    type: 'member_removed',
+    version: 1,
+    chatId: id(9),
+    memberId: id(5),
+    eventId: id(6),
+    room: `group:${id(9)}`,
+    epoch: 'e',
+    streamId: '1-0',
+    seq: '2',
+    userSeq: '1',
+  } as never)
+  await vi.advanceTimersByTimeAsync(1000)
+  expect(counts()).toBe(before + 1)
+  const resets = () => watches().filter((frame) => frame.reset).length
+  const resetsBefore = resets()
+  store.onEvent({ type: 'error', version: 1, code: 'RATE_LIMITED' })
+  store.onEvent({ type: 'error', version: 1, code: 'RATE_LIMITED' })
+  await vi.advanceTimersByTimeAsync(5000)
+  expect(resets()).toBe(resetsBefore + 1)
 })
 
 it('paces the online count with presence and keys it by group size', async () => {
@@ -109,7 +147,7 @@ it('resets the whole watch on reconnect, while released and after a rate limit',
   expect(sent.at(-1)).toEqual({ type: 'watch_online_count', version: 1, chatId: id(9) })
   const before = watches().length
   store.onEvent({ type: 'error', version: 1, code: 'RATE_LIMITED' })
-  await vi.advanceTimersByTimeAsync(3000)
+  await vi.advanceTimersByTimeAsync(4000)
   expect(watches()).toHaveLength(before + 1)
   expect(watches().at(-1)).toMatchObject({ reset: true, add: [id(1)] })
 })

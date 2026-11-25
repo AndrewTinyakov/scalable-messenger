@@ -10,7 +10,7 @@ export type PresenceSource = 'sidebar' | 'header' | 'members' | 'profile'
 
 const BUDGETS: Record<PresenceSource, number> = {
   sidebar: 200,
-  members: 300,
+  members: 500,
   header: 10,
   profile: 10,
 }
@@ -47,6 +47,7 @@ export class PresenceStore {
   private snapshot: PresenceSnapshot = { statuses: this.statuses, onlineCounts: this.onlineCounts }
   private send: ((frame: OutgoingSocketFrame) => void) | null = null
   private released = false
+  private resync = false
   private timer?: ReturnType<typeof setTimeout>
   private timerAt = Infinity
   private lastSentAt = -Infinity
@@ -88,6 +89,7 @@ export class PresenceStore {
     this.sent.clear()
     this.removals.clear()
     this.countSent = undefined
+    this.resync = false
     this.clearTimer()
     if (!send) return
     const add = this.released ? [] : [...this.desired()]
@@ -108,10 +110,18 @@ export class PresenceStore {
   onEvent(event: SocketEvent): boolean {
     if (event.type === 'error' && event.code === 'RATE_LIMITED' && !event.requestId) {
       // The gateway may have refused a watch; send the whole set again later.
-      const send = this.send
-      setTimeout(() => {
-        if (send && this.send === send) this.connect(send)
-      }, RATE_LIMIT_RETRY_MS)
+      if (!this.resync) {
+        this.resync = true
+        this.countSent = undefined
+        this.schedule(this.now() + RATE_LIMIT_RETRY_MS)
+      }
+      return false
+    }
+    if (event.type === 'membership_changed' || event.type === 'member_removed') {
+      if (this.countWanted?.startsWith(`${event.chatId}:`)) {
+        this.countSent = undefined
+        this.schedule(this.now())
+      }
       return false
     }
     if (event.type === 'presence_config') {
@@ -198,24 +208,30 @@ export class PresenceStore {
       if (this.sent.size - remove.length + add.length <= MAX_WATCHED) break
       if (!remove.includes(id)) remove.push(id)
     }
+    // Count changes are rare and go first so presence churn cannot starve them.
+    if (this.countWanted !== this.countSent) {
+      const chatId = this.countWanted?.split(':')[0]
+      send({ type: 'watch_online_count', version: 1, ...(chatId ? { chatId } : {}) })
+      this.countSent = this.countWanted
+      this.lastSentAt = now
+      this.schedule(now)
+      return
+    }
+    if (this.resync) {
+      this.resync = false
+      this.lastSentAt = now
+      this.connect(send)
+      return
+    }
     remove.forEach((id) => {
       this.sent.delete(id)
       this.removals.delete(id)
     })
     add.forEach((id) => this.sent.add(id))
-    let sentFrame = false
     if (add.length || remove.length) {
       send({ type: 'watch_presence', version: 1, add, remove })
-      sentFrame = true
+      this.lastSentAt = now
     }
-    if (this.countWanted !== this.countSent && !sentFrame) {
-      const chatId = this.countWanted?.split(':')[0]
-      send({ type: 'watch_online_count', version: 1, ...(chatId ? { chatId } : {}) })
-      this.countSent = this.countWanted
-      sentFrame = true
-    }
-    if (sentFrame) this.lastSentAt = now
-    if (this.countWanted !== this.countSent) this.schedule(now)
     if (this.removals.size) this.schedule(Math.min(...this.removals.values()) + UNWATCH_DELAY_MS)
   }
 }

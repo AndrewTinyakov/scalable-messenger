@@ -5,9 +5,10 @@ export type Activity = { active: boolean; visible: boolean }
 const INPUT_EVENTS = ['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart', 'scroll']
 
 /**
- * Reports when this page becomes active or idle. A page is idle once it has
- * been hidden or unfocused for a while, or has had no input for a while,
- * whichever comes first. Focus and return to the page count as input.
+ * Reports when this page becomes active or idle, and when it has been hidden
+ * long enough to pause delivery. A page is idle once it has been hidden or
+ * unfocused for a while, or has had no input for a while, whichever comes
+ * first. Focus and return to the page count as input.
  */
 export function watchActivity(
   config: () => PresenceConfig,
@@ -18,6 +19,7 @@ export function watchActivity(
   const document = target.document
   let lastInput = Date.now()
   let awaySince: number | undefined
+  let hiddenSince: number | undefined
   let idle: ReturnType<typeof setTimeout> | undefined
   let release: ReturnType<typeof setTimeout> | undefined
   let reported: Activity | undefined
@@ -35,13 +37,16 @@ export function watchActivity(
     const now = Date.now()
     if (present()) awaySince = undefined
     else awaySince ??= now
-    const deadline = Math.min(
+    if (visible()) hiddenSince = undefined
+    else hiddenSince ??= now
+    const activeUntil = Math.min(
       lastInput + settings.idleAfterInputMs,
-      awaySince === undefined ? Infinity : awaySince + settings.idleAfterHiddenMs,
+      (awaySince ?? Infinity) + settings.idleAfterHiddenMs,
     )
-    if (now >= deadline) return report({ active: false, visible: visible() })
-    report({ active: true, visible: true })
-    idle = setTimeout(evaluate, deadline - now)
+    const visibleUntil = (hiddenSince ?? Infinity) + settings.idleAfterHiddenMs
+    report({ active: now < activeUntil, visible: now < visibleUntil })
+    const next = Math.min(...[activeUntil, visibleUntil].filter((at) => at > now))
+    if (next !== Infinity) idle = setTimeout(evaluate, next - now)
   }
   const setReleased = (next: boolean) => {
     if (next === released) return

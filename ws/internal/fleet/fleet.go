@@ -12,6 +12,8 @@ import (
 type Store interface {
 	AdmitConnection(context.Context, string, string, int) (bool, error)
 	ReleaseConnections(context.Context, string, string, int) error
+	IndexConnections(context.Context, string, string) error
+	UnindexConnections(context.Context, string, string) error
 	SetConnections(context.Context, string, string, int) error
 	Heartbeat(context.Context, string, time.Duration) (registered, dead bool, err error)
 	ExpiredGateways(context.Context, int64) ([]string, error)
@@ -47,11 +49,12 @@ type Fleet struct {
 	counts   map[string]int
 	released map[string]int
 	rewrite  map[string]bool
+	unindex  map[string]bool
 	renewed  []func(string)
 }
 
 func New(store Store, config Config, logger *slog.Logger) *Fleet {
-	return &Fleet{store: store, config: config, logger: logger, wake: make(chan struct{}, 1), id: newID(), counts: make(map[string]int), released: make(map[string]int), rewrite: make(map[string]bool)}
+	return &Fleet{store: store, config: config, logger: logger, wake: make(chan struct{}, 1), id: newID(), counts: make(map[string]int), released: make(map[string]int), rewrite: make(map[string]bool), unindex: make(map[string]bool)}
 }
 
 func newID() string {
@@ -89,7 +92,17 @@ func (f *Fleet) Admit(ctx context.Context, userID string) (bool, error) {
 	f.mu.Unlock()
 	admitted, err := f.store.AdmitConnection(ctx, userID, id, f.config.ConnectionLimit)
 	if err != nil || !admitted {
-		f.release(userID, err != nil)
+		f.mu.Lock()
+		if f.counts[userID]--; f.counts[userID] <= 0 {
+			delete(f.counts, userID)
+		}
+		if err != nil {
+			// The outcome is unknown, so write the absolute count instead.
+			f.rewrite[userID] = true
+		}
+		f.unindex[userID] = true
+		f.mu.Unlock()
+		f.signal()
 	}
 	return admitted, err
 }
@@ -106,6 +119,7 @@ func (f *Fleet) release(userID string, write bool) {
 	if write && !f.rewrite[userID] {
 		f.released[userID]++
 	}
+	f.unindex[userID] = true
 	f.mu.Unlock()
 	if write {
 		f.signal()
@@ -173,6 +187,33 @@ func (f *Fleet) writeCounts(ctx context.Context) {
 				f.rewrite[userID] = true
 				f.mu.Unlock()
 			}
+		}
+		f.unindexIdle(ctx, id)
+	}
+}
+
+// unindexIdle drops users without local connections from the cleanup index.
+// A connection admitted meanwhile indexes the user again before it counts,
+// so the index is restored if the removal raced with it.
+func (f *Fleet) unindexIdle(ctx context.Context, id string) {
+	f.mu.Lock()
+	var idle []string
+	for userID := range f.unindex {
+		if f.counts[userID] == 0 && f.released[userID] == 0 && !f.rewrite[userID] {
+			idle = append(idle, userID)
+			delete(f.unindex, userID)
+		}
+	}
+	f.mu.Unlock()
+	for _, userID := range idle {
+		if f.write(ctx, func(ctx context.Context) error { return f.store.UnindexConnections(ctx, userID, id) }) != nil {
+			continue
+		}
+		f.mu.Lock()
+		restored := f.counts[userID] > 0
+		f.mu.Unlock()
+		if restored {
+			_ = f.write(ctx, func(ctx context.Context) error { return f.store.IndexConnections(ctx, userID, id) })
 		}
 	}
 }

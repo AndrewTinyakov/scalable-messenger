@@ -39,7 +39,10 @@ type watch struct {
 	hidden      bool
 	renewing    bool
 	recheck     bool
+	authorized  uint64
+	renewal     uint64
 	count       *onlineCount
+	counted     uint64
 }
 
 // Hub delivers presence transitions to local sockets. It keeps one entry
@@ -115,18 +118,17 @@ func (h *Hub) Watch(ctx context.Context, w Watcher, add, remove []string, reset 
 		}
 		requested = append(requested, id)
 	}
-	h.pending[wt] = struct{}{}
+	generation := wt.authorized
 	h.mu.Unlock()
-	if len(requested) == 0 {
-		return nil
-	}
-	visibility, err := h.auth.PresenceVisibility(ctx, w.PresenceSession(), requested)
-	if err != nil {
-		return err
-	}
-	unknown := h.grant(wt, requested, visibility)
-	if err := h.load(ctx, unknown); err != nil {
-		return err
+	if len(requested) > 0 {
+		visibility, err := h.auth.PresenceVisibility(ctx, w.PresenceSession(), requested)
+		if err != nil {
+			return err
+		}
+		unknown := h.grant(wt, requested, visibility, generation)
+		if err := h.load(ctx, unknown); err != nil {
+			return err
+		}
 	}
 	h.flushWatch(wt)
 	return nil
@@ -157,6 +159,7 @@ func (h *Hub) Revalidate(w Watcher) {
 		return
 	}
 	now := time.Now()
+	wt.authorized++
 	for _, g := range wt.grants {
 		g.expires = now
 	}
@@ -205,12 +208,17 @@ func (h *Hub) rejectLocked(wt *watch, id string) {
 	}
 }
 
-func (h *Hub) grant(wt *watch, ids []string, visibility map[string]grpcauth.Visibility) []string {
-	expires := time.Now().Add(h.config.GrantTTL - rand.N(h.config.GrantTTL/10))
+// grant installs an authorization result. A result read before a later
+// revocation event is installed suspended, so it renews before any delivery.
+func (h *Hub) grant(wt *watch, ids []string, visibility map[string]grpcauth.Visibility, generation uint64) []string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.watches[wt.watcher] != wt {
 		return nil
+	}
+	expires := time.Now().Add(h.config.GrantTTL - rand.N(h.config.GrantTTL/10))
+	if generation != wt.authorized {
+		expires = time.Now()
 	}
 	var unknown []string
 	for _, id := range ids {
@@ -229,6 +237,7 @@ func (h *Hub) grant(wt *watch, ids []string, visibility map[string]grpcauth.Visi
 		}
 		wt.grants[id] = &grant{visibility: v, expires: expires}
 		wt.dirty[id] = struct{}{}
+		delete(wt.unavailable, id)
 	}
 	h.pending[wt] = struct{}{}
 	return unknown
@@ -285,6 +294,7 @@ func (h *Hub) markLocked(s *subject, now time.Time) {
 // startRenewalLocked claims the socket's renewal, or asks the running one
 // to check again when it finishes.
 func (h *Hub) startRenewalLocked(wt *watch) ([]string, bool) {
+	wt.renewal = wt.authorized
 	if wt.renewing {
 		wt.recheck = true
 		return nil, false
@@ -317,8 +327,9 @@ func (h *Hub) renew(wt *watch, ids []string) {
 					current = append(current, id)
 				}
 			}
+			generation := wt.renewal
 			h.mu.Unlock()
-			h.grant(wt, current, visibility)
+			h.grant(wt, current, visibility, generation)
 		}
 		h.mu.Lock()
 		wt.renewing = false

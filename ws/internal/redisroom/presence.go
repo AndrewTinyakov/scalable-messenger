@@ -67,26 +67,38 @@ func presenceGatewayKey(gateway string) string {
 // can always be found. Errors are reported per user so callers can retry.
 func (c *Client) SetPresence(ctx context.Context, gateway string, active map[string]bool) map[string]error {
 	index := presenceGatewayKey(gateway)
+	failed := make(map[string]error)
+	var online []any
+	for userID, on := range active {
+		if on {
+			online = append(online, userID)
+		}
+	}
+	if len(online) > 0 {
+		if err := c.redis.SAdd(ctx, index, online...).Err(); err != nil {
+			for _, userID := range online {
+				failed[userID.(string)] = err
+			}
+		}
+	}
 	pipe := c.redis.Pipeline()
-	indexed := make(map[string]*redis.IntCmd)
 	commands := make(map[string]*redis.Cmd, len(active))
 	for userID, on := range active {
+		if failed[userID] != nil {
+			continue
+		}
 		b := roomname.PresenceBucketOf(userID)
 		value := "0"
 		if on {
 			value = "1"
-			indexed[userID] = pipe.SAdd(ctx, index, userID)
 		}
 		commands[userID] = setPresenceScript.Eval(ctx, pipe, []string{presenceStateKey(b, userID), presenceSeqKey(b)}, "g:"+gateway, value, userID, Channel(roomname.PresenceBucket(b)), presenceStateTTLMillis)
 	}
 	_, _ = pipe.Exec(ctx)
-	failed := make(map[string]error)
 	var cleared []any
 	for userID, command := range commands {
 		if err := command.Err(); err != nil && !errors.Is(err, redis.Nil) {
 			failed[userID] = err
-		} else if add := indexed[userID]; add != nil && add.Err() != nil {
-			failed[userID] = add.Err()
 		} else if !active[userID] {
 			cleared = append(cleared, userID)
 		}

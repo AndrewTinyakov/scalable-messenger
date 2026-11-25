@@ -43,14 +43,14 @@ func (c *Client) AdmitConnection(ctx context.Context, userID, gateway string, li
 	if !validConnectionUserID(userID) || gateway == "" {
 		return false, errors.New("invalid connection admission")
 	}
+	if err := c.redis.SAdd(ctx, gatewayUsersKey(gateway), userID).Err(); err != nil {
+		return false, fmt.Errorf("index connection: %w", err)
+	}
 	admitted, err := admitConnectionScript.Run(ctx, c.redis, []string{connectionCountKey(userID)}, gateway, limit).Int64()
 	if err != nil {
 		return false, fmt.Errorf("admit connection: %w", err)
 	}
-	if admitted == 1 {
-		err = c.redis.SAdd(ctx, gatewayUsersKey(gateway), userID).Err()
-	}
-	return admitted == 1, err
+	return admitted == 1, nil
 }
 
 // ReleaseConnections removes closed connections from this gateway's count.
@@ -58,14 +58,21 @@ func (c *Client) ReleaseConnections(ctx context.Context, userID, gateway string,
 	if !validConnectionUserID(userID) || gateway == "" || closed <= 0 {
 		return errors.New("invalid connection release")
 	}
-	left, err := releaseConnectionsScript.Run(ctx, c.redis, []string{connectionCountKey(userID)}, gateway, closed).Int64()
-	if err != nil {
+	if err := releaseConnectionsScript.Run(ctx, c.redis, []string{connectionCountKey(userID)}, gateway, closed).Err(); err != nil {
 		return fmt.Errorf("release connections: %w", err)
 	}
-	if left <= 0 {
-		return c.redis.SRem(ctx, gatewayUsersKey(gateway), userID).Err()
-	}
 	return nil
+}
+
+// UnindexConnections removes a user from this gateway's cleanup index once
+// the gateway holds no connections for them.
+func (c *Client) UnindexConnections(ctx context.Context, userID, gateway string) error {
+	return c.redis.SRem(ctx, gatewayUsersKey(gateway), userID).Err()
+}
+
+// IndexConnections adds a user to this gateway's cleanup index.
+func (c *Client) IndexConnections(ctx context.Context, userID, gateway string) error {
+	return c.redis.SAdd(ctx, gatewayUsersKey(gateway), userID).Err()
 }
 
 // SetConnections writes this gateway's absolute connection count for a user.
@@ -79,7 +86,7 @@ func (c *Client) SetConnections(ctx context.Context, userID, gateway string, cou
 	if count > 0 {
 		return c.redis.SAdd(ctx, gatewayUsersKey(gateway), userID).Err()
 	}
-	return c.redis.SRem(ctx, gatewayUsersKey(gateway), userID).Err()
+	return nil
 }
 
 // Heartbeat extends this gateway's registration. It reports registered=false

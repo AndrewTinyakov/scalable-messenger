@@ -56,6 +56,25 @@ it('reports idle after hiding or no input, and active again on input', async () 
   stop()
 })
 
+it('pauses delivery only after the page has been hidden for the hidden delay', async () => {
+  const changes: Activity[] = []
+  const stop = watchActivity(
+    config,
+    (activity) => changes.push(activity),
+    () => {},
+    dom.window as unknown as Window,
+  )
+  await vi.advanceTimersByTimeAsync(30000)
+  expect(changes.at(-1)).toEqual({ active: false, visible: true })
+  hidden = true
+  focused = false
+  dom.window.document.dispatchEvent(new dom.window.Event('visibilitychange'))
+  expect(changes.at(-1)).toEqual({ active: false, visible: true })
+  await vi.advanceTimersByTimeAsync(5000)
+  expect(changes.at(-1)).toEqual({ active: false, visible: false })
+  stop()
+})
+
 it('keeps the input deadline when focus is lost and arms release for a hidden start', async () => {
   const changes: Activity[] = []
   const releases: boolean[] = []

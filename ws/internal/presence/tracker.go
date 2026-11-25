@@ -24,9 +24,11 @@ type Tracker struct {
 	logger   *slog.Logger
 	lastSeen *lastSeen
 	wake     chan struct{}
+	writing  sync.Mutex
 	mu       sync.Mutex
 	users    map[string]*localUser
 	pending  map[string]bool
+	cleared  map[string]time.Time
 }
 
 func NewTracker(store Store, recorder LastSeenRecorder, gateway func() string, config Config, logger *slog.Logger) *Tracker {
@@ -36,6 +38,7 @@ func NewTracker(store Store, recorder LastSeenRecorder, gateway func() string, c
 		wake:     make(chan struct{}, 1),
 		users:    make(map[string]*localUser),
 		pending:  make(map[string]bool),
+		cleared:  make(map[string]time.Time),
 	}
 }
 
@@ -94,6 +97,8 @@ func (t *Tracker) queueLocked(userID string, user *localUser, online bool) {
 // Renew writes local state again after this gateway's identity or its Redis
 // state was lost. It first clears what the previous identity may still hold.
 func (t *Tracker) Renew(previous string) {
+	t.writing.Lock()
+	defer t.writing.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), t.config.Timeout)
 	defer cancel()
 	if previous != t.gateway() {
@@ -163,7 +168,11 @@ func (t *Tracker) Run(ctx context.Context) {
 	}
 }
 
+// write sends pending state. Renewal waits for it, so no write under an
+// identity can land after that identity was cleared.
 func (t *Tracker) write(ctx context.Context) {
+	t.writing.Lock()
+	defer t.writing.Unlock()
 	t.mu.Lock()
 	if len(t.pending) == 0 {
 		t.mu.Unlock()
@@ -185,6 +194,11 @@ func (t *Tracker) write(ctx context.Context) {
 			t.pending[userID] = online
 			continue
 		}
+		if online {
+			delete(t.cleared, userID)
+		} else if _, known := t.cleared[userID]; !known {
+			t.cleared[userID] = time.Now()
+		}
 		if user := t.users[userID]; user != nil {
 			if !user.online && user.active == 0 && user.grace == nil {
 				delete(t.users, userID)
@@ -196,11 +210,20 @@ func (t *Tracker) write(ctx context.Context) {
 	}
 }
 
-// refresh records last seen for users still active and writes their online
-// state again, which repairs state a Redis failover rolled back.
+// refresh records last seen for users still active and writes their state
+// again, which repairs state a Redis failover rolled back. Users cleared in
+// the last interval are cleared once more for the same reason.
 func (t *Tracker) refresh(now time.Time) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	for userID, at := range t.cleared {
+		if _, queued := t.pending[userID]; !queued && t.users[userID] == nil {
+			t.pending[userID] = false
+		}
+		if now.Sub(at) >= t.config.LastSeenActive {
+			delete(t.cleared, userID)
+		}
+	}
 	for userID, user := range t.users {
 		if user.active == 0 {
 			continue

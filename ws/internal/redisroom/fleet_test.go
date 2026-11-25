@@ -37,6 +37,9 @@ func TestAdmissionCapsConnectionsAcrossGateways(t *testing.T) {
 	if err := first.ReleaseConnections(ctx, user, gatewayA, 1); err != nil {
 		t.Fatal(err)
 	}
+	if err := first.UnindexConnections(ctx, user, gatewayA); err != nil {
+		t.Fatal(err)
+	}
 	if members, _ := first.redis.SMembers(ctx, gatewayUsersKey(gatewayA)).Result(); len(members) != 0 {
 		t.Fatalf("gateway users = %v, want empty", members)
 	}

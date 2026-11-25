@@ -26,19 +26,24 @@ type onlineCount struct {
 func (h *Hub) WatchOnlineCount(ctx context.Context, w Watcher, chatID string) error {
 	h.mu.Lock()
 	wt := h.watchLocked(w)
+	var generation uint64
 	if wt != nil {
 		h.clearCountLocked(wt)
+		wt.counted++
+		generation = wt.counted
 	}
 	h.mu.Unlock()
 	if wt == nil || chatID == "" {
 		return nil
 	}
-	return h.resolveCount(ctx, wt, chatID, -1)
+	return h.resolveCount(ctx, wt, chatID, -1, generation)
 }
 
 func (h *Hub) refreshCount(wt *watch) {
 	h.mu.Lock()
 	count := wt.count
+	wt.counted++
+	generation := wt.counted
 	h.mu.Unlock()
 	if count == nil {
 		return
@@ -48,10 +53,10 @@ func (h *Hub) refreshCount(wt *watch) {
 		defer h.wg.Done()
 		ctx, cancel := context.WithTimeout(h.ctx, h.config.Timeout)
 		defer cancel()
-		err := h.resolveCount(ctx, wt, count.chatID, count.sent)
+		err := h.resolveCount(ctx, wt, count.chatID, count.sent, generation)
 		if errors.Is(err, grpcauth.ErrUnauthorized) {
 			h.mu.Lock()
-			if wt.count == count {
+			if wt.counted == generation {
 				h.clearCountLocked(wt)
 			}
 			h.mu.Unlock()
@@ -59,15 +64,16 @@ func (h *Hub) refreshCount(wt *watch) {
 	}()
 }
 
-// resolveCount authorizes the roster and installs it, keeping the last
-// count the socket received so an unchanged count is not sent again.
-func (h *Hub) resolveCount(ctx context.Context, wt *watch, chatID string, sent int) error {
+// resolveCount authorizes the roster and installs it if no newer count
+// watch or invalidation started meanwhile, keeping the last count the
+// socket received so an unchanged count is not sent again.
+func (h *Hub) resolveCount(ctx context.Context, wt *watch, chatID string, sent int, generation uint64) error {
 	total, members, err := h.auth.OnlineCountMembers(ctx, wt.watcher.PresenceSession(), chatID, h.config.MaxCountGroup)
 	if err != nil {
 		return err
 	}
 	h.mu.Lock()
-	if h.watches[wt.watcher] != wt || (sent >= 0 && (wt.count == nil || wt.count.chatID != chatID)) {
+	if h.watches[wt.watcher] != wt || wt.counted != generation {
 		h.mu.Unlock()
 		return nil
 	}

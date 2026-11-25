@@ -481,3 +481,22 @@ func TestTrackerRemovesGatewayFromItsIndex(t *testing.T) {
 		t.Fatalf("dead gateway still online: %v", last)
 	}
 }
+
+func TestTrackerClearsRecentlyOfflineUsersAgainOnRefresh(t *testing.T) {
+	store := newFakeStore()
+	tracker := NewTracker(store, recorderFunc(func(context.Context, []grpcauth.LastSeen) error { return nil }), func() string { return "gateway" }, testConfig(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	alice := user(1)
+	tracker.SetActive(alice, true)
+	tracker.write(context.Background())
+	tracker.SetActive(alice, false)
+	time.Sleep(80 * time.Millisecond)
+	tracker.write(context.Background())
+	before := writeCount(store)
+	tracker.refresh(time.Now())
+	tracker.write(context.Background())
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.writes) != before+1 || store.writes[before][alice] {
+		t.Fatalf("refresh writes = %v", store.writes[before:])
+	}
+}

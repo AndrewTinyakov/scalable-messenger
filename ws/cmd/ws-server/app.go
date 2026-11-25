@@ -75,9 +75,9 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	gateways := fleet.New(redis, fleet.Config{ConnectionLimit: 10, Heartbeat: cfg.GatewayHeartbeat, TTL: cfg.GatewayTTL, Timeout: cfg.APITimeout}, logger)
 	tracker := presence.NewTracker(presenceStore, groupAuth, gateways.ID, presenceConfig, logger)
 	gateways.AddCleaner(tracker)
-	gateways.OnRenewed(tracker.Rewrite)
-	watchers := presence.NewHub(presenceStore, groupAuth, presenceConfig, logger, metrics.PresenceMetrics)
+	gateways.OnRenewed(tracker.Renew)
 	background, stopBackground := context.WithCancel(context.WithoutCancel(ctx))
+	watchers := presence.NewHub(background, presenceStore, groupAuth, presenceConfig, logger, metrics.PresenceMetrics)
 	var backgroundWG sync.WaitGroup
 	for _, run := range []func(context.Context){gateways.Run, tracker.Run, watchers.Run} {
 		backgroundWG.Add(1)

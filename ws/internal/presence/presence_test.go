@@ -61,6 +61,22 @@ func (s *fakeStore) PresenceSnapshot(_ context.Context, ids []string) (map[strin
 	return states, sequences, nil
 }
 
+func (s *fakeStore) PresenceGatewayUsers(_ context.Context, _ string, _ uint64) ([]string, uint64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var users []string
+	for _, write := range s.writes {
+		for id, on := range write {
+			if on {
+				users = append(users, id)
+			}
+		}
+	}
+	return users, 0, nil
+}
+
+func (s *fakeStore) ForgetPresenceGateway(context.Context, string) error { return nil }
+
 func (s *fakeStore) SubscribePresence(ctx context.Context, bucket int) (Feed, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -141,6 +157,7 @@ func newFakeWatcher() *fakeWatcher { return &fakeWatcher{events: make(chan proto
 
 func (w *fakeWatcher) Enqueue(event protocol.Event) bool { w.events <- event; return true }
 func (*fakeWatcher) PresenceSession() string             { return "session" }
+func (*fakeWatcher) Closed() bool                        { return false }
 
 func (w *fakeWatcher) next(t *testing.T) protocol.Event {
 	t.Helper()
@@ -171,8 +188,8 @@ func testConfig() Config {
 
 func startHub(t *testing.T, store *fakeStore, auth *fakeAuth, config Config) *Hub {
 	t.Helper()
-	hub := NewHub(store, auth, config, slog.New(slog.NewTextHandler(io.Discard, nil)), monitoring.New(prometheus.NewRegistry()).PresenceMetrics)
 	ctx, cancel := context.WithCancel(context.Background())
+	hub := NewHub(ctx, store, auth, config, slog.New(slog.NewTextHandler(io.Discard, nil)), monitoring.New(prometheus.NewRegistry()).PresenceMetrics)
 	done := make(chan struct{})
 	go func() { hub.Run(ctx); close(done) }()
 	t.Cleanup(func() { cancel(); <-done })
@@ -386,5 +403,81 @@ func TestCoarseLastSeenBuckets(t *testing.T) {
 	}
 	if got := coarse(false, time.Time{}, now); got != "long_ago" {
 		t.Fatalf("never seen = %s", got)
+	}
+}
+
+func TestHubSuspendsRevokedGrantsUntilRenewal(t *testing.T) {
+	store, auth := newFakeStore(), &fakeAuth{}
+	alice := user(1)
+	hub := startHub(t, store, auth, testConfig())
+	bob := newFakeWatcher()
+	if err := hub.Watch(context.Background(), bob, []string{alice}, nil, false); err != nil {
+		t.Fatal(err)
+	}
+	bob.next(t)
+	auth.mu.Lock()
+	auth.levels = map[string]grpcauth.PresenceLevel{alice: grpcauth.PresenceNone}
+	auth.mu.Unlock()
+	hub.Revalidate(bob)
+	store.publish(alice, true, 1)
+	event := bob.next(t)
+	if len(event.Statuses) != 0 || len(event.Unavailable) != 1 || event.Unavailable[0] != alice {
+		t.Fatalf("after revocation = %+v", event)
+	}
+	bob.quiet(t)
+}
+
+func TestHubResyncAcceptsRolledBackState(t *testing.T) {
+	store, auth := newFakeStore(), &fakeAuth{}
+	alice := user(1)
+	store.states[alice] = redisroom.PresenceState{Online: true, Version: 10}
+	hub := startHub(t, store, auth, testConfig())
+	bob := newFakeWatcher()
+	if err := hub.Watch(context.Background(), bob, []string{alice}, nil, false); err != nil {
+		t.Fatal(err)
+	}
+	bob.next(t)
+	store.mu.Lock()
+	store.states[alice] = redisroom.PresenceState{Online: false, Version: 3, LastSeen: time.Now().UnixMilli()}
+	store.mu.Unlock()
+	hub.resync(context.Background(), hub.buckets[roomname.PresenceBucketOf(alice)])
+	hub.flushWatch(hub.watches[bob])
+	if event := bob.next(t); event.Statuses[0].Online {
+		t.Fatalf("rolled back state ignored: %+v", event)
+	}
+}
+
+func TestHubBoundsRejectionsForHiddenSockets(t *testing.T) {
+	store := newFakeStore()
+	auth := &fakeAuth{levels: map[string]grpcauth.PresenceLevel{}}
+	for i := range 5 {
+		auth.levels[user(i)] = grpcauth.PresenceNone
+	}
+	config := testConfig()
+	config.MaxWatched = 3
+	hub := startHub(t, store, auth, config)
+	bob := newFakeWatcher()
+	hub.Watch(context.Background(), bob, nil, nil, false)
+	hub.SetVisible(bob, false)
+	for range 3 {
+		hub.Watch(context.Background(), bob, []string{user(0), user(1), user(2), user(3), user(4)}, nil, false)
+	}
+	hub.mu.Lock()
+	size := len(hub.watches[bob].unavailable)
+	hub.mu.Unlock()
+	if size > 3 {
+		t.Fatalf("pending rejections = %d", size)
+	}
+}
+
+func TestTrackerRemovesGatewayFromItsIndex(t *testing.T) {
+	store := newFakeStore()
+	tracker := NewTracker(store, recorderFunc(func(context.Context, []grpcauth.LastSeen) error { return nil }), func() string { return "gateway" }, testConfig(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	store.SetPresence(context.Background(), "dead", map[string]bool{user(1): true})
+	if err := tracker.RemoveGateway(context.Background(), "dead"); err != nil {
+		t.Fatal(err)
+	}
+	if last := store.writes[len(store.writes)-1]; last[user(1)] {
+		t.Fatalf("dead gateway still online: %v", last)
 	}
 }

@@ -13,6 +13,8 @@ type Store interface {
 	SetPresence(context.Context, string, map[string]bool) map[string]error
 	PresenceSnapshot(context.Context, []string) (map[string]redisroom.PresenceState, map[int]int64, error)
 	SubscribePresence(context.Context, int) (Feed, error)
+	PresenceGatewayUsers(context.Context, string, uint64) ([]string, uint64, error)
+	ForgetPresenceGateway(context.Context, string) error
 }
 
 type Feed interface {
@@ -33,6 +35,7 @@ type LastSeenRecorder interface {
 type Watcher interface {
 	Enqueue(protocol.Event) bool
 	PresenceSession() string
+	Closed() bool
 }
 
 type Config struct {

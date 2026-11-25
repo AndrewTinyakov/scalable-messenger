@@ -57,27 +57,57 @@ func presenceSeqKey(bucket int) string {
 	return "messenger:{" + roomname.PresenceBucket(bucket) + "}:seq"
 }
 
+func presenceGatewayKey(gateway string) string {
+	return "messenger:presence:gateway:{" + gateway + "}:users"
+}
+
 // SetPresence records whether this gateway holds an active connection for
-// each user. Errors are reported per user so callers can retry them.
+// each user. A user joins the gateway's index before its state goes online
+// and leaves it only after its state is cleared, so a dead gateway's state
+// can always be found. Errors are reported per user so callers can retry.
 func (c *Client) SetPresence(ctx context.Context, gateway string, active map[string]bool) map[string]error {
+	index := presenceGatewayKey(gateway)
 	pipe := c.redis.Pipeline()
+	indexed := make(map[string]*redis.IntCmd)
 	commands := make(map[string]*redis.Cmd, len(active))
 	for userID, on := range active {
 		b := roomname.PresenceBucketOf(userID)
 		value := "0"
 		if on {
 			value = "1"
+			indexed[userID] = pipe.SAdd(ctx, index, userID)
 		}
 		commands[userID] = setPresenceScript.Eval(ctx, pipe, []string{presenceStateKey(b, userID), presenceSeqKey(b)}, "g:"+gateway, value, userID, Channel(roomname.PresenceBucket(b)), presenceStateTTLMillis)
 	}
 	_, _ = pipe.Exec(ctx)
 	failed := make(map[string]error)
+	var cleared []any
 	for userID, command := range commands {
 		if err := command.Err(); err != nil && !errors.Is(err, redis.Nil) {
 			failed[userID] = err
+		} else if add := indexed[userID]; add != nil && add.Err() != nil {
+			failed[userID] = add.Err()
+		} else if !active[userID] {
+			cleared = append(cleared, userID)
+		}
+	}
+	if len(cleared) > 0 {
+		if err := c.redis.SRem(ctx, index, cleared...).Err(); err != nil {
+			for _, userID := range cleared {
+				failed[userID.(string)] = err
+			}
 		}
 	}
 	return failed
+}
+
+// PresenceGatewayUsers pages through the users a gateway may still mark online.
+func (c *Client) PresenceGatewayUsers(ctx context.Context, gateway string, cursor uint64) ([]string, uint64, error) {
+	return c.redis.SScan(ctx, presenceGatewayKey(gateway), cursor, "", 500).Result()
+}
+
+func (c *Client) ForgetPresenceGateway(ctx context.Context, gateway string) error {
+	return c.redis.Del(ctx, presenceGatewayKey(gateway)).Err()
 }
 
 // PresenceSnapshot reads current account states and the latest sequence of

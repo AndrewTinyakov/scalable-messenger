@@ -123,6 +123,7 @@ func (group *subscriptionGroup) read() {
 						delete(group.expectedAcks, item.Channel)
 					}
 				} else if listener != nil {
+					group.hub.forgetSlots()
 					go group.remove(listener, errSubscriptionMoved)
 				}
 			}

@@ -19,6 +19,10 @@ for i=1,#fields,2 do total=total+tonumber(fields[i+1]) end
 if total>=tonumber(ARGV[2]) then return 0 end
 redis.call('HINCRBY',KEYS[1],ARGV[1],1)
 return 1`)
+	releaseConnectionsScript = redis.NewScript(`
+local left=redis.call('HINCRBY',KEYS[1],ARGV[1],-tonumber(ARGV[2]))
+if left<=0 then redis.call('HDEL',KEYS[1],ARGV[1]) end
+return left`)
 	setConnectionsScript = redis.NewScript(`
 local count=tonumber(ARGV[2])
 if count>0 then redis.call('HSET',KEYS[1],ARGV[1],count) else redis.call('HDEL',KEYS[1],ARGV[1]) end
@@ -47,6 +51,21 @@ func (c *Client) AdmitConnection(ctx context.Context, userID, gateway string, li
 		err = c.redis.SAdd(ctx, gatewayUsersKey(gateway), userID).Err()
 	}
 	return admitted == 1, err
+}
+
+// ReleaseConnections removes closed connections from this gateway's count.
+func (c *Client) ReleaseConnections(ctx context.Context, userID, gateway string, closed int) error {
+	if !validConnectionUserID(userID) || gateway == "" || closed <= 0 {
+		return errors.New("invalid connection release")
+	}
+	left, err := releaseConnectionsScript.Run(ctx, c.redis, []string{connectionCountKey(userID)}, gateway, closed).Int64()
+	if err != nil {
+		return fmt.Errorf("release connections: %w", err)
+	}
+	if left <= 0 {
+		return c.redis.SRem(ctx, gatewayUsersKey(gateway), userID).Err()
+	}
+	return nil
 }
 
 // SetConnections writes this gateway's absolute connection count for a user.
@@ -82,22 +101,31 @@ func (c *Client) ExpiredGateways(ctx context.Context, limit int64) ([]string, er
 	return c.redis.ZRangeArgs(ctx, redis.ZRangeArgs{Key: gatewaysKey, Start: "-inf", Stop: time.Now().UnixMilli(), ByScore: true, Count: limit}).Result()
 }
 
-// ClaimGateway lets one caller remove an expired gateway's state. The claim
-// expires so another gateway can finish an interrupted removal.
+// ClaimGateway lets one caller remove a gateway that is still expired and
+// marks it dead before any state is removed, so the gateway stops writing
+// under that identity. The claim expires so another gateway can finish an
+// interrupted removal.
 func (c *Client) ClaimGateway(ctx context.Context, gateway string) (bool, error) {
-	return c.redis.SetNX(ctx, gatewayReapingKey(gateway), 1, time.Minute).Result()
+	claimed, err := c.redis.SetNX(ctx, gatewayReapingKey(gateway), 1, time.Minute).Result()
+	if err != nil || !claimed {
+		return false, err
+	}
+	deadline, err := c.redis.ZScore(ctx, gatewaysKey, gateway).Result()
+	if err == nil && int64(deadline) > time.Now().UnixMilli() {
+		return false, c.redis.Del(ctx, gatewayReapingKey(gateway)).Err()
+	}
+	if err != nil && !errors.Is(err, redis.Nil) {
+		return false, err
+	}
+	return true, c.redis.Set(ctx, gatewayDeadKey(gateway), 1, 24*time.Hour).Err()
 }
 
 func (c *Client) GatewayUsers(ctx context.Context, gateway string, cursor uint64) ([]string, uint64, error) {
 	return c.redis.SScan(ctx, gatewayUsersKey(gateway), cursor, "", 500).Result()
 }
 
-// ForgetGateway marks a removed gateway dead so a surviving process with
-// that identity registers again under a new one.
+// ForgetGateway drops a removed gateway's index and registration.
 func (c *Client) ForgetGateway(ctx context.Context, gateway string) error {
-	if err := c.redis.Set(ctx, gatewayDeadKey(gateway), 1, 24*time.Hour).Err(); err != nil {
-		return err
-	}
 	if err := c.redis.Del(ctx, gatewayUsersKey(gateway)).Err(); err != nil {
 		return err
 	}

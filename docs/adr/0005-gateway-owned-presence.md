@@ -30,6 +30,8 @@ Gateways register in a `messenger:gateways` sorted set and heartbeat every five 
 
 A Redis error never closes a socket. The current lease renewal does close sockets on error, and the new design removes that behavior.
 
+Every ten minutes a gateway writes its active users once more. The write is idempotent and publishes nothing unless state differs, and it repairs presence that a Redis failover rolled back while the gateway registration survived. Each gateway keeps a presence index of the users it may mark online. A user enters the index before going online and leaves it only after being cleared, so a dead gateway's presence can always be found and removed. A gateway that learns it was declared dead first clears what its old identity holds, then writes its state under a new one.
+
 The ten-connection admission cap stays separate from presence. It uses its own gateway-owned counts, `conn:{h}`, written by one script on connect and one on disconnect. Presence can therefore move to its own Redis cluster without handshakes depending on it.
 
 ## Watchers
@@ -57,7 +59,7 @@ A hidden tab stops receiving presence after five seconds. On focus it gets one b
 
 The client keeps one reference-counted store. It has a global cap of 500 distinct users and a budget per source (the sidebar gets 200). The open chat header, an open profile and the members of an open group are never evicted. When the store is over its cap, it first evicts from the source that is furthest over its budget, least recently shown first. A removal waits ten seconds before it is sent.
 
-The sidebar watches the peers of every loaded direct chat, ranked visible first, then the next 20 rows, then the most recently shown. Loaded pages stay in memory for the session. The gateway enforces 500 distinct users per connection and rejects the excess IDs by name. The existing per-account rate limit is charged once per `add` batch.
+The sidebar watches the peers of every loaded direct chat, ranked visible first, then the next 20 rows, then the most recently shown. Loaded pages stay in memory for the session. The gateway enforces 500 distinct users per connection and rejects the excess IDs by name. A per-account rate limit (burst 30, three per second) is charged once per watch command that adds users. The client paces its presence and online count watches together at one per second, and after a rate-limit error it sends its whole watch set again.
 
 ## Group online count
 
@@ -127,6 +129,7 @@ Deferred:
 
 - live username and avatar updates, which use their own profile topic and never the presence channel;
 - reciprocal last-seen privacy;
+- coarse visibility, which must deliver its snapshot without joining live fanout so transition timing stays private;
 - a server-side online count for large groups;
 - unloading old sidebar pages.
 

@@ -72,7 +72,8 @@ func (c *Client) allowAttempt(ctx context.Context, userID string, cost, limit in
 	return result == 1, nil
 }
 
-// AllowPresenceWatch limits watch commands per user across all WS nodes.
+// AllowPresenceWatch limits watch commands per user across all WS nodes:
+// a burst of 30, refilled at three per second.
 func (c *Client) AllowPresenceWatch(ctx context.Context, userID string) (bool, error) {
-	return c.allowAttempt(ctx, userID, 1, 10, 10*time.Second, "presence")
+	return c.allowAttempt(ctx, userID, 1, 30, 10*time.Second, "presence")
 }

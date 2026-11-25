@@ -101,3 +101,10 @@ func (h *subscriptionHub) Close() {
 	}
 	h.wg.Wait()
 }
+
+// forgetSlots makes the next subscription look up slot owners again.
+func (h *subscriptionHub) forgetSlots() {
+	h.mu.Lock()
+	h.slots = nil
+	h.mu.Unlock()
+}

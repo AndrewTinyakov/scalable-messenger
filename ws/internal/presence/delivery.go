@@ -17,10 +17,8 @@ func (h *Hub) flushPending(now time.Time) {
 	}
 	watches := make([]*watch, 0, len(h.pending))
 	for wt := range h.pending {
-		if !wt.hidden {
-			watches = append(watches, wt)
-			delete(h.pending, wt)
-		}
+		watches = append(watches, wt)
+		delete(h.pending, wt)
 	}
 	h.mu.Unlock()
 	for _, wt := range watches {
@@ -28,29 +26,45 @@ func (h *Hub) flushPending(now time.Time) {
 	}
 }
 
-// flushWatch sends a socket its changed statuses and online count.
+// flushWatch sends a socket its rejected users and, unless its page is
+// hidden, its changed statuses and online count. Building and queueing hold
+// the socket's flush lock, so frames reach the socket in the order built.
 func (h *Hub) flushWatch(wt *watch) {
+	wt.flush.Lock()
+	defer wt.flush.Unlock()
 	h.mu.Lock()
-	if wt.hidden || h.watches[wt.watcher] != wt {
+	if h.watches[wt.watcher] != wt {
 		h.mu.Unlock()
 		return
 	}
-	var events []protocol.Event
-	statuses := make([]protocol.PresenceStatus, 0, len(wt.dirty))
-	for id := range wt.dirty {
-		s, g := h.subjects[id], wt.grants[id]
-		if s == nil || g == nil || !s.known {
-			continue
+	now := time.Now()
+	var statuses []protocol.PresenceStatus
+	if !wt.hidden {
+		for id := range wt.dirty {
+			s, g := h.subjects[id], wt.grants[id]
+			if s == nil || g == nil {
+				delete(wt.dirty, id)
+				continue
+			}
+			if s.known && now.Before(g.expires) {
+				statuses = append(statuses, status(s, g))
+				delete(wt.dirty, id)
+			}
 		}
-		statuses = append(statuses, status(s, g))
-		delete(wt.dirty, id)
 	}
-	if len(statuses) > 0 || len(wt.unavailable) > 0 {
-		events = append(events, protocol.Event{Type: protocol.EventPresence, Version: 1, Statuses: statuses, Unavailable: wt.unavailable})
-		wt.unavailable = nil
+	var unavailable []string
+	for id := range wt.unavailable {
+		unavailable = append(unavailable, id)
 	}
-	if event, ok := h.countEventLocked(wt); ok {
-		events = append(events, event)
+	clear(wt.unavailable)
+	var events []protocol.Event
+	if len(statuses) > 0 || len(unavailable) > 0 {
+		events = append(events, protocol.Event{Type: protocol.EventPresence, Version: 1, Statuses: statuses, Unavailable: unavailable})
+	}
+	if !wt.hidden {
+		if event, ok := h.countEventLocked(wt, now); ok {
+			events = append(events, event)
+		}
 	}
 	h.mu.Unlock()
 	for _, event := range events {

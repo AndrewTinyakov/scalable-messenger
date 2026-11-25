@@ -28,13 +28,13 @@ func TestAdmissionCapsConnectionsAcrossGateways(t *testing.T) {
 	if admitted, err := second.AdmitConnection(ctx, user, gatewayB, 3); err != nil || admitted {
 		t.Fatalf("fourth connection = %v, %v; want refused", admitted, err)
 	}
-	if err := first.SetConnections(ctx, user, gatewayA, 1); err != nil {
+	if err := first.ReleaseConnections(ctx, user, gatewayA, 1); err != nil {
 		t.Fatal(err)
 	}
 	if admitted, err := second.AdmitConnection(ctx, user, gatewayB, 3); err != nil || !admitted {
 		t.Fatalf("after release = %v, %v; want admitted", admitted, err)
 	}
-	if err := first.SetConnections(ctx, user, gatewayA, 0); err != nil {
+	if err := first.ReleaseConnections(ctx, user, gatewayA, 1); err != nil {
 		t.Fatal(err)
 	}
 	if members, _ := first.redis.SMembers(ctx, gatewayUsersKey(gatewayA)).Result(); len(members) != 0 {
@@ -63,8 +63,14 @@ func TestGatewayRegistryClaimsExpiredGatewaysOnce(t *testing.T) {
 	if registered, dead, err := first.Heartbeat(ctx, gateway, time.Millisecond); err != nil || registered || dead {
 		t.Fatalf("first heartbeat = %v, %v, %v; want new registration", registered, dead, err)
 	}
-	if registered, _, err := first.Heartbeat(ctx, gateway, time.Millisecond); err != nil || !registered {
+	if registered, _, err := first.Heartbeat(ctx, gateway, time.Minute); err != nil || !registered {
 		t.Fatalf("second heartbeat = %v, %v; want registered", registered, err)
+	}
+	if claimed, err := second.ClaimGateway(ctx, gateway); err != nil || claimed {
+		t.Fatalf("claim of a live gateway = %v, %v", claimed, err)
+	}
+	if _, _, err := first.Heartbeat(ctx, gateway, time.Millisecond); err != nil {
+		t.Fatal(err)
 	}
 	time.Sleep(5 * time.Millisecond)
 	expired, err := second.ExpiredGateways(ctx, 1000)
@@ -76,9 +82,6 @@ func TestGatewayRegistryClaimsExpiredGatewaysOnce(t *testing.T) {
 	}
 	if claimed, err := second.ClaimGateway(ctx, gateway); err != nil || claimed {
 		t.Fatalf("second claim = %v, %v; want lost", claimed, err)
-	}
-	if err := first.ForgetGateway(ctx, gateway); err != nil {
-		t.Fatal(err)
 	}
 	if _, dead, err := first.Heartbeat(ctx, gateway, time.Minute); err != nil || !dead {
 		t.Fatalf("heartbeat after removal = dead %v, %v; want dead", dead, err)

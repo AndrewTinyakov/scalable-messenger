@@ -2,18 +2,23 @@ package presence
 
 import (
 	"context"
+	"errors"
+	"time"
 
+	"messenger/ws/internal/grpcauth"
 	"messenger/ws/internal/protocol"
 )
 
 // onlineCount tracks how many members of a small group are online for one
-// socket. Only the count is sent; members stay private to the gateway.
+// socket. Only the count is sent; members stay private to the gateway. The
+// roster is authorized again when it expires or access may have changed.
 type onlineCount struct {
 	chatID  string
 	members []string
 	total   int
 	sent    int
 	dirty   bool
+	expires time.Time
 }
 
 // WatchOnlineCount replaces the socket's online count. An empty chat ID
@@ -21,22 +26,57 @@ type onlineCount struct {
 func (h *Hub) WatchOnlineCount(ctx context.Context, w Watcher, chatID string) error {
 	h.mu.Lock()
 	wt := h.watchLocked(w)
-	h.clearCountLocked(wt)
+	if wt != nil {
+		h.clearCountLocked(wt)
+	}
 	h.mu.Unlock()
-	if chatID == "" {
+	if wt == nil || chatID == "" {
 		return nil
 	}
-	total, members, err := h.auth.OnlineCountMembers(ctx, w.PresenceSession(), chatID, h.config.MaxCountGroup)
-	if err != nil || len(members) == 0 {
+	return h.resolveCount(ctx, wt, chatID, -1)
+}
+
+func (h *Hub) refreshCount(wt *watch) {
+	h.mu.Lock()
+	count := wt.count
+	h.mu.Unlock()
+	if count == nil {
+		return
+	}
+	h.wg.Add(1)
+	go func() {
+		defer h.wg.Done()
+		ctx, cancel := context.WithTimeout(h.ctx, h.config.Timeout)
+		defer cancel()
+		err := h.resolveCount(ctx, wt, count.chatID, count.sent)
+		if errors.Is(err, grpcauth.ErrUnauthorized) {
+			h.mu.Lock()
+			if wt.count == count {
+				h.clearCountLocked(wt)
+			}
+			h.mu.Unlock()
+		}
+	}()
+}
+
+// resolveCount authorizes the roster and installs it, keeping the last
+// count the socket received so an unchanged count is not sent again.
+func (h *Hub) resolveCount(ctx context.Context, wt *watch, chatID string, sent int) error {
+	total, members, err := h.auth.OnlineCountMembers(ctx, wt.watcher.PresenceSession(), chatID, h.config.MaxCountGroup)
+	if err != nil {
 		return err
 	}
 	h.mu.Lock()
-	if h.watches[w] != wt {
+	if h.watches[wt.watcher] != wt || (sent >= 0 && (wt.count == nil || wt.count.chatID != chatID)) {
 		h.mu.Unlock()
 		return nil
 	}
 	h.clearCountLocked(wt)
-	wt.count = &onlineCount{chatID: chatID, members: members, total: total, sent: -1, dirty: true}
+	if len(members) == 0 {
+		h.mu.Unlock()
+		return nil
+	}
+	wt.count = &onlineCount{chatID: chatID, members: members, total: total, sent: sent, dirty: true, expires: time.Now().Add(h.config.GrantTTL)}
 	var unknown []string
 	for _, id := range members {
 		s := h.attachLocked(id)
@@ -67,9 +107,9 @@ func (h *Hub) clearCountLocked(wt *watch) {
 	wt.count = nil
 }
 
-func (h *Hub) countEventLocked(wt *watch) (protocol.Event, bool) {
+func (h *Hub) countEventLocked(wt *watch, now time.Time) (protocol.Event, bool) {
 	count := wt.count
-	if count == nil || !count.dirty {
+	if count == nil || !count.dirty || !now.Before(count.expires) {
 		return protocol.Event{}, false
 	}
 	online := 0

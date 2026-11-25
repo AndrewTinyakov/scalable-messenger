@@ -81,6 +81,9 @@ func (t *Tracker) expire(userID string, user *localUser) {
 
 func (t *Tracker) queueLocked(userID string, user *localUser, online bool) {
 	user.online = online
+	now := time.Now()
+	t.lastSeen.record(userID, now)
+	user.seen = now
 	t.pending[userID] = online
 	select {
 	case t.wake <- struct{}{}:
@@ -88,28 +91,53 @@ func (t *Tracker) queueLocked(userID string, user *localUser, online bool) {
 	}
 }
 
-// Rewrite queues every locally active user again, after this gateway's
-// identity or Redis state was lost.
-func (t *Tracker) Rewrite() {
+// Renew writes local state again after this gateway's identity or its Redis
+// state was lost. It first clears what the previous identity may still hold.
+func (t *Tracker) Renew(previous string) {
+	ctx, cancel := context.WithTimeout(context.Background(), t.config.Timeout)
+	defer cancel()
+	if previous != t.gateway() {
+		if err := t.RemoveGateway(ctx, previous); err != nil {
+			t.logger.Warn("clear previous gateway presence", "error", err)
+		}
+	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	for userID, user := range t.users {
 		if user.online {
-			t.queueLocked(userID, user, true)
+			t.pending[userID] = true
 		}
+	}
+	t.signal()
+}
+
+func (t *Tracker) signal() {
+	select {
+	case t.wake <- struct{}{}:
+	default:
 	}
 }
 
-// RemoveGateway clears presence a dead gateway left behind.
-func (t *Tracker) RemoveGateway(ctx context.Context, gateway string, userIDs []string) error {
-	offline := make(map[string]bool, len(userIDs))
-	for _, userID := range userIDs {
-		offline[userID] = false
+// RemoveGateway clears the presence a gateway left behind, page by page from
+// its index.
+func (t *Tracker) RemoveGateway(ctx context.Context, gateway string) error {
+	var cursor uint64
+	for {
+		users, next, err := t.store.PresenceGatewayUsers(ctx, gateway, cursor)
+		if err != nil {
+			return err
+		}
+		offline := make(map[string]bool, len(users))
+		for _, userID := range users {
+			offline[userID] = false
+		}
+		for _, err := range t.store.SetPresence(ctx, gateway, offline) {
+			return err
+		}
+		if cursor = next; cursor == 0 {
+			return t.store.ForgetPresenceGateway(ctx, gateway)
+		}
 	}
-	for _, err := range t.store.SetPresence(ctx, gateway, offline) {
-		return err
-	}
-	return nil
 }
 
 func (t *Tracker) Run(ctx context.Context) {
@@ -130,7 +158,7 @@ func (t *Tracker) Run(ctx context.Context) {
 		case <-retry.C:
 			t.write(ctx)
 		case now := <-active.C:
-			t.recordActive(now)
+			t.refresh(now)
 		}
 	}
 }
@@ -147,7 +175,6 @@ func (t *Tracker) write(ctx context.Context) {
 	writeCtx, cancel := context.WithTimeout(ctx, t.config.Timeout)
 	failed := t.store.SetPresence(writeCtx, t.gateway(), batch)
 	cancel()
-	now := time.Now()
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	for userID, online := range batch {
@@ -158,9 +185,7 @@ func (t *Tracker) write(ctx context.Context) {
 			t.pending[userID] = online
 			continue
 		}
-		t.lastSeen.record(userID, now)
 		if user := t.users[userID]; user != nil {
-			user.seen = now
 			if !user.online && user.active == 0 && user.grace == nil {
 				delete(t.users, userID)
 			}
@@ -171,13 +196,22 @@ func (t *Tracker) write(ctx context.Context) {
 	}
 }
 
-func (t *Tracker) recordActive(now time.Time) {
+// refresh records last seen for users still active and writes their online
+// state again, which repairs state a Redis failover rolled back.
+func (t *Tracker) refresh(now time.Time) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	for userID, user := range t.users {
-		if user.active > 0 && now.Sub(user.seen) >= t.config.LastSeenActive {
+		if user.active == 0 {
+			continue
+		}
+		if now.Sub(user.seen) >= t.config.LastSeenActive {
 			t.lastSeen.record(userID, now)
 			user.seen = now
 		}
+		if _, queued := t.pending[userID]; !queued && user.online {
+			t.pending[userID] = true
+		}
 	}
+	t.signal()
 }

@@ -67,11 +67,15 @@ it('shows the peer status, never a blank line once it is known', async () => {
 })
 
 it('shows a live online count for small groups and opens members from it', async () => {
+  vi.useFakeTimers()
   const store = new PresenceStore()
   const sent: { type: string; chatId?: string }[] = []
   store.connect((frame) => sent.push(frame))
   const group: Chat = { ...chat, kind: ChatKind.GROUP, name: 'Team', memberCount: 3 }
   const line = await render(store, group)
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1000)
+  })
   expect(sent.at(-1)).toEqual({ type: 'watch_online_count', version: 1, chatId: group.id })
   await act(async () => {
     store.onEvent({ type: 'online_count', version: 1, chatId: group.id, online: 2, members: 3 })
@@ -84,7 +88,11 @@ it('shows a live online count for small groups and opens members from it', async
     memberCount: 201,
   })
   expect(large.textContent).toBe('201 members')
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1000)
+  })
   expect(sent.at(-1)).toEqual({ type: 'watch_online_count', version: 1 })
+  vi.useRealTimers()
 })
 
 it('previews paginated members with live status while hovering the count', async () => {

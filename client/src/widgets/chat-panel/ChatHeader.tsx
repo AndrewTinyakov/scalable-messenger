@@ -30,10 +30,10 @@ function useSubtitle(chat: Chat, recipient: string | undefined): { text: string;
   const statuses = usePresence('header', recipient ? [recipient] : [])
   const counted =
     group && !chat.id.startsWith('draft:') && chat.memberCount <= LIVE_ONLINE_COUNT_MAX_MEMBERS
-  const count = useOnlineCount(counted ? chat.id : undefined)
+  const count = useOnlineCount(counted ? chat.id : undefined, chat.memberCount)
   if (group) {
     const members = `${chat.memberCount} ${chat.memberCount === 1 ? 'member' : 'members'}`
-    return { text: count?.online ? `${members}, ${count.online} online` : members, online: false }
+    return { text: count ? `${members}, ${count.online} online` : members, online: false }
   }
   const status = recipient ? statuses.get(recipient) : undefined
   return { text: presenceLabel(status), online: isOnline(status) }
@@ -67,6 +67,7 @@ export function ChatHeader({
   const title = chatTitle(chat, currentUser.id)
   const status = useSubtitle(chat, recipient)
   useEffect(() => {
+    clearTimeout(previewTimer.current)
     setMenuOpen(false)
     setPreview(false)
   }, [chat.id])

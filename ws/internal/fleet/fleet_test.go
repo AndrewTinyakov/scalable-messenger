@@ -55,6 +55,20 @@ func (s *fakeStore) AdmitConnection(_ context.Context, userID, gateway string, l
 	return true, nil
 }
 
+func (s *fakeStore) ReleaseConnections(_ context.Context, userID, gateway string, closed int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.writeErrs > 0 {
+		s.writeErrs--
+		return errors.New("redis down")
+	}
+	if s.counts[userID][gateway] -= closed; s.counts[userID][gateway] <= 0 {
+		delete(s.counts[userID], gateway)
+		s.users[gateway][userID] = false
+	}
+	return nil
+}
+
 func (s *fakeStore) SetConnections(_ context.Context, userID, gateway string, count int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -136,10 +150,10 @@ func (s *fakeStore) ForgetGateway(_ context.Context, gateway string) error {
 	return nil
 }
 
-type cleanerFunc func(context.Context, string, []string) error
+type cleanerFunc func(context.Context, string) error
 
-func (f cleanerFunc) RemoveGateway(ctx context.Context, gateway string, users []string) error {
-	return f(ctx, gateway, users)
+func (f cleanerFunc) RemoveGateway(ctx context.Context, gateway string) error {
+	return f(ctx, gateway)
 }
 
 func testFleet(store *fakeStore) *Fleet {
@@ -173,6 +187,11 @@ func TestFleetAdmitsWithinLimitAndWritesReleases(t *testing.T) {
 	store.mu.Unlock()
 	f.Release("alice")
 	eventually(t, func() bool { return store.total("alice") == 1 })
+	if admitted, err := f.Admit(ctx, "alice"); err != nil || !admitted {
+		t.Fatalf("readmit = %v, %v", admitted, err)
+	}
+	f.Release("alice")
+	eventually(t, func() bool { return store.total("alice") == 1 })
 	store.admitErr = errors.New("redis down")
 	if _, err := f.Admit(ctx, "alice"); err == nil {
 		t.Fatal("admission error was hidden")
@@ -183,9 +202,9 @@ func TestFleetAdmitsWithinLimitAndWritesReleases(t *testing.T) {
 func TestFleetRemovesDeadGatewaysAndRenewsItsOwnIdentity(t *testing.T) {
 	store := newFakeStore()
 	survivor, crashed := testFleet(store), testFleet(store)
-	cleaned := make(chan []string, 1)
-	survivor.AddCleaner(cleanerFunc(func(_ context.Context, _ string, users []string) error {
-		cleaned <- users
+	cleaned := make(chan string, 1)
+	survivor.AddCleaner(cleanerFunc(func(_ context.Context, gateway string) error {
+		cleaned <- gateway
 		return nil
 	}))
 	ctx, cancel := context.WithCancel(context.Background())
@@ -204,23 +223,26 @@ func TestFleetRemovesDeadGatewaysAndRenewsItsOwnIdentity(t *testing.T) {
 	crash()
 	go survivor.Run(ctx)
 	select {
-	case users := <-cleaned:
-		if len(users) != 1 || users[0] != "bob" {
-			t.Fatalf("cleaned = %v", users)
+	case gateway := <-cleaned:
+		if gateway != crashed.ID() {
+			t.Fatalf("cleaned = %s, want %s", gateway, crashed.ID())
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("dead gateway was not removed")
 	}
 	eventually(t, func() bool { return store.total("bob") == 0 })
 	old := crashed.ID()
-	renewed := make(chan struct{}, 1)
-	crashed.OnRenewed(func() { renewed <- struct{}{} })
+	renewed := make(chan string, 1)
+	crashed.OnRenewed(func(previous string) { renewed <- previous })
 	crashed.heartbeat(ctx)
 	if crashed.ID() == old {
 		t.Fatal("removed gateway kept its identity")
 	}
 	select {
-	case <-renewed:
+	case previous := <-renewed:
+		if previous != old {
+			t.Fatalf("renewed from %s, want %s", previous, old)
+		}
 	case <-time.After(time.Second):
 		t.Fatal("state was not rewritten under the new identity")
 	}

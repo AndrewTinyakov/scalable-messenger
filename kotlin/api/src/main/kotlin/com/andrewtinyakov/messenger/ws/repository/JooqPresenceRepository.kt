@@ -7,6 +7,7 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHA
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHAT_MEMBERS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.SESSIONS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.USERS
+import com.andrewtinyakov.messenger.infrastructure.database.generated.enums.ChatKind
 import com.andrewtinyakov.messenger.ws.model.LastSeen
 import com.andrewtinyakov.messenger.ws.model.OnlineCountMembers
 import com.andrewtinyakov.messenger.ws.model.PresenceLevel
@@ -50,7 +51,7 @@ class JooqPresenceRepository(
         val member = CHAT_MEMBERS.`as`("member")
         val chat = db.select(CHATS.ID).from(CHATS)
             .join(CHAT_MEMBERS).on(CHAT_MEMBERS.CHAT_ID.eq(CHATS.ID), CHAT_MEMBERS.USER_ID.eq(viewerId))
-            .where(CHATS.ID.eq(chatId.value), CHATS.DELETED_AT.isNull)
+            .where(CHATS.ID.eq(chatId.value), CHATS.KIND.eq(ChatKind.GROUP), CHATS.DELETED_AT.isNull)
             .fetchOne() ?: return null
         val members = db.select(member.USER_ID).from(member)
             .where(member.CHAT_ID.eq(chat.value1()))

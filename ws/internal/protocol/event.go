@@ -53,6 +53,15 @@ type PresenceStatus struct {
 
 func (event Event) MarshalJSON() ([]byte, error) {
 	type wireEvent Event
+	if event.Type == EventPresenceConfig {
+		return json.Marshal(struct {
+			Type               EventType `json:"type"`
+			Version            int       `json:"version"`
+			IdleAfterHiddenMS  int       `json:"idleAfterHiddenMs"`
+			IdleAfterInputMS   int       `json:"idleAfterInputMs"`
+			ReleaseAfterHidden int       `json:"releaseAfterHiddenMs"`
+		}{event.Type, event.Version, event.IdleAfterHiddenMS, event.IdleAfterInputMS, event.ReleaseAfterHidden})
+	}
 	if event.Type != EventMessageChanged && event.Type != EventPresence && event.Type != EventOnlineCount && event.ReplyToMessageID == "" {
 		return json.Marshal(wireEvent(event))
 	}

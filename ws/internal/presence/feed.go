@@ -120,10 +120,15 @@ func (h *Hub) apply(ctx context.Context, b *bucket, live redisroom.Live) {
 	}
 }
 
+// resync forgets what the bucket's subjects were known to be and reloads
+// them. Versions start over, so state that Redis rolled back still applies;
+// subjects that fail to load stay unknown and the sweep retries them.
 func (h *Hub) resync(ctx context.Context, b *bucket) {
 	h.mu.Lock()
 	ids := make([]string, 0, len(b.subjects))
-	for id := range b.subjects {
+	for id, s := range b.subjects {
+		s.known = false
+		s.state.Version = 0
 		ids = append(ids, id)
 	}
 	h.mu.Unlock()

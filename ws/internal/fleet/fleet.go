@@ -11,6 +11,7 @@ import (
 
 type Store interface {
 	AdmitConnection(context.Context, string, string, int) (bool, error)
+	ReleaseConnections(context.Context, string, string, int) error
 	SetConnections(context.Context, string, string, int) error
 	Heartbeat(context.Context, string, time.Duration) (registered, dead bool, err error)
 	ExpiredGateways(context.Context, int64) ([]string, error)
@@ -20,9 +21,9 @@ type Store interface {
 	ForgetGateway(context.Context, string) error
 }
 
-// Cleaner removes per-user state that a dead gateway left behind.
+// Cleaner removes the state a dead gateway left behind, using its own index.
 type Cleaner interface {
-	RemoveGateway(context.Context, string, []string) error
+	RemoveGateway(context.Context, string) error
 }
 
 type Config struct {
@@ -33,7 +34,7 @@ type Config struct {
 }
 
 // Fleet owns this gateway's identity and its per-user connection counts.
-// Redis holds one count per user and gateway, written only when a
+// Redis holds one count per user and gateway, changed only when a
 // connection opens or closes, never while sockets are idle.
 type Fleet struct {
 	store    Store
@@ -44,12 +45,13 @@ type Fleet struct {
 	mu       sync.Mutex
 	id       string
 	counts   map[string]int
-	stale    map[string]bool
-	renewed  []func()
+	released map[string]int
+	rewrite  map[string]bool
+	renewed  []func(string)
 }
 
 func New(store Store, config Config, logger *slog.Logger) *Fleet {
-	return &Fleet{store: store, config: config, logger: logger, wake: make(chan struct{}, 1), id: newID(), counts: make(map[string]int), stale: make(map[string]bool)}
+	return &Fleet{store: store, config: config, logger: logger, wake: make(chan struct{}, 1), id: newID(), counts: make(map[string]int), released: make(map[string]int), rewrite: make(map[string]bool)}
 }
 
 func newID() string {
@@ -71,9 +73,10 @@ func (f *Fleet) AddCleaner(cleaner Cleaner) {
 	f.mu.Unlock()
 }
 
-// OnRenewed registers a callback for when this gateway takes a new identity
-// and must write its state again.
-func (f *Fleet) OnRenewed(callback func()) {
+// OnRenewed registers a callback for when this gateway must write its state
+// again. It receives the identity whose state may be stale, which equals the
+// current identity when Redis lost the registration.
+func (f *Fleet) OnRenewed(callback func(string)) {
 	f.mu.Lock()
 	f.renewed = append(f.renewed, callback)
 	f.mu.Unlock()
@@ -93,13 +96,15 @@ func (f *Fleet) Admit(ctx context.Context, userID string) (bool, error) {
 
 func (f *Fleet) Release(userID string) { f.release(userID, true) }
 
+// release forgets one local connection. Redis is decremented rather than
+// overwritten so concurrent admissions on this gateway keep their count.
 func (f *Fleet) release(userID string, write bool) {
 	f.mu.Lock()
 	if f.counts[userID]--; f.counts[userID] <= 0 {
 		delete(f.counts, userID)
 	}
-	if write {
-		f.stale[userID] = true
+	if write && !f.rewrite[userID] {
+		f.released[userID]++
 	}
 	f.mu.Unlock()
 	if write {
@@ -148,24 +153,34 @@ func (f *Fleet) writeCounts(ctx context.Context) {
 		case <-retry.C:
 		}
 		f.mu.Lock()
-		id := f.id
-		pending := make(map[string]int, len(f.stale))
-		for userID := range f.stale {
-			pending[userID] = f.counts[userID]
+		id, released, rewrite := f.id, f.released, make(map[string]int, len(f.rewrite))
+		f.released = make(map[string]int)
+		for userID := range f.rewrite {
+			rewrite[userID] = f.counts[userID]
 		}
-		clear(f.stale)
+		clear(f.rewrite)
 		f.mu.Unlock()
-		for userID, count := range pending {
-			writeCtx, cancel := context.WithTimeout(ctx, f.config.Timeout)
-			err := f.store.SetConnections(writeCtx, userID, id, count)
-			cancel()
-			if err != nil {
+		for userID, closed := range released {
+			if err := f.write(ctx, func(ctx context.Context) error { return f.store.ReleaseConnections(ctx, userID, id, closed) }); err != nil {
 				f.mu.Lock()
-				f.stale[userID] = true
+				f.released[userID] += closed
+				f.mu.Unlock()
+			}
+		}
+		for userID, count := range rewrite {
+			if err := f.write(ctx, func(ctx context.Context) error { return f.store.SetConnections(ctx, userID, id, count) }); err != nil {
+				f.mu.Lock()
+				f.rewrite[userID] = true
 				f.mu.Unlock()
 			}
 		}
 	}
+}
+
+func (f *Fleet) write(ctx context.Context, operation func(context.Context) error) error {
+	writeCtx, cancel := context.WithTimeout(ctx, f.config.Timeout)
+	defer cancel()
+	return operation(writeCtx)
 }
 
 func (f *Fleet) heartbeat(ctx context.Context) {
@@ -187,19 +202,30 @@ func (f *Fleet) heartbeat(ctx context.Context) {
 		f.id = newID()
 	}
 	renewedID := f.id
+	clear(f.released)
 	for userID := range f.counts {
-		f.stale[userID] = true
+		f.rewrite[userID] = true
 	}
-	callbacks := append([]func(){}, f.renewed...)
+	users := make([]string, 0, len(f.counts))
+	for userID := range f.counts {
+		users = append(users, userID)
+	}
+	callbacks := append([]func(string){}, f.renewed...)
 	f.mu.Unlock()
 	if dead {
 		f.logger.Warn("gateway was removed by the fleet; registering again", "gateway", id)
-		beatCtx, cancel := context.WithTimeout(ctx, f.config.Timeout)
-		_, _, _ = f.store.Heartbeat(beatCtx, renewedID, f.config.TTL)
-		cancel()
+		_ = f.write(ctx, func(ctx context.Context) error {
+			for _, userID := range users {
+				if err := f.store.SetConnections(ctx, userID, id, 0); err != nil {
+					return err
+				}
+			}
+			_, _, err := f.store.Heartbeat(ctx, renewedID, f.config.TTL)
+			return err
+		})
 	}
 	for _, callback := range callbacks {
-		callback()
+		callback(id)
 	}
 	f.signal()
 }
@@ -229,20 +255,20 @@ func (f *Fleet) remove(ctx context.Context, gateway string) error {
 	if err != nil || !claimed {
 		return err
 	}
+	f.mu.Lock()
+	cleaners := append([]Cleaner(nil), f.cleaners...)
+	f.mu.Unlock()
+	for _, cleaner := range cleaners {
+		if err := cleaner.RemoveGateway(ctx, gateway); err != nil {
+			return err
+		}
+	}
 	var cursor uint64
 	for {
 		pageCtx, cancel := context.WithTimeout(ctx, f.config.Timeout)
 		users, next, err := f.store.GatewayUsers(pageCtx, gateway, cursor)
 		if err == nil && len(users) > 0 {
 			err = f.store.RemoveGatewayConnections(pageCtx, gateway, users)
-			f.mu.Lock()
-			cleaners := append([]Cleaner(nil), f.cleaners...)
-			f.mu.Unlock()
-			for _, cleaner := range cleaners {
-				if err == nil {
-					err = cleaner.RemoveGateway(pageCtx, gateway, users)
-				}
-			}
 		}
 		cancel()
 		if err != nil {

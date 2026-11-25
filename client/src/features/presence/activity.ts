@@ -5,8 +5,9 @@ export type Activity = { active: boolean; visible: boolean }
 const INPUT_EVENTS = ['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart', 'scroll']
 
 /**
- * Reports when this page becomes active or idle. A page is idle after it has
- * been hidden or unfocused for a while, or has had no input for a while.
+ * Reports when this page becomes active or idle. A page is idle once it has
+ * been hidden or unfocused for a while, or has had no input for a while,
+ * whichever comes first. Focus and return to the page count as input.
  */
 export function watchActivity(
   config: () => PresenceConfig,
@@ -16,62 +17,65 @@ export function watchActivity(
 ): () => void {
   const document = target.document
   let lastInput = Date.now()
-  let away: ReturnType<typeof setTimeout> | undefined
+  let awaySince: number | undefined
   let idle: ReturnType<typeof setTimeout> | undefined
   let release: ReturnType<typeof setTimeout> | undefined
   let reported: Activity | undefined
+  let released = false
   const visible = () => document.visibilityState === 'visible'
   const present = () => visible() && document.hasFocus()
-  const report = (active: boolean) => {
-    const next = { active, visible: visible() }
+  const report = (next: Activity) => {
     if (reported?.active === next.active && reported.visible === next.visible) return
     reported = next
     onChange(next)
   }
   const evaluate = () => {
-    clearTimeout(away)
     clearTimeout(idle)
     const settings = config()
-    if (!present()) {
-      away = setTimeout(() => report(false), settings.idleAfterHiddenMs)
-      if (reported?.visible && !visible()) report(reported.active)
-      return
-    }
-    const remaining = lastInput + settings.idleAfterInputMs - Date.now()
-    if (remaining <= 0) return report(false)
-    report(true)
-    idle = setTimeout(evaluate, remaining)
+    const now = Date.now()
+    if (present()) awaySince = undefined
+    else awaySince ??= now
+    const deadline = Math.min(
+      lastInput + settings.idleAfterInputMs,
+      awaySince === undefined ? Infinity : awaySince + settings.idleAfterHiddenMs,
+    )
+    if (now >= deadline) return report({ active: false, visible: visible() })
+    report({ active: true, visible: true })
+    idle = setTimeout(evaluate, deadline - now)
   }
-  const onFocus = () => {
-    lastInput = Date.now()
-    evaluate()
+  const setReleased = (next: boolean) => {
+    if (next === released) return
+    released = next
+    onRelease(next)
   }
-  const onVisibility = () => {
+  const armRelease = () => {
     clearTimeout(release)
-    if (visible()) lastInput = Date.now()
-    if (visible()) onRelease(false)
-    else release = setTimeout(() => onRelease(true), config().releaseAfterHiddenMs)
+    if (visible()) setReleased(false)
+    else release = setTimeout(() => setReleased(true), config().releaseAfterHiddenMs)
+  }
+  const onReturn = () => {
+    if (present()) lastInput = Date.now()
+    armRelease()
     evaluate()
   }
   const onInput = () => {
-    const wasIdle = Date.now() - lastInput >= config().idleAfterInputMs
     lastInput = Date.now()
-    if (wasIdle || !reported?.active) evaluate()
+    if (!reported?.active) evaluate()
   }
   INPUT_EVENTS.forEach((name) =>
     target.addEventListener(name, onInput, { passive: true, capture: true }),
   )
-  target.addEventListener('focus', onFocus)
+  target.addEventListener('focus', onReturn)
   target.addEventListener('blur', evaluate)
-  document.addEventListener('visibilitychange', onVisibility)
+  document.addEventListener('visibilitychange', onReturn)
+  armRelease()
   evaluate()
   return () => {
-    clearTimeout(away)
     clearTimeout(idle)
     clearTimeout(release)
     INPUT_EVENTS.forEach((name) => target.removeEventListener(name, onInput, { capture: true }))
-    target.removeEventListener('focus', onFocus)
+    target.removeEventListener('focus', onReturn)
     target.removeEventListener('blur', evaluate)
-    document.removeEventListener('visibilitychange', onVisibility)
+    document.removeEventListener('visibilitychange', onReturn)
   }
 }

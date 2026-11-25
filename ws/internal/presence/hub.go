@@ -32,11 +32,13 @@ type grant struct {
 
 type watch struct {
 	watcher     Watcher
+	flush       sync.Mutex
 	grants      map[string]*grant
 	dirty       map[string]struct{}
-	unavailable []string
+	unavailable map[string]struct{}
 	hidden      bool
 	renewing    bool
+	recheck     bool
 	count       *onlineCount
 }
 
@@ -58,18 +60,16 @@ type Hub struct {
 	hot      map[*subject]struct{}
 }
 
-func NewHub(store Store, auth Authorizer, config Config, logger *slog.Logger, metrics *monitoring.PresenceMetrics) *Hub {
+// NewHub creates a hub whose subscriptions live until ctx ends.
+func NewHub(ctx context.Context, store Store, auth Authorizer, config Config, logger *slog.Logger, metrics *monitoring.PresenceMetrics) *Hub {
 	return &Hub{
-		store: store, auth: auth, config: config, logger: logger, metrics: metrics, ctx: context.Background(),
+		store: store, auth: auth, config: config, logger: logger, metrics: metrics, ctx: ctx,
 		subjects: make(map[string]*subject), buckets: make(map[int]*bucket), watches: make(map[Watcher]*watch),
 		pending: make(map[*watch]struct{}), hot: make(map[*subject]struct{}),
 	}
 }
 
 func (h *Hub) Run(ctx context.Context) {
-	h.mu.Lock()
-	h.ctx = ctx
-	h.mu.Unlock()
 	flush := time.NewTicker(h.config.FlushInterval)
 	defer flush.Stop()
 	sweep := time.NewTicker(5 * time.Second)
@@ -92,6 +92,10 @@ func (h *Hub) Run(ctx context.Context) {
 func (h *Hub) Watch(ctx context.Context, w Watcher, add, remove []string, reset bool) error {
 	h.mu.Lock()
 	wt := h.watchLocked(w)
+	if wt == nil {
+		h.mu.Unlock()
+		return nil
+	}
 	if reset {
 		for id := range wt.grants {
 			h.dropLocked(wt, id)
@@ -106,7 +110,7 @@ func (h *Hub) Watch(ctx context.Context, w Watcher, add, remove []string, reset 
 			continue
 		}
 		if len(wt.grants)+len(requested) >= h.config.MaxWatched {
-			wt.unavailable = append(wt.unavailable, id)
+			h.rejectLocked(wt, id)
 			continue
 		}
 		requested = append(requested, id)
@@ -128,7 +132,7 @@ func (h *Hub) Watch(ctx context.Context, w Watcher, add, remove []string, reset 
 	return nil
 }
 
-// SetVisible pauses delivery while the socket's page is hidden.
+// SetVisible pauses status delivery while the socket's page is hidden.
 func (h *Hub) SetVisible(w Watcher, visible bool) {
 	h.mu.Lock()
 	wt := h.watches[w]
@@ -143,21 +147,28 @@ func (h *Hub) SetVisible(w Watcher, visible bool) {
 	}
 }
 
-// Revalidate rechecks every grant of a socket after a revocation event.
+// Revalidate suspends a socket's grants and online count and checks them
+// again, after an event that may have revoked access.
 func (h *Hub) Revalidate(w Watcher) {
 	h.mu.Lock()
 	wt := h.watches[w]
-	if wt == nil || wt.renewing || len(wt.grants) == 0 {
+	if wt == nil {
 		h.mu.Unlock()
 		return
 	}
-	ids := make([]string, 0, len(wt.grants))
-	for id := range wt.grants {
-		ids = append(ids, id)
+	now := time.Now()
+	for _, g := range wt.grants {
+		g.expires = now
 	}
-	wt.renewing = true
+	if wt.count != nil {
+		wt.count.expires = now
+	}
+	ids, renew := h.startRenewalLocked(wt)
 	h.mu.Unlock()
-	h.renew(wt, ids)
+	if renew {
+		h.renew(wt, ids)
+	}
+	h.refreshCount(wt)
 }
 
 func (h *Hub) Remove(w Watcher) {
@@ -176,14 +187,22 @@ func (h *Hub) Remove(w Watcher) {
 	h.metrics.PresenceWatches.Set(float64(len(h.watches)))
 }
 
+// watchLocked returns the socket's watch, creating it unless the socket has
+// already closed.
 func (h *Hub) watchLocked(w Watcher) *watch {
 	wt := h.watches[w]
-	if wt == nil {
-		wt = &watch{watcher: w, grants: make(map[string]*grant), dirty: make(map[string]struct{})}
+	if wt == nil && !w.Closed() {
+		wt = &watch{watcher: w, grants: make(map[string]*grant), dirty: make(map[string]struct{}), unavailable: make(map[string]struct{})}
 		h.watches[w] = wt
 		h.metrics.PresenceWatches.Set(float64(len(h.watches)))
 	}
 	return wt
+}
+
+func (h *Hub) rejectLocked(wt *watch, id string) {
+	if len(wt.unavailable) < h.config.MaxWatched {
+		wt.unavailable[id] = struct{}{}
+	}
 }
 
 func (h *Hub) grant(wt *watch, ids []string, visibility map[string]grpcauth.Visibility) []string {
@@ -198,7 +217,7 @@ func (h *Hub) grant(wt *watch, ids []string, visibility map[string]grpcauth.Visi
 		v := visibility[id]
 		if v.Level == grpcauth.PresenceNone {
 			h.dropLocked(wt, id)
-			wt.unavailable = append(wt.unavailable, id)
+			h.rejectLocked(wt, id)
 			continue
 		}
 		if wt.grants[id] == nil {
@@ -263,6 +282,24 @@ func (h *Hub) markLocked(s *subject, now time.Time) {
 	}
 }
 
+// startRenewalLocked claims the socket's renewal, or asks the running one
+// to check again when it finishes.
+func (h *Hub) startRenewalLocked(wt *watch) ([]string, bool) {
+	if wt.renewing {
+		wt.recheck = true
+		return nil, false
+	}
+	if len(wt.grants) == 0 {
+		return nil, false
+	}
+	ids := make([]string, 0, len(wt.grants))
+	for id := range wt.grants {
+		ids = append(ids, id)
+	}
+	wt.renewing = true
+	return ids, true
+}
+
 func (h *Hub) renew(wt *watch, ids []string) {
 	h.wg.Add(1)
 	go func() {
@@ -270,22 +307,32 @@ func (h *Hub) renew(wt *watch, ids []string) {
 		ctx, cancel := context.WithTimeout(h.ctx, h.config.Timeout)
 		defer cancel()
 		visibility, err := h.auth.PresenceVisibility(ctx, wt.watcher.PresenceSession(), ids)
-		h.mu.Lock()
-		wt.renewing = false
-		h.mu.Unlock()
 		if err != nil {
 			h.logger.Warn("renew presence grants", "error", err)
-			return
+		} else {
+			h.mu.Lock()
+			current := make([]string, 0, len(ids))
+			for _, id := range ids {
+				if wt.grants[id] != nil {
+					current = append(current, id)
+				}
+			}
+			h.mu.Unlock()
+			h.grant(wt, current, visibility)
 		}
 		h.mu.Lock()
-		current := make([]string, 0, len(ids))
-		for _, id := range ids {
-			if wt.grants[id] != nil {
-				current = append(current, id)
-			}
+		wt.renewing = false
+		recheck := wt.recheck
+		wt.recheck = false
+		next, again := []string(nil), false
+		if recheck {
+			next, again = h.startRenewalLocked(wt)
 		}
 		h.mu.Unlock()
-		h.grant(wt, current, visibility)
+		if again {
+			h.renew(wt, next)
+			return
+		}
 		h.flushWatch(wt)
 	}()
 }
@@ -309,24 +356,26 @@ func (h *Hub) sweep(now time.Time) {
 		ids []string
 	}
 	var renewals []renewal
+	var counts []*watch
 	for _, wt := range h.watches {
-		if wt.renewing {
-			continue
+		if wt.count != nil && !now.Before(wt.count.expires) {
+			counts = append(counts, wt)
 		}
-		var due []string
-		for id, g := range wt.grants {
-			if now.After(g.expires) {
-				due = append(due, id)
-			}
+		expired := false
+		for _, g := range wt.grants {
+			expired = expired || !now.Before(g.expires)
 		}
-		if len(due) > 0 {
-			wt.renewing = true
-			renewals = append(renewals, renewal{wt, due})
+		if expired && !wt.renewing {
+			ids, _ := h.startRenewalLocked(wt)
+			renewals = append(renewals, renewal{wt, ids})
 		}
 	}
 	h.mu.Unlock()
 	for _, r := range renewals {
 		h.renew(r.wt, r.ids)
+	}
+	for _, wt := range counts {
+		h.refreshCount(wt)
 	}
 	if len(unknown) > 0 {
 		ctx, cancel := context.WithTimeout(h.ctx, h.config.Timeout)

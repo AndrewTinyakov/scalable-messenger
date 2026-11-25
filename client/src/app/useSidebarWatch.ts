@@ -54,9 +54,13 @@ export function useSidebarWatch(options: Options) {
     .flatMap((chat) => chat.members.map((member) => member.id))
     .filter((id) => id !== options.userId && isId(id))
   const peerKey = [...new Set(peers)].join(',')
+  const consumer = useRef({}).current
   useEffect(() => {
-    options.presence.watch('sidebar', peerKey ? peerKey.split(',') : [])
-  }, [options.presence, peerKey])
-  useEffect(() => () => options.presence.watch('sidebar', []), [options.presence])
+    options.presence.watch('sidebar', consumer, peerKey ? peerKey.split(',') : [])
+  }, [options.presence, consumer, peerKey])
+  useEffect(
+    () => () => options.presence.watch('sidebar', consumer, []),
+    [options.presence, consumer],
+  )
   return { watchSidebarPeers }
 }

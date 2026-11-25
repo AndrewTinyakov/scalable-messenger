@@ -302,7 +302,8 @@ export function decodeSocketEvent(data: unknown): SocketEvent | null {
         (!('unavailable' in frame) ||
           (Array.isArray(frame.unavailable) &&
             frame.unavailable.length <= 500 &&
-            frame.unavailable.every(isId)))
+            frame.unavailable.every(isId) &&
+            new Set(frame.unavailable).size === frame.unavailable.length))
       break
     case 'online_count':
       valid =
@@ -310,6 +311,7 @@ export function decodeSocketEvent(data: unknown): SocketEvent | null {
         isCount(frame.online) &&
         isCount(frame.members) &&
         (frame.members as number) >= 1 &&
+        (frame.members as number) <= 200 &&
         (frame.online as number) <= (frame.members as number)
       break
     case 'presence_config':
@@ -317,8 +319,11 @@ export function decodeSocketEvent(data: unknown): SocketEvent | null {
         isCount(frame.idleAfterHiddenMs) &&
         isCount(frame.idleAfterInputMs) &&
         isCount(frame.releaseAfterHiddenMs) &&
+        (frame.idleAfterHiddenMs as number) <= 3_600_000 &&
         (frame.idleAfterInputMs as number) >= 1000 &&
-        (frame.releaseAfterHiddenMs as number) >= 1000
+        (frame.idleAfterInputMs as number) <= 3_600_000 &&
+        (frame.releaseAfterHiddenMs as number) >= 1000 &&
+        (frame.releaseAfterHiddenMs as number) <= 86_400_000
       break
     case 'chat_deleted':
     case 'reads_changed':

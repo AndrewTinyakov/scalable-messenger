@@ -15,6 +15,8 @@ type connectionPresence struct {
 
 func (c *Connection) PresenceSession() string { return c.session.SessionID }
 
+func (c *Connection) Closed() bool { return c.ctx.Err() != nil }
+
 func (c *Connection) startPresence() {
 	c.mu.Lock()
 	if c.state == lifecycleClosed {
@@ -22,8 +24,8 @@ func (c *Connection) startPresence() {
 		return
 	}
 	c.presence = connectionPresence{started: true, active: true}
-	c.mu.Unlock()
 	c.server.tracker.SetActive(c.session.UserID, true)
+	c.mu.Unlock()
 	cfg := c.server.config
 	c.Enqueue(protocol.Event{Type: protocol.EventPresenceConfig, Version: 1, IdleAfterHiddenMS: int(cfg.IdleAfterHidden.Milliseconds()), IdleAfterInputMS: int(cfg.IdleAfterInput.Milliseconds()), ReleaseAfterHidden: int(cfg.ReleaseAfterHidden.Milliseconds())})
 }
@@ -31,12 +33,11 @@ func (c *Connection) startPresence() {
 func (c *Connection) stopPresence() {
 	c.server.watchers.Remove(c)
 	c.mu.Lock()
-	active := c.presence.active
-	c.presence = connectionPresence{}
-	c.mu.Unlock()
-	if active {
+	if c.presence.active {
 		c.server.tracker.SetActive(c.session.UserID, false)
 	}
+	c.presence = connectionPresence{}
+	c.mu.Unlock()
 }
 
 func (c *Connection) setActivity(active, visible bool) {
@@ -45,12 +46,11 @@ func (c *Connection) setActivity(active, visible bool) {
 		c.mu.Unlock()
 		return
 	}
-	changed := c.presence.active != active
-	c.presence.active = active
-	c.mu.Unlock()
-	if changed {
+	if c.presence.active != active {
+		c.presence.active = active
 		c.server.tracker.SetActive(c.session.UserID, active)
 	}
+	c.mu.Unlock()
 	c.server.watchers.SetVisible(c, visible)
 }
 

@@ -246,9 +246,9 @@ func TestFleetRemovesDeadGatewaysAndRenewsItsOwnIdentity(t *testing.T) {
 		t.Fatal("removed gateway kept its identity")
 	}
 	select {
-	case previous := <-renewed:
-		if previous != old {
-			t.Fatalf("renewed from %s, want %s", previous, old)
+	case current := <-renewed:
+		if current != crashed.ID() {
+			t.Fatalf("renewed as %s, want %s", current, crashed.ID())
 		}
 	case <-time.After(time.Second):
 		t.Fatal("state was not rewritten under the new identity")

@@ -41,6 +41,7 @@ type watch struct {
 	recheck     bool
 	authorized  uint64
 	count       *onlineCount
+	countChat   string
 	counted     uint64
 }
 
@@ -163,7 +164,7 @@ func (h *Hub) Revalidate(w Watcher) {
 		wt.count.expires = now
 	}
 	ids, generation, renew := h.startRenewalLocked(wt)
-	refreshCount := h.startCountRefreshLocked(wt, wt.count)
+	refreshCount := h.startCountRefreshLocked(wt)
 	h.mu.Unlock()
 	if renew {
 		h.renew(wt, ids, generation)
@@ -366,15 +367,11 @@ func (h *Hub) sweep(now time.Time) {
 		ids        []string
 		generation uint64
 	}
-	type countRefresh struct {
-		wt    *watch
-		count *onlineCount
-	}
 	var renewals []renewal
-	var counts []countRefresh
+	var counts []*watch
 	for _, wt := range h.watches {
 		if wt.count != nil && !now.Before(wt.count.expires) {
-			counts = append(counts, countRefresh{wt, wt.count})
+			counts = append(counts, wt)
 		}
 		expired := false
 		for _, g := range wt.grants {
@@ -389,8 +386,8 @@ func (h *Hub) sweep(now time.Time) {
 	for _, r := range renewals {
 		h.renew(r.wt, r.ids, r.generation)
 	}
-	for _, c := range counts {
-		h.refreshCount(c.wt, c.count)
+	for _, wt := range counts {
+		h.refreshCount(wt)
 	}
 	if len(unknown) > 0 {
 		ctx, cancel := context.WithTimeout(h.ctx, h.config.Timeout)

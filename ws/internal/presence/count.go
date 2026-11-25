@@ -29,6 +29,7 @@ func (h *Hub) WatchOnlineCount(ctx context.Context, w Watcher, chatID string) er
 	var generation uint64
 	if wt != nil {
 		h.clearCountLocked(wt)
+		wt.countChat = chatID
 		wt.counted++
 		generation = wt.counted
 	}
@@ -39,41 +40,43 @@ func (h *Hub) WatchOnlineCount(ctx context.Context, w Watcher, chatID string) er
 	return h.resolveCount(ctx, wt, chatID, -1, generation)
 }
 
-// refreshCount authorizes the given roster again unless it was replaced.
-func (h *Hub) refreshCount(wt *watch, count *onlineCount) {
+func (h *Hub) refreshCount(wt *watch) {
 	h.mu.Lock()
-	refresh := h.startCountRefreshLocked(wt, count)
+	refresh := h.startCountRefreshLocked(wt)
 	h.mu.Unlock()
 	refresh()
 }
 
-// startCountRefreshLocked advances the count generation, so any refresh
-// already running can no longer install its roster, and returns the new
-// refresh to start after unlocking.
-func (h *Hub) startCountRefreshLocked(wt *watch, count *onlineCount) func() {
-	if count == nil || wt.count != count {
+// startCountRefreshLocked authorizes the selected group's roster again,
+// whether or not one is installed yet. It advances the count generation, so
+// a reply already in flight can no longer install a roster.
+func (h *Hub) startCountRefreshLocked(wt *watch) func() {
+	if wt.countChat == "" {
 		return func() {}
 	}
 	wt.counted++
-	generation := wt.counted
-	return func() { h.runCountRefresh(wt, count, generation) }
-}
-
-func (h *Hub) runCountRefresh(wt *watch, count *onlineCount, generation uint64) {
-	h.wg.Add(1)
-	go func() {
-		defer h.wg.Done()
-		ctx, cancel := context.WithTimeout(h.ctx, h.config.Timeout)
-		defer cancel()
-		err := h.resolveCount(ctx, wt, count.chatID, count.sent, generation)
-		if errors.Is(err, grpcauth.ErrUnauthorized) {
-			h.mu.Lock()
-			if wt.counted == generation {
-				h.clearCountLocked(wt)
+	generation, chatID, sent := wt.counted, wt.countChat, -1
+	if wt.count != nil {
+		wt.count.expires = time.Now()
+		sent = wt.count.sent
+	}
+	return func() {
+		h.wg.Add(1)
+		go func() {
+			defer h.wg.Done()
+			ctx, cancel := context.WithTimeout(h.ctx, h.config.Timeout)
+			defer cancel()
+			err := h.resolveCount(ctx, wt, chatID, sent, generation)
+			if errors.Is(err, grpcauth.ErrUnauthorized) {
+				h.mu.Lock()
+				if wt.counted == generation {
+					h.clearCountLocked(wt)
+					wt.countChat = ""
+				}
+				h.mu.Unlock()
 			}
-			h.mu.Unlock()
-		}
-	}()
+		}()
+	}
 }
 
 // resolveCount authorizes the roster and installs it if no newer count

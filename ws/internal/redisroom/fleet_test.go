@@ -28,13 +28,13 @@ func TestAdmissionCapsConnectionsAcrossGateways(t *testing.T) {
 	if admitted, err := second.AdmitConnection(ctx, user, gatewayB, 3); err != nil || admitted {
 		t.Fatalf("fourth connection = %v, %v; want refused", admitted, err)
 	}
-	if err := first.ReleaseConnections(ctx, user, gatewayA, 1); err != nil {
+	if err := first.SetConnections(ctx, user, gatewayA, 1); err != nil {
 		t.Fatal(err)
 	}
 	if admitted, err := second.AdmitConnection(ctx, user, gatewayB, 3); err != nil || !admitted {
 		t.Fatalf("after release = %v, %v; want admitted", admitted, err)
 	}
-	if err := first.ReleaseConnections(ctx, user, gatewayA, 1); err != nil {
+	if err := first.SetConnections(ctx, user, gatewayA, 0); err != nil {
 		t.Fatal(err)
 	}
 	if err := first.UnindexConnections(ctx, user, gatewayA); err != nil {
@@ -46,7 +46,7 @@ func TestAdmissionCapsConnectionsAcrossGateways(t *testing.T) {
 	if members, _ := first.redis.SMembers(ctx, gatewayUsersKey(gatewayB)).Result(); len(members) != 1 || members[0] != user {
 		t.Fatalf("gateway users = %v, want %s", members, user)
 	}
-	if err := second.RemoveGatewayConnections(ctx, gatewayB, []string{user}); err != nil {
+	if err := second.SetConnections(ctx, user, gatewayB, 0); err != nil {
 		t.Fatal(err)
 	}
 	if fields, _ := first.redis.HGetAll(ctx, connectionCountKey(user)).Result(); len(fields) != 0 {

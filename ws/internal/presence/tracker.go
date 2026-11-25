@@ -94,18 +94,9 @@ func (t *Tracker) queueLocked(userID string, user *localUser, online bool) {
 	}
 }
 
-// Renew writes local state again after this gateway's identity or its Redis
-// state was lost. It first clears what the previous identity may still hold.
-func (t *Tracker) Renew(previous string) {
-	t.writing.Lock()
-	defer t.writing.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), t.config.Timeout)
-	defer cancel()
-	if previous != t.gateway() {
-		if err := t.RemoveGateway(ctx, previous); err != nil {
-			t.logger.Warn("clear previous gateway presence", "error", err)
-		}
-	}
+// Renew writes every locally online user again under the gateway's current
+// identity, after Redis lost the registration or the identity changed.
+func (t *Tracker) Renew(string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	for userID, user := range t.users {
@@ -123,9 +114,12 @@ func (t *Tracker) signal() {
 	}
 }
 
-// RemoveGateway clears the presence a gateway left behind, page by page from
-// its index.
+// RemoveGateway clears the presence a gateway identity left behind, page by
+// page from its index. It waits for any write in progress, so a write under
+// a retired identity of this gateway cannot land afterwards.
 func (t *Tracker) RemoveGateway(ctx context.Context, gateway string) error {
+	t.writing.Lock()
+	defer t.writing.Unlock()
 	var cursor uint64
 	for {
 		users, next, err := t.store.PresenceGatewayUsers(ctx, gateway, cursor)

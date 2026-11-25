@@ -142,7 +142,10 @@ func (a *fakeAuth) PresenceVisibility(_ context.Context, _ string, ids []string)
 func (a *fakeAuth) OnlineCountMembers(_ context.Context, _, chatID string, limit int) (int, []string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	members := a.members[chatID]
+	members, ok := a.members[chatID]
+	if !ok {
+		return 0, nil, grpcauth.ErrUnauthorized
+	}
 	if len(members) > limit {
 		return len(members), nil, nil
 	}
@@ -498,5 +501,29 @@ func TestTrackerClearsRecentlyOfflineUsersAgainOnRefresh(t *testing.T) {
 	defer store.mu.Unlock()
 	if len(store.writes) != before+1 || store.writes[before][alice] {
 		t.Fatalf("refresh writes = %v", store.writes[before:])
+	}
+}
+
+func TestHubStopsCountingAfterRevocation(t *testing.T) {
+	store := newFakeStore()
+	members := []string{user(1), user(2)}
+	auth := &fakeAuth{members: map[string][]string{"group": members}}
+	hub := startHub(t, store, auth, testConfig())
+	bob := newFakeWatcher()
+	if err := hub.WatchOnlineCount(context.Background(), bob, "group"); err != nil {
+		t.Fatal(err)
+	}
+	bob.next(t)
+	auth.mu.Lock()
+	delete(auth.members, "group")
+	auth.mu.Unlock()
+	hub.Revalidate(bob)
+	time.Sleep(50 * time.Millisecond)
+	store.publish(user(1), true, 1)
+	bob.quiet(t)
+	hub.mu.Lock()
+	defer hub.mu.Unlock()
+	if wt := hub.watches[bob]; wt.count != nil || wt.countChat != "" {
+		t.Fatal("revoked count kept its roster")
 	}
 }

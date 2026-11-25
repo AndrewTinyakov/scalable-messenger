@@ -19,10 +19,6 @@ for i=1,#fields,2 do total=total+tonumber(fields[i+1]) end
 if total>=tonumber(ARGV[2]) then return 0 end
 redis.call('HINCRBY',KEYS[1],ARGV[1],1)
 return 1`)
-	releaseConnectionsScript = redis.NewScript(`
-local left=redis.call('HINCRBY',KEYS[1],ARGV[1],-tonumber(ARGV[2]))
-if left<=0 then redis.call('HDEL',KEYS[1],ARGV[1]) end
-return left`)
 	setConnectionsScript = redis.NewScript(`
 local count=tonumber(ARGV[2])
 if count>0 then redis.call('HSET',KEYS[1],ARGV[1],count) else redis.call('HDEL',KEYS[1],ARGV[1]) end
@@ -51,17 +47,6 @@ func (c *Client) AdmitConnection(ctx context.Context, userID, gateway string, li
 		return false, fmt.Errorf("admit connection: %w", err)
 	}
 	return admitted == 1, nil
-}
-
-// ReleaseConnections removes closed connections from this gateway's count.
-func (c *Client) ReleaseConnections(ctx context.Context, userID, gateway string, closed int) error {
-	if !validConnectionUserID(userID) || gateway == "" || closed <= 0 {
-		return errors.New("invalid connection release")
-	}
-	if err := releaseConnectionsScript.Run(ctx, c.redis, []string{connectionCountKey(userID)}, gateway, closed).Err(); err != nil {
-		return fmt.Errorf("release connections: %w", err)
-	}
-	return nil
 }
 
 // UnindexConnections removes a user from this gateway's cleanup index once
@@ -134,13 +119,4 @@ func (c *Client) ForgetGateway(ctx context.Context, gateway string) error {
 		return err
 	}
 	return c.redis.ZRem(ctx, gatewaysKey, gateway).Err()
-}
-
-func (c *Client) RemoveGatewayConnections(ctx context.Context, gateway string, userIDs []string) error {
-	pipe := c.redis.Pipeline()
-	for _, userID := range userIDs {
-		pipe.HDel(ctx, connectionCountKey(userID), gateway)
-	}
-	_, err := pipe.Exec(ctx)
-	return err
 }

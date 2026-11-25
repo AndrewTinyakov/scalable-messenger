@@ -8,7 +8,7 @@ import (
 )
 
 func TestSharedSidebarContracts(t *testing.T) {
-	for _, name := range []string{"watch-sidebar", "sidebar-activity", "sidebar-presence"} {
+	for _, name := range []string{"watch-sidebar", "sidebar-activity"} {
 		data, err := os.ReadFile("../../../contracts/fixtures/valid/" + name + ".json")
 		if err != nil {
 			t.Fatal(err)

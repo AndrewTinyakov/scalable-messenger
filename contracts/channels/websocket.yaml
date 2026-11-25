@@ -53,15 +53,19 @@ socketFrames:
       $ref: ../messages.yaml#/messages/SocketPinsChangedV1
     SocketWatchPresenceV1:
       $ref: ../messages.yaml#/messages/SocketWatchPresenceV1
-    SocketUnwatchPresenceV1:
-      $ref: ../messages.yaml#/messages/SocketUnwatchPresenceV1
+    SocketActivityV1:
+      $ref: ../messages.yaml#/messages/SocketActivityV1
+    SocketWatchOnlineCountV1:
+      $ref: ../messages.yaml#/messages/SocketWatchOnlineCountV1
+    SocketOnlineCountV1:
+      $ref: ../messages.yaml#/messages/SocketOnlineCountV1
+    SocketPresenceConfigV1:
+      $ref: ../messages.yaml#/messages/SocketPresenceConfigV1
     SocketPresenceV1:
       $ref: ../messages.yaml#/messages/SocketPresenceV1
     SocketHistoryChangedV1:
       $ref: ../messages.yaml#/messages/SocketHistoryChangedV1
     SocketWatchSidebarV1:
       $ref: ../messages.yaml#/messages/SocketWatchSidebarV1
-    SocketSidebarPresenceV1:
-      $ref: ../messages.yaml#/messages/SocketSidebarPresenceV1
     SocketSidebarActivityV1:
       $ref: ../messages.yaml#/messages/SocketSidebarActivityV1

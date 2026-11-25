@@ -35,7 +35,7 @@ func TestMissingAppliedACKClosesSocketForRecovery(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("server did not accept socket")
 	}
-	connection := newConnection(server, socket, ticket.Identity{}, "")
+	connection := newConnection(server, socket, ticket.Identity{})
 	server.connections[connection] = struct{}{}
 	writerDone := make(chan struct{})
 	go func() { connection.writeLoop(); close(writerDone) }()

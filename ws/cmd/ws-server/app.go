@@ -6,14 +6,18 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 
 	"messenger/ws/internal/config"
+	"messenger/ws/internal/fleet"
 	"messenger/ws/internal/grpcauth"
 	"messenger/ws/internal/monitoring"
+	"messenger/ws/internal/presence"
 	"messenger/ws/internal/rabbitmq"
 	"messenger/ws/internal/redisroom"
 	roomregistry "messenger/ws/internal/room"
@@ -56,10 +60,35 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	metrics := monitoring.New(registry)
 	redis.SetMetrics(metrics)
 	publisher.SetMetrics(metrics)
+	presenceRedis := redis
+	if cfg.PresenceRedisURL != cfg.RedisURL || !slices.Equal(cfg.PresenceRedisNodes, cfg.RedisClusterNodes) {
+		if presenceRedis, err = redisroom.New(cfg.PresenceRedisURL, cfg.PresenceRedisNodes); err != nil {
+			return err
+		}
+		defer presenceRedis.Close()
+		presenceRedis.SetMetrics(metrics)
+	}
+	presenceStore := presence.RedisStore(presenceRedis)
+	presenceConfig := presence.DefaultConfig()
+	presenceConfig.Grace = cfg.PresenceGrace
+	presenceConfig.Timeout = cfg.APITimeout
+	gateways := fleet.New(redis, fleet.Config{ConnectionLimit: 10, Heartbeat: cfg.GatewayHeartbeat, TTL: cfg.GatewayTTL, Timeout: cfg.APITimeout}, logger)
+	tracker := presence.NewTracker(presenceStore, groupAuth, gateways.ID, presenceConfig, logger)
+	gateways.AddCleaner(tracker)
+	gateways.OnRenewed(tracker.Rewrite)
+	watchers := presence.NewHub(presenceStore, groupAuth, presenceConfig, logger, metrics.PresenceMetrics)
+	background, stopBackground := context.WithCancel(context.WithoutCancel(ctx))
+	var backgroundWG sync.WaitGroup
+	for _, run := range []func(context.Context){gateways.Run, tracker.Run, watchers.Run} {
+		backgroundWG.Add(1)
+		go func() { defer backgroundWG.Done(); run(background) }()
+	}
+	defer func() { stopBackground(); backgroundWG.Wait() }()
 	rooms := roomregistry.NewRooms(redis, logger, cfg.ReplayLimit, cfg.QueueItems, cfg.QueueBytes, cfg.PositionCheckInterval, metrics, cfg.MaxRooms, cfg.MaxMemberships)
 	ws, err := socket.NewServer(context.WithoutCancel(ctx), cfg, logger, socket.Dependencies{
 		GroupAuthorizer: groupAuth, SessionAuthorizer: groupAuth, Publisher: publisher,
-		SendLimiter: redis, HandshakeLimiter: redis, ConnectionLeases: redis, SubscriptionLimiter: redis, Rooms: rooms,
+		SendLimiter: redis, HandshakeLimiter: redis, SubscriptionLimiter: redis, Rooms: rooms,
+		Admission: gateways, Presence: tracker, Watchers: watchers, WatchLimiter: redis, SidebarActivity: redis,
 	}, registry, metrics)
 	if err != nil {
 		rooms.Close()

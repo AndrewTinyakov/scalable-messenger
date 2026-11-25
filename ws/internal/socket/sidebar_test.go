@@ -2,19 +2,25 @@ package socket
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"messenger/ws/internal/config"
 	"messenger/ws/internal/grpcauth"
 	"messenger/ws/internal/protocol"
+	"messenger/ws/internal/ticket"
 )
 
 type sidebarTestDependencies struct {
-	presenceTestDependencies
+	serverTestDependencies
 	sidebarMu sync.Mutex
 	chats     []grpcauth.SidebarChat
-	calls     int
+	authErr   error
+	limited   bool
 	feeds     map[string]chan protocol.Event
 	started   chan string
 	stopped   chan string
@@ -23,9 +29,15 @@ type sidebarTestDependencies struct {
 func (d *sidebarTestDependencies) AuthorizeSidebar(context.Context, string, []string) ([]grpcauth.SidebarChat, error) {
 	d.sidebarMu.Lock()
 	defer d.sidebarMu.Unlock()
-	d.calls++
-	return append([]grpcauth.SidebarChat(nil), d.chats...), nil
+	return append([]grpcauth.SidebarChat(nil), d.chats...), d.authErr
 }
+
+func (d *sidebarTestDependencies) AllowPresenceWatch(context.Context, string) (bool, error) {
+	d.sidebarMu.Lock()
+	defer d.sidebarMu.Unlock()
+	return !d.limited, nil
+}
+
 func (d *sidebarTestDependencies) RunActivity(ctx context.Context, id string, consume func(protocol.Event)) error {
 	d.sidebarMu.Lock()
 	events := d.feeds[id]
@@ -41,15 +53,14 @@ func (d *sidebarTestDependencies) RunActivity(ctx context.Context, id string, co
 		}
 	}
 }
+
 func newSidebarTestServer(t *testing.T) (*Server, *sidebarTestDependencies) {
-	s, _ := newPresenceTestServer(t, 1000)
-	s.config.MaxRooms = 100
+	t.Helper()
+	s := newTestServer(t, config.Config{MaxGroupAuths: 8, MaxMemberships: 1000, MaxRooms: 100, QueueItems: 32, QueueBytes: 65536, APITimeout: time.Second, WriteTimeout: time.Second, PingInterval: time.Hour}, testDependencies(&sessionRooms{}))
 	d := &sidebarTestDependencies{feeds: make(map[string]chan protocol.Event), started: make(chan string, 10), stopped: make(chan string, 10)}
-	d.values = map[string]bool{}
-	s.connectionLeases = d
 	s.groupAuth = d
-	s.handshakeLimiter = d
-	s.presence = newPresenceCoordinator(s)
+	s.watchLimiter = d
+	s.sidebarActivity = d
 	s.sidebar = newSidebarCoordinator(s)
 	t.Cleanup(func() {
 		s.sidebar.mu.Lock()
@@ -62,22 +73,25 @@ func newSidebarTestServer(t *testing.T) (*Server, *sidebarTestDependencies) {
 	})
 	return s, d
 }
-func TestSidebarSharesActivityFeedsAndKeepsSelectedPresence(t *testing.T) {
+
+func sidebarTestConnection(t *testing.T, s *Server) *Connection {
+	t.Helper()
+	c := newConnection(s, nil, ticket.Identity{UserID: sessionTestUser, SessionID: strings.Repeat("a", 64)})
+	t.Cleanup(c.Close)
+	return c
+}
+
+func sidebarID(i int) string { return fmt.Sprintf("%026d", i+1) }
+
+func TestSidebarSharesGroupActivityFeeds(t *testing.T) {
 	s, d := newSidebarTestServer(t)
-	group, peer, direct := presencePeer(1), presencePeer(2), presencePeer(3)
-	d.chats = []grpcauth.SidebarChat{{ChatID: group, Group: true}, {ChatID: direct, PeerID: peer}}
+	group, direct := sidebarID(1), sidebarID(3)
+	d.chats = []grpcauth.SidebarChat{{ChatID: group, Group: true}, {ChatID: direct}}
 	d.feeds[group] = make(chan protocol.Event, 1)
-	first, second := presenceTestConnection(t, s), presenceTestConnection(t, s)
-	d.allowed = []string{peer}
-	if err := first.watchPresence(context.Background(), protocol.Frame{ChatID: direct, UserIDs: []string{peer}}); err != nil {
-		t.Fatal(err)
-	}
+	first, second := sidebarTestConnection(t, s), sidebarTestConnection(t, s)
 	for _, c := range []*Connection{first, second} {
 		if err := c.watchSidebar(context.Background(), []string{group, direct}); err != nil {
 			t.Fatal(err)
-		}
-		if item := <-c.out; item.frame.Event().Type != protocol.EventSidebarPresence {
-			t.Fatal("missing initial presence")
 		}
 	}
 	select {
@@ -91,11 +105,6 @@ func TestSidebarSharesActivityFeedsAndKeepsSelectedPresence(t *testing.T) {
 	}
 	old := s.sidebar.watches[first]
 	s.sidebar.mu.Unlock()
-	s.presence.mu.Lock()
-	if s.presence.watches[first] == nil {
-		t.Fatal("sidebar replaced selected presence")
-	}
-	s.presence.mu.Unlock()
 	d.feeds[group] <- protocol.Event{Type: protocol.EventSidebarActivity, Version: 1, ChatID: group, Sequence: "9"}
 	for _, c := range []*Connection{first, second} {
 		select {
@@ -122,78 +131,34 @@ func TestSidebarSharesActivityFeedsAndKeepsSelectedPresence(t *testing.T) {
 		t.Fatal("feed was not joined on cancellation")
 	}
 }
-func TestSidebarPresenceUnknownExpiryAndRateLimit(t *testing.T) {
+
+func TestSidebarExpiryDenialAndRateLimit(t *testing.T) {
 	s, d := newSidebarTestServer(t)
-	peer, direct := presencePeer(1), presencePeer(2)
-	d.chats = []grpcauth.SidebarChat{{ChatID: direct, PeerID: peer}}
-	c := presenceTestConnection(t, s)
-	if err := c.watchSidebar(context.Background(), []string{direct}); err != nil {
+	group := sidebarID(1)
+	d.chats = []grpcauth.SidebarChat{{ChatID: group, Group: true}}
+	d.feeds[group] = make(chan protocol.Event)
+	c := sidebarTestConnection(t, s)
+	if err := c.watchSidebar(context.Background(), []string{group}); err != nil {
 		t.Fatal(err)
-	}
-	s.sidebar.sweep()
-	select {
-	case item := <-c.out:
-		if len(item.frame.Event().Statuses) != 1 || item.frame.Event().Statuses[0].State != "unknown" {
-			t.Fatal("unavailable presence was not unknown")
-		}
-	default:
-		t.Fatal("missing presence snapshot")
 	}
 	s.sidebar.mu.Lock()
 	watch := s.sidebar.watches[c]
-	watch.expires = time.Now().Add(-time.Second)
+	watch.nextAuth = time.Now().Add(-time.Second)
 	s.sidebar.mu.Unlock()
-	if s.sidebar.current(c, watch) {
-		t.Fatal("expired grant accepted")
-	}
+	d.sidebarMu.Lock()
+	d.authErr = grpcauth.ErrUnauthorized
+	d.sidebarMu.Unlock()
 	s.sidebar.sweep()
-	d.mu.Lock()
-	d.limited = true
-	d.mu.Unlock()
-	if err := c.watchSidebar(context.Background(), []string{direct}); err != errRateLimited {
+	s.sidebar.mu.Lock()
+	removed := s.sidebar.watches[c] == nil
+	s.sidebar.mu.Unlock()
+	if !removed {
+		t.Fatal("denied renewal kept the old grant")
+	}
+	d.sidebarMu.Lock()
+	d.authErr, d.limited = nil, true
+	d.sidebarMu.Unlock()
+	if err := c.watchSidebar(context.Background(), []string{group}); !errors.Is(err, errRateLimited) {
 		t.Fatalf("rate limit = %v", err)
-	}
-}
-func TestSidebarSendsPresenceWhenPeersChange(t *testing.T) {
-	s, d := newSidebarTestServer(t)
-	peer, other, direct, second := presencePeer(1), presencePeer(2), presencePeer(3), presencePeer(4)
-	d.values = map[string]bool{peer: true, other: false}
-	d.chats = []grpcauth.SidebarChat{{ChatID: direct, PeerID: peer}}
-	c := presenceTestConnection(t, s)
-	if err := c.watchSidebar(context.Background(), []string{direct}); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case item := <-c.out:
-		statuses := item.frame.Event().Statuses
-		if len(statuses) != 1 || statuses[0].UserID != peer || statuses[0].State != "online" || item.sidebarWatch == nil {
-			t.Fatalf("initial presence = %+v", statuses)
-		}
-	default:
-		t.Fatal("new watch waited for the sweep")
-	}
-	if err := c.watchSidebar(context.Background(), []string{direct}); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case <-c.out:
-		t.Fatal("renewal with the same peers sent presence")
-	default:
-	}
-	d.chats = []grpcauth.SidebarChat{{ChatID: direct, PeerID: peer}, {ChatID: second, PeerID: other}}
-	if err := c.watchSidebar(context.Background(), []string{direct, second}); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case item := <-c.out:
-		states := map[string]string{}
-		for _, status := range item.frame.Event().Statuses {
-			states[status.UserID] = status.State
-		}
-		if states[peer] != "online" || states[other] != "offline" {
-			t.Fatalf("changed peers presence = %v", states)
-		}
-	default:
-		t.Fatal("changed peers waited for the sweep")
 	}
 }

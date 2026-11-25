@@ -181,11 +181,26 @@ messages:
     contentType: application/json
     payload:
       $ref: ./schemas/socket/frame/watch-presence-v1.yaml
-  SocketUnwatchPresenceV1:
-    name: SocketUnwatchPresenceV1
+  SocketActivityV1:
+    name: SocketActivityV1
     contentType: application/json
     payload:
-      $ref: ./schemas/socket/frame/unwatch-presence-v1.yaml
+      $ref: ./schemas/socket/frame/activity-v1.yaml
+  SocketWatchOnlineCountV1:
+    name: SocketWatchOnlineCountV1
+    contentType: application/json
+    payload:
+      $ref: ./schemas/socket/frame/watch-online-count-v1.yaml
+  SocketOnlineCountV1:
+    name: SocketOnlineCountV1
+    contentType: application/json
+    payload:
+      $ref: ./schemas/socket/frame/online-count-v1.yaml
+  SocketPresenceConfigV1:
+    name: SocketPresenceConfigV1
+    contentType: application/json
+    payload:
+      $ref: ./schemas/socket/frame/presence-config-v1.yaml
   SocketPresenceV1:
     name: SocketPresenceV1
     contentType: application/json
@@ -203,10 +218,6 @@ messages:
     name: SocketWatchSidebarV1
     payload:
       $ref: ./schemas/socket/frame/watch-sidebar-v1.yaml
-  SocketSidebarPresenceV1:
-    name: SocketSidebarPresenceV1
-    payload:
-      $ref: ./schemas/socket/frame/sidebar-presence-v1.yaml
   SocketSidebarActivityV1:
     name: SocketSidebarActivityV1
     payload:

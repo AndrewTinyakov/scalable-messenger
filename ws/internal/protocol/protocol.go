@@ -26,7 +26,8 @@ const (
 	FrameReceivedMessage = messaging.FrameReceivedMessage
 	FrameWatchSidebar    = messaging.FrameWatchSidebar
 	FrameWatchPresence   = messaging.FrameWatchPresence
-	FrameUnwatchPresence = messaging.FrameUnwatchPresence
+	FrameWatchOnline     = messaging.FrameWatchOnlineCount
+	FrameActivity        = messaging.FrameActivity
 )
 
 type EventType = messaging.EventType
@@ -39,9 +40,10 @@ const (
 	EventChatPreferences     = messaging.EventChatPreferencesChanged
 	EventPinsChanged         = messaging.EventPinsChanged
 	EventHistoryChanged      = messaging.EventHistoryChanged
-	EventSidebarPresence     = messaging.EventSidebarPresence
 	EventSidebarActivity     = messaging.EventSidebarActivity
 	EventPresence            = messaging.EventPresence
+	EventPresenceConfig      = messaging.EventPresenceConfig
+	EventOnlineCount         = messaging.EventOnlineCount
 	EventSendRejected        = messaging.EventSendRejected
 	EventChatCreated         = messaging.EventChatCreated
 	EventMemberRemoved       = messaging.EventMemberRemoved
@@ -78,7 +80,11 @@ type Frame struct {
 	ReplyToMessageID    string         `json:"replyToMessageId,omitempty"`
 	ForwardFromChatID   string         `json:"forwardFromChatId,omitempty"`
 	ForwardFromMsgID    string         `json:"forwardFromMessageId,omitempty"`
-	UserIDs             []string       `json:"userIds,omitempty"`
+	Add                 []string       `json:"add,omitempty"`
+	Remove              []string       `json:"remove,omitempty"`
+	Reset               bool           `json:"reset,omitempty"`
+	Active              bool           `json:"active,omitempty"`
+	Visible             bool           `json:"visible,omitempty"`
 }
 
 type Subscription struct {
@@ -128,7 +134,7 @@ func DecodeFrame(data []byte) (Frame, error) {
 		err = validateSendFrame(f)
 	case FrameWatchSidebar:
 		err = validateWatchSidebarFrame(f)
-	case FrameWatchPresence, FrameUnwatchPresence:
+	case FrameWatchPresence, FrameWatchOnline, FrameActivity:
 	case FrameSubscribe:
 		err = validateSubscribeFrame(f)
 	case FrameSubscribeMany:

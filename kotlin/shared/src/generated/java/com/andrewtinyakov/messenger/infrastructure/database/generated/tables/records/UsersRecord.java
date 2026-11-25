@@ -90,6 +90,20 @@ public class UsersRecord extends UpdatableRecordImpl<UsersRecord> {
         return (Long) get(4);
     }
 
+    /**
+     * Setter for <code>public.users.last_seen_at</code>.
+     */
+    public void setLastSeenAt(OffsetDateTime value) {
+        set(5, value);
+    }
+
+    /**
+     * Getter for <code>public.users.last_seen_at</code>.
+     */
+    public OffsetDateTime getLastSeenAt() {
+        return (OffsetDateTime) get(5);
+    }
+
     // -------------------------------------------------------------------------
     // Primary key information
     // -------------------------------------------------------------------------
@@ -113,7 +127,7 @@ public class UsersRecord extends UpdatableRecordImpl<UsersRecord> {
     /**
      * Create a detached, initialised UsersRecord
      */
-    public UsersRecord(String id, String username, String passwordHash, OffsetDateTime createdAt, Long eventSeq) {
+    public UsersRecord(String id, String username, String passwordHash, OffsetDateTime createdAt, Long eventSeq, OffsetDateTime lastSeenAt) {
         super(Users.USERS);
 
         setId(id);
@@ -121,6 +135,7 @@ public class UsersRecord extends UpdatableRecordImpl<UsersRecord> {
         setPasswordHash(passwordHash);
         setCreatedAt(createdAt);
         setEventSeq(eventSeq);
+        setLastSeenAt(lastSeenAt);
         resetTouchedOnNotNull();
     }
 }

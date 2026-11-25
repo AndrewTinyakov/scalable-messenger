@@ -21,6 +21,58 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type PresenceLevel int32
+
+const (
+	PresenceLevel_PRESENCE_LEVEL_UNSPECIFIED PresenceLevel = 0
+	PresenceLevel_PRESENCE_LEVEL_NONE        PresenceLevel = 1
+	PresenceLevel_PRESENCE_LEVEL_COARSE      PresenceLevel = 2
+	PresenceLevel_PRESENCE_LEVEL_FULL        PresenceLevel = 3
+)
+
+// Enum value maps for PresenceLevel.
+var (
+	PresenceLevel_name = map[int32]string{
+		0: "PRESENCE_LEVEL_UNSPECIFIED",
+		1: "PRESENCE_LEVEL_NONE",
+		2: "PRESENCE_LEVEL_COARSE",
+		3: "PRESENCE_LEVEL_FULL",
+	}
+	PresenceLevel_value = map[string]int32{
+		"PRESENCE_LEVEL_UNSPECIFIED": 0,
+		"PRESENCE_LEVEL_NONE":        1,
+		"PRESENCE_LEVEL_COARSE":      2,
+		"PRESENCE_LEVEL_FULL":        3,
+	}
+)
+
+func (x PresenceLevel) Enum() *PresenceLevel {
+	p := new(PresenceLevel)
+	*p = x
+	return p
+}
+
+func (x PresenceLevel) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (PresenceLevel) Descriptor() protoreflect.EnumDescriptor {
+	return file_contracts_grpc_chat_authorization_proto_enumTypes[0].Descriptor()
+}
+
+func (PresenceLevel) Type() protoreflect.EnumType {
+	return &file_contracts_grpc_chat_authorization_proto_enumTypes[0]
+}
+
+func (x PresenceLevel) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use PresenceLevel.Descriptor instead.
+func (PresenceLevel) EnumDescriptor() ([]byte, []int) {
+	return file_contracts_grpc_chat_authorization_proto_rawDescGZIP(), []int{0}
+}
+
 type ValidateSessionRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SessionId     string                 `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
@@ -413,29 +465,28 @@ func (x *AuthorizeGroupsResponse) GetAuthorizedChatIds() []string {
 	return nil
 }
 
-type AuthorizePresenceRequest struct {
+type PresenceVisibilityRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	ChatId        string                 `protobuf:"bytes,2,opt,name=chat_id,json=chatId,proto3" json:"chat_id,omitempty"`
-	UserIds       []string               `protobuf:"bytes,3,rep,name=user_ids,json=userIds,proto3" json:"user_ids,omitempty"`
+	UserIds       []string               `protobuf:"bytes,2,rep,name=user_ids,json=userIds,proto3" json:"user_ids,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *AuthorizePresenceRequest) Reset() {
-	*x = AuthorizePresenceRequest{}
+func (x *PresenceVisibilityRequest) Reset() {
+	*x = PresenceVisibilityRequest{}
 	mi := &file_contracts_grpc_chat_authorization_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *AuthorizePresenceRequest) String() string {
+func (x *PresenceVisibilityRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*AuthorizePresenceRequest) ProtoMessage() {}
+func (*PresenceVisibilityRequest) ProtoMessage() {}
 
-func (x *AuthorizePresenceRequest) ProtoReflect() protoreflect.Message {
+func (x *PresenceVisibilityRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_contracts_grpc_chat_authorization_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -447,53 +498,48 @@ func (x *AuthorizePresenceRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use AuthorizePresenceRequest.ProtoReflect.Descriptor instead.
-func (*AuthorizePresenceRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use PresenceVisibilityRequest.ProtoReflect.Descriptor instead.
+func (*PresenceVisibilityRequest) Descriptor() ([]byte, []int) {
 	return file_contracts_grpc_chat_authorization_proto_rawDescGZIP(), []int{8}
 }
 
-func (x *AuthorizePresenceRequest) GetSessionId() string {
+func (x *PresenceVisibilityRequest) GetSessionId() string {
 	if x != nil {
 		return x.SessionId
 	}
 	return ""
 }
 
-func (x *AuthorizePresenceRequest) GetChatId() string {
-	if x != nil {
-		return x.ChatId
-	}
-	return ""
-}
-
-func (x *AuthorizePresenceRequest) GetUserIds() []string {
+func (x *PresenceVisibilityRequest) GetUserIds() []string {
 	if x != nil {
 		return x.UserIds
 	}
 	return nil
 }
 
-type AuthorizePresenceResponse struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	AuthorizedUserIds []string               `protobuf:"bytes,1,rep,name=authorized_user_ids,json=authorizedUserIds,proto3" json:"authorized_user_ids,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+type SubjectVisibility struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	UserId         string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Level          PresenceLevel          `protobuf:"varint,2,opt,name=level,proto3,enum=messenger.authorization.v1.PresenceLevel" json:"level,omitempty"`
+	LastSeenUnixMs int64                  `protobuf:"varint,3,opt,name=last_seen_unix_ms,json=lastSeenUnixMs,proto3" json:"last_seen_unix_ms,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
-func (x *AuthorizePresenceResponse) Reset() {
-	*x = AuthorizePresenceResponse{}
+func (x *SubjectVisibility) Reset() {
+	*x = SubjectVisibility{}
 	mi := &file_contracts_grpc_chat_authorization_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *AuthorizePresenceResponse) String() string {
+func (x *SubjectVisibility) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*AuthorizePresenceResponse) ProtoMessage() {}
+func (*SubjectVisibility) ProtoMessage() {}
 
-func (x *AuthorizePresenceResponse) ProtoReflect() protoreflect.Message {
+func (x *SubjectVisibility) ProtoReflect() protoreflect.Message {
 	mi := &file_contracts_grpc_chat_authorization_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -505,16 +551,318 @@ func (x *AuthorizePresenceResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use AuthorizePresenceResponse.ProtoReflect.Descriptor instead.
-func (*AuthorizePresenceResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use SubjectVisibility.ProtoReflect.Descriptor instead.
+func (*SubjectVisibility) Descriptor() ([]byte, []int) {
 	return file_contracts_grpc_chat_authorization_proto_rawDescGZIP(), []int{9}
 }
 
-func (x *AuthorizePresenceResponse) GetAuthorizedUserIds() []string {
+func (x *SubjectVisibility) GetUserId() string {
 	if x != nil {
-		return x.AuthorizedUserIds
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *SubjectVisibility) GetLevel() PresenceLevel {
+	if x != nil {
+		return x.Level
+	}
+	return PresenceLevel_PRESENCE_LEVEL_UNSPECIFIED
+}
+
+func (x *SubjectVisibility) GetLastSeenUnixMs() int64 {
+	if x != nil {
+		return x.LastSeenUnixMs
+	}
+	return 0
+}
+
+type PresenceVisibilityResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Subjects      []*SubjectVisibility   `protobuf:"bytes,1,rep,name=subjects,proto3" json:"subjects,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PresenceVisibilityResponse) Reset() {
+	*x = PresenceVisibilityResponse{}
+	mi := &file_contracts_grpc_chat_authorization_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PresenceVisibilityResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PresenceVisibilityResponse) ProtoMessage() {}
+
+func (x *PresenceVisibilityResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_contracts_grpc_chat_authorization_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PresenceVisibilityResponse.ProtoReflect.Descriptor instead.
+func (*PresenceVisibilityResponse) Descriptor() ([]byte, []int) {
+	return file_contracts_grpc_chat_authorization_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *PresenceVisibilityResponse) GetSubjects() []*SubjectVisibility {
+	if x != nil {
+		return x.Subjects
 	}
 	return nil
+}
+
+type OnlineCountMembersRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	ChatId        string                 `protobuf:"bytes,2,opt,name=chat_id,json=chatId,proto3" json:"chat_id,omitempty"`
+	Limit         int32                  `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OnlineCountMembersRequest) Reset() {
+	*x = OnlineCountMembersRequest{}
+	mi := &file_contracts_grpc_chat_authorization_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OnlineCountMembersRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OnlineCountMembersRequest) ProtoMessage() {}
+
+func (x *OnlineCountMembersRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_contracts_grpc_chat_authorization_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OnlineCountMembersRequest.ProtoReflect.Descriptor instead.
+func (*OnlineCountMembersRequest) Descriptor() ([]byte, []int) {
+	return file_contracts_grpc_chat_authorization_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *OnlineCountMembersRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *OnlineCountMembersRequest) GetChatId() string {
+	if x != nil {
+		return x.ChatId
+	}
+	return ""
+}
+
+func (x *OnlineCountMembersRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+type OnlineCountMembersResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	MemberCount   int32                  `protobuf:"varint,1,opt,name=member_count,json=memberCount,proto3" json:"member_count,omitempty"`
+	MemberIds     []string               `protobuf:"bytes,2,rep,name=member_ids,json=memberIds,proto3" json:"member_ids,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OnlineCountMembersResponse) Reset() {
+	*x = OnlineCountMembersResponse{}
+	mi := &file_contracts_grpc_chat_authorization_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OnlineCountMembersResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OnlineCountMembersResponse) ProtoMessage() {}
+
+func (x *OnlineCountMembersResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_contracts_grpc_chat_authorization_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OnlineCountMembersResponse.ProtoReflect.Descriptor instead.
+func (*OnlineCountMembersResponse) Descriptor() ([]byte, []int) {
+	return file_contracts_grpc_chat_authorization_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *OnlineCountMembersResponse) GetMemberCount() int32 {
+	if x != nil {
+		return x.MemberCount
+	}
+	return 0
+}
+
+func (x *OnlineCountMembersResponse) GetMemberIds() []string {
+	if x != nil {
+		return x.MemberIds
+	}
+	return nil
+}
+
+type LastSeen struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	SeenUnixMs    int64                  `protobuf:"varint,2,opt,name=seen_unix_ms,json=seenUnixMs,proto3" json:"seen_unix_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LastSeen) Reset() {
+	*x = LastSeen{}
+	mi := &file_contracts_grpc_chat_authorization_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LastSeen) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LastSeen) ProtoMessage() {}
+
+func (x *LastSeen) ProtoReflect() protoreflect.Message {
+	mi := &file_contracts_grpc_chat_authorization_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LastSeen.ProtoReflect.Descriptor instead.
+func (*LastSeen) Descriptor() ([]byte, []int) {
+	return file_contracts_grpc_chat_authorization_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *LastSeen) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *LastSeen) GetSeenUnixMs() int64 {
+	if x != nil {
+		return x.SeenUnixMs
+	}
+	return 0
+}
+
+type RecordLastSeenRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Entries       []*LastSeen            `protobuf:"bytes,1,rep,name=entries,proto3" json:"entries,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RecordLastSeenRequest) Reset() {
+	*x = RecordLastSeenRequest{}
+	mi := &file_contracts_grpc_chat_authorization_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RecordLastSeenRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RecordLastSeenRequest) ProtoMessage() {}
+
+func (x *RecordLastSeenRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_contracts_grpc_chat_authorization_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RecordLastSeenRequest.ProtoReflect.Descriptor instead.
+func (*RecordLastSeenRequest) Descriptor() ([]byte, []int) {
+	return file_contracts_grpc_chat_authorization_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *RecordLastSeenRequest) GetEntries() []*LastSeen {
+	if x != nil {
+		return x.Entries
+	}
+	return nil
+}
+
+type RecordLastSeenResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RecordLastSeenResponse) Reset() {
+	*x = RecordLastSeenResponse{}
+	mi := &file_contracts_grpc_chat_authorization_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RecordLastSeenResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RecordLastSeenResponse) ProtoMessage() {}
+
+func (x *RecordLastSeenResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_contracts_grpc_chat_authorization_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RecordLastSeenResponse.ProtoReflect.Descriptor instead.
+func (*RecordLastSeenResponse) Descriptor() ([]byte, []int) {
+	return file_contracts_grpc_chat_authorization_proto_rawDescGZIP(), []int{15}
 }
 
 type AuthorizeSidebarRequest struct {
@@ -527,7 +875,7 @@ type AuthorizeSidebarRequest struct {
 
 func (x *AuthorizeSidebarRequest) Reset() {
 	*x = AuthorizeSidebarRequest{}
-	mi := &file_contracts_grpc_chat_authorization_proto_msgTypes[10]
+	mi := &file_contracts_grpc_chat_authorization_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -539,7 +887,7 @@ func (x *AuthorizeSidebarRequest) String() string {
 func (*AuthorizeSidebarRequest) ProtoMessage() {}
 
 func (x *AuthorizeSidebarRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_contracts_grpc_chat_authorization_proto_msgTypes[10]
+	mi := &file_contracts_grpc_chat_authorization_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -552,7 +900,7 @@ func (x *AuthorizeSidebarRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthorizeSidebarRequest.ProtoReflect.Descriptor instead.
 func (*AuthorizeSidebarRequest) Descriptor() ([]byte, []int) {
-	return file_contracts_grpc_chat_authorization_proto_rawDescGZIP(), []int{10}
+	return file_contracts_grpc_chat_authorization_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *AuthorizeSidebarRequest) GetSessionId() string {
@@ -580,7 +928,7 @@ type SidebarChat struct {
 
 func (x *SidebarChat) Reset() {
 	*x = SidebarChat{}
-	mi := &file_contracts_grpc_chat_authorization_proto_msgTypes[11]
+	mi := &file_contracts_grpc_chat_authorization_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -592,7 +940,7 @@ func (x *SidebarChat) String() string {
 func (*SidebarChat) ProtoMessage() {}
 
 func (x *SidebarChat) ProtoReflect() protoreflect.Message {
-	mi := &file_contracts_grpc_chat_authorization_proto_msgTypes[11]
+	mi := &file_contracts_grpc_chat_authorization_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -605,7 +953,7 @@ func (x *SidebarChat) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SidebarChat.ProtoReflect.Descriptor instead.
 func (*SidebarChat) Descriptor() ([]byte, []int) {
-	return file_contracts_grpc_chat_authorization_proto_rawDescGZIP(), []int{11}
+	return file_contracts_grpc_chat_authorization_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *SidebarChat) GetChatId() string {
@@ -638,7 +986,7 @@ type AuthorizeSidebarResponse struct {
 
 func (x *AuthorizeSidebarResponse) Reset() {
 	*x = AuthorizeSidebarResponse{}
-	mi := &file_contracts_grpc_chat_authorization_proto_msgTypes[12]
+	mi := &file_contracts_grpc_chat_authorization_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -650,7 +998,7 @@ func (x *AuthorizeSidebarResponse) String() string {
 func (*AuthorizeSidebarResponse) ProtoMessage() {}
 
 func (x *AuthorizeSidebarResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_contracts_grpc_chat_authorization_proto_msgTypes[12]
+	mi := &file_contracts_grpc_chat_authorization_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -663,7 +1011,7 @@ func (x *AuthorizeSidebarResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthorizeSidebarResponse.ProtoReflect.Descriptor instead.
 func (*AuthorizeSidebarResponse) Descriptor() ([]byte, []int) {
-	return file_contracts_grpc_chat_authorization_proto_rawDescGZIP(), []int{12}
+	return file_contracts_grpc_chat_authorization_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *AuthorizeSidebarResponse) GetChats() []*SidebarChat {
@@ -703,14 +1051,33 @@ const file_contracts_grpc_chat_authorization_proto_rawDesc = "" +
 	"\n" +
 	"session_id\x18\x03 \x01(\tR\tsessionIdJ\x04\b\x02\x10\x03R\tws_ticket\"I\n" +
 	"\x17AuthorizeGroupsResponse\x12.\n" +
-	"\x13authorized_chat_ids\x18\x01 \x03(\tR\x11authorizedChatIds\"m\n" +
-	"\x18AuthorizePresenceRequest\x12\x1d\n" +
+	"\x13authorized_chat_ids\x18\x01 \x03(\tR\x11authorizedChatIds\"U\n" +
+	"\x19PresenceVisibilityRequest\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x19\n" +
+	"\buser_ids\x18\x02 \x03(\tR\auserIds\"\x98\x01\n" +
+	"\x11SubjectVisibility\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\x12?\n" +
+	"\x05level\x18\x02 \x01(\x0e2).messenger.authorization.v1.PresenceLevelR\x05level\x12)\n" +
+	"\x11last_seen_unix_ms\x18\x03 \x01(\x03R\x0elastSeenUnixMs\"g\n" +
+	"\x1aPresenceVisibilityResponse\x12I\n" +
+	"\bsubjects\x18\x01 \x03(\v2-.messenger.authorization.v1.SubjectVisibilityR\bsubjects\"i\n" +
+	"\x19OnlineCountMembersRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x17\n" +
-	"\achat_id\x18\x02 \x01(\tR\x06chatId\x12\x19\n" +
-	"\buser_ids\x18\x03 \x03(\tR\auserIds\"K\n" +
-	"\x19AuthorizePresenceResponse\x12.\n" +
-	"\x13authorized_user_ids\x18\x01 \x03(\tR\x11authorizedUserIds\"S\n" +
+	"\achat_id\x18\x02 \x01(\tR\x06chatId\x12\x14\n" +
+	"\x05limit\x18\x03 \x01(\x05R\x05limit\"^\n" +
+	"\x1aOnlineCountMembersResponse\x12!\n" +
+	"\fmember_count\x18\x01 \x01(\x05R\vmemberCount\x12\x1d\n" +
+	"\n" +
+	"member_ids\x18\x02 \x03(\tR\tmemberIds\"E\n" +
+	"\bLastSeen\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\x12 \n" +
+	"\fseen_unix_ms\x18\x02 \x01(\x03R\n" +
+	"seenUnixMs\"W\n" +
+	"\x15RecordLastSeenRequest\x12>\n" +
+	"\aentries\x18\x01 \x03(\v2$.messenger.authorization.v1.LastSeenR\aentries\"\x18\n" +
+	"\x16RecordLastSeenResponse\"S\n" +
 	"\x17AuthorizeSidebarRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x19\n" +
@@ -720,14 +1087,21 @@ const file_contracts_grpc_chat_authorization_proto_rawDesc = "" +
 	"\apeer_id\x18\x02 \x01(\tR\x06peerId\x12\x14\n" +
 	"\x05group\x18\x03 \x01(\bR\x05group\"Y\n" +
 	"\x18AuthorizeSidebarResponse\x12=\n" +
-	"\x05chats\x18\x01 \x03(\v2'.messenger.authorization.v1.SidebarChatR\x05chats2\x85\x06\n" +
+	"\x05chats\x18\x01 \x03(\v2'.messenger.authorization.v1.SidebarChatR\x05chats*|\n" +
+	"\rPresenceLevel\x12\x1e\n" +
+	"\x1aPRESENCE_LEVEL_UNSPECIFIED\x10\x00\x12\x17\n" +
+	"\x13PRESENCE_LEVEL_NONE\x10\x01\x12\x19\n" +
+	"\x15PRESENCE_LEVEL_COARSE\x10\x02\x12\x17\n" +
+	"\x13PRESENCE_LEVEL_FULL\x10\x032\x87\b\n" +
 	"\x11ChatAuthorization\x12}\n" +
 	"\x10AuthorizeSidebar\x123.messenger.authorization.v1.AuthorizeSidebarRequest\x1a4.messenger.authorization.v1.AuthorizeSidebarResponse\x12z\n" +
 	"\x0fValidateSession\x122.messenger.authorization.v1.ValidateSessionRequest\x1a3.messenger.authorization.v1.ValidateSessionResponse\x12}\n" +
 	"\x10ValidateSessions\x123.messenger.authorization.v1.ValidateSessionsRequest\x1a4.messenger.authorization.v1.ValidateSessionsResponse\x12w\n" +
 	"\x0eAuthorizeGroup\x121.messenger.authorization.v1.AuthorizeGroupRequest\x1a2.messenger.authorization.v1.AuthorizeGroupResponse\x12z\n" +
-	"\x0fAuthorizeGroups\x122.messenger.authorization.v1.AuthorizeGroupsRequest\x1a3.messenger.authorization.v1.AuthorizeGroupsResponse\x12\x80\x01\n" +
-	"\x11AuthorizePresence\x124.messenger.authorization.v1.AuthorizePresenceRequest\x1a5.messenger.authorization.v1.AuthorizePresenceResponseBc\n" +
+	"\x0fAuthorizeGroups\x122.messenger.authorization.v1.AuthorizeGroupsRequest\x1a3.messenger.authorization.v1.AuthorizeGroupsResponse\x12\x83\x01\n" +
+	"\x12PresenceVisibility\x125.messenger.authorization.v1.PresenceVisibilityRequest\x1a6.messenger.authorization.v1.PresenceVisibilityResponse\x12\x83\x01\n" +
+	"\x12OnlineCountMembers\x125.messenger.authorization.v1.OnlineCountMembersRequest\x1a6.messenger.authorization.v1.OnlineCountMembersResponse\x12w\n" +
+	"\x0eRecordLastSeen\x121.messenger.authorization.v1.RecordLastSeenRequest\x1a2.messenger.authorization.v1.RecordLastSeenResponseBc\n" +
 	"+com.andrewtinyakov.messenger.generated.grpcP\x01Z2messenger/ws/internal/generated/grpc;authorizationb\x06proto3"
 
 var (
@@ -742,42 +1116,57 @@ func file_contracts_grpc_chat_authorization_proto_rawDescGZIP() []byte {
 	return file_contracts_grpc_chat_authorization_proto_rawDescData
 }
 
-var file_contracts_grpc_chat_authorization_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_contracts_grpc_chat_authorization_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_contracts_grpc_chat_authorization_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_contracts_grpc_chat_authorization_proto_goTypes = []any{
-	(*ValidateSessionRequest)(nil),    // 0: messenger.authorization.v1.ValidateSessionRequest
-	(*ValidateSessionResponse)(nil),   // 1: messenger.authorization.v1.ValidateSessionResponse
-	(*ValidateSessionsRequest)(nil),   // 2: messenger.authorization.v1.ValidateSessionsRequest
-	(*ValidateSessionsResponse)(nil),  // 3: messenger.authorization.v1.ValidateSessionsResponse
-	(*AuthorizeGroupRequest)(nil),     // 4: messenger.authorization.v1.AuthorizeGroupRequest
-	(*AuthorizeGroupResponse)(nil),    // 5: messenger.authorization.v1.AuthorizeGroupResponse
-	(*AuthorizeGroupsRequest)(nil),    // 6: messenger.authorization.v1.AuthorizeGroupsRequest
-	(*AuthorizeGroupsResponse)(nil),   // 7: messenger.authorization.v1.AuthorizeGroupsResponse
-	(*AuthorizePresenceRequest)(nil),  // 8: messenger.authorization.v1.AuthorizePresenceRequest
-	(*AuthorizePresenceResponse)(nil), // 9: messenger.authorization.v1.AuthorizePresenceResponse
-	(*AuthorizeSidebarRequest)(nil),   // 10: messenger.authorization.v1.AuthorizeSidebarRequest
-	(*SidebarChat)(nil),               // 11: messenger.authorization.v1.SidebarChat
-	(*AuthorizeSidebarResponse)(nil),  // 12: messenger.authorization.v1.AuthorizeSidebarResponse
+	(PresenceLevel)(0),                 // 0: messenger.authorization.v1.PresenceLevel
+	(*ValidateSessionRequest)(nil),     // 1: messenger.authorization.v1.ValidateSessionRequest
+	(*ValidateSessionResponse)(nil),    // 2: messenger.authorization.v1.ValidateSessionResponse
+	(*ValidateSessionsRequest)(nil),    // 3: messenger.authorization.v1.ValidateSessionsRequest
+	(*ValidateSessionsResponse)(nil),   // 4: messenger.authorization.v1.ValidateSessionsResponse
+	(*AuthorizeGroupRequest)(nil),      // 5: messenger.authorization.v1.AuthorizeGroupRequest
+	(*AuthorizeGroupResponse)(nil),     // 6: messenger.authorization.v1.AuthorizeGroupResponse
+	(*AuthorizeGroupsRequest)(nil),     // 7: messenger.authorization.v1.AuthorizeGroupsRequest
+	(*AuthorizeGroupsResponse)(nil),    // 8: messenger.authorization.v1.AuthorizeGroupsResponse
+	(*PresenceVisibilityRequest)(nil),  // 9: messenger.authorization.v1.PresenceVisibilityRequest
+	(*SubjectVisibility)(nil),          // 10: messenger.authorization.v1.SubjectVisibility
+	(*PresenceVisibilityResponse)(nil), // 11: messenger.authorization.v1.PresenceVisibilityResponse
+	(*OnlineCountMembersRequest)(nil),  // 12: messenger.authorization.v1.OnlineCountMembersRequest
+	(*OnlineCountMembersResponse)(nil), // 13: messenger.authorization.v1.OnlineCountMembersResponse
+	(*LastSeen)(nil),                   // 14: messenger.authorization.v1.LastSeen
+	(*RecordLastSeenRequest)(nil),      // 15: messenger.authorization.v1.RecordLastSeenRequest
+	(*RecordLastSeenResponse)(nil),     // 16: messenger.authorization.v1.RecordLastSeenResponse
+	(*AuthorizeSidebarRequest)(nil),    // 17: messenger.authorization.v1.AuthorizeSidebarRequest
+	(*SidebarChat)(nil),                // 18: messenger.authorization.v1.SidebarChat
+	(*AuthorizeSidebarResponse)(nil),   // 19: messenger.authorization.v1.AuthorizeSidebarResponse
 }
 var file_contracts_grpc_chat_authorization_proto_depIdxs = []int32{
-	1,  // 0: messenger.authorization.v1.ValidateSessionsResponse.sessions:type_name -> messenger.authorization.v1.ValidateSessionResponse
-	11, // 1: messenger.authorization.v1.AuthorizeSidebarResponse.chats:type_name -> messenger.authorization.v1.SidebarChat
-	10, // 2: messenger.authorization.v1.ChatAuthorization.AuthorizeSidebar:input_type -> messenger.authorization.v1.AuthorizeSidebarRequest
-	0,  // 3: messenger.authorization.v1.ChatAuthorization.ValidateSession:input_type -> messenger.authorization.v1.ValidateSessionRequest
-	2,  // 4: messenger.authorization.v1.ChatAuthorization.ValidateSessions:input_type -> messenger.authorization.v1.ValidateSessionsRequest
-	4,  // 5: messenger.authorization.v1.ChatAuthorization.AuthorizeGroup:input_type -> messenger.authorization.v1.AuthorizeGroupRequest
-	6,  // 6: messenger.authorization.v1.ChatAuthorization.AuthorizeGroups:input_type -> messenger.authorization.v1.AuthorizeGroupsRequest
-	8,  // 7: messenger.authorization.v1.ChatAuthorization.AuthorizePresence:input_type -> messenger.authorization.v1.AuthorizePresenceRequest
-	12, // 8: messenger.authorization.v1.ChatAuthorization.AuthorizeSidebar:output_type -> messenger.authorization.v1.AuthorizeSidebarResponse
-	1,  // 9: messenger.authorization.v1.ChatAuthorization.ValidateSession:output_type -> messenger.authorization.v1.ValidateSessionResponse
-	3,  // 10: messenger.authorization.v1.ChatAuthorization.ValidateSessions:output_type -> messenger.authorization.v1.ValidateSessionsResponse
-	5,  // 11: messenger.authorization.v1.ChatAuthorization.AuthorizeGroup:output_type -> messenger.authorization.v1.AuthorizeGroupResponse
-	7,  // 12: messenger.authorization.v1.ChatAuthorization.AuthorizeGroups:output_type -> messenger.authorization.v1.AuthorizeGroupsResponse
-	9,  // 13: messenger.authorization.v1.ChatAuthorization.AuthorizePresence:output_type -> messenger.authorization.v1.AuthorizePresenceResponse
-	8,  // [8:14] is the sub-list for method output_type
-	2,  // [2:8] is the sub-list for method input_type
-	2,  // [2:2] is the sub-list for extension type_name
-	2,  // [2:2] is the sub-list for extension extendee
-	0,  // [0:2] is the sub-list for field type_name
+	2,  // 0: messenger.authorization.v1.ValidateSessionsResponse.sessions:type_name -> messenger.authorization.v1.ValidateSessionResponse
+	0,  // 1: messenger.authorization.v1.SubjectVisibility.level:type_name -> messenger.authorization.v1.PresenceLevel
+	10, // 2: messenger.authorization.v1.PresenceVisibilityResponse.subjects:type_name -> messenger.authorization.v1.SubjectVisibility
+	14, // 3: messenger.authorization.v1.RecordLastSeenRequest.entries:type_name -> messenger.authorization.v1.LastSeen
+	18, // 4: messenger.authorization.v1.AuthorizeSidebarResponse.chats:type_name -> messenger.authorization.v1.SidebarChat
+	17, // 5: messenger.authorization.v1.ChatAuthorization.AuthorizeSidebar:input_type -> messenger.authorization.v1.AuthorizeSidebarRequest
+	1,  // 6: messenger.authorization.v1.ChatAuthorization.ValidateSession:input_type -> messenger.authorization.v1.ValidateSessionRequest
+	3,  // 7: messenger.authorization.v1.ChatAuthorization.ValidateSessions:input_type -> messenger.authorization.v1.ValidateSessionsRequest
+	5,  // 8: messenger.authorization.v1.ChatAuthorization.AuthorizeGroup:input_type -> messenger.authorization.v1.AuthorizeGroupRequest
+	7,  // 9: messenger.authorization.v1.ChatAuthorization.AuthorizeGroups:input_type -> messenger.authorization.v1.AuthorizeGroupsRequest
+	9,  // 10: messenger.authorization.v1.ChatAuthorization.PresenceVisibility:input_type -> messenger.authorization.v1.PresenceVisibilityRequest
+	12, // 11: messenger.authorization.v1.ChatAuthorization.OnlineCountMembers:input_type -> messenger.authorization.v1.OnlineCountMembersRequest
+	15, // 12: messenger.authorization.v1.ChatAuthorization.RecordLastSeen:input_type -> messenger.authorization.v1.RecordLastSeenRequest
+	19, // 13: messenger.authorization.v1.ChatAuthorization.AuthorizeSidebar:output_type -> messenger.authorization.v1.AuthorizeSidebarResponse
+	2,  // 14: messenger.authorization.v1.ChatAuthorization.ValidateSession:output_type -> messenger.authorization.v1.ValidateSessionResponse
+	4,  // 15: messenger.authorization.v1.ChatAuthorization.ValidateSessions:output_type -> messenger.authorization.v1.ValidateSessionsResponse
+	6,  // 16: messenger.authorization.v1.ChatAuthorization.AuthorizeGroup:output_type -> messenger.authorization.v1.AuthorizeGroupResponse
+	8,  // 17: messenger.authorization.v1.ChatAuthorization.AuthorizeGroups:output_type -> messenger.authorization.v1.AuthorizeGroupsResponse
+	11, // 18: messenger.authorization.v1.ChatAuthorization.PresenceVisibility:output_type -> messenger.authorization.v1.PresenceVisibilityResponse
+	13, // 19: messenger.authorization.v1.ChatAuthorization.OnlineCountMembers:output_type -> messenger.authorization.v1.OnlineCountMembersResponse
+	16, // 20: messenger.authorization.v1.ChatAuthorization.RecordLastSeen:output_type -> messenger.authorization.v1.RecordLastSeenResponse
+	13, // [13:21] is the sub-list for method output_type
+	5,  // [5:13] is the sub-list for method input_type
+	5,  // [5:5] is the sub-list for extension type_name
+	5,  // [5:5] is the sub-list for extension extendee
+	0,  // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_contracts_grpc_chat_authorization_proto_init() }
@@ -790,13 +1179,14 @@ func file_contracts_grpc_chat_authorization_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_contracts_grpc_chat_authorization_proto_rawDesc), len(file_contracts_grpc_chat_authorization_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   13,
+			NumEnums:      1,
+			NumMessages:   19,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_contracts_grpc_chat_authorization_proto_goTypes,
 		DependencyIndexes: file_contracts_grpc_chat_authorization_proto_depIdxs,
+		EnumInfos:         file_contracts_grpc_chat_authorization_proto_enumTypes,
 		MessageInfos:      file_contracts_grpc_chat_authorization_proto_msgTypes,
 	}.Build()
 	File_contracts_grpc_chat_authorization_proto = out.File

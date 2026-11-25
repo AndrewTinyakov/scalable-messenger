@@ -8,7 +8,10 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-var errSubscriptionClosed = errors.New("Redis room subscription closed")
+var (
+	errSubscriptionClosed = errors.New("Redis room subscription closed")
+	errSubscriptionMoved  = errors.New("Redis room subscription moved")
+)
 
 type subscriptionHubState uint8
 
@@ -76,6 +79,7 @@ func (h *subscriptionHub) group(ctx context.Context, room string) (*subscription
 		pubsub: pubsub, ctx: groupCtx, cancel: cancel, dropped: make(chan struct{}),
 		listeners:     make(map[string]*Listener),
 		unsubscribing: make(map[string]chan struct{}),
+		expectedAcks:  make(map[string]int),
 		unsubscribe: func(ctx context.Context, channel string) error {
 			return pubsub.SUnsubscribe(ctx, channel)
 		},

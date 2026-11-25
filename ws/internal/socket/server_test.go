@@ -16,6 +16,7 @@ import (
 	"messenger/ws/internal/config"
 	"messenger/ws/internal/grpcauth"
 	"messenger/ws/internal/monitoring"
+	"messenger/ws/internal/presence"
 	"messenger/ws/internal/protocol"
 	"messenger/ws/internal/rabbitmq"
 	"messenger/ws/internal/ticket"
@@ -34,14 +35,24 @@ func (serverTestDependencies) AllowSubscribe(context.Context, string, int, time.
 func (serverTestDependencies) AllowSubscribeBatch(context.Context, string, int, int, time.Duration) (bool, error) {
 	return true, nil
 }
-func (serverTestDependencies) AcquireConnectionLease(context.Context, string) (string, bool, error) {
-	return "", true, nil
+func (serverTestDependencies) Admit(context.Context, string) (bool, error) { return true, nil }
+func (serverTestDependencies) Release(string)                              {}
+func (serverTestDependencies) SetActive(string, bool)                      {}
+func (serverTestDependencies) Watch(context.Context, presence.Watcher, []string, []string, bool) error {
+	return nil
 }
-func (serverTestDependencies) RenewConnectionLease(context.Context, string, string) (bool, error) {
+func (serverTestDependencies) WatchOnlineCount(context.Context, presence.Watcher, string) error {
+	return nil
+}
+func (serverTestDependencies) SetVisible(presence.Watcher, bool) {}
+func (serverTestDependencies) Revalidate(presence.Watcher)       {}
+func (serverTestDependencies) Remove(presence.Watcher)           {}
+func (serverTestDependencies) AllowPresenceWatch(context.Context, string) (bool, error) {
 	return true, nil
 }
-func (serverTestDependencies) ReleaseConnectionLease(context.Context, string, string) error {
-	return nil
+func (serverTestDependencies) RunActivity(ctx context.Context, _ string, _ func(protocol.Event)) error {
+	<-ctx.Done()
+	return ctx.Err()
 }
 func (serverTestDependencies) AuthorizeGroup(context.Context, string, string) (string, error) {
 	return "", grpcauth.ErrUnauthorized
@@ -58,7 +69,7 @@ func (serverTestDependencies) ValidateSessions(context.Context, []string) (map[s
 
 func testDependencies(rooms RoomCoordinator) Dependencies {
 	adapter := serverTestDependencies{}
-	return Dependencies{GroupAuthorizer: adapter, SessionAuthorizer: adapter, Publisher: adapter, SendLimiter: adapter, HandshakeLimiter: adapter, ConnectionLeases: adapter, SubscriptionLimiter: adapter, Rooms: rooms}
+	return Dependencies{GroupAuthorizer: adapter, SessionAuthorizer: adapter, Publisher: adapter, SendLimiter: adapter, HandshakeLimiter: adapter, Admission: adapter, Presence: adapter, Watchers: adapter, WatchLimiter: adapter, SidebarActivity: adapter, SubscriptionLimiter: adapter, Rooms: rooms}
 }
 
 func newTestServer(t *testing.T, cfg config.Config, dependencies Dependencies) *Server {
@@ -140,7 +151,7 @@ func TestServerRejectsMissingDependenciesBeforeStartingRooms(t *testing.T) {
 		{"publisher", func(d *Dependencies) { d.Publisher = nil }},
 		{"send limiter", func(d *Dependencies) { d.SendLimiter = nil }},
 		{"handshake limiter", func(d *Dependencies) { d.HandshakeLimiter = nil }},
-		{"connection leases", func(d *Dependencies) { d.ConnectionLeases = nil }},
+		{"connection admission", func(d *Dependencies) { d.Admission = nil }},
 		{"subscription limiter", func(d *Dependencies) { d.SubscriptionLimiter = nil }},
 		{"rooms", func(d *Dependencies) { d.Rooms = nil }},
 		{"rooms", func(d *Dependencies) { var rooms *sessionRooms; d.Rooms = rooms }},
@@ -183,7 +194,7 @@ func TestSocketErrorCodesKeepWireAndMetricValues(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			server := newTestServer(t, config.Config{MaxGroupAuths: 1, QueueItems: 8, QueueBytes: 4096}, testDependencies(&sessionRooms{}))
-			connection := newConnection(server, nil, ticket.Identity{}, "")
+			connection := newConnection(server, nil, ticket.Identity{})
 			t.Cleanup(connection.Close)
 			connection.handleError(test.err, raceChatID)
 			frame := (<-connection.out).frame
@@ -232,7 +243,7 @@ func TestSendPublishResultKeepsWireAndMetricValues(t *testing.T) {
 				return test.err
 			})
 			server := newTestServer(t, config.Config{MaxGroupAuths: 1, QueueItems: 8, QueueBytes: 4096, ConfirmTimeout: time.Second}, dependencies)
-			connection := newConnection(server, nil, ticket.Identity{UserID: sessionTestUser}, "")
+			connection := newConnection(server, nil, ticket.Identity{UserID: sessionTestUser})
 			t.Cleanup(connection.Close)
 			if err := connection.enqueueCommand(protocol.Frame{Type: protocol.FrameSend, ChatID: raceChatID, RequestID: secondRaceChatID, Body: "hello"}, 100); err != nil {
 				t.Fatal(err)

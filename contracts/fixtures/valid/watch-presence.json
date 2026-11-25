@@ -1,0 +1,9 @@
+{
+  "type": "watch_presence",
+  "version": 1,
+  "reset": true,
+  "add": [
+    "01ARZ3NDEKTSV4RRFFQ69G5FAX"
+  ],
+  "remove": []
+}

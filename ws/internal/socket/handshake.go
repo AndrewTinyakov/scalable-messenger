@@ -29,20 +29,19 @@ const (
 	upgradeReleased
 )
 
-type handshakeLeaseState uint8
+type handshakeAdmissionState uint8
 
 const (
-	handshakeLeaseUnowned handshakeLeaseState = iota
-	handshakeLeaseOwned
-	handshakeLeaseTransferred
+	handshakeAdmissionUnowned handshakeAdmissionState = iota
+	handshakeAdmissionOwned
+	handshakeAdmissionTransferred
 )
 
 type handshake struct {
 	server      *Server
 	setup       monitoring.HandshakeSetup
 	identity    ticket.Identity
-	leaseID     string
-	leaseState  handshakeLeaseState
+	admission   handshakeAdmissionState
 	reservation upgradeReservationState
 }
 
@@ -74,8 +73,8 @@ func (s *Server) upgrade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.setup.CompleteStage()
-	c := newConnection(s, ws, h.identity, h.leaseID)
-	h.leaseState = handshakeLeaseTransferred
+	c := newConnection(s, ws, h.identity)
+	h.admission = handshakeAdmissionTransferred
 	if !s.register(c) {
 		c.Close()
 		return
@@ -139,27 +138,19 @@ func (h *handshake) admit(w http.ResponseWriter, r *http.Request) bool {
 		}
 	}
 	h.setup.CompleteStage()
-	if s.connectionLeases == nil {
-		return true
-	}
-	h.setup.NextStage(monitoring.HandshakeConnectionLease)
+	h.setup.NextStage(monitoring.HandshakeConnectionAdmission)
 	ctx, cancel := s.admissionContext(r.Context())
-	leaseID, allowed, err := s.connectionLeases.AcquireConnectionLease(ctx, h.identity.UserID)
+	allowed, err := s.admission.Admit(ctx, h.identity.UserID)
 	cancel()
-	h.leaseID = leaseID
-	if leaseID != "" {
-		h.leaseState = handshakeLeaseOwned
-	}
 	if err != nil {
-		h.reject(w, monitoring.HandshakeLeaseUnavailable, http.StatusServiceUnavailable, "connection admission unavailable")
+		h.reject(w, monitoring.HandshakeAdmissionUnavailable, http.StatusServiceUnavailable, "connection admission unavailable")
 		return false
 	}
 	if !allowed {
-		h.leaseID = ""
-		h.leaseState = handshakeLeaseUnowned
 		h.reject(w, monitoring.HandshakeUserCapacity, http.StatusTooManyRequests, "too many connections")
 		return false
 	}
+	h.admission = handshakeAdmissionOwned
 	return true
 }
 
@@ -180,7 +171,8 @@ func (h *handshake) establish(c *Connection) bool {
 	if !h.validateSession(c) {
 		return false
 	}
-	return h.promoteLease(c)
+	c.startPresence()
+	return true
 }
 
 func (h *handshake) validateSession(c *Connection) bool {
@@ -213,24 +205,6 @@ func (h *handshake) validateSession(c *Connection) bool {
 	return true
 }
 
-func (h *handshake) promoteLease(c *Connection) bool {
-	s := h.server
-	promoter, ok := s.connectionLeases.(connectionEstablisher)
-	if !ok {
-		return true
-	}
-	h.setup.NextStage(monitoring.HandshakePresenceEstablish)
-	ctx, cancel := context.WithTimeout(c.ctx, s.config.APITimeout)
-	established, err := promoter.EstablishConnectionLease(ctx, h.identity.UserID, h.leaseID)
-	cancel()
-	if err != nil || !established {
-		h.record(monitoring.HandshakeLeaseUnavailable)
-		c.Close()
-		return false
-	}
-	return true
-}
-
 func (h *handshake) activate(c *Connection) bool {
 	s := h.server
 	s.mu.Lock()
@@ -250,9 +224,9 @@ func (h *handshake) activate(c *Connection) bool {
 }
 
 func (h *handshake) release() {
-	if h.leaseState == handshakeLeaseOwned {
-		h.server.releaseConnectionLease(h.identity.UserID, h.leaseID)
-		h.leaseState = handshakeLeaseUnowned
+	if h.admission == handshakeAdmissionOwned {
+		h.server.admission.Release(h.identity.UserID)
+		h.admission = handshakeAdmissionUnowned
 	}
 	if h.reservation == upgradeReserved {
 		h.server.releaseUpgrade()

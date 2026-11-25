@@ -17,7 +17,6 @@ type Metrics struct {
 	QueuedItems          prometheus.Gauge
 	CommandItems         prometheus.Gauge
 	CommandBytes         prometheus.Gauge
-	LeaseCleanupDropped  prometheus.Counter
 	Draining             prometheus.Gauge
 	Connections          prometheus.Gauge
 	handshake            *prometheus.CounterVec
@@ -59,7 +58,6 @@ func New(registry *prometheus.Registry) *Metrics {
 		QueuedItems:          prometheus.NewGauge(prometheus.GaugeOpts{Name: "messenger_ws_queued_items", Help: "Items in outbound socket queues."}),
 		CommandItems:         prometheus.NewGauge(prometheus.GaugeOpts{Name: "messenger_ws_command_items", Help: "Admitted socket commands waiting or running."}),
 		CommandBytes:         prometheus.NewGauge(prometheus.GaugeOpts{Name: "messenger_ws_command_bytes", Help: "Wire bytes of admitted socket commands."}),
-		LeaseCleanupDropped:  prometheus.NewCounter(prometheus.CounterOpts{Name: "messenger_ws_lease_cleanup_dropped_total", Help: "Lease releases left to expire after cleanup queue capacity or closure."}),
 		Draining:             prometheus.NewGauge(prometheus.GaugeOpts{Name: "messenger_ws_draining", Help: "One when this gateway is draining connections."}),
 		Connections:          prometheus.NewGauge(prometheus.GaugeOpts{Name: "messenger_ws_connections", Help: "Active browser WebSocket connections."}),
 		handshake:            prometheus.NewCounterVec(prometheus.CounterOpts{Name: "messenger_ws_handshakes_total", Help: "WebSocket handshake and initial room join outcomes."}, []string{"result"}),
@@ -90,7 +88,7 @@ func New(registry *prometheus.Registry) *Metrics {
 		publishChannelAcquisition: prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "messenger_ws_publish_channel_acquisition_seconds", Help: "RabbitMQ publisher channel acquisition duration including connection, topology declaration, confirm setup and broker failover.", Buckets: latencyBuckets}, []string{"result"}),
 		publishConfirmation:       prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "messenger_ws_publish_confirmation_seconds", Help: "RabbitMQ publisher duration from wire send attempt to confirmation or final transport failure, even after caller cancellation.", Buckets: latencyBuckets}, []string{"result"}),
 	}
-	registry.MustRegister(m.capacity, m.QueuedItems, m.CommandItems, m.CommandBytes, m.LeaseCleanupDropped, m.Draining, m.Connections, m.handshake, m.applied, m.dismissed, m.receivedMessages, m.frameErrors, m.RecoveryCloses, m.GroupLeaseExpired, m.groupAuthSeconds, m.subscriptionRefusals, m.RoomSubscriptions, m.RoomMemberships, m.QueuedBytes, m.SlowCloses, m.publishSeconds, m.replay, m.SQLFallback, m.StaleRooms, m.PositionSweep, m.OldestPositionAge, m.FanoutRecipients, m.FanoutSeconds, m.SavedEventLag)
+	registry.MustRegister(m.capacity, m.QueuedItems, m.CommandItems, m.CommandBytes, m.Draining, m.Connections, m.handshake, m.applied, m.dismissed, m.receivedMessages, m.frameErrors, m.RecoveryCloses, m.GroupLeaseExpired, m.groupAuthSeconds, m.subscriptionRefusals, m.RoomSubscriptions, m.RoomMemberships, m.QueuedBytes, m.SlowCloses, m.publishSeconds, m.replay, m.SQLFallback, m.StaleRooms, m.PositionSweep, m.OldestPositionAge, m.FanoutRecipients, m.FanoutSeconds, m.SavedEventLag)
 	registry.MustRegister(m.publishCapacityWait, m.publishQueueWait, m.publishChannelAcquisition, m.publishConfirmation)
 	return m
 }

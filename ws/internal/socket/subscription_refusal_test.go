@@ -12,7 +12,7 @@ import (
 
 func TestFullGroupAuthorizationSlotsCountTheRefusal(t *testing.T) {
 	server := newTestServer(t, config.Config{MaxGroupAuths: 1, QueueItems: 8, QueueBytes: 4096}, testDependencies(&sessionRooms{}))
-	connection := newConnection(server, nil, ticket.Identity{}, "")
+	connection := newConnection(server, nil, ticket.Identity{})
 	t.Cleanup(connection.Close)
 	server.groupAuthSlots <- struct{}{}
 	t.Cleanup(func() { <-server.groupAuthSlots })

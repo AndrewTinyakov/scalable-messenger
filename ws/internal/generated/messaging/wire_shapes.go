@@ -6,16 +6,17 @@ type WireShape struct {
 }
 
 var FrameShapes = map[FrameType]WireShape{
-	"send":             {Required: []string{"type", "version", "requestId", "body"}, Optional: []string{"chatId", "recipientId", "replyToMessageId", "forwardFromChatId", "forwardFromMessageId"}},
-	"subscribe":        {Required: []string{"type", "version", "chatId", "kind"}, Optional: []string{"epoch", "streamId", "lastAppliedSequence"}},
-	"subscribe_many":   {Required: []string{"type", "version", "subscriptions"}, Optional: []string{}},
-	"unsubscribe":      {Required: []string{"type", "version", "chatId"}, Optional: []string{}},
-	"applied":          {Required: []string{"type", "version", "chatId", "sequence"}, Optional: []string{"epoch", "streamId"}},
-	"dismissed":        {Required: []string{"type", "version", "chatId", "sequence"}, Optional: []string{}},
-	"received_message": {Required: []string{"type", "version", "chatId", "sequence"}, Optional: []string{}},
-	"watch_presence":   {Required: []string{"type", "version", "chatId", "userIds"}, Optional: []string{}},
-	"unwatch_presence": {Required: []string{"type", "version"}, Optional: []string{}},
-	"watch_sidebar":    {Required: []string{"type", "version", "chatIds"}, Optional: []string{}},
+	"send":               {Required: []string{"type", "version", "requestId", "body"}, Optional: []string{"chatId", "recipientId", "replyToMessageId", "forwardFromChatId", "forwardFromMessageId"}},
+	"subscribe":          {Required: []string{"type", "version", "chatId", "kind"}, Optional: []string{"epoch", "streamId", "lastAppliedSequence"}},
+	"subscribe_many":     {Required: []string{"type", "version", "subscriptions"}, Optional: []string{}},
+	"unsubscribe":        {Required: []string{"type", "version", "chatId"}, Optional: []string{}},
+	"applied":            {Required: []string{"type", "version", "chatId", "sequence"}, Optional: []string{"epoch", "streamId"}},
+	"dismissed":          {Required: []string{"type", "version", "chatId", "sequence"}, Optional: []string{}},
+	"received_message":   {Required: []string{"type", "version", "chatId", "sequence"}, Optional: []string{}},
+	"watch_presence":     {Required: []string{"type", "version"}, Optional: []string{"reset", "add", "remove"}},
+	"activity":           {Required: []string{"type", "version", "active", "visible"}, Optional: []string{}},
+	"watch_online_count": {Required: []string{"type", "version"}, Optional: []string{"chatId"}},
+	"watch_sidebar":      {Required: []string{"type", "version", "chatIds"}, Optional: []string{}},
 }
 
 var RoomShapes = map[EventType]WireShape{

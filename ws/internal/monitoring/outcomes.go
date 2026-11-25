@@ -56,19 +56,19 @@ const (
 type HandshakeOutcome string
 
 const (
-	HandshakeInvalidTicket      HandshakeOutcome = "invalid_ticket"
-	HandshakeInvalidOrigin      HandshakeOutcome = "invalid_origin"
-	HandshakeCapacity           HandshakeOutcome = "capacity"
-	HandshakeLimitUnavailable   HandshakeOutcome = "handshake_limit_unavailable"
-	HandshakeRateLimited        HandshakeOutcome = "handshake_rate_limited"
-	HandshakeLeaseUnavailable   HandshakeOutcome = "lease_unavailable"
-	HandshakeUserCapacity       HandshakeOutcome = "user_capacity"
-	HandshakeUpgradeError       HandshakeOutcome = "upgrade_error"
-	HandshakeRoomJoinFailed     HandshakeOutcome = "room_join_failed"
-	HandshakeSessionRevoked     HandshakeOutcome = "session_revoked"
-	HandshakeSessionUnavailable HandshakeOutcome = "session_unavailable"
-	HandshakeSessionMismatch    HandshakeOutcome = "session_mismatch"
-	HandshakeAccepted           HandshakeOutcome = "accepted"
+	HandshakeInvalidTicket        HandshakeOutcome = "invalid_ticket"
+	HandshakeInvalidOrigin        HandshakeOutcome = "invalid_origin"
+	HandshakeCapacity             HandshakeOutcome = "capacity"
+	HandshakeLimitUnavailable     HandshakeOutcome = "handshake_limit_unavailable"
+	HandshakeRateLimited          HandshakeOutcome = "handshake_rate_limited"
+	HandshakeAdmissionUnavailable HandshakeOutcome = "admission_unavailable"
+	HandshakeUserCapacity         HandshakeOutcome = "user_capacity"
+	HandshakeUpgradeError         HandshakeOutcome = "upgrade_error"
+	HandshakeRoomJoinFailed       HandshakeOutcome = "room_join_failed"
+	HandshakeSessionRevoked       HandshakeOutcome = "session_revoked"
+	HandshakeSessionUnavailable   HandshakeOutcome = "session_unavailable"
+	HandshakeSessionMismatch      HandshakeOutcome = "session_mismatch"
+	HandshakeAccepted             HandshakeOutcome = "accepted"
 )
 
 type CapacityResource string

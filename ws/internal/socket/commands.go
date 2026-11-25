@@ -33,8 +33,10 @@ func (c *Connection) handleContext(base context.Context, f protocol.Frame) error
 		return nil
 	case protocol.FrameWatchPresence:
 		return c.watchPresence(base, f)
-	case protocol.FrameUnwatchPresence:
-		c.clearPresence()
+	case protocol.FrameWatchOnline:
+		return c.watchOnlineCount(base, f.ChatID)
+	case protocol.FrameActivity:
+		c.setActivity(f.Active, f.Visible)
 		return nil
 	case protocol.FrameSend:
 		return c.send(base, f)

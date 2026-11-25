@@ -12,7 +12,9 @@ service ChatAuthorization {
   rpc ValidateSessions(ValidateSessionsRequest) returns (ValidateSessionsResponse);
   rpc AuthorizeGroup(AuthorizeGroupRequest) returns (AuthorizeGroupResponse);
   rpc AuthorizeGroups(AuthorizeGroupsRequest) returns (AuthorizeGroupsResponse);
-  rpc AuthorizePresence(AuthorizePresenceRequest) returns (AuthorizePresenceResponse);
+  rpc PresenceVisibility(PresenceVisibilityRequest) returns (PresenceVisibilityResponse);
+  rpc OnlineCountMembers(OnlineCountMembersRequest) returns (OnlineCountMembersResponse);
+  rpc RecordLastSeen(RecordLastSeenRequest) returns (RecordLastSeenResponse);
 }
 
 message ValidateSessionRequest {
@@ -58,15 +60,49 @@ message AuthorizeGroupsResponse {
   repeated string authorized_chat_ids = 1;
 }
 
-message AuthorizePresenceRequest {
-  string session_id = 1;
-  string chat_id = 2;
-  repeated string user_ids = 3;
+enum PresenceLevel {
+  PRESENCE_LEVEL_UNSPECIFIED = 0;
+  PRESENCE_LEVEL_NONE = 1;
+  PRESENCE_LEVEL_COARSE = 2;
+  PRESENCE_LEVEL_FULL = 3;
 }
 
-message AuthorizePresenceResponse {
-  repeated string authorized_user_ids = 1;
+message PresenceVisibilityRequest {
+  string session_id = 1;
+  repeated string user_ids = 2;
 }
+
+message SubjectVisibility {
+  string user_id = 1;
+  PresenceLevel level = 2;
+  int64 last_seen_unix_ms = 3;
+}
+
+message PresenceVisibilityResponse {
+  repeated SubjectVisibility subjects = 1;
+}
+
+message OnlineCountMembersRequest {
+  string session_id = 1;
+  string chat_id = 2;
+  int32 limit = 3;
+}
+
+message OnlineCountMembersResponse {
+  int32 member_count = 1;
+  repeated string member_ids = 2;
+}
+
+message LastSeen {
+  string user_id = 1;
+  int64 seen_unix_ms = 2;
+}
+
+message RecordLastSeenRequest {
+  repeated LastSeen entries = 1;
+}
+
+message RecordLastSeenResponse {}
 
 message AuthorizeSidebarRequest {
   string session_id = 1;

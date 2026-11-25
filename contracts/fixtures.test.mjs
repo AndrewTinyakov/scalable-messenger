@@ -170,17 +170,28 @@ test('feature fixtures preserve versions, reply identity and empty tombstones', 
   assert.equal(saved({ ...readJSON('fixtures/valid/message-saved.json'), replyBody: '' }), false);
 });
 
-test('presence snapshots are bounded, private to a chat and separate from durable events', () => {
+test('presence frames carry transitions by user and never chat identity', () => {
   const event = readJSON('fixtures/valid/socket-presence.json');
+  const [status] = event.statuses;
   assert.equal(socketPresence(event), true, JSON.stringify(socketPresence.errors));
   assert.equal(socketPresence({ ...event, statuses: [] }), true);
-  assert.equal(socketPresence({ ...event, validForMs: 0 }), false);
-  assert.equal(socketPresence({ ...event, statuses: [{ userId: event.chatId, state: 'maybe' }] }), false);
-  assert.equal(socketPresence({ ...event, userId: event.chatId }), false);
-  const frame = { type: 'watch_presence', version: 1, chatId: event.chatId, userIds: [event.chatId] };
-  assert.equal(watchPresence(frame), true);
-  assert.equal(watchPresence({ ...frame, userIds: [event.chatId, event.chatId] }), false);
-  assert.equal(watchPresence({ ...frame, body: '' }), false);
+  assert.equal(socketPresence({ ...event, chatId: status.userId }), false);
+  assert.equal(socketPresence({ ...event, statuses: [{ ...status, online: 'yes' }] }), false);
+  assert.equal(socketPresence({ ...event, statuses: [{ ...status, lastSeen: 'yesterday' }] }), false);
+  assert.equal(socketPresence({ ...event, statuses: [{ ...status, lastSeen: 'recently', lastSeenAt: '2026-11-04T00:00:00Z' }] }), false);
+  const frame = readJSON('fixtures/valid/watch-presence.json');
+  assert.equal(watchPresence(frame), true, JSON.stringify(watchPresence.errors));
+  assert.equal(watchPresence({ type: 'watch_presence', version: 1 }), true);
+  assert.equal(watchPresence({ ...frame, add: [status.userId, status.userId] }), false);
+  assert.equal(watchPresence({ ...frame, chatId: status.userId }), false);
+  assert.equal(watchPresence({ ...frame, add: Array.from({ length: 501 }, (_, i) => `01ARZ3NDEKTSV4RRFFQ6${String(i).padStart(6, '0')}`) }), false);
+  const schemas = Object.fromEntries(['activity', 'watch-online-count', 'online-count', 'presence-config'].map((name) => [name, validate(`schemas/socket/frame/${name}-v1.yaml`)]));
+  for (const [name, schema] of Object.entries(schemas)) {
+    const fixture = readJSON(`fixtures/valid/${name}.json`);
+    assert.equal(schema(fixture), true, JSON.stringify(schema.errors));
+    assert.equal(schema({ ...fixture, body: 'forbidden' }), false);
+  }
+  assert.equal(schemas['online-count']({ ...readJSON('fixtures/valid/online-count.json'), members: 201 }), false);
   assert.equal(chatDeleted({ ...readJSON('fixtures/valid/chat-deleted.json'), observedAt: '' }), false);
 });
 
@@ -208,8 +219,8 @@ test('bodyless recovery hints and viewer-resolved live replies share strict fixt
   assert.equal(reference({ ...row, body: 'retained text' }), false);
 });
 
-test('sidebar watch and bodyless observations share strict bounded schemas', () => {
-  for (const name of ['watch-sidebar', 'sidebar-activity', 'sidebar-presence']) {
+test('sidebar watch and bodyless activity share strict bounded schemas', () => {
+  for (const name of ['watch-sidebar', 'sidebar-activity']) {
     const schema = validate(`schemas/socket/frame/${name}-v1.yaml`);
     const fixture = readJSON(`fixtures/valid/${name}.json`);
     assert.equal(schema(fixture), true, JSON.stringify(schema.errors));

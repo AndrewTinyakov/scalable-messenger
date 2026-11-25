@@ -3,62 +3,137 @@ package redisroom
 import (
 	"context"
 	"errors"
-	"time"
+	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/redis/go-redis/v9"
+
+	"messenger/ws/internal/roomname"
 )
 
-var establishConnectionScript = redis.NewScript(`
+// Account state is online while any gateway field is present. A transition
+// increments the version and the bucket sequence and publishes atomically.
+var setPresenceScript = redis.NewScript(`
+local function online()
+  for _,field in ipairs(redis.call('HKEYS',KEYS[1])) do
+    if string.sub(field,1,2)=='g:' then return true end
+  end
+  return false
+end
+local before=online()
+if ARGV[2]=='1' then redis.call('HSET',KEYS[1],ARGV[1],1) else redis.call('HDEL',KEYS[1],ARGV[1]) end
+local after=online()
+if before==after then return 0 end
 local t=redis.call('TIME')
-local now=t[1]*1000+math.floor(t[2]/1000)
-local expires=tonumber(redis.call('ZSCORE',KEYS[1],ARGV[1]))
-if not expires or expires<=now then return 0 end
-redis.call('ZREMRANGEBYSCORE',KEYS[2],'-inf',now)
-redis.call('ZADD',KEYS[2],expires,ARGV[1])
-redis.call('PEXPIRE',KEYS[2],ARGV[2])
+local now=t[1]*1000000+t[2]
+local version=math.max((tonumber(redis.call('HGET',KEYS[1],'v')) or 0)+1,now)
+redis.call('HSET',KEYS[1],'v',string.format('%.0f',version))
+local seen=tonumber(redis.call('HGET',KEYS[1],'ls')) or 0
+if after then
+  redis.call('PERSIST',KEYS[1])
+else
+  seen=math.floor(now/1000)
+  redis.call('HSET',KEYS[1],'ls',seen)
+  redis.call('PEXPIRE',KEYS[1],ARGV[5])
+end
+local seq=redis.call('INCR',KEYS[2])
+redis.call('SPUBLISH',ARGV[4],cjson.encode({u=ARGV[3],v=string.format('%.0f',version),s=seq,o=after,l=seen}))
 return 1`)
 
-var presenceSnapshotScript = redis.NewScript(`
-local t=redis.call('TIME')
-local now=t[1]*1000+math.floor(t[2]/1000)
-return redis.call('ZCOUNT',KEYS[1],'('..now,'+inf')`)
+const presenceStateTTLMillis = 30 * 24 * 60 * 60 * 1000
 
-func connectionOnlineKey(userID string) string { return connectionUserKey(userID, "online") }
-
-func (c *Client) EstablishConnectionLease(ctx context.Context, userID, leaseID string) (bool, error) {
-	if !validConnectionUserID(userID) || leaseID == "" {
-		return false, errors.New("invalid connection lease")
-	}
-	result, err := establishConnectionScript.Run(ctx, c.redis, []string{connectionLeaseKey(userID), connectionOnlineKey(userID)}, leaseID, ConnectionLeaseTTL.Milliseconds()).Int64()
-	return result == 1, err
+type PresenceState struct {
+	Online   bool
+	Version  int64
+	LastSeen int64
 }
 
-func (c *Client) Presence(ctx context.Context, userIDs []string) (map[string]bool, error) {
-	if len(userIDs) < 1 || len(userIDs) > 100 {
-		return nil, errors.New("presence batch must contain 1 to 100 users")
-	}
+func presenceStateKey(bucket int, userID string) string {
+	return "messenger:{" + roomname.PresenceBucket(bucket) + "}:u:" + userID
+}
+
+func presenceSeqKey(bucket int) string {
+	return "messenger:{" + roomname.PresenceBucket(bucket) + "}:seq"
+}
+
+// SetPresence records whether this gateway holds an active connection for
+// each user. Errors are reported per user so callers can retry them.
+func (c *Client) SetPresence(ctx context.Context, gateway string, active map[string]bool) map[string]error {
 	pipe := c.redis.Pipeline()
-	commands := make([]*redis.Cmd, len(userIDs))
-	for index, userID := range userIDs {
-		if !validConnectionUserID(userID) {
-			return nil, errors.New("invalid presence target")
+	commands := make(map[string]*redis.Cmd, len(active))
+	for userID, on := range active {
+		b := roomname.PresenceBucketOf(userID)
+		value := "0"
+		if on {
+			value = "1"
 		}
-		commands[index] = presenceSnapshotScript.Eval(ctx, pipe, []string{connectionOnlineKey(userID)})
+		commands[userID] = setPresenceScript.Eval(ctx, pipe, []string{presenceStateKey(b, userID), presenceSeqKey(b)}, "g:"+gateway, value, userID, Channel(roomname.PresenceBucket(b)), presenceStateTTLMillis)
 	}
-	if _, err := pipe.Exec(ctx); err != nil {
-		return nil, err
-	}
-	result := make(map[string]bool, len(userIDs))
-	for index, command := range commands {
-		count, err := command.Int64()
-		if err != nil {
-			return nil, err
+	_, _ = pipe.Exec(ctx)
+	failed := make(map[string]error)
+	for userID, command := range commands {
+		if err := command.Err(); err != nil && !errors.Is(err, redis.Nil) {
+			failed[userID] = err
 		}
-		result[userIDs[index]] = count > 0
 	}
-	return result, nil
+	return failed
 }
 
-func (c *Client) AllowPresenceWatch(ctx context.Context, userID string) (bool, error) {
-	return c.allowAttempt(ctx, userID, 1, 10, 10*time.Second, "presence")
+// PresenceSnapshot reads current account states and the latest sequence of
+// each bucket they belong to.
+func (c *Client) PresenceSnapshot(ctx context.Context, userIDs []string) (map[string]PresenceState, map[int]int64, error) {
+	pipe := c.redis.Pipeline()
+	states := make(map[string]*redis.MapStringStringCmd, len(userIDs))
+	seqs := make(map[int]*redis.StringCmd)
+	for _, userID := range userIDs {
+		b := roomname.PresenceBucketOf(userID)
+		states[userID] = pipe.HGetAll(ctx, presenceStateKey(b, userID))
+		if seqs[b] == nil {
+			seqs[b] = pipe.Get(ctx, presenceSeqKey(b))
+		}
+	}
+	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
+		return nil, nil, fmt.Errorf("presence snapshot: %w", err)
+	}
+	result := make(map[string]PresenceState, len(states))
+	for userID, command := range states {
+		state, err := decodePresenceState(command.Val())
+		if err != nil {
+			return nil, nil, err
+		}
+		result[userID] = state
+	}
+	sequences := make(map[int]int64, len(seqs))
+	for b, command := range seqs {
+		value, err := command.Int64()
+		if err != nil && !errors.Is(err, redis.Nil) {
+			return nil, nil, fmt.Errorf("presence sequence: %w", err)
+		}
+		sequences[b] = value
+	}
+	return result, sequences, nil
+}
+
+func decodePresenceState(fields map[string]string) (PresenceState, error) {
+	var state PresenceState
+	var err error
+	for field, value := range fields {
+		switch {
+		case strings.HasPrefix(field, "g:"):
+			state.Online = true
+		case field == "v":
+			state.Version, err = strconv.ParseInt(value, 10, 64)
+		case field == "ls":
+			state.LastSeen, err = strconv.ParseInt(value, 10, 64)
+		}
+		if err != nil {
+			return PresenceState{}, fmt.Errorf("decode presence state: %w", err)
+		}
+	}
+	return state, nil
+}
+
+func (c *Client) SubscribePresence(ctx context.Context, bucket int) (*Listener, error) {
+	return c.Subscribe(ctx, roomname.PresenceBucket(bucket))
 }

@@ -35,29 +35,39 @@ type Event struct {
 	ReplyDeleted        *bool            `json:"replyDeleted,omitempty"`
 	ReplyVersion        string           `json:"replyVersion,omitempty"`
 	ForwardedFromUserID string           `json:"forwardedFromUserId,omitempty"`
-	ObservedAt          string           `json:"observedAt,omitempty"`
-	ValidForMS          int              `json:"validForMs,omitempty"`
 	Statuses            []PresenceStatus `json:"statuses,omitempty"`
+	Unavailable         []string         `json:"unavailable,omitempty"`
+	Online              int              `json:"online,omitempty"`
+	Members             int              `json:"members,omitempty"`
+	IdleAfterHiddenMS   int              `json:"idleAfterHiddenMs,omitempty"`
+	IdleAfterInputMS    int              `json:"idleAfterInputMs,omitempty"`
+	ReleaseAfterHidden  int              `json:"releaseAfterHiddenMs,omitempty"`
 }
 
 type PresenceStatus struct {
-	UserID string `json:"userId"`
-	State  string `json:"state"`
+	UserID     string `json:"userId"`
+	Online     bool   `json:"online"`
+	LastSeenAt string `json:"lastSeenAt,omitempty"`
+	LastSeen   string `json:"lastSeen,omitempty"`
 }
 
 func (event Event) MarshalJSON() ([]byte, error) {
 	type wireEvent Event
-	if event.Type != EventMessageChanged && event.Type != EventPresence && event.Type != EventSidebarPresence && event.ReplyToMessageID == "" {
+	if event.Type != EventMessageChanged && event.Type != EventPresence && event.Type != EventOnlineCount && event.ReplyToMessageID == "" {
 		return json.Marshal(wireEvent(event))
 	}
 	var body, replyBody *string
 	var statuses *[]PresenceStatus
-	if event.Type == EventPresence || event.Type == EventSidebarPresence {
+	var online *int
+	if event.Type == EventPresence {
 		value := event.Statuses
 		if value == nil {
 			value = []PresenceStatus{}
 		}
 		statuses = &value
+	}
+	if event.Type == EventOnlineCount {
+		online = &event.Online
 	}
 	if event.Body != "" || event.Type == EventMessageChanged {
 		body = &event.Body
@@ -70,5 +80,6 @@ func (event Event) MarshalJSON() ([]byte, error) {
 		Body      *string           `json:"body,omitempty"`
 		ReplyBody *string           `json:"replyBody,omitempty"`
 		Statuses  *[]PresenceStatus `json:"statuses,omitempty"`
-	}{wireEvent: (*wireEvent)(&event), Body: body, ReplyBody: replyBody, Statuses: statuses})
+		Online    *int              `json:"online,omitempty"`
+	}{wireEvent: (*wireEvent)(&event), Body: body, ReplyBody: replyBody, Statuses: statuses, Online: online})
 }

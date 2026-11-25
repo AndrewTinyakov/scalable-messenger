@@ -95,6 +95,11 @@ public class Users extends TableImpl<UsersRecord> {
      */
     public final TableField<UsersRecord, Long> EVENT_SEQ = createField(DSL.name("event_seq"), SQLDataType.BIGINT.nullable(false).defaultValue(DSL.field(DSL.raw("0"), SQLDataType.BIGINT)), this, "");
 
+    /**
+     * The column <code>public.users.last_seen_at</code>.
+     */
+    public final TableField<UsersRecord, OffsetDateTime> LAST_SEEN_AT = createField(DSL.name("last_seen_at"), SQLDataType.TIMESTAMPWITHTIMEZONE(6), this, "");
+
     private Users(Name alias, Table<UsersRecord> aliased) {
         this(alias, aliased, (Field<?>[]) null, null);
     }

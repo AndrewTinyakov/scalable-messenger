@@ -14,14 +14,14 @@ import (
 	roomregistry "messenger/ws/internal/room"
 )
 
-type handshakeLeaseResult struct {
+type handshakeAdmissionResult struct {
 	serverTestDependencies
 	allowed bool
 	err     error
 }
 
-func (lease handshakeLeaseResult) AcquireConnectionLease(context.Context, string) (string, bool, error) {
-	return "", lease.allowed, lease.err
+func (result handshakeAdmissionResult) Admit(context.Context, string) (bool, error) {
+	return result.allowed, result.err
 }
 
 func TestHandshakeSetupAcceptedBeforeSocketCloses(t *testing.T) {
@@ -47,7 +47,7 @@ func TestHandshakeSetupAcceptedBeforeSocketCloses(t *testing.T) {
 	default:
 	}
 	before := assertHandshakeMetrics(t, server, "accepted", map[string]string{
-		"admission": "ready", "connection_lease": "ready", "http_upgrade": "ready",
+		"admission": "ready", "connection_admission": "ready", "http_upgrade": "ready",
 		"user_room_join": "ready", "session_validation": "ready",
 	})
 	_ = socket.Close()
@@ -57,7 +57,7 @@ func TestHandshakeSetupAcceptedBeforeSocketCloses(t *testing.T) {
 		t.Fatal("upgrade handler did not finish after socket closed")
 	}
 	after := assertHandshakeMetrics(t, server, "accepted", map[string]string{
-		"admission": "ready", "connection_lease": "ready", "http_upgrade": "ready",
+		"admission": "ready", "connection_admission": "ready", "http_upgrade": "ready",
 		"user_room_join": "ready", "session_validation": "ready",
 	})
 	if before != after {
@@ -85,10 +85,10 @@ func TestHandshakeSetupRejectsBeforeUpgrade(t *testing.T) {
 			})
 		}, http.StatusServiceUnavailable, "handshake_limit_unavailable", map[string]string{"admission": "handshake_limit_unavailable"}},
 		{"lease unavailable", func(server *Server, _ *http.Request) {
-			server.connectionLeases = handshakeLeaseResult{err: errors.New("Redis unavailable")}
-		}, http.StatusServiceUnavailable, "lease_unavailable", map[string]string{"admission": "ready", "connection_lease": "lease_unavailable"}},
-		{"user capacity", func(server *Server, _ *http.Request) { server.connectionLeases = handshakeLeaseResult{} }, http.StatusTooManyRequests, "user_capacity", map[string]string{"admission": "ready", "connection_lease": "user_capacity"}},
-		{"upgrade failure", func(*Server, *http.Request) {}, http.StatusBadRequest, "upgrade_error", map[string]string{"admission": "ready", "connection_lease": "ready", "http_upgrade": "upgrade_error"}},
+			server.admission = handshakeAdmissionResult{err: errors.New("Redis unavailable")}
+		}, http.StatusServiceUnavailable, "admission_unavailable", map[string]string{"admission": "ready", "connection_admission": "admission_unavailable"}},
+		{"user capacity", func(server *Server, _ *http.Request) { server.admission = handshakeAdmissionResult{} }, http.StatusTooManyRequests, "user_capacity", map[string]string{"admission": "ready", "connection_admission": "user_capacity"}},
+		{"upgrade failure", func(*Server, *http.Request) {}, http.StatusBadRequest, "upgrade_error", map[string]string{"admission": "ready", "connection_admission": "ready", "http_upgrade": "upgrade_error"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			server, secret := newSessionServer(t, &sessionRooms{}, nil)
@@ -112,22 +112,22 @@ func TestHandshakeSetupFailsAfterUpgrade(t *testing.T) {
 		result    string
 		stages    map[string]string
 	}{
-		{"room unavailable", func(_ *Server, rooms *sessionRooms) { rooms.joinErr = errors.New("room unavailable") }, "room_join_failed", map[string]string{"admission": "ready", "connection_lease": "ready", "http_upgrade": "ready", "user_room_join": "room_join_failed"}},
-		{"session revoked", func(*Server, *sessionRooms) {}, "session_revoked", map[string]string{"admission": "ready", "connection_lease": "ready", "http_upgrade": "ready", "user_room_join": "ready", "session_validation": "session_revoked"}},
+		{"room unavailable", func(_ *Server, rooms *sessionRooms) { rooms.joinErr = errors.New("room unavailable") }, "room_join_failed", map[string]string{"admission": "ready", "connection_admission": "ready", "http_upgrade": "ready", "user_room_join": "room_join_failed"}},
+		{"session revoked", func(*Server, *sessionRooms) {}, "session_revoked", map[string]string{"admission": "ready", "connection_admission": "ready", "http_upgrade": "ready", "user_room_join": "ready", "session_validation": "session_revoked"}},
 		{"session unavailable", func(server *Server, _ *sessionRooms) {
 			server.sessionAuth = sessionAuthorizerFunc(func(context.Context, string) (grpcauth.Session, error) {
 				return grpcauth.Session{}, errors.New("gRPC unavailable")
 			})
-		}, "session_unavailable", map[string]string{"admission": "ready", "connection_lease": "ready", "http_upgrade": "ready", "user_room_join": "ready", "session_validation": "session_unavailable"}},
+		}, "session_unavailable", map[string]string{"admission": "ready", "connection_admission": "ready", "http_upgrade": "ready", "user_room_join": "ready", "session_validation": "session_unavailable"}},
 		{"session mismatch", func(server *Server, _ *sessionRooms) {
 			server.sessionAuth = sessionAuthorizerFunc(func(context.Context, string) (grpcauth.Session, error) { return grpcauth.Session{}, nil })
-		}, "session_mismatch", map[string]string{"admission": "ready", "connection_lease": "ready", "http_upgrade": "ready", "user_room_join": "ready", "session_validation": "session_mismatch"}},
+		}, "session_mismatch", map[string]string{"admission": "ready", "connection_admission": "ready", "http_upgrade": "ready", "user_room_join": "ready", "session_validation": "session_mismatch"}},
 		{"canceled during join", func(server *Server, rooms *sessionRooms) {
 			rooms.join = func(recipient roomregistry.Recipient) { recipient.(*Connection).Close() }
 			server.sessionAuth = sessionAuthorizerFunc(func(_ context.Context, sessionID string) (grpcauth.Session, error) {
 				return grpcauth.Session{UserID: sessionTestUser, DeviceID: "device", SessionID: sessionID}, nil
 			})
-		}, "canceled", map[string]string{"admission": "ready", "connection_lease": "ready", "http_upgrade": "ready", "user_room_join": "ready", "session_validation": "ready"}},
+		}, "canceled", map[string]string{"admission": "ready", "connection_admission": "ready", "http_upgrade": "ready", "user_room_join": "ready", "session_validation": "ready"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			rooms := &sessionRooms{}

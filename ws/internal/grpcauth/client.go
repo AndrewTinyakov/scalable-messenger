@@ -157,24 +157,3 @@ func decodeSession(response *authorization.ValidateSessionResponse) (Session, er
 
 func (c *Client) Close() error { return c.connection.Close() }
 
-func (c *Client) AuthorizePresence(ctx context.Context, sessionID, chatID string, userIDs []string) ([]string, error) {
-	response, err := c.service.AuthorizePresence(ctx, &authorization.AuthorizePresenceRequest{SessionId: sessionID, ChatId: chatID, UserIds: userIDs})
-	if err != nil {
-		if code := status.Code(err); code == codes.PermissionDenied || code == codes.Unauthenticated || code == codes.NotFound || code == codes.InvalidArgument {
-			return nil, ErrUnauthorized
-		}
-		return nil, fmt.Errorf("authorize presence: %w", err)
-	}
-	requested := make(map[string]bool, len(userIDs))
-	for _, id := range userIDs {
-		requested[id] = true
-	}
-	seen := make(map[string]bool, len(userIDs))
-	for _, id := range response.GetAuthorizedUserIds() {
-		if !requested[id] || seen[id] {
-			return nil, errors.New("invalid presence authorization response")
-		}
-		seen[id] = true
-	}
-	return response.GetAuthorizedUserIds(), nil
-}

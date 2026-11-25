@@ -19,7 +19,6 @@ type sidebarActivitySource interface {
 type sidebarWatch struct {
 	generation uint64
 	chatIDs    []string
-	peers      []string
 	groups     map[string]bool
 	expires    time.Time
 	nextAuth   time.Time
@@ -42,14 +41,10 @@ type sidebarCoordinator struct {
 
 func newSidebarCoordinator(s *Server) *sidebarCoordinator {
 	auth, ok := s.groupAuth.(sidebarAuthorizer)
-	if !ok || s.presence == nil {
+	if !ok || s.sidebarActivity == nil {
 		return nil
 	}
-	source, ok := s.connectionLeases.(sidebarActivitySource)
-	if !ok {
-		return nil
-	}
-	return &sidebarCoordinator{server: s, authorizer: auth, source: source, watches: make(map[*Connection]*sidebarWatch), feeds: make(map[string]*sidebarFeed)}
+	return &sidebarCoordinator{server: s, authorizer: auth, source: s.sidebarActivity, watches: make(map[*Connection]*sidebarWatch), feeds: make(map[string]*sidebarFeed)}
 }
 
 func (c *Connection) watchSidebar(base context.Context, ids []string) error {
@@ -59,12 +54,8 @@ func (c *Connection) watchSidebar(base context.Context, ids []string) error {
 	}
 	ctx, cancel := context.WithTimeout(base, c.server.config.APITimeout)
 	defer cancel()
-	allowed, err := c.server.presence.limiter.AllowPresenceWatch(ctx, c.session.UserID)
-	if err != nil {
+	if err := c.allowWatch(ctx); err != nil {
 		return err
-	}
-	if !allowed {
-		return errRateLimited
 	}
 	generation := c.sidebarSerial.Add(1)
 	if len(ids) == 0 {
@@ -76,13 +67,7 @@ func (c *Connection) watchSidebar(base context.Context, ids []string) error {
 		p.remove(c)
 		return err
 	}
-	fresh, err := p.install(c, nil, watch)
-	if err != nil || !fresh || len(watch.peers) == 0 {
-		return err
-	}
-	states := p.server.presence.snapshot(ctx, watch.peers)
-	p.deliver(c, watch, sidebarPresenceEvent(watch, states, time.Now()))
-	return nil
+	return p.install(c, nil, watch)
 }
 
 func (p *sidebarCoordinator) authorize(ctx context.Context, c *Connection, ids []string, generation uint64) (*sidebarWatch, error) {
@@ -102,41 +87,34 @@ func (p *sidebarCoordinator) authorize(ctx context.Context, c *Connection, ids [
 	for _, id := range ids {
 		requested[id] = true
 	}
-	peers := make(map[string]bool)
 	for _, chat := range chats {
-		if !requested[chat.ChatID] || (chat.Group && chat.PeerID != "") || (chat.PeerID != "" && !protocol.ValidULID(chat.PeerID)) {
+		if !requested[chat.ChatID] {
 			return nil, errors.New("invalid sidebar grant")
 		}
 		delete(requested, chat.ChatID)
 		if chat.Group {
 			watch.groups[chat.ChatID] = true
 		}
-		if chat.PeerID != "" {
-			peers[chat.PeerID] = true
-		}
-	}
-	for id := range peers {
-		watch.peers = append(watch.peers, id)
 	}
 	return watch, nil
 }
 
-func (p *sidebarCoordinator) install(c *Connection, expected, watch *sidebarWatch) (bool, error) {
+func (p *sidebarCoordinator) install(c *Connection, expected, watch *sidebarWatch) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.state == lifecycleClosed || c.ctx.Err() != nil {
-		return false, context.Canceled
+		return context.Canceled
 	}
 	old := p.watches[c]
 	if watch.generation != c.sidebarSerial.Load() || (expected != nil && old != expected) {
-		return false, nil
+		return nil
 	}
 	previous := 0
 	if old != nil {
 		previous = len(old.chatIDs)
 	}
 	if p.references-previous+len(watch.chatIDs) > min(p.server.config.MaxMemberships, 100000) {
-		return false, errRoomLimit
+		return errRoomLimit
 	}
 	if old != nil {
 		for id := range old.groups {
@@ -152,7 +130,7 @@ func (p *sidebarCoordinator) install(c *Connection, expected, watch *sidebarWatc
 		if feed == nil {
 			if len(p.feeds) >= p.server.config.MaxRooms {
 				p.removeLocked(c)
-				return false, errRoomLimit
+				return errRoomLimit
 			}
 			ctx, cancel := context.WithCancel(p.server.ctx)
 			feed = &sidebarFeed{cancel: cancel, watchers: make(map[*Connection]*sidebarWatch)}
@@ -162,35 +140,7 @@ func (p *sidebarCoordinator) install(c *Connection, expected, watch *sidebarWatc
 		}
 		feed.watchers[c] = watch
 	}
-	return old == nil || !samePeers(old.peers, watch.peers), nil
-}
-
-func samePeers(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	seen := make(map[string]bool, len(a))
-	for _, id := range a {
-		seen[id] = true
-	}
-	for _, id := range b {
-		if !seen[id] {
-			return false
-		}
-	}
-	return true
-}
-
-func sidebarPresenceEvent(watch *sidebarWatch, states map[string]string, now time.Time) protocol.Event {
-	statuses := make([]protocol.PresenceStatus, 0, len(watch.peers))
-	for _, id := range watch.peers {
-		state := states[id]
-		if state == "" {
-			state = "unknown"
-		}
-		statuses = append(statuses, protocol.PresenceStatus{UserID: id, State: state})
-	}
-	return protocol.Event{Type: protocol.EventSidebarPresence, Version: 1, ObservedAt: now.UTC().Format(time.RFC3339Nano), ValidForMS: min(15000, int(watch.expires.Sub(now).Milliseconds())), Statuses: statuses}
+	return nil
 }
 
 func (p *sidebarCoordinator) leaveLocked(c *Connection, id string) {
@@ -209,6 +159,13 @@ func (p *sidebarCoordinator) removeLocked(c *Connection) {
 		for id := range watch.groups {
 			p.leaveLocked(c, id)
 		}
+	}
+}
+func (p *sidebarCoordinator) removeIf(c *Connection, expected *sidebarWatch) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.watches[c] == expected {
+		p.removeLocked(c)
 	}
 }
 func (p *sidebarCoordinator) remove(c *Connection) {
@@ -284,17 +241,11 @@ func (p *sidebarCoordinator) run() {
 func (p *sidebarCoordinator) sweep() {
 	now := time.Now()
 	p.mu.Lock()
-	watches := make(map[*Connection]*sidebarWatch, len(p.watches))
 	due := make(map[*Connection]*sidebarWatch)
-	peers := make(map[string]bool)
 	for c, w := range p.watches {
 		if c.ctx.Err() != nil || w.generation != c.sidebarSerial.Load() || !now.Before(w.expires) {
 			p.removeLocked(c)
 			continue
-		}
-		watches[c] = w
-		for _, id := range w.peers {
-			peers[id] = true
 		}
 		if !now.Before(w.nextAuth) {
 			due[c] = w
@@ -303,15 +254,6 @@ func (p *sidebarCoordinator) sweep() {
 	p.mu.Unlock()
 	ctx, cancel := context.WithTimeout(p.server.ctx, p.server.config.APITimeout)
 	defer cancel()
-	ids := make([]string, 0, len(peers))
-	for id := range peers {
-		ids = append(ids, id)
-	}
-	states := p.server.presence.snapshot(ctx, ids)
-	observed := time.Now()
-	for c, w := range watches {
-		p.deliver(c, w, sidebarPresenceEvent(w, states, observed))
-	}
 	jobs := make(chan struct {
 		c *Connection
 		w *sidebarWatch
@@ -323,8 +265,11 @@ func (p *sidebarCoordinator) sweep() {
 			defer workers.Done()
 			for job := range jobs {
 				w, err := p.authorize(ctx, job.c, job.w.chatIDs, job.w.generation)
-				if err == nil {
-					_, _ = p.install(job.c, job.w, w)
+				switch {
+				case err == nil:
+					_ = p.install(job.c, job.w, w)
+				case errors.Is(err, grpcauth.ErrUnauthorized):
+					p.removeIf(job.c, job.w)
 				}
 			}
 		}()

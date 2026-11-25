@@ -59,33 +59,28 @@ type sessionRooms struct {
 	closed  sync.Once
 }
 
-type trackingConnectionLeases struct {
+type trackingAdmission struct {
 	mu       sync.Mutex
 	acquired int
 	released int
 	release  chan struct{}
 }
 
-func (leases *trackingConnectionLeases) AcquireConnectionLease(context.Context, string) (string, bool, error) {
+func (leases *trackingAdmission) Admit(context.Context, string) (bool, error) {
 	leases.mu.Lock()
 	leases.acquired++
 	leases.mu.Unlock()
-	return "test-lease", true, nil
-}
-
-func (*trackingConnectionLeases) RenewConnectionLease(context.Context, string, string) (bool, error) {
 	return true, nil
 }
 
-func (leases *trackingConnectionLeases) ReleaseConnectionLease(_ context.Context, _, _ string) error {
+func (leases *trackingAdmission) Release(string) {
 	leases.mu.Lock()
 	leases.released++
 	leases.mu.Unlock()
 	leases.release <- struct{}{}
-	return nil
 }
 
-func (leases *trackingConnectionLeases) counts() (int, int) {
+func (leases *trackingAdmission) counts() (int, int) {
 	leases.mu.Lock()
 	defer leases.mu.Unlock()
 	return leases.acquired, leases.released
@@ -224,8 +219,8 @@ func TestDeniedSessionReleasesConnectionLease(t *testing.T) {
 		return grpcauth.Session{}, grpcauth.ErrUnauthorized
 	})
 	server, secret := newSessionServer(t, &sessionRooms{}, auth)
-	leases := &trackingConnectionLeases{release: make(chan struct{}, 1)}
-	server.connectionLeases = leases
+	leases := &trackingAdmission{release: make(chan struct{}, 1)}
+	server.admission = leases
 	done := make(chan struct{})
 	socket := dialSessionSocket(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		server.upgrade(w, r)
@@ -246,8 +241,8 @@ func TestDeniedSessionReleasesConnectionLease(t *testing.T) {
 
 func TestFailedHTTPUpgradeReleasesConnectionLease(t *testing.T) {
 	server, secret := newSessionServer(t, &sessionRooms{}, nil)
-	leases := &trackingConnectionLeases{release: make(chan struct{}, 1)}
-	server.connectionLeases = leases
+	leases := &trackingAdmission{release: make(chan struct{}, 1)}
+	server.admission = leases
 	done := make(chan struct{})
 	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		server.upgrade(w, r)
@@ -285,8 +280,8 @@ func TestInvalidOriginDoesNotAcquireConnectionLease(t *testing.T) {
 	} {
 		t.Run(fmt.Sprint(origins), func(t *testing.T) {
 			server, secret := newSessionServer(t, &sessionRooms{}, nil)
-			leases := &trackingConnectionLeases{release: make(chan struct{}, 1)}
-			server.connectionLeases = leases
+			leases := &trackingAdmission{release: make(chan struct{}, 1)}
+			server.admission = leases
 			httpServer := httptest.NewServer(http.HandlerFunc(server.upgrade))
 			defer httpServer.Close()
 			dialer := websocket.Dialer{Subprotocols: []string{"messenger", "messenger-ticket." + testWSToken(secret, strings.Repeat("a", 64))}}
@@ -319,8 +314,8 @@ func TestAllowedOriginUpgradesWithSignedTicket(t *testing.T) {
 
 func TestHandshakeLimitRejectsBeforeConnectionLease(t *testing.T) {
 	server, secret := newSessionServer(t, &sessionRooms{}, nil)
-	leases := &trackingConnectionLeases{release: make(chan struct{}, 1)}
-	server.connectionLeases = leases
+	leases := &trackingAdmission{release: make(chan struct{}, 1)}
+	server.admission = leases
 	called := false
 	server.handshakeLimiter = handshakeLimiterFunc(func(_ context.Context, userID string, limit int, window time.Duration) (bool, error) {
 		called = true
@@ -355,8 +350,8 @@ func TestClosedSocketReleasesConnectionLease(t *testing.T) {
 		return grpcauth.Session{UserID: sessionTestUser, DeviceID: "device", SessionID: sessionID}, nil
 	})
 	server, secret := newSessionServer(t, &sessionRooms{}, auth)
-	leases := &trackingConnectionLeases{release: make(chan struct{}, 1)}
-	server.connectionLeases = leases
+	leases := &trackingAdmission{release: make(chan struct{}, 1)}
+	server.admission = leases
 	socket := dialSessionSocket(t, http.HandlerFunc(server.upgrade), testWSToken(secret, sessionID))
 	if err := socket.Close(); err != nil {
 		t.Fatalf("close socket: %v", err)

@@ -14,12 +14,12 @@ import (
 	"messenger/ws/internal/ticket"
 )
 
-func TestExpiredConnectionReleasesAdmissionLease(t *testing.T) {
+func TestExpiredConnectionReleasesAdmission(t *testing.T) {
 	base := newRaceConnection(t, &raceRooms{}, nil)
 	t.Cleanup(base.Close)
-	leases := &trackingConnectionLeases{release: make(chan struct{}, 1)}
-	base.server.connectionLeases = leases
-	connection := newConnection(base.server, nil, ticket.Identity{UserID: sessionTestUser, ExpiresAt: time.Now().Add(-time.Second)}, "expired-lease")
+	leases := &trackingAdmission{release: make(chan struct{}, 1)}
+	base.server.admission = leases
+	connection := newConnection(base.server, nil, ticket.Identity{UserID: sessionTestUser, ExpiresAt: time.Now().Add(-time.Second)})
 	select {
 	case <-connection.ctx.Done():
 	case <-time.After(time.Second):
@@ -41,7 +41,7 @@ func TestExpiredConnectionClosesDuringConstruction(t *testing.T) {
 	base := newRaceConnection(t, &raceRooms{}, nil)
 	t.Cleanup(base.Close)
 	for range 100 {
-		connection := newConnection(base.server, nil, ticket.Identity{ExpiresAt: time.Now().Add(-time.Second)}, "")
+		connection := newConnection(base.server, nil, ticket.Identity{ExpiresAt: time.Now().Add(-time.Second)})
 		select {
 		case <-connection.ctx.Done():
 		case <-time.After(time.Second):

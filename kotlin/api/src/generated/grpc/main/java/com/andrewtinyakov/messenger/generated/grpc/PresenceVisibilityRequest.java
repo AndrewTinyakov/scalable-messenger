@@ -6,12 +6,12 @@
 package com.andrewtinyakov.messenger.generated.grpc;
 
 /**
- * Protobuf type {@code messenger.authorization.v1.AuthorizePresenceRequest}
+ * Protobuf type {@code messenger.authorization.v1.PresenceVisibilityRequest}
  */
-public final class AuthorizePresenceRequest extends
+public final class PresenceVisibilityRequest extends
     com.google.protobuf.GeneratedMessage implements
-    // @@protoc_insertion_point(message_implements:messenger.authorization.v1.AuthorizePresenceRequest)
-    AuthorizePresenceRequestOrBuilder {
+    // @@protoc_insertion_point(message_implements:messenger.authorization.v1.PresenceVisibilityRequest)
+    PresenceVisibilityRequestOrBuilder {
 private static final long serialVersionUID = 0L;
   static {
     com.google.protobuf.RuntimeVersion.validateProtobufGencodeVersion(
@@ -20,30 +20,29 @@ private static final long serialVersionUID = 0L;
       /* minor= */ 30,
       /* patch= */ 2,
       /* suffix= */ "",
-      AuthorizePresenceRequest.class.getName());
+      PresenceVisibilityRequest.class.getName());
   }
-  // Use AuthorizePresenceRequest.newBuilder() to construct.
-  private AuthorizePresenceRequest(com.google.protobuf.GeneratedMessage.Builder<?> builder) {
+  // Use PresenceVisibilityRequest.newBuilder() to construct.
+  private PresenceVisibilityRequest(com.google.protobuf.GeneratedMessage.Builder<?> builder) {
     super(builder);
   }
-  private AuthorizePresenceRequest() {
+  private PresenceVisibilityRequest() {
     sessionId_ = "";
-    chatId_ = "";
     userIds_ =
         com.google.protobuf.LazyStringArrayList.emptyList();
   }
 
   public static final com.google.protobuf.Descriptors.Descriptor
       getDescriptor() {
-    return com.andrewtinyakov.messenger.generated.grpc.ChatAuthorizationOuterClass.internal_static_messenger_authorization_v1_AuthorizePresenceRequest_descriptor;
+    return com.andrewtinyakov.messenger.generated.grpc.ChatAuthorizationOuterClass.internal_static_messenger_authorization_v1_PresenceVisibilityRequest_descriptor;
   }
 
   @java.lang.Override
   protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
       internalGetFieldAccessorTable() {
-    return com.andrewtinyakov.messenger.generated.grpc.ChatAuthorizationOuterClass.internal_static_messenger_authorization_v1_AuthorizePresenceRequest_fieldAccessorTable
+    return com.andrewtinyakov.messenger.generated.grpc.ChatAuthorizationOuterClass.internal_static_messenger_authorization_v1_PresenceVisibilityRequest_fieldAccessorTable
         .ensureFieldAccessorsInitialized(
-            com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest.class, com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest.Builder.class);
+            com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest.class, com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest.Builder.class);
   }
 
   public static final int SESSION_ID_FIELD_NUMBER = 1;
@@ -85,51 +84,12 @@ private static final long serialVersionUID = 0L;
     }
   }
 
-  public static final int CHAT_ID_FIELD_NUMBER = 2;
-  @SuppressWarnings("serial")
-  private volatile java.lang.Object chatId_ = "";
-  /**
-   * <code>string chat_id = 2;</code>
-   * @return The chatId.
-   */
-  @java.lang.Override
-  public java.lang.String getChatId() {
-    java.lang.Object ref = chatId_;
-    if (ref instanceof java.lang.String) {
-      return (java.lang.String) ref;
-    } else {
-      com.google.protobuf.ByteString bs =
-          (com.google.protobuf.ByteString) ref;
-      java.lang.String s = bs.toStringUtf8();
-      chatId_ = s;
-      return s;
-    }
-  }
-  /**
-   * <code>string chat_id = 2;</code>
-   * @return The bytes for chatId.
-   */
-  @java.lang.Override
-  public com.google.protobuf.ByteString
-      getChatIdBytes() {
-    java.lang.Object ref = chatId_;
-    if (ref instanceof java.lang.String) {
-      com.google.protobuf.ByteString b =
-          com.google.protobuf.ByteString.copyFromUtf8(
-              (java.lang.String) ref);
-      chatId_ = b;
-      return b;
-    } else {
-      return (com.google.protobuf.ByteString) ref;
-    }
-  }
-
-  public static final int USER_IDS_FIELD_NUMBER = 3;
+  public static final int USER_IDS_FIELD_NUMBER = 2;
   @SuppressWarnings("serial")
   private com.google.protobuf.LazyStringArrayList userIds_ =
       com.google.protobuf.LazyStringArrayList.emptyList();
   /**
-   * <code>repeated string user_ids = 3;</code>
+   * <code>repeated string user_ids = 2;</code>
    * @return A list containing the userIds.
    */
   public com.google.protobuf.ProtocolStringList
@@ -137,14 +97,14 @@ private static final long serialVersionUID = 0L;
     return userIds_;
   }
   /**
-   * <code>repeated string user_ids = 3;</code>
+   * <code>repeated string user_ids = 2;</code>
    * @return The count of userIds.
    */
   public int getUserIdsCount() {
     return userIds_.size();
   }
   /**
-   * <code>repeated string user_ids = 3;</code>
+   * <code>repeated string user_ids = 2;</code>
    * @param index The index of the element to return.
    * @return The userIds at the given index.
    */
@@ -152,7 +112,7 @@ private static final long serialVersionUID = 0L;
     return userIds_.get(index);
   }
   /**
-   * <code>repeated string user_ids = 3;</code>
+   * <code>repeated string user_ids = 2;</code>
    * @param index The index of the value to return.
    * @return The bytes of the userIds at the given index.
    */
@@ -178,11 +138,8 @@ private static final long serialVersionUID = 0L;
     if (!com.google.protobuf.GeneratedMessage.isStringEmpty(sessionId_)) {
       com.google.protobuf.GeneratedMessage.writeString(output, 1, sessionId_);
     }
-    if (!com.google.protobuf.GeneratedMessage.isStringEmpty(chatId_)) {
-      com.google.protobuf.GeneratedMessage.writeString(output, 2, chatId_);
-    }
     for (int i = 0; i < userIds_.size(); i++) {
-      com.google.protobuf.GeneratedMessage.writeString(output, 3, userIds_.getRaw(i));
+      com.google.protobuf.GeneratedMessage.writeString(output, 2, userIds_.getRaw(i));
     }
     getUnknownFields().writeTo(output);
   }
@@ -195,9 +152,6 @@ private static final long serialVersionUID = 0L;
     size = 0;
     if (!com.google.protobuf.GeneratedMessage.isStringEmpty(sessionId_)) {
       size += com.google.protobuf.GeneratedMessage.computeStringSize(1, sessionId_);
-    }
-    if (!com.google.protobuf.GeneratedMessage.isStringEmpty(chatId_)) {
-      size += com.google.protobuf.GeneratedMessage.computeStringSize(2, chatId_);
     }
     {
       int dataSize = 0;
@@ -217,15 +171,13 @@ private static final long serialVersionUID = 0L;
     if (obj == this) {
      return true;
     }
-    if (!(obj instanceof com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest)) {
+    if (!(obj instanceof com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest)) {
       return super.equals(obj);
     }
-    com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest other = (com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest) obj;
+    com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest other = (com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest) obj;
 
     if (!getSessionId()
         .equals(other.getSessionId())) return false;
-    if (!getChatId()
-        .equals(other.getChatId())) return false;
     if (!getUserIdsList()
         .equals(other.getUserIdsList())) return false;
     if (!getUnknownFields().equals(other.getUnknownFields())) return false;
@@ -241,8 +193,6 @@ private static final long serialVersionUID = 0L;
     hash = (19 * hash) + getDescriptor().hashCode();
     hash = (37 * hash) + SESSION_ID_FIELD_NUMBER;
     hash = (53 * hash) + getSessionId().hashCode();
-    hash = (37 * hash) + CHAT_ID_FIELD_NUMBER;
-    hash = (53 * hash) + getChatId().hashCode();
     if (getUserIdsCount() > 0) {
       hash = (37 * hash) + USER_IDS_FIELD_NUMBER;
       hash = (53 * hash) + getUserIdsList().hashCode();
@@ -252,44 +202,44 @@ private static final long serialVersionUID = 0L;
     return hash;
   }
 
-  public static com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest parseFrom(
+  public static com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest parseFrom(
       java.nio.ByteBuffer data)
       throws com.google.protobuf.InvalidProtocolBufferException {
     return PARSER.parseFrom(data);
   }
-  public static com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest parseFrom(
+  public static com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest parseFrom(
       java.nio.ByteBuffer data,
       com.google.protobuf.ExtensionRegistryLite extensionRegistry)
       throws com.google.protobuf.InvalidProtocolBufferException {
     return PARSER.parseFrom(data, extensionRegistry);
   }
-  public static com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest parseFrom(
+  public static com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest parseFrom(
       com.google.protobuf.ByteString data)
       throws com.google.protobuf.InvalidProtocolBufferException {
     return PARSER.parseFrom(data);
   }
-  public static com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest parseFrom(
+  public static com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest parseFrom(
       com.google.protobuf.ByteString data,
       com.google.protobuf.ExtensionRegistryLite extensionRegistry)
       throws com.google.protobuf.InvalidProtocolBufferException {
     return PARSER.parseFrom(data, extensionRegistry);
   }
-  public static com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest parseFrom(byte[] data)
+  public static com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest parseFrom(byte[] data)
       throws com.google.protobuf.InvalidProtocolBufferException {
     return PARSER.parseFrom(data);
   }
-  public static com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest parseFrom(
+  public static com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest parseFrom(
       byte[] data,
       com.google.protobuf.ExtensionRegistryLite extensionRegistry)
       throws com.google.protobuf.InvalidProtocolBufferException {
     return PARSER.parseFrom(data, extensionRegistry);
   }
-  public static com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest parseFrom(java.io.InputStream input)
+  public static com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest parseFrom(java.io.InputStream input)
       throws java.io.IOException {
     return com.google.protobuf.GeneratedMessage
         .parseWithIOException(PARSER, input);
   }
-  public static com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest parseFrom(
+  public static com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest parseFrom(
       java.io.InputStream input,
       com.google.protobuf.ExtensionRegistryLite extensionRegistry)
       throws java.io.IOException {
@@ -297,26 +247,26 @@ private static final long serialVersionUID = 0L;
         .parseWithIOException(PARSER, input, extensionRegistry);
   }
 
-  public static com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest parseDelimitedFrom(java.io.InputStream input)
+  public static com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest parseDelimitedFrom(java.io.InputStream input)
       throws java.io.IOException {
     return com.google.protobuf.GeneratedMessage
         .parseDelimitedWithIOException(PARSER, input);
   }
 
-  public static com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest parseDelimitedFrom(
+  public static com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest parseDelimitedFrom(
       java.io.InputStream input,
       com.google.protobuf.ExtensionRegistryLite extensionRegistry)
       throws java.io.IOException {
     return com.google.protobuf.GeneratedMessage
         .parseDelimitedWithIOException(PARSER, input, extensionRegistry);
   }
-  public static com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest parseFrom(
+  public static com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest parseFrom(
       com.google.protobuf.CodedInputStream input)
       throws java.io.IOException {
     return com.google.protobuf.GeneratedMessage
         .parseWithIOException(PARSER, input);
   }
-  public static com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest parseFrom(
+  public static com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest parseFrom(
       com.google.protobuf.CodedInputStream input,
       com.google.protobuf.ExtensionRegistryLite extensionRegistry)
       throws java.io.IOException {
@@ -329,7 +279,7 @@ private static final long serialVersionUID = 0L;
   public static Builder newBuilder() {
     return DEFAULT_INSTANCE.toBuilder();
   }
-  public static Builder newBuilder(com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest prototype) {
+  public static Builder newBuilder(com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest prototype) {
     return DEFAULT_INSTANCE.toBuilder().mergeFrom(prototype);
   }
   @java.lang.Override
@@ -345,26 +295,26 @@ private static final long serialVersionUID = 0L;
     return builder;
   }
   /**
-   * Protobuf type {@code messenger.authorization.v1.AuthorizePresenceRequest}
+   * Protobuf type {@code messenger.authorization.v1.PresenceVisibilityRequest}
    */
   public static final class Builder extends
       com.google.protobuf.GeneratedMessage.Builder<Builder> implements
-      // @@protoc_insertion_point(builder_implements:messenger.authorization.v1.AuthorizePresenceRequest)
-      com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequestOrBuilder {
+      // @@protoc_insertion_point(builder_implements:messenger.authorization.v1.PresenceVisibilityRequest)
+      com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequestOrBuilder {
     public static final com.google.protobuf.Descriptors.Descriptor
         getDescriptor() {
-      return com.andrewtinyakov.messenger.generated.grpc.ChatAuthorizationOuterClass.internal_static_messenger_authorization_v1_AuthorizePresenceRequest_descriptor;
+      return com.andrewtinyakov.messenger.generated.grpc.ChatAuthorizationOuterClass.internal_static_messenger_authorization_v1_PresenceVisibilityRequest_descriptor;
     }
 
     @java.lang.Override
     protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
         internalGetFieldAccessorTable() {
-      return com.andrewtinyakov.messenger.generated.grpc.ChatAuthorizationOuterClass.internal_static_messenger_authorization_v1_AuthorizePresenceRequest_fieldAccessorTable
+      return com.andrewtinyakov.messenger.generated.grpc.ChatAuthorizationOuterClass.internal_static_messenger_authorization_v1_PresenceVisibilityRequest_fieldAccessorTable
           .ensureFieldAccessorsInitialized(
-              com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest.class, com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest.Builder.class);
+              com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest.class, com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest.Builder.class);
     }
 
-    // Construct using com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest.newBuilder()
+    // Construct using com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest.newBuilder()
     private Builder() {
 
     }
@@ -379,7 +329,6 @@ private static final long serialVersionUID = 0L;
       super.clear();
       bitField0_ = 0;
       sessionId_ = "";
-      chatId_ = "";
       userIds_ =
           com.google.protobuf.LazyStringArrayList.emptyList();
       return this;
@@ -388,17 +337,17 @@ private static final long serialVersionUID = 0L;
     @java.lang.Override
     public com.google.protobuf.Descriptors.Descriptor
         getDescriptorForType() {
-      return com.andrewtinyakov.messenger.generated.grpc.ChatAuthorizationOuterClass.internal_static_messenger_authorization_v1_AuthorizePresenceRequest_descriptor;
+      return com.andrewtinyakov.messenger.generated.grpc.ChatAuthorizationOuterClass.internal_static_messenger_authorization_v1_PresenceVisibilityRequest_descriptor;
     }
 
     @java.lang.Override
-    public com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest getDefaultInstanceForType() {
-      return com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest.getDefaultInstance();
+    public com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest getDefaultInstanceForType() {
+      return com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest.getDefaultInstance();
     }
 
     @java.lang.Override
-    public com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest build() {
-      com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest result = buildPartial();
+    public com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest build() {
+      com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest result = buildPartial();
       if (!result.isInitialized()) {
         throw newUninitializedMessageException(result);
       }
@@ -406,22 +355,19 @@ private static final long serialVersionUID = 0L;
     }
 
     @java.lang.Override
-    public com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest buildPartial() {
-      com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest result = new com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest(this);
+    public com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest buildPartial() {
+      com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest result = new com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest(this);
       if (bitField0_ != 0) { buildPartial0(result); }
       onBuilt();
       return result;
     }
 
-    private void buildPartial0(com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest result) {
+    private void buildPartial0(com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest result) {
       int from_bitField0_ = bitField0_;
       if (((from_bitField0_ & 0x00000001) != 0)) {
         result.sessionId_ = sessionId_;
       }
       if (((from_bitField0_ & 0x00000002) != 0)) {
-        result.chatId_ = chatId_;
-      }
-      if (((from_bitField0_ & 0x00000004) != 0)) {
         userIds_.makeImmutable();
         result.userIds_ = userIds_;
       }
@@ -429,30 +375,25 @@ private static final long serialVersionUID = 0L;
 
     @java.lang.Override
     public Builder mergeFrom(com.google.protobuf.Message other) {
-      if (other instanceof com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest) {
-        return mergeFrom((com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest)other);
+      if (other instanceof com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest) {
+        return mergeFrom((com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest)other);
       } else {
         super.mergeFrom(other);
         return this;
       }
     }
 
-    public Builder mergeFrom(com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest other) {
-      if (other == com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest.getDefaultInstance()) return this;
+    public Builder mergeFrom(com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest other) {
+      if (other == com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest.getDefaultInstance()) return this;
       if (!other.getSessionId().isEmpty()) {
         sessionId_ = other.sessionId_;
         bitField0_ |= 0x00000001;
         onChanged();
       }
-      if (!other.getChatId().isEmpty()) {
-        chatId_ = other.chatId_;
-        bitField0_ |= 0x00000002;
-        onChanged();
-      }
       if (!other.userIds_.isEmpty()) {
         if (userIds_.isEmpty()) {
           userIds_ = other.userIds_;
-          bitField0_ |= 0x00000004;
+          bitField0_ |= 0x00000002;
         } else {
           ensureUserIdsIsMutable();
           userIds_.addAll(other.userIds_);
@@ -491,16 +432,11 @@ private static final long serialVersionUID = 0L;
               break;
             } // case 10
             case 18: {
-              chatId_ = input.readStringRequireUtf8();
-              bitField0_ |= 0x00000002;
-              break;
-            } // case 18
-            case 26: {
               java.lang.String s = input.readStringRequireUtf8();
               ensureUserIdsIsMutable();
               userIds_.add(s);
               break;
-            } // case 26
+            } // case 18
             default: {
               if (!super.parseUnknownField(input, extensionRegistry, tag)) {
                 done = true; // was an endgroup tag
@@ -590,88 +526,16 @@ private static final long serialVersionUID = 0L;
       return this;
     }
 
-    private java.lang.Object chatId_ = "";
-    /**
-     * <code>string chat_id = 2;</code>
-     * @return The chatId.
-     */
-    public java.lang.String getChatId() {
-      java.lang.Object ref = chatId_;
-      if (!(ref instanceof java.lang.String)) {
-        com.google.protobuf.ByteString bs =
-            (com.google.protobuf.ByteString) ref;
-        java.lang.String s = bs.toStringUtf8();
-        chatId_ = s;
-        return s;
-      } else {
-        return (java.lang.String) ref;
-      }
-    }
-    /**
-     * <code>string chat_id = 2;</code>
-     * @return The bytes for chatId.
-     */
-    public com.google.protobuf.ByteString
-        getChatIdBytes() {
-      java.lang.Object ref = chatId_;
-      if (ref instanceof String) {
-        com.google.protobuf.ByteString b =
-            com.google.protobuf.ByteString.copyFromUtf8(
-                (java.lang.String) ref);
-        chatId_ = b;
-        return b;
-      } else {
-        return (com.google.protobuf.ByteString) ref;
-      }
-    }
-    /**
-     * <code>string chat_id = 2;</code>
-     * @param value The chatId to set.
-     * @return This builder for chaining.
-     */
-    public Builder setChatId(
-        java.lang.String value) {
-      if (value == null) { throw new NullPointerException(); }
-      chatId_ = value;
-      bitField0_ |= 0x00000002;
-      onChanged();
-      return this;
-    }
-    /**
-     * <code>string chat_id = 2;</code>
-     * @return This builder for chaining.
-     */
-    public Builder clearChatId() {
-      chatId_ = getDefaultInstance().getChatId();
-      bitField0_ = (bitField0_ & ~0x00000002);
-      onChanged();
-      return this;
-    }
-    /**
-     * <code>string chat_id = 2;</code>
-     * @param value The bytes for chatId to set.
-     * @return This builder for chaining.
-     */
-    public Builder setChatIdBytes(
-        com.google.protobuf.ByteString value) {
-      if (value == null) { throw new NullPointerException(); }
-      checkByteStringIsUtf8(value);
-      chatId_ = value;
-      bitField0_ |= 0x00000002;
-      onChanged();
-      return this;
-    }
-
     private com.google.protobuf.LazyStringArrayList userIds_ =
         com.google.protobuf.LazyStringArrayList.emptyList();
     private void ensureUserIdsIsMutable() {
       if (!userIds_.isModifiable()) {
         userIds_ = new com.google.protobuf.LazyStringArrayList(userIds_);
       }
-      bitField0_ |= 0x00000004;
+      bitField0_ |= 0x00000002;
     }
     /**
-     * <code>repeated string user_ids = 3;</code>
+     * <code>repeated string user_ids = 2;</code>
      * @return A list containing the userIds.
      */
     public com.google.protobuf.ProtocolStringList
@@ -680,14 +544,14 @@ private static final long serialVersionUID = 0L;
       return userIds_;
     }
     /**
-     * <code>repeated string user_ids = 3;</code>
+     * <code>repeated string user_ids = 2;</code>
      * @return The count of userIds.
      */
     public int getUserIdsCount() {
       return userIds_.size();
     }
     /**
-     * <code>repeated string user_ids = 3;</code>
+     * <code>repeated string user_ids = 2;</code>
      * @param index The index of the element to return.
      * @return The userIds at the given index.
      */
@@ -695,7 +559,7 @@ private static final long serialVersionUID = 0L;
       return userIds_.get(index);
     }
     /**
-     * <code>repeated string user_ids = 3;</code>
+     * <code>repeated string user_ids = 2;</code>
      * @param index The index of the value to return.
      * @return The bytes of the userIds at the given index.
      */
@@ -704,7 +568,7 @@ private static final long serialVersionUID = 0L;
       return userIds_.getByteString(index);
     }
     /**
-     * <code>repeated string user_ids = 3;</code>
+     * <code>repeated string user_ids = 2;</code>
      * @param index The index to set the value at.
      * @param value The userIds to set.
      * @return This builder for chaining.
@@ -714,12 +578,12 @@ private static final long serialVersionUID = 0L;
       if (value == null) { throw new NullPointerException(); }
       ensureUserIdsIsMutable();
       userIds_.set(index, value);
-      bitField0_ |= 0x00000004;
+      bitField0_ |= 0x00000002;
       onChanged();
       return this;
     }
     /**
-     * <code>repeated string user_ids = 3;</code>
+     * <code>repeated string user_ids = 2;</code>
      * @param value The userIds to add.
      * @return This builder for chaining.
      */
@@ -728,12 +592,12 @@ private static final long serialVersionUID = 0L;
       if (value == null) { throw new NullPointerException(); }
       ensureUserIdsIsMutable();
       userIds_.add(value);
-      bitField0_ |= 0x00000004;
+      bitField0_ |= 0x00000002;
       onChanged();
       return this;
     }
     /**
-     * <code>repeated string user_ids = 3;</code>
+     * <code>repeated string user_ids = 2;</code>
      * @param values The userIds to add.
      * @return This builder for chaining.
      */
@@ -742,23 +606,23 @@ private static final long serialVersionUID = 0L;
       ensureUserIdsIsMutable();
       com.google.protobuf.AbstractMessageLite.Builder.addAll(
           values, userIds_);
-      bitField0_ |= 0x00000004;
+      bitField0_ |= 0x00000002;
       onChanged();
       return this;
     }
     /**
-     * <code>repeated string user_ids = 3;</code>
+     * <code>repeated string user_ids = 2;</code>
      * @return This builder for chaining.
      */
     public Builder clearUserIds() {
       userIds_ =
         com.google.protobuf.LazyStringArrayList.emptyList();
-      bitField0_ = (bitField0_ & ~0x00000004);;
+      bitField0_ = (bitField0_ & ~0x00000002);;
       onChanged();
       return this;
     }
     /**
-     * <code>repeated string user_ids = 3;</code>
+     * <code>repeated string user_ids = 2;</code>
      * @param value The bytes of the userIds to add.
      * @return This builder for chaining.
      */
@@ -768,28 +632,28 @@ private static final long serialVersionUID = 0L;
       checkByteStringIsUtf8(value);
       ensureUserIdsIsMutable();
       userIds_.add(value);
-      bitField0_ |= 0x00000004;
+      bitField0_ |= 0x00000002;
       onChanged();
       return this;
     }
 
-    // @@protoc_insertion_point(builder_scope:messenger.authorization.v1.AuthorizePresenceRequest)
+    // @@protoc_insertion_point(builder_scope:messenger.authorization.v1.PresenceVisibilityRequest)
   }
 
-  // @@protoc_insertion_point(class_scope:messenger.authorization.v1.AuthorizePresenceRequest)
-  private static final com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest DEFAULT_INSTANCE;
+  // @@protoc_insertion_point(class_scope:messenger.authorization.v1.PresenceVisibilityRequest)
+  private static final com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest DEFAULT_INSTANCE;
   static {
-    DEFAULT_INSTANCE = new com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest();
+    DEFAULT_INSTANCE = new com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest();
   }
 
-  public static com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest getDefaultInstance() {
+  public static com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest getDefaultInstance() {
     return DEFAULT_INSTANCE;
   }
 
-  private static final com.google.protobuf.Parser<AuthorizePresenceRequest>
-      PARSER = new com.google.protobuf.AbstractParser<AuthorizePresenceRequest>() {
+  private static final com.google.protobuf.Parser<PresenceVisibilityRequest>
+      PARSER = new com.google.protobuf.AbstractParser<PresenceVisibilityRequest>() {
     @java.lang.Override
-    public AuthorizePresenceRequest parsePartialFrom(
+    public PresenceVisibilityRequest parsePartialFrom(
         com.google.protobuf.CodedInputStream input,
         com.google.protobuf.ExtensionRegistryLite extensionRegistry)
         throws com.google.protobuf.InvalidProtocolBufferException {
@@ -808,17 +672,17 @@ private static final long serialVersionUID = 0L;
     }
   };
 
-  public static com.google.protobuf.Parser<AuthorizePresenceRequest> parser() {
+  public static com.google.protobuf.Parser<PresenceVisibilityRequest> parser() {
     return PARSER;
   }
 
   @java.lang.Override
-  public com.google.protobuf.Parser<AuthorizePresenceRequest> getParserForType() {
+  public com.google.protobuf.Parser<PresenceVisibilityRequest> getParserForType() {
     return PARSER;
   }
 
   @java.lang.Override
-  public com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest getDefaultInstanceForType() {
+  public com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest getDefaultInstanceForType() {
     return DEFAULT_INSTANCE;
   }
 

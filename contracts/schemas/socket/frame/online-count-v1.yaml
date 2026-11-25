@@ -1,0 +1,28 @@
+$schema: http://json-schema.org/draft-07/schema#
+title: SocketOnlineCountV1
+x-messenger-direction: server
+type: object
+additionalProperties: false
+required:
+  - type
+  - version
+  - chatId
+  - online
+  - members
+properties:
+  type:
+    const: online_count
+  version:
+    type: integer
+    const: 1
+  chatId:
+    type: string
+    pattern: ^[0-7][0-9A-HJKMNP-TV-Z]{25}$
+  online:
+    type: integer
+    minimum: 0
+    maximum: 200
+  members:
+    type: integer
+    minimum: 1
+    maximum: 200

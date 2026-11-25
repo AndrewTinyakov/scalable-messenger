@@ -5,8 +5,8 @@
 
 package com.andrewtinyakov.messenger.generated.grpc;
 
-public interface AuthorizePresenceRequestOrBuilder extends
-    // @@protoc_insertion_point(interface_extends:messenger.authorization.v1.AuthorizePresenceRequest)
+public interface PresenceVisibilityRequestOrBuilder extends
+    // @@protoc_insertion_point(interface_extends:messenger.authorization.v1.PresenceVisibilityRequest)
     com.google.protobuf.MessageOrBuilder {
 
   /**
@@ -22,36 +22,24 @@ public interface AuthorizePresenceRequestOrBuilder extends
       getSessionIdBytes();
 
   /**
-   * <code>string chat_id = 2;</code>
-   * @return The chatId.
-   */
-  java.lang.String getChatId();
-  /**
-   * <code>string chat_id = 2;</code>
-   * @return The bytes for chatId.
-   */
-  com.google.protobuf.ByteString
-      getChatIdBytes();
-
-  /**
-   * <code>repeated string user_ids = 3;</code>
+   * <code>repeated string user_ids = 2;</code>
    * @return A list containing the userIds.
    */
   java.util.List<java.lang.String>
       getUserIdsList();
   /**
-   * <code>repeated string user_ids = 3;</code>
+   * <code>repeated string user_ids = 2;</code>
    * @return The count of userIds.
    */
   int getUserIdsCount();
   /**
-   * <code>repeated string user_ids = 3;</code>
+   * <code>repeated string user_ids = 2;</code>
    * @param index The index of the element to return.
    * @return The userIds at the given index.
    */
   java.lang.String getUserIds(int index);
   /**
-   * <code>repeated string user_ids = 3;</code>
+   * <code>repeated string user_ids = 2;</code>
    * @param index The index of the value to return.
    * @return The bytes of the userIds at the given index.
    */

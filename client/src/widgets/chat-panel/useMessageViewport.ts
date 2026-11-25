@@ -225,6 +225,9 @@ export function useMessageViewport({
     const dragging = (event: PointerEvent) => {
       if (event.buttons) scrollInputUntil.current = Date.now() + 1500
     }
+    const focused = () => {
+      scrollInputUntil.current = Date.now() + 1500
+    }
     const keyboard = (event: KeyboardEvent) => {
       if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key))
         intentional()
@@ -262,6 +265,7 @@ export function useMessageViewport({
     scroller.addEventListener('pointerdown', intentional)
     scroller.addEventListener('pointermove', dragging)
     scroller.addEventListener('keydown', keyboard)
+    scroller.addEventListener('focusin', focused)
     return () => {
       resize?.disconnect()
       scroller.removeEventListener('wheel', intentional)
@@ -270,6 +274,7 @@ export function useMessageViewport({
       scroller.removeEventListener('pointerdown', intentional)
       scroller.removeEventListener('pointermove', dragging)
       scroller.removeEventListener('keydown', keyboard)
+      scroller.removeEventListener('focusin', focused)
     }
   }, [chatId])
 

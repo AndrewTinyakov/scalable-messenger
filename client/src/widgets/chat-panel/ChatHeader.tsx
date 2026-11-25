@@ -76,12 +76,14 @@ export function ChatHeader({
         group={group}
         online={status.online}
       />
-      <div className="chat-header-info">
+      <div className="chat-header-info" key={recipient ?? chat.id}>
         <h2>
           {title}
           {muted && <BellOff className="chat-muted-icon" size={15} aria-label="Muted" />}
         </h2>
-        {status.text && <p className={status.online ? 'online' : ''}>{status.text}</p>}
+        <p key={status.text} className={status.online ? 'online' : undefined}>
+          {status.text}
+        </p>
       </div>
       {group && onMembers && (
         <button className="icon-button" onClick={onMembers} aria-label="Group members">

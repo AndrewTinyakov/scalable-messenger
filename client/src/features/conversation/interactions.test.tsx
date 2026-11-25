@@ -321,7 +321,11 @@ describe('conversation interactions', () => {
         readers: [{ userId: 'reader-2', username: 'Carol', readAt: '2026-11-04T09:45:00Z' }],
         nextUserId: null,
       })
-    await act(async () => root.render(<InlineReaders message={message('1')} load={load} />))
+    await act(async () => root.render(<InlineReaders message={message('1')} group load={load} />))
+    const toggle = container.querySelector<HTMLButtonElement>('button[aria-expanded]')!
+    expect(toggle.textContent).toMatch(/^1\+ seen/)
+    expect(container.querySelector('time')).toBeNull()
+    await act(async () => toggle.click())
     expect(container.querySelector('time')?.dateTime).toBe('2026-11-04T09:30:00Z')
     const more = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
       (button) => button.textContent === 'More readers',
@@ -336,8 +340,37 @@ describe('conversation interactions', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1000)
     })
-    expect(container.textContent).toContain('messages created within the last seven days')
+    expect(container.textContent).toBe('Read times are kept for 7 days')
     expect(container.querySelectorAll('time')).toHaveLength(0)
+  })
+
+  it('shows a direct chat read as one relative time row and an unread message as not read', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 10, 4, 18, 0))
+    const readAt = new Date(2026, 10, 4, 14, 23).toISOString()
+    const page: ReaderPage = {
+      readers: [{ userId: 'reader-1', username: 'Bob', readAt }],
+      nextUserId: null,
+      detailsAvailable: true,
+      serverTime: new Date().toISOString(),
+      detailsExpiresAt: new Date(2026, 10, 9).toISOString(),
+    }
+    await act(async () =>
+      root.render(<InlineReaders message={message('1')} load={async () => page} />),
+    )
+    expect(container.querySelector('time')?.dateTime).toBe(readAt)
+    expect(container.textContent).toMatch(/^today at 2:23\sPM$/)
+    expect(container.querySelector('button')).toBeNull()
+    await act(async () =>
+      root.render(
+        <InlineReaders
+          key="unread"
+          message={message('2')}
+          load={async () => ({ ...page, readers: [] })}
+        />,
+      ),
+    )
+    expect(container.textContent).toBe('Not read yet')
   })
 
   it.each([false, true])(

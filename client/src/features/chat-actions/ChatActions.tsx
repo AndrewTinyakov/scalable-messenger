@@ -104,6 +104,7 @@ export function ChatActions({
       <DeleteConfirmation
         target={{ kind: confirm }}
         canDeleteEveryone={chat.kind === ChatKind.DIRECT || chat.ownerId === user.id}
+        peerName={chat.kind === ChatKind.DIRECT ? chatTitle(chat, user.id) : undefined}
         busy={busy}
         error={error}
         onCancel={onClose}

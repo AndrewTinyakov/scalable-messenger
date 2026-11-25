@@ -1,5 +1,5 @@
 import { Check, CheckCheck, CircleAlert, Clock3, Pin } from 'lucide-react'
-import { memo, useRef, type ReactNode } from 'react'
+import { memo, useRef, useState, type ReactNode } from 'react'
 import { colorIndex } from '../../shared/lib/color'
 import { formatMessageTime } from '../../shared/lib/time'
 import { Avatar } from '../../shared/ui/Avatar'
@@ -28,6 +28,7 @@ interface Props {
   runEnd?: boolean
   selectionMode?: boolean
   selected?: boolean
+  entering?: boolean
   aside?: ReactNode
 }
 
@@ -62,8 +63,10 @@ export const MessageItem = memo(function MessageItem({
   runEnd = true,
   selectionMode = false,
   selected = false,
+  entering = false,
   aside,
 }: Props) {
+  const [animating, setAnimating] = useState(entering)
   const bubbleRef = useRef<HTMLDivElement>(null)
   const pointer = useRef({ x: 0, y: 0, moved: false, touch: false })
   const state = send?.status || (mine ? 'saved' : undefined)
@@ -95,7 +98,10 @@ export const MessageItem = memo(function MessageItem({
   }
   return (
     <div
-      className={`message-row ${mine ? 'mine' : ''} ${highlighted ? 'message-revealed' : ''} ${runStart ? 'run-start' : 'run-continued'} ${runEnd ? 'run-end' : ''} ${selected ? 'message-selected' : ''}`}
+      className={`message-row ${mine ? 'mine' : ''} ${highlighted ? 'message-revealed' : ''} ${runStart ? 'run-start' : 'run-continued'} ${runEnd ? 'run-end' : ''} ${selected ? 'message-selected' : ''} ${animating ? 'message-enter' : ''}`}
+      onAnimationEnd={(event) => {
+        if (event.animationName === 'bubble-in') setAnimating(false)
+      }}
       data-message-id={message?.id}
       data-message-sequence={message?.sequence}
       tabIndex={message && !deleted ? 0 : -1}

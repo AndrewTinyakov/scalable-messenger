@@ -659,6 +659,56 @@ describe('messenger request coordination', () => {
     },
   )
 
+  it('keeps the selected direct chat on the sidebar presence watch instead of a per-chat watch', async () => {
+    vi.useFakeTimers()
+    window.history.replaceState(null, '', `/groups/${chatId}`)
+    await renderMessenger()
+    await act(async () => {
+      sockets[0].open()
+      messenger.updateChat({ ...direct, kind: ChatKind.DIRECT })
+      messenger.watchSidebarPeers([])
+    })
+    await act(async () => messenger.selectChat(direct.id))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1750)
+    })
+    const frames = () => sockets[0].sent.map((raw) => JSON.parse(raw))
+    expect(
+      frames()
+        .filter((frame) => frame.type === 'watch_sidebar')
+        .at(-1),
+    ).toEqual({
+      type: 'watch_sidebar',
+      version: 1,
+      chatIds: [direct.id],
+    })
+    expect(
+      frames().some((frame) => frame.type === 'watch_presence' && frame.chatId === direct.id),
+    ).toBe(false)
+    await act(async () =>
+      sockets[0].event({
+        type: 'sidebar_presence',
+        version: 1,
+        observedAt: new Date().toISOString(),
+        validForMs: 15000,
+        statuses: [{ userId: recipient.id, state: 'online' }],
+      }),
+    )
+    expect(messenger.features.presence[recipient.id]).toBe('online')
+    await act(async () => messenger.watchSidebarPeers([direct.id]))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1750)
+    })
+    expect(messenger.sidebarPresence[recipient.id]).toBe('online')
+    await act(async () => messenger.selectChat(chatId))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1750)
+    })
+    expect(
+      frames().some((frame) => frame.type === 'watch_presence' && frame.chatId === chatId),
+    ).toBe(true)
+  })
+
   it('debounces sidebar targets, expires presence to unknown and restores the watch after reconnect', async () => {
     vi.useFakeTimers()
     window.history.replaceState(null, '', `/groups/${chatId}`)

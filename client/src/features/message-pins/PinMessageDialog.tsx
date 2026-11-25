@@ -10,7 +10,7 @@ interface Props {
   onPin(scope: PinScope): Promise<void>
 }
 
-export function PinMessageDialog({ message, peerName, onCancel, onPin }: Props) {
+export function PinMessageDialog({ peerName, onCancel, onPin }: Props) {
   const [forPeer, setForPeer] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -26,13 +26,16 @@ export function PinMessageDialog({ message, peerName, onCancel, onPin }: Props) 
     }
   }
   return (
-    <Dialog title="Pin message" onClose={onCancel} busy={busy}>
-      <p className="dialog-description">
-        {peerName === undefined
-          ? 'Pin this message at the top of the chat for all members?'
-          : 'Pin this message at the top of the chat?'}
-      </p>
-      <blockquote className="delete-preview">{message.body}</blockquote>
+    <Dialog
+      title={
+        peerName === undefined
+          ? 'Do you want to pin this message for all members?'
+          : 'Do you want to pin this message?'
+      }
+      onClose={onCancel}
+      busy={busy}
+      compact
+    >
       {peerName !== undefined && (
         <label className="dialog-check">
           <input

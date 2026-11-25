@@ -76,7 +76,13 @@ func (c *Connection) watchSidebar(base context.Context, ids []string) error {
 		p.remove(c)
 		return err
 	}
-	return p.install(c, nil, watch)
+	fresh, err := p.install(c, nil, watch)
+	if err != nil || !fresh || len(watch.peers) == 0 {
+		return err
+	}
+	states := p.server.presence.snapshot(ctx, watch.peers)
+	p.deliver(c, watch, sidebarPresenceEvent(watch, states, time.Now()))
+	return nil
 }
 
 func (p *sidebarCoordinator) authorize(ctx context.Context, c *Connection, ids []string, generation uint64) (*sidebarWatch, error) {
@@ -115,22 +121,22 @@ func (p *sidebarCoordinator) authorize(ctx context.Context, c *Connection, ids [
 	return watch, nil
 }
 
-func (p *sidebarCoordinator) install(c *Connection, expected, watch *sidebarWatch) error {
+func (p *sidebarCoordinator) install(c *Connection, expected, watch *sidebarWatch) (bool, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.state == lifecycleClosed || c.ctx.Err() != nil {
-		return context.Canceled
+		return false, context.Canceled
 	}
 	old := p.watches[c]
 	if watch.generation != c.sidebarSerial.Load() || (expected != nil && old != expected) {
-		return nil
+		return false, nil
 	}
 	previous := 0
 	if old != nil {
 		previous = len(old.chatIDs)
 	}
 	if p.references-previous+len(watch.chatIDs) > min(p.server.config.MaxMemberships, 100000) {
-		return errRoomLimit
+		return false, errRoomLimit
 	}
 	if old != nil {
 		for id := range old.groups {
@@ -146,7 +152,7 @@ func (p *sidebarCoordinator) install(c *Connection, expected, watch *sidebarWatc
 		if feed == nil {
 			if len(p.feeds) >= p.server.config.MaxRooms {
 				p.removeLocked(c)
-				return errRoomLimit
+				return false, errRoomLimit
 			}
 			ctx, cancel := context.WithCancel(p.server.ctx)
 			feed = &sidebarFeed{cancel: cancel, watchers: make(map[*Connection]*sidebarWatch)}
@@ -156,7 +162,35 @@ func (p *sidebarCoordinator) install(c *Connection, expected, watch *sidebarWatc
 		}
 		feed.watchers[c] = watch
 	}
-	return nil
+	return old == nil || !samePeers(old.peers, watch.peers), nil
+}
+
+func samePeers(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := make(map[string]bool, len(a))
+	for _, id := range a {
+		seen[id] = true
+	}
+	for _, id := range b {
+		if !seen[id] {
+			return false
+		}
+	}
+	return true
+}
+
+func sidebarPresenceEvent(watch *sidebarWatch, states map[string]string, now time.Time) protocol.Event {
+	statuses := make([]protocol.PresenceStatus, 0, len(watch.peers))
+	for _, id := range watch.peers {
+		state := states[id]
+		if state == "" {
+			state = "unknown"
+		}
+		statuses = append(statuses, protocol.PresenceStatus{UserID: id, State: state})
+	}
+	return protocol.Event{Type: protocol.EventSidebarPresence, Version: 1, ObservedAt: now.UTC().Format(time.RFC3339Nano), ValidForMS: min(15000, int(watch.expires.Sub(now).Milliseconds())), Statuses: statuses}
 }
 
 func (p *sidebarCoordinator) leaveLocked(c *Connection, id string) {
@@ -274,17 +308,9 @@ func (p *sidebarCoordinator) sweep() {
 		ids = append(ids, id)
 	}
 	states := p.server.presence.snapshot(ctx, ids)
-	observed := time.Now().UTC().Format(time.RFC3339Nano)
+	observed := time.Now()
 	for c, w := range watches {
-		statuses := make([]protocol.PresenceStatus, 0, len(w.peers))
-		for _, id := range w.peers {
-			state := states[id]
-			if state == "" {
-				state = "unknown"
-			}
-			statuses = append(statuses, protocol.PresenceStatus{UserID: id, State: state})
-		}
-		p.deliver(c, w, protocol.Event{Type: protocol.EventSidebarPresence, Version: 1, ObservedAt: observed, ValidForMS: min(15000, int(time.Until(w.expires).Milliseconds())), Statuses: statuses})
+		p.deliver(c, w, sidebarPresenceEvent(w, states, observed))
 	}
 	jobs := make(chan struct {
 		c *Connection
@@ -298,7 +324,7 @@ func (p *sidebarCoordinator) sweep() {
 			for job := range jobs {
 				w, err := p.authorize(ctx, job.c, job.w.chatIDs, job.w.generation)
 				if err == nil {
-					_ = p.install(job.c, job.w, w)
+					_, _ = p.install(job.c, job.w, w)
 				}
 			}
 		}()

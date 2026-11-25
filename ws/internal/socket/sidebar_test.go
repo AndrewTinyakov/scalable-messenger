@@ -76,6 +76,9 @@ func TestSidebarSharesActivityFeedsAndKeepsSelectedPresence(t *testing.T) {
 		if err := c.watchSidebar(context.Background(), []string{group, direct}); err != nil {
 			t.Fatal(err)
 		}
+		if item := <-c.out; item.frame.Event().Type != protocol.EventSidebarPresence {
+			t.Fatal("missing initial presence")
+		}
 	}
 	select {
 	case <-d.started:
@@ -149,5 +152,48 @@ func TestSidebarPresenceUnknownExpiryAndRateLimit(t *testing.T) {
 	d.mu.Unlock()
 	if err := c.watchSidebar(context.Background(), []string{direct}); err != errRateLimited {
 		t.Fatalf("rate limit = %v", err)
+	}
+}
+func TestSidebarSendsPresenceWhenPeersChange(t *testing.T) {
+	s, d := newSidebarTestServer(t)
+	peer, other, direct, second := presencePeer(1), presencePeer(2), presencePeer(3), presencePeer(4)
+	d.values = map[string]bool{peer: true, other: false}
+	d.chats = []grpcauth.SidebarChat{{ChatID: direct, PeerID: peer}}
+	c := presenceTestConnection(t, s)
+	if err := c.watchSidebar(context.Background(), []string{direct}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case item := <-c.out:
+		statuses := item.frame.Event().Statuses
+		if len(statuses) != 1 || statuses[0].UserID != peer || statuses[0].State != "online" || item.sidebarWatch == nil {
+			t.Fatalf("initial presence = %+v", statuses)
+		}
+	default:
+		t.Fatal("new watch waited for the sweep")
+	}
+	if err := c.watchSidebar(context.Background(), []string{direct}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-c.out:
+		t.Fatal("renewal with the same peers sent presence")
+	default:
+	}
+	d.chats = []grpcauth.SidebarChat{{ChatID: direct, PeerID: peer}, {ChatID: second, PeerID: other}}
+	if err := c.watchSidebar(context.Background(), []string{direct, second}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case item := <-c.out:
+		states := map[string]string{}
+		for _, status := range item.frame.Event().Statuses {
+			states[status.UserID] = status.State
+		}
+		if states[peer] != "online" || states[other] != "offline" {
+			t.Fatalf("changed peers presence = %v", states)
+		}
+	default:
+		t.Fatal("changed peers waited for the sweep")
 	}
 }

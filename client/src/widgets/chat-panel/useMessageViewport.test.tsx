@@ -180,4 +180,25 @@ it('keeps bottom intent through append, trim, and pending resolution scroll even
   height += 100
   await act(async () => root.render(<Harness />))
   expect(top).toBe(readingTop)
+  vi.useFakeTimers({ toFake: ['Date'] })
+  try {
+    await act(async () =>
+      scroller.dispatchEvent(new dom.window.WheelEvent('wheel', { deltaY: 900 })),
+    )
+    top = height - 600
+    await act(async () => scroller.dispatchEvent(new dom.window.Event('scroll')))
+    expect(report).toHaveBeenLastCalledWith(true)
+    vi.setSystemTime(Date.now() + 2000)
+    await act(async () =>
+      scroller.firstElementChild!.dispatchEvent(
+        new dom.window.FocusEvent('focusin', { bubbles: true }),
+      ),
+    )
+    top -= 400
+    await act(async () => scroller.dispatchEvent(new dom.window.Event('scroll')))
+    expect(top).toBe(height - 1000)
+    expect(report).toHaveBeenLastCalledWith(false)
+  } finally {
+    vi.useRealTimers()
+  }
 })

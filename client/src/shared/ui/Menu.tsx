@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from 'react'
 import { createPortal } from 'react-dom'
+import { fadeOutMenu, useExitAnimation } from './useExitAnimation'
 
 const EDGE = 8
 const GAP = 6
@@ -31,8 +32,24 @@ function clamp(value: number, size: number, limit: number): number {
   return Math.max(EDGE, Math.min(value, limit - size - EDGE))
 }
 
+function swallowNextClick() {
+  const swallow = (event: Event) => {
+    event.preventDefault()
+    event.stopPropagation()
+    release()
+  }
+  const release = () => {
+    document.removeEventListener('click', swallow, true)
+    document.removeEventListener('pointerdown', release, true)
+    document.removeEventListener('keydown', release, true)
+  }
+  document.addEventListener('click', swallow, true)
+  document.addEventListener('pointerdown', release, true)
+  document.addEventListener('keydown', release, true)
+}
+
 function placement(
-  size: DOMRect,
+  size: { width: number; height: number },
   anchor: DOMRect,
   point: MenuPoint | undefined,
   align: 'start' | 'end',
@@ -70,6 +87,7 @@ export function Menu({
   const ref = useRef<HTMLDivElement>(null)
   const [position, setPosition] = useState({ top: 0, left: 0, origin: 'top left' })
   const close = useRef(onClose)
+  useExitAnimation(ref, fadeOutMenu)
   close.current = onClose
   const x = point?.x
   const y = point?.y
@@ -80,7 +98,7 @@ export function Menu({
     const place = () =>
       setPosition(
         placement(
-          menu.getBoundingClientRect(),
+          { width: menu.offsetWidth, height: menu.offsetHeight },
           anchor.getBoundingClientRect(),
           x === undefined || y === undefined ? undefined : { x, y },
           align,
@@ -99,8 +117,11 @@ export function Menu({
 
   useEffect(() => {
     const dismiss = (event: PointerEvent) => {
-      if (!ref.current?.contains(event.target as Node) && !anchor.contains(event.target as Node))
-        close.current()
+      if (ref.current?.contains(event.target as Node)) return
+      event.preventDefault()
+      event.stopPropagation()
+      if (event.button === 0) swallowNextClick()
+      close.current()
     }
     const scroll = (event: Event) => {
       if (!ref.current?.contains(event.target as Node)) close.current()
@@ -111,15 +132,15 @@ export function Menu({
       event.stopPropagation()
       close.current()
     }
-    document.addEventListener('pointerdown', dismiss)
+    document.addEventListener('pointerdown', dismiss, true)
     document.addEventListener('scroll', scroll, true)
     document.addEventListener('keydown', escape, true)
     return () => {
-      document.removeEventListener('pointerdown', dismiss)
+      document.removeEventListener('pointerdown', dismiss, true)
       document.removeEventListener('scroll', scroll, true)
       document.removeEventListener('keydown', escape, true)
     }
-  }, [anchor])
+  }, [])
 
   return createPortal(
     <div
@@ -127,6 +148,15 @@ export function Menu({
       className="menu"
       style={{ top: position.top, left: position.left, transformOrigin: position.origin }}
       onContextMenu={(event) => event.preventDefault()}
+      onPointerMove={(event) => {
+        const item = (event.target as HTMLElement).closest<HTMLElement>('[role^="menuitem"]')
+        if (
+          item &&
+          item !== document.activeElement &&
+          ref.current?.contains(document.activeElement)
+        )
+          item.focus({ preventScroll: true })
+      }}
       onKeyDown={(event) => {
         if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
         const items = [...(ref.current?.querySelectorAll<HTMLElement>('[role^="menuitem"]') ?? [])]

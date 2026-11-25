@@ -1,5 +1,5 @@
 import { BellOff, Check, CircleAlert, Clock3, Pin } from 'lucide-react'
-import { memo, useRef, type DragEvent } from 'react'
+import { memo, useRef, type CSSProperties, type DragEvent } from 'react'
 import { chatPeer, chatTitle, formatUnread, isMuted, type Chat } from '../../entities/chat/model'
 import type { Message, PendingSend } from '../../entities/message/model'
 import { ChatKind } from '../../shared/api/generated/socket-vocabulary'
@@ -25,6 +25,7 @@ interface Props {
   loaded?: Message
   pending?: PendingSend
   dragging?: boolean
+  index?: number
   onSelect(id: string): void
   onMenu: OpenChatMenu
   onDragStart?: (event: DragEvent<HTMLButtonElement>, chatId: string) => void
@@ -100,6 +101,7 @@ export const ChatRow = memo(function ChatRow({
   loaded,
   pending,
   dragging = false,
+  index = 0,
   onSelect,
   onMenu,
   onDragStart,
@@ -120,6 +122,7 @@ export const ChatRow = memo(function ChatRow({
     <button
       className={`chat-item ${selected ? 'selected' : ''} ${dragging ? 'dragging' : ''}`}
       data-chat-id={chat.id}
+      style={{ '--row-index': index } as CSSProperties}
       data-pinned={pinned || undefined}
       draggable={pinned && Boolean(onDragStart)}
       onDragStart={pinned && onDragStart ? (event) => onDragStart(event, chat.id) : undefined}
@@ -134,7 +137,8 @@ export const ChatRow = memo(function ChatRow({
       }}
       onContextMenu={(event) => {
         event.preventDefault()
-        onMenu(chat, event.currentTarget, event.detail === 0, {
+        const pointer = (event.nativeEvent as Partial<PointerEvent>).pointerType
+        onMenu(chat, event.currentTarget, pointer === '', {
           x: event.clientX,
           y: event.clientY,
         })

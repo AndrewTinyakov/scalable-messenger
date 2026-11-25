@@ -11,6 +11,7 @@ interface Props {
   point?: MenuPoint
   keyboard: boolean
   mine: boolean
+  group?: boolean
   readers?: (chatId: string, messageId: string, afterUserId?: string) => Promise<ReaderPage>
   onReply(): void
   onEdit?: () => void
@@ -29,6 +30,7 @@ export function MessageActionMenu({
   point,
   keyboard,
   mine,
+  group = false,
   readers,
   onReply,
   onEdit,
@@ -61,7 +63,9 @@ export function MessageActionMenu({
               Could not copy. Select the message text to copy it.
             </p>
           )}
-          {mine && readers && <InlineReaders key={message.id} message={message} load={readers} />}
+          {mine && readers && (
+            <InlineReaders key={message.id} message={message} group={group} load={readers} />
+          )}
         </>
       }
     >

@@ -10,8 +10,6 @@ interface Props {
   onUnpin(entry: PinnedEntry): void
 }
 
-const SEGMENTS = 4
-
 export function PinnedBar({ pins, total, onJump, onOpenList, onUnpin }: Props) {
   const [index, setIndex] = useState(0)
   const count = pins.length
@@ -20,8 +18,6 @@ export function PinnedBar({ pins, total, onJump, onOpenList, onUnpin }: Props) {
   }, [count])
   const current = pins[Math.min(index, count - 1)]
   if (!current) return null
-  const visibleSegments = Math.min(total, SEGMENTS)
-  const activeSegment = Math.min(index, visibleSegments - 1)
   const preview = current.message.body.replace(/\s+/g, ' ')
   return (
     <div className="pinned-bar">
@@ -33,12 +29,7 @@ export function PinnedBar({ pins, total, onJump, onOpenList, onUnpin }: Props) {
         }}
         aria-label={`Pinned message ${index + 1} of ${total}: ${preview}`}
       >
-        <span className="pinned-segments" aria-hidden="true">
-          {Array.from({ length: visibleSegments }, (_, segment) => (
-            <i key={segment} className={segment === activeSegment ? 'active' : ''} />
-          ))}
-        </span>
-        <span className="pinned-bar-copy">
+        <span className="pinned-bar-copy" key={current.message.id}>
           <strong>
             {total > 1 && index > 0 ? `Pinned message #${total - index}` : 'Pinned message'}
           </strong>

@@ -16,13 +16,22 @@ function rect(left: number, top: number, width: number, height: number) {
 async function open(
   anchorRect: DOMRect,
   props: { align?: 'start' | 'end'; point?: { x: number; y: number } },
+  renderedScale = 1,
 ) {
   const anchor = document.createElement('button')
   anchor.getBoundingClientRect = () => anchorRect
   document.body.append(anchor)
   dom.window.HTMLElement.prototype.getBoundingClientRect = function () {
-    return this === anchor ? anchorRect : rect(0, 0, 200, 120)
+    return this === anchor ? anchorRect : rect(0, 0, 200 * renderedScale, 120 * renderedScale)
   }
+  Object.defineProperty(dom.window.HTMLElement.prototype, 'offsetWidth', {
+    configurable: true,
+    get: () => 200,
+  })
+  Object.defineProperty(dom.window.HTMLElement.prototype, 'offsetHeight', {
+    configurable: true,
+    get: () => 120,
+  })
   const close = vi.fn()
   await act(async () =>
     root.render(
@@ -61,6 +70,11 @@ describe('floating menu placement', () => {
     expect(parseFloat(menu.style.top)).toBe(62)
   })
 
+  it('uses its layout size while its opening animation scales it down', async () => {
+    const { menu } = await open(rect(960, 20, 36, 36), {}, 0.9)
+    expect(parseFloat(menu.style.left)).toBe(792)
+  })
+
   it('flips above an anchor that has no room below', async () => {
     const { menu } = await open(rect(100, 640, 40, 40), { align: 'end' })
     expect(parseFloat(menu.style.top)).toBe(514)
@@ -92,5 +106,42 @@ describe('floating menu placement', () => {
       )
     })
     expect(close).toHaveBeenCalledTimes(2)
+  })
+
+  it('treats a press outside the menu, including on its anchor, as dismissal only', async () => {
+    const { close } = await open(rect(100, 100, 40, 40), {})
+    const anchor = document.querySelector<HTMLButtonElement>('body > button')!
+    const clicked = vi.fn()
+    anchor.addEventListener('click', clicked)
+    container.addEventListener('click', clicked)
+    const press = new dom.window.MouseEvent('pointerdown', { bubbles: true, cancelable: true })
+    await act(async () => anchor.dispatchEvent(press))
+    expect(press.defaultPrevented).toBe(true)
+    expect(close).toHaveBeenCalledTimes(1)
+    anchor.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
+    expect(clicked).not.toHaveBeenCalled()
+    await act(async () => root.render(null))
+    container.dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true }))
+    container.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
+    expect(clicked).toHaveBeenCalledTimes(1)
+  })
+
+  it('moves keyboard focus to the item under the pointer so only one item is highlighted', async () => {
+    const anchor = document.createElement('button')
+    document.body.append(anchor)
+    await act(async () =>
+      root.render(
+        <Menu label="Options" anchor={anchor} keyboard onClose={() => {}}>
+          <MenuItem icon={null}>Pin</MenuItem>
+          <MenuItem icon={null}>Delete chat</MenuItem>
+        </Menu>,
+      ),
+    )
+    const [pin, remove] = document.querySelectorAll<HTMLElement>('[role="menuitem"]')
+    expect(document.activeElement).toBe(pin)
+    await act(async () =>
+      remove.dispatchEvent(new dom.window.MouseEvent('pointermove', { bubbles: true })),
+    )
+    expect(document.activeElement).toBe(remove)
   })
 })

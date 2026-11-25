@@ -1,8 +1,9 @@
 import { Check, Search, Users, X } from 'lucide-react'
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import type { Session, User } from '../../entities/session/model'
 import { api } from '../../shared/api/http'
 import { Avatar } from '../../shared/ui/Avatar'
+import { fadeOutDialog, useExitAnimation } from '../../shared/ui/useExitAnimation'
 
 interface Props {
   session: Session
@@ -22,6 +23,8 @@ export function CreateChatDialog({
   onGroup,
 }: Props) {
   const sessionApi = useMemo(() => api.forSession(session), [session.user.id, session.deviceId])
+  const backdrop = useRef<HTMLDivElement>(null)
+  useExitAnimation(backdrop, fadeOutDialog)
   const [mode, setMode] = useState(initialMode)
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<User[]>([])
@@ -96,6 +99,7 @@ export function CreateChatDialog({
 
   return (
     <div
+      ref={backdrop}
       className="dialog-backdrop"
       role="presentation"
       onMouseDown={(event) => {

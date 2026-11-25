@@ -70,7 +70,7 @@ describe('sidebar chat actions', () => {
     const { onDelete, onClose } = await render(chat)
     await press('Delete chat')
     expect(onDelete).not.toHaveBeenCalled()
-    await press('Delete for me')
+    await press('Delete')
     expect(onDelete).toHaveBeenCalledWith('group', 'SELF')
     expect(onClose).toHaveBeenCalledOnce()
   })
@@ -87,7 +87,7 @@ describe('sidebar chat actions', () => {
     await act(async () =>
       document.querySelector<HTMLInputElement>('input[value="EVERYONE"]')!.click(),
     )
-    await press('Clear for everyone')
+    await press('Clear')
     expect(onClear).toHaveBeenCalledWith('group', 'EVERYONE')
   })
 
@@ -99,7 +99,7 @@ describe('sidebar chat actions', () => {
       }),
     )
     await press('Delete chat')
-    await press('Delete for me')
+    await press('Delete')
     expect(document.querySelector('[role="alert"]')?.textContent).toBe('Chat is busy')
     expect(onClose).not.toHaveBeenCalled()
   })

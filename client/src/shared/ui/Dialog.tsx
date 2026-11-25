@@ -1,14 +1,18 @@
 import { X } from 'lucide-react'
 import { useEffect, useRef, type ReactNode } from 'react'
+import { fadeOutDialog, useExitAnimation } from './useExitAnimation'
 
 interface Props {
   title: string
   children: ReactNode
   onClose(): void
   busy?: boolean
+  compact?: boolean
 }
-export function Dialog({ title, children, onClose, busy = false }: Props) {
+export function Dialog({ title, children, onClose, busy = false, compact = false }: Props) {
   const ref = useRef<HTMLElement>(null)
+  const backdrop = useRef<HTMLDivElement>(null)
+  useExitAnimation(backdrop, fadeOutDialog)
   const closeRef = useRef(onClose)
   const busyRef = useRef(busy)
   closeRef.current = onClose
@@ -40,6 +44,7 @@ export function Dialog({ title, children, onClose, busy = false }: Props) {
   }, [])
   return (
     <div
+      ref={backdrop}
       className="dialog-backdrop"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget && !busy) onClose()
@@ -47,7 +52,7 @@ export function Dialog({ title, children, onClose, busy = false }: Props) {
     >
       <section
         ref={ref}
-        className="create-dialog feature-dialog"
+        className={`create-dialog feature-dialog${compact ? ' dialog-compact' : ''}`}
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -55,14 +60,16 @@ export function Dialog({ title, children, onClose, busy = false }: Props) {
       >
         <div className="dialog-head">
           <h2>{title}</h2>
-          <button
-            className="icon-button"
-            onClick={onClose}
-            disabled={busy}
-            aria-label={`Close ${title.toLowerCase()}`}
-          >
-            <X size={20} />
-          </button>
+          {!compact && (
+            <button
+              className="icon-button"
+              onClick={onClose}
+              disabled={busy}
+              aria-label={`Close ${title.toLowerCase()}`}
+            >
+              <X size={20} />
+            </button>
+          )}
         </div>
         {children}
       </section>

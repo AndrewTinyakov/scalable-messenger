@@ -111,10 +111,11 @@ describe('chat row', () => {
     const contextMenu = new dom.window.MouseEvent('contextmenu', {
       bubbles: true,
       cancelable: true,
-      detail: 1,
+      detail: 0,
       clientX: 40,
       clientY: 60,
     })
+    Object.defineProperty(contextMenu, 'pointerType', { value: 'mouse' })
     await act(async () => row.dispatchEvent(contextMenu))
     expect(contextMenu.defaultPrevented).toBe(true)
     expect(menu).toHaveBeenCalledWith(direct, row, false, { x: 40, y: 60 })

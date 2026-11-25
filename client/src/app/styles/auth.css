@@ -5,57 +5,86 @@
   padding: 32px 20px;
   overflow: auto;
   place-items: center;
-  background: var(--bg-panel);
+  background: var(--bg-app);
+}
+.auth-layout::before {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgb(255 255 255 / 5%) 1px, transparent 1px);
+  background-size: 22px 22px;
+  content: '';
+  -webkit-mask-image: radial-gradient(ellipse at center, #000 20%, transparent 75%);
+  mask-image: radial-gradient(ellipse at center, #000 20%, transparent 75%);
+  pointer-events: none;
 }
 .auth-card {
   position: relative;
   display: flex;
-  width: min(100%, 372px);
+  width: min(100%, 400px);
+  padding: 36px 32px 30px;
   flex-direction: column;
   align-items: center;
+  border: 1px solid var(--line-strong);
+  border-radius: 28px;
+  background: var(--bg-dialog);
   text-align: center;
-  animation: rise 420ms var(--ease) both;
+  animation: rise 520ms var(--ease) backwards;
 }
 .auth-card .brand-mark {
+  width: 76px;
+  height: 76px;
   margin-bottom: 22px;
-  color: var(--text);
+  padding: 17px;
+  border-radius: 24px;
+  background: var(--accent);
+  color: #fff;
+  animation: brand-in 620ms var(--ease) 80ms backwards;
 }
 .auth-card h1 {
-  font-size: 24px;
-  font-weight: 600;
-  letter-spacing: -0.025em;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  animation: rise 520ms var(--ease) 120ms backwards;
 }
 .auth-lede {
   margin-top: 8px;
   color: var(--text-2);
   font-size: 15px;
+  line-height: 1.5;
+  animation: rise 520ms var(--ease) 160ms backwards;
 }
 .auth-card form {
   display: flex;
   width: 100%;
-  margin-top: 30px;
+  margin-top: 28px;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
+  animation: rise 520ms var(--ease) 200ms backwards;
 }
 .auth-submit {
-  min-height: 44px;
-  margin-top: 6px;
+  min-height: 48px;
+  margin-top: 8px;
   font-size: 15px;
 }
 .auth-switch {
   margin-top: 22px;
   color: var(--text-2);
   font-size: 14px;
+  animation: fade 520ms ease 260ms backwards;
 }
 .auth-switch button {
   padding: 0;
   border: 0;
   background: none;
-  color: var(--text);
-  font-weight: 550;
+  color: var(--accent-text);
+  font-weight: 600;
   text-decoration: underline;
   text-underline-offset: 3px;
-  text-decoration-color: var(--line-strong);
+  text-decoration-color: var(--accent-text-faint);
+  transition: text-decoration-color 160ms;
+}
+.auth-switch button:hover {
+  text-decoration-color: currentColor;
 }
 .auth-offline-icon {
   display: grid;
@@ -64,8 +93,8 @@
   margin-bottom: 24px;
   place-items: center;
   border-radius: 50%;
-  background: var(--bg-raised);
-  color: var(--text-2);
+  background: var(--accent-soft);
+  color: var(--accent-text);
 }
 
 .field {
@@ -74,45 +103,46 @@
 }
 .field input {
   width: 100%;
-  height: 54px;
-  padding: 20px 46px 6px 14px;
+  height: 56px;
+  padding: 20px 48px 6px 16px;
   border: 1px solid var(--line-strong);
-  border-radius: var(--radius-s);
-  background: var(--bg-sidebar);
+  border-radius: 16px;
+  background: rgb(0 0 0 / 22%);
   transition:
-    border-color 120ms,
-    background 120ms;
+    border-color 160ms,
+    background 160ms,
+    box-shadow 160ms;
 }
 .field input:hover {
-  border-color: var(--line-focus);
+  border-color: rgb(255 255 255 / 16%);
 }
 .field input:focus {
-  border-color: var(--text-2);
+  border-color: var(--line-focus);
   outline: none;
 }
 .field input:-webkit-autofill {
   -webkit-text-fill-color: var(--text);
-  box-shadow: 0 0 0 40px var(--bg-sidebar) inset;
+  box-shadow: 0 0 0 40px var(--bg-panel) inset;
   caret-color: var(--text);
 }
 .field label {
   position: absolute;
-  top: 17px;
-  left: 15px;
+  top: 18px;
+  left: 17px;
   color: var(--text-3);
   pointer-events: none;
   transform-origin: left top;
   transition:
-    transform 140ms var(--ease),
-    color 140ms;
+    transform 180ms var(--ease),
+    color 180ms;
 }
 .field input:focus + label,
 .field input:not(:placeholder-shown) + label,
 .field input:-webkit-autofill + label {
-  transform: translateY(-9px) scale(0.78);
+  transform: translateY(-10px) scale(0.78);
 }
 .field input:focus + label {
-  color: var(--text-2);
+  color: var(--accent-text);
 }
 .field-action {
   position: absolute;
@@ -127,18 +157,29 @@
   border-radius: 50%;
   background: none;
   color: var(--text-3);
+  transition:
+    background 140ms,
+    color 140ms;
 }
 .field-action:hover {
+  background: rgb(255 255 255 / 6%);
   color: var(--text);
 }
 
 .loading-spinner {
   width: 34px;
   height: 34px;
-  border: 3px solid var(--line-strong);
-  border-top-color: var(--text);
+  border: 3px solid rgb(255 255 255 / 10%);
+  border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
+}
+
+@keyframes brand-in {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
 }
 
 .field-error {

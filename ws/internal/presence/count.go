@@ -40,9 +40,9 @@ func (h *Hub) WatchOnlineCount(ctx context.Context, w Watcher, chatID string) er
 	return h.resolveCount(ctx, wt, chatID, -1, generation)
 }
 
-func (h *Hub) refreshCount(wt *watch) {
+func (h *Hub) refreshCount(wt *watch, chatID string) {
 	h.mu.Lock()
-	refresh := h.startCountRefreshLocked(wt)
+	refresh := h.startCountRefreshLocked(wt, chatID)
 	h.mu.Unlock()
 	refresh()
 }
@@ -50,12 +50,12 @@ func (h *Hub) refreshCount(wt *watch) {
 // startCountRefreshLocked authorizes the selected group's roster again,
 // whether or not one is installed yet. It advances the count generation, so
 // a reply already in flight can no longer install a roster.
-func (h *Hub) startCountRefreshLocked(wt *watch) func() {
-	if wt.countChat == "" {
+func (h *Hub) startCountRefreshLocked(wt *watch, chatID string) func() {
+	if chatID == "" || wt.countChat != chatID {
 		return func() {}
 	}
 	wt.counted++
-	generation, chatID, sent := wt.counted, wt.countChat, -1
+	generation, sent := wt.counted, -1
 	if wt.count != nil {
 		wt.count.expires = time.Now()
 		sent = wt.count.sent
@@ -83,6 +83,16 @@ func (h *Hub) startCountRefreshLocked(wt *watch) func() {
 // watch or invalidation started meanwhile, keeping the last count the
 // socket received so an unchanged count is not sent again.
 func (h *Hub) resolveCount(ctx context.Context, wt *watch, chatID string, sent int, generation uint64) error {
+	h.mu.Lock()
+	wt.resolving = generation
+	h.mu.Unlock()
+	defer func() {
+		h.mu.Lock()
+		if wt.resolving == generation {
+			wt.resolving = 0
+		}
+		h.mu.Unlock()
+	}()
 	total, members, err := h.auth.OnlineCountMembers(ctx, wt.watcher.PresenceSession(), chatID, h.config.MaxCountGroup)
 	if err != nil {
 		return err
@@ -94,6 +104,7 @@ func (h *Hub) resolveCount(ctx context.Context, wt *watch, chatID string, sent i
 	}
 	h.clearCountLocked(wt)
 	if len(members) == 0 {
+		wt.countChat = ""
 		h.mu.Unlock()
 		return nil
 	}

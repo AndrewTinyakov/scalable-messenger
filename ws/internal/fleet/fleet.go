@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-var ErrRenewing = errors.New("gateway is registering a new identity")
+var ErrRenewing = errors.New("gateway is restoring its connection counts")
 
 type Store interface {
 	AdmitConnection(context.Context, string, string, int) (bool, error)
@@ -48,13 +48,24 @@ type Fleet struct {
 	wake     chan struct{}
 	mu       sync.Mutex
 	id       string
-	renewing bool
+	renewal  renewalPhase
 	counts   map[string]int
 	dirty    map[string]bool
 	locks    map[string]*userLock
 	retired  []string
 	renewed  []func(string)
 }
+
+// renewalPhase blocks admission while Redis may undercount this gateway's
+// connections: while a new identity registers, and until every local count
+// has been written again after Redis lost them.
+type renewalPhase uint8
+
+const (
+	renewalNone renewalPhase = iota
+	renewalRegistering
+	renewalRestoring
+)
 
 // userLock is a mutex whose waiters can give up when their context ends.
 type userLock struct {
@@ -131,7 +142,7 @@ func (f *Fleet) Admit(ctx context.Context, userID string) (bool, error) {
 	}
 	defer unlock()
 	f.mu.Lock()
-	if f.renewing {
+	if f.renewal != renewalNone {
 		f.mu.Unlock()
 		return false, ErrRenewing
 	}
@@ -139,6 +150,18 @@ func (f *Fleet) Admit(ctx context.Context, userID string) (bool, error) {
 	id := f.id
 	f.mu.Unlock()
 	admitted, err := f.store.AdmitConnection(ctx, userID, id, f.config.ConnectionLimit)
+	f.mu.Lock()
+	renewed := f.id != id
+	f.mu.Unlock()
+	if renewed {
+		// The identity this admission wrote under was retired meanwhile and may
+		// already be cleaned; clear it here and count under the new one.
+		_ = f.write(ctx, func(ctx context.Context) error { return f.store.SetConnections(ctx, userID, id, 0) })
+		_ = f.write(ctx, func(ctx context.Context) error { return f.store.UnindexConnections(ctx, userID, id) })
+		f.mu.Lock()
+		f.dirty[userID] = true
+		f.mu.Unlock()
+	}
 	if err != nil || !admitted {
 		f.forget(userID)
 	}
@@ -207,6 +230,11 @@ func (f *Fleet) writeCounts(ctx context.Context) {
 		for _, userID := range users {
 			f.writeUser(ctx, userID)
 		}
+		f.mu.Lock()
+		if f.renewal == renewalRestoring && len(f.dirty) == 0 {
+			f.renewal = renewalNone
+		}
+		f.mu.Unlock()
 	}
 }
 
@@ -258,7 +286,7 @@ func (f *Fleet) heartbeat(ctx context.Context) {
 	}
 	if dead {
 		f.mu.Lock()
-		f.renewing = true
+		f.renewal = renewalRegistering
 		f.mu.Unlock()
 		next := newID()
 		if _, _, err := f.beat(ctx, next); err != nil {
@@ -267,11 +295,12 @@ func (f *Fleet) heartbeat(ctx context.Context) {
 		}
 		f.logger.Warn("gateway was removed by the fleet; registered a new identity", "previous", id, "gateway", next)
 		f.mu.Lock()
-		f.id, f.renewing = next, false
+		f.id = next
 		f.retired = append(f.retired, id)
 		f.mu.Unlock()
 	}
 	f.mu.Lock()
+	f.renewal = renewalRestoring
 	for userID := range f.counts {
 		f.dirty[userID] = true
 	}

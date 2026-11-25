@@ -273,3 +273,28 @@ func TestFleetAdmissionGivesUpWaitingWhenItsContextEnds(t *testing.T) {
 		t.Fatalf("locks=%d counts=%v", len(f.locks), f.counts)
 	}
 }
+
+func TestFleetBlocksAdmissionUntilRenewedCountsAreRestored(t *testing.T) {
+	store := newFakeStore()
+	f := testFleet(store)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if _, err := f.Admit(ctx, "alice"); err != nil {
+		t.Fatal(err)
+	}
+	old := f.ID()
+	store.mu.Lock()
+	store.dead[old] = true
+	delete(store.counts, "alice")
+	store.mu.Unlock()
+	f.heartbeat(ctx)
+	if f.ID() == old {
+		t.Fatal("identity was not renewed")
+	}
+	if _, err := f.Admit(ctx, "alice"); !errors.Is(err, ErrRenewing) {
+		t.Fatalf("admit during restore = %v", err)
+	}
+	go f.Run(ctx)
+	eventually(t, func() bool { return store.total("alice") == 1 })
+	eventually(t, func() bool { admitted, err := f.Admit(ctx, "alice"); return err == nil && admitted })
+}

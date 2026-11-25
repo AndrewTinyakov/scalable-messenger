@@ -43,6 +43,7 @@ type watch struct {
 	count       *onlineCount
 	countChat   string
 	counted     uint64
+	resolving   uint64
 }
 
 // Hub delivers presence transitions to local sockets. It keeps one entry
@@ -164,7 +165,7 @@ func (h *Hub) Revalidate(w Watcher) {
 		wt.count.expires = now
 	}
 	ids, generation, renew := h.startRenewalLocked(wt)
-	refreshCount := h.startCountRefreshLocked(wt)
+	refreshCount := h.startCountRefreshLocked(wt, wt.countChat)
 	h.mu.Unlock()
 	if renew {
 		h.renew(wt, ids, generation)
@@ -367,11 +368,16 @@ func (h *Hub) sweep(now time.Time) {
 		ids        []string
 		generation uint64
 	}
+	type countRefresh struct {
+		wt     *watch
+		chatID string
+	}
 	var renewals []renewal
-	var counts []*watch
+	var counts []countRefresh
 	for _, wt := range h.watches {
-		if wt.count != nil && !now.Before(wt.count.expires) {
-			counts = append(counts, wt)
+		stale := wt.count == nil || !now.Before(wt.count.expires)
+		if wt.countChat != "" && stale && wt.resolving != wt.counted {
+			counts = append(counts, countRefresh{wt, wt.countChat})
 		}
 		expired := false
 		for _, g := range wt.grants {
@@ -386,8 +392,8 @@ func (h *Hub) sweep(now time.Time) {
 	for _, r := range renewals {
 		h.renew(r.wt, r.ids, r.generation)
 	}
-	for _, wt := range counts {
-		h.refreshCount(wt)
+	for _, c := range counts {
+		h.refreshCount(c.wt, c.chatID)
 	}
 	if len(unknown) > 0 {
 		ctx, cancel := context.WithTimeout(h.ctx, h.config.Timeout)

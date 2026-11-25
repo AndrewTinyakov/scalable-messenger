@@ -334,7 +334,7 @@ func (f *Fleet) reap(ctx context.Context) {
 	retired := append([]string(nil), f.retired...)
 	f.mu.Unlock()
 	for _, gateway := range retired {
-		if err := f.clean(ctx, gateway); err != nil {
+		if err := f.clean(ctx, gateway, f.localUsers()); err != nil {
 			f.logger.Warn("clean retired gateway identity", "gateway", gateway, "error", err)
 			continue
 		}
@@ -371,13 +371,26 @@ func (f *Fleet) remove(ctx context.Context, gateway string) error {
 	if err != nil || !claimed {
 		return err
 	}
-	return f.clean(ctx, gateway)
+	return f.clean(ctx, gateway, nil)
 }
 
-// clean removes a dead gateway identity's state through its indexes, then
-// forgets the identity. Clearing a count takes that user's lock, so a write
-// still running under a retired identity of this gateway finishes first.
-func (f *Fleet) clean(ctx context.Context, gateway string) error {
+func (f *Fleet) localUsers() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	users := make([]string, 0, len(f.counts))
+	for userID := range f.counts {
+		users = append(users, userID)
+	}
+	return users
+}
+
+// clean removes a dead gateway identity's state through its indexes and the
+// given users, then forgets the identity. For a retired identity of this
+// gateway the users are its local ones, which also covers an admission whose
+// index entry another gateway's cleanup already deleted. Clearing a count
+// takes that user's lock, so a write still running under the retired
+// identity finishes first.
+func (f *Fleet) clean(ctx context.Context, gateway string, users []string) error {
 	f.mu.Lock()
 	cleaners := append([]Cleaner(nil), f.cleaners...)
 	f.mu.Unlock()
@@ -386,14 +399,7 @@ func (f *Fleet) clean(ctx context.Context, gateway string) error {
 			return err
 		}
 	}
-	var cursor uint64
-	for {
-		pageCtx, cancel := context.WithTimeout(ctx, f.config.Timeout)
-		users, next, err := f.store.GatewayUsers(pageCtx, gateway, cursor)
-		cancel()
-		if err != nil {
-			return err
-		}
+	clearUsers := func(users []string) error {
 		for _, userID := range users {
 			unlock, err := f.lockUser(ctx, userID)
 			if err != nil {
@@ -404,6 +410,22 @@ func (f *Fleet) clean(ctx context.Context, gateway string) error {
 			if err != nil {
 				return err
 			}
+		}
+		return nil
+	}
+	if err := clearUsers(users); err != nil {
+		return err
+	}
+	var cursor uint64
+	for {
+		pageCtx, cancel := context.WithTimeout(ctx, f.config.Timeout)
+		users, next, err := f.store.GatewayUsers(pageCtx, gateway, cursor)
+		cancel()
+		if err != nil {
+			return err
+		}
+		if err := clearUsers(users); err != nil {
+			return err
 		}
 		if cursor = next; cursor == 0 {
 			break

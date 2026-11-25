@@ -32,7 +32,7 @@ A Redis error never closes a socket. The current lease renewal does close socket
 
 Every ten minutes a gateway writes its active users once more. The write is idempotent and publishes nothing unless state differs, and it repairs presence that a Redis failover rolled back while the gateway registration survived. Each gateway keeps a presence index of the users it may mark online. A user enters the index before going online and leaves it only after being cleared, so a dead gateway's presence can always be found and removed. A gateway that learns it was declared dead first clears what its old identity holds, then writes its state under a new one.
 
-The ten-connection admission cap stays separate from presence. It uses its own gateway-owned counts, `conn:{h}`, written by one script on connect and one on disconnect. Presence can therefore move to its own Redis cluster without handshakes depending on it.
+The ten-connection admission cap stays separate from presence. Each gateway writes a user's absolute count under that user's lock, and admissions pause while the gateway re-registers or restores its counts. If a stalled gateway is declared dead while it is admitting a connection, the cap can be exceeded by one connection until those connections close. It uses its own gateway-owned counts, `conn:{h}`, written by one script on connect and one on disconnect. Presence can therefore move to its own Redis cluster without handshakes depending on it.
 
 ## Watchers
 

@@ -2,6 +2,9 @@ import WebSocket from 'ws';
 import { setTimeout as delay } from 'node:timers/promises';
 import { TicketAdmission } from '../features-load/tickets.mjs';
 import { Histogram } from '../features-load/metrics.mjs';
+import { isId, validOnlineCount, validPresence, validPresenceConfig } from '../features-load/presence.mjs';
+
+export { isId };
 
 export class Fault extends Error {
   constructor(code) {
@@ -112,7 +115,6 @@ export class Measurements {
   }
 }
 
-export const isId = value => typeof value === 'string' && /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/.test(value);
 export const isSeq = value => typeof value === 'string' && /^(0|[1-9][0-9]{0,18})$/.test(value);
 export const greater = (a, b) => BigInt(a) > BigInt(b);
 
@@ -218,13 +220,15 @@ export class Http {
 
 const chatEvents = new Set([
   'message_saved', 'message_changed', 'reads_changed', 'history_changed', 'chat_preferences_changed',
-  'pins_changed', 'sidebar_activity', 'subscribed', 'presence', 'chat_created', 'membership_changed',
+  'pins_changed', 'sidebar_activity', 'subscribed', 'chat_created', 'membership_changed',
   'member_removed', 'recovery_failed', 'subscription_expired', 'chat_deleted',
 ]);
-const knownEvents = new Set([...chatEvents, 'queued', 'send_rejected', 'error', 'sidebar_presence', 'session_revoked']);
+const knownEvents = new Set([...chatEvents, 'queued', 'send_rejected', 'error', 'presence', 'online_count', 'presence_config', 'session_revoked']);
 
 export class Socket {
   closed = false;
+  presenceTargets = null;
+  onlineCountChat = null;
 
   constructor(http, credentials, receive) {
     Object.assign(this, { http, credentials, receive });
@@ -245,6 +249,9 @@ export class Socket {
         const frame = JSON.parse(data);
         check(frame.version === 1 && knownEvents.has(frame.type), 'frameType');
         if (chatEvents.has(frame.type)) check(isId(frame.chatId), 'frameChat');
+        if (frame.type === 'presence') check(validPresence(frame, this.presenceTargets), 'framePresence');
+        if (frame.type === 'online_count') check(validOnlineCount(frame), 'frameOnlineCount');
+        if (frame.type === 'presence_config') check(validPresenceConfig(frame), 'framePresenceConfig');
         if (frame.type === 'message_saved' || frame.type === 'message_changed') {
           check(isId(frame.messageId) && isId(frame.senderId) && isSeq(frame.sequence) && isSeq(frame.messageVersion), 'frameMessage');
         }
@@ -282,6 +289,12 @@ export class Socket {
     const payload = JSON.stringify({ version: 1, ...frame });
     check(this.ws.bufferedAmount + Buffer.byteLength(payload) <= 65536, 'writerCapacity');
     this.ws.send(payload);
+    if (frame.type === 'watch_presence') {
+      if (frame.reset || !this.presenceTargets) this.presenceTargets = new Set();
+      for (const id of frame.remove ?? []) this.presenceTargets.delete(id);
+      for (const id of frame.add ?? []) this.presenceTargets.add(id);
+    }
+    if (frame.type === 'watch_online_count') this.onlineCountChat = frame.chatId ?? null;
   }
 
   async close() {

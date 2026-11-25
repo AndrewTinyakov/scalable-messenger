@@ -32,7 +32,10 @@ export class Run {
   constructor(plan, manifest, http, metrics, shard = { index: 0, count: 1 }) {
     Object.assign(this, { plan, manifest, http, metrics, shard, signal: http.controller.signal, capacity: http.options.capacity ?? 1 });
     this.remoteSightings = new Set();
-    this.devices = manifest.devices.map((devices, actor) => devices.map(credentials => new Device(this, credentials, actor)));
+    this.devices = manifest.devices.map((devices, actor) => {
+      const watchPace = { nextAt: 0 };
+      return devices.map(credentials => new Device(this, credentials, actor, watchPace));
+    });
     this.roster = new Map(plan.chats.map(chat => [manifest.chats[chat.id], chat]));
   }
 
@@ -312,9 +315,9 @@ export class Run {
       case 'appOpen': return device.startup(true, due);
       case 'appClose': device.appRevision++; return device.close();
       case 'sidebar': return device.sidebar();
-      case 'background': device.foreground = false; return;
+      case 'background': return device.setForeground(false);
       case 'foreground':
-        device.foreground = true;
+        device.setForeground(true);
         return join([
           device.get('/auth/session'), device.refreshDirectory(), device.reconcile(),
           device.catchUp(id), device.refreshFeatures(device.selected, true),
@@ -323,6 +326,7 @@ export class Run {
       case 'reconnect':
         await device.connect();
         device.subscribe(device.selected);
+        device.refreshPresence();
         device.backgroundTask('sidebar.initial', async () => {
           await delay(250, undefined, { signal: this.signal });
           device.sidebar();

@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import presence from '../../contracts/fixtures/valid/socket-presence.json' with { type: 'json' };
+import onlineCount from '../../contracts/fixtures/valid/online-count.json' with { type: 'json' };
+import presenceConfig from '../../contracts/fixtures/valid/presence-config.json' with { type: 'json' };
 import { Histogram, Metrics } from './metrics.mjs';
 import { plan, offeredAt, bounded } from './plan.mjs';
 import { Driver } from './driver.mjs';
@@ -63,6 +66,31 @@ test('a conflicting saved terminal fails while replayed notifications remain ide
   assert.equal(metrics.counts['saved.duplicateNotification'], 1);
   driver.receive({ index: 1, session: driver.sockets[1].session }, { ...frame, messageId: 'two' }, 30);
   assert.equal(metrics.counts['correctness.failed'], 1);
+});
+
+test('presence snapshots and handshake events are checked before measurement', () => {
+  const metrics = new Metrics();
+  const driver = new Driver({ seed: 1 }, metrics, {});
+  const watched = [...presence.statuses.map(status => status.userId), ...presence.unavailable];
+  driver.foreground.set(0, { watchIds: new Set(watched) });
+  const receive = event => driver.receive({ index: 0 }, event, 0);
+  for (const event of [presence, onlineCount, presenceConfig, { ...onlineCount, online: 0 }, { ...presenceConfig, idleAfterHiddenMs: 0 }]) receive(event);
+  assert.equal(metrics.counts['correctness.failed'] ?? 0, 0);
+
+  const invalid = [
+    { ...presence, observedAt: '2026-11-04T00:00:00Z' },
+    { ...presence, statuses: [null] },
+    { ...presence, statuses: [{ ...presence.statuses[0], online: 'true' }] },
+    { ...presence, statuses: [{ ...presence.statuses[1], lastSeenAt: '2026-02-30T00:00:00Z' }] },
+    { ...presence, statuses: [{ ...presence.statuses[1], lastSeen: 'recently' }] },
+    { ...presence, statuses: [{ ...presence.statuses[2], lastSeen: 'unknown' }] },
+    { ...presence, unavailable: [watched[0], watched[0]] },
+    { ...presence, unavailable: ['00000000000000000000000001'] },
+    { ...onlineCount, online: onlineCount.members + 1 },
+    { ...presenceConfig, releaseAfterHiddenMs: null },
+  ];
+  for (const event of invalid) receive(event);
+  assert.equal(metrics.counts['correctness.failed'], invalid.length);
 });
 
 test('mutation removals and certified empty history pages recover without inventing notifications', async () => {

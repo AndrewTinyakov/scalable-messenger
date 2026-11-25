@@ -1,6 +1,7 @@
 // One signed-in client device: its socket, selected chat, cached history and background refreshes.
 // It sends the same requests and frames as the browser client for each user-visible flow.
 import { setTimeout as delay } from 'node:timers/promises';
+import { MAX_PRESENCE_TARGETS } from '../features-load/presence.mjs';
 import { check, Fault, greater, isId, isSeq, join, query, Socket } from './transport.mjs';
 
 const STATE_CHECK_MS = 60_000;
@@ -62,15 +63,14 @@ export class Device {
   subscribedTo = null;
   refreshes = new Map();
   watch = new Map();
-  watchAfter = 0;
   phase = 'closed';
   connectionWork = Promise.resolve();
   sessionWork = Promise.resolve();
   connectionRevision = 0;
   appRevision = 0;
 
-  constructor(state, credentials, actor) {
-    Object.assign(this, { state, credentials, actor });
+  constructor(state, credentials, actor, watchPace = { nextAt: 0 }) {
+    Object.assign(this, { state, credentials, actor, watchPace });
   }
 
   get connected() { return this.socket?.opened && this.socket.ws.readyState === WebSocket.OPEN; }
@@ -133,6 +133,7 @@ export class Device {
     const result = await this.get('/chats', { limit: 100 });
     check(Array.isArray(result?.chats) && result.chats.length <= 100 && result.chats.every(chat => isId(chat.id)));
     this.directory = result.chats;
+    if (this.phase === 'open') this.refreshPresence();
     return result.chats;
   }
 
@@ -214,23 +215,46 @@ export class Device {
 
   offerWatch(frame) {
     if (!this.connected) return;
-    if (frame.type === 'unwatch_presence') {
-      this.watch.delete('watch_presence');
-      this.send(frame);
-      return;
-    }
     this.watch.set(frame.type, frame);
     this.backgroundTask('watch.flush', async () => {
       while (this.watch.size && this.connected) {
-        const wait = this.watchAfter - performance.now();
-        if (wait > 0) await delay(wait, undefined, { signal: this.state.signal });
-        if (!this.connected || this.watch.size === 0) break;
+        const wait = this.watchPace.nextAt - performance.now();
+        if (wait > 0) {
+          await delay(wait, undefined, { signal: this.state.signal });
+          continue;
+        }
         const [key, next] = this.watch.entries().next().value;
         this.watch.delete(key);
-        this.watchAfter = performance.now() + 1500;
+        this.watchPace.nextAt = performance.now() + 1000;
         this.send(next);
       }
     });
+  }
+
+  refreshPresence() {
+    if (!this.connected) return;
+    const directPeers = this.directory.filter(chat => chat.kind === 'DIRECT').flatMap(chat => chat.members);
+    const memberIds = [...(this.selected?.members ?? []), ...directPeers]
+      .map(member => member.id).filter(id => id !== this.credentials.userId);
+    const targets = new Set([...new Set(memberIds)].slice(0, MAX_PRESENCE_TARGETS));
+    const watched = this.socket.presenceTargets;
+    const add = [...targets].filter(id => !watched?.has(id));
+    const remove = [...(watched ?? [])].filter(id => !targets.has(id));
+    if (!watched) this.offerWatch({ type: 'watch_presence', reset: true, add });
+    else if (add.length || remove.length) this.offerWatch({ type: 'watch_presence', add, remove });
+    else this.watch.delete('watch_presence');
+
+    const chat = this.selected;
+    const countChat = chat?.kind === 'GROUP' && chat.memberCount >= 1 && chat.memberCount <= 200 ? chat.id : null;
+    if (countChat !== (this.socket.onlineCountChat ?? null)) {
+      this.offerWatch({ type: 'watch_online_count', ...(countChat ? { chatId: countChat } : {}) });
+    } else this.watch.delete('watch_online_count');
+  }
+
+  setForeground(foreground) {
+    if (this.foreground === foreground) return;
+    this.foreground = foreground;
+    if (this.connected) this.send({ type: 'activity', active: foreground, visible: foreground });
   }
 
   sidebar() {
@@ -266,6 +290,7 @@ export class Device {
       try {
         await socket.open();
         check(revision === this.connectionRevision, 'socketClosed');
+        if (!this.foreground) this.send({ type: 'activity', active: false, visible: false });
       } catch (error) {
         await socket.close();
         if (this.socket === socket) this.socket = null;
@@ -301,6 +326,7 @@ export class Device {
     ]);
     check(revision === this.connectionRevision, 'socketClosed');
     this.phase = 'open';
+    this.refreshPresence();
     this.backgroundTask('sidebar.initial', async () => {
       await delay(250, undefined, { signal: this.state.signal });
       this.sidebar();
@@ -555,16 +581,14 @@ export class Device {
 
   async refreshFeatures(chat, force = false) {
     if (!chat || !this.connected) return;
-    if (chat.members.length === 0) {
+    const row = this.directory.find(item => item.id === chat.id);
+    if (chat.members.length === 0 || (row && row.memberCount !== chat.memberCount)) {
       const details = await this.get(chatPath(chat.id));
       check(details?.id === chat.id && Array.isArray(details.members), 'invalidChatMembers');
       chat.members = details.members;
-      if (this.selected?.id === chat.id && chat.members.length) this.offerWatch({ type: 'unwatch_presence' });
+      chat.memberCount = details.memberCount;
     }
-    if (chat.members.length && this.selected?.id === chat.id) this.offerWatch({
-      type: 'watch_presence', chatId: chat.id,
-      userIds: chat.members.slice(0, 100).map(member => member.id).sort(),
-    });
+    if (this.selected === chat) this.refreshPresence();
     if (force || this.view(chat.id).stateAt === null || performance.now() - this.view(chat.id).stateAt >= STATE_CHECK_MS) await this.sync(chat.id);
   }
 
@@ -577,7 +601,6 @@ export class Device {
     this.endSelection();
     this.subscribedTo = null;
     if (this.selected && this.connected) {
-      this.offerWatch({ type: 'unwatch_presence' });
       this.send({ type: 'unsubscribe', chatId: this.selected.id });
     }
     this.selected = chat;

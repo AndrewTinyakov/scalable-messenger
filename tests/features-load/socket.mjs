@@ -21,7 +21,7 @@ export class Socket {
         if (typeof data !== 'string' || data.length > 65536) throw new Error('Socket frame exceeds 64 KiB or is binary');
         const decoded = JSON.parse(data);
         const frame = decoded.event ?? decoded;
-        if (this.measuring) this.metrics.count(`frame.${['message_saved', 'message_changed', 'history_changed', 'presence', 'reads_changed', 'queued', 'send_rejected', 'error', 'recovery_failed', 'chat_deleted'].includes(frame.type) ? frame.type : 'other'}`);
+        if (this.measuring) this.metrics.count(`frame.${['message_saved', 'message_changed', 'history_changed', 'presence', 'online_count', 'presence_config', 'reads_changed', 'queued', 'send_rejected', 'error', 'recovery_failed', 'chat_deleted'].includes(frame.type) ? frame.type : 'other'}`);
         if (frame.type === 'message_saved') {
           if (!this.acks.has(frame.chatId) && this.acks.size >= 4096) throw new Error('ACK chat limit exceeded');
           const sequence = BigInt(frame.sequence);

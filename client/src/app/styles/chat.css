@@ -581,3 +581,82 @@
   flex: 1;
   font-weight: 600;
 }
+
+.chat-header-members {
+  position: relative;
+  margin-top: 2px;
+}
+.chat-header-members > button {
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-header-members > button:hover,
+.chat-header-members > button:focus-visible {
+  color: var(--text-2);
+}
+.members-preview {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 8px);
+  left: -12px;
+  width: min(320px, calc(100vw - 32px));
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-m);
+  background: var(--bg-menu);
+  box-shadow: var(--shadow-pop);
+  animation: fade 160ms ease backwards;
+}
+.members-preview ul {
+  max-height: 320px;
+  margin: 0;
+  padding: 6px;
+  overflow-y: auto;
+  list-style: none;
+}
+.members-preview li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 8px;
+  border-radius: var(--radius-s);
+}
+.members-preview li:hover {
+  background: var(--bg-hover);
+}
+.members-preview li > span {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+.members-preview strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.members-preview small {
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+.members-preview small.online {
+  color: var(--accent-text);
+}
+.members-preview em {
+  color: var(--accent-text);
+  font-size: 12px;
+  font-style: normal;
+}

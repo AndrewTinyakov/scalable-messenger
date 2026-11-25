@@ -48,11 +48,24 @@ type Subscription = {
   lastAppliedSequence?: string
 }
 
-export type PresenceStatus = { userId: string; state: 'online' | 'offline' | 'unknown' }
+export const LAST_SEEN_BUCKETS = ['recently', 'within_week', 'within_month', 'long_ago'] as const
+export type LastSeenBucket = (typeof LAST_SEEN_BUCKETS)[number]
+export type PresenceStatus = {
+  userId: string
+  online: boolean
+  lastSeenAt?: string
+  lastSeen?: LastSeenBucket
+}
+export type PresenceConfig = {
+  idleAfterHiddenMs: number
+  idleAfterInputMs: number
+  releaseAfterHiddenMs: number
+}
 export type OutgoingSocketFrame =
   | { type: 'watch_sidebar'; version: 1; chatIds: string[] }
-  | { type: 'watch_presence'; version: 1; chatId: string; userIds: string[] }
-  | { type: 'unwatch_presence'; version: 1 }
+  | { type: 'watch_presence'; version: 1; reset?: boolean; add?: string[]; remove?: string[] }
+  | { type: 'watch_online_count'; version: 1; chatId?: string }
+  | { type: 'activity'; version: 1; active: boolean; visible: boolean }
   | SendFrame
   | RecoveryFrame
   | { type: typeof FrameType.SUBSCRIBE_MANY; version: 1; subscriptions: Subscription[] }
@@ -91,7 +104,6 @@ const activityMessageFields = [
 const USERNAME = /^[a-z0-9_]{3,40}$/
 export type SocketEvent = { version: 1 } & (
   | ({ type: 'sidebar_activity'; chatId: string; sequence: string } & Partial<ActivityMessage>)
-  | { type: 'sidebar_presence'; observedAt: string; validForMs: number; statuses: PresenceStatus[] }
   | ({
       type: 'history_changed'
       chatId: string
@@ -104,13 +116,9 @@ export type SocketEvent = { version: 1 } & (
       chatId: string
     } & EventCounters &
       LiveEvent)
-  | {
-      type: 'presence'
-      chatId: string
-      observedAt: string
-      validForMs: number
-      statuses: PresenceStatus[]
-    }
+  | { type: 'presence'; statuses: PresenceStatus[]; unavailable?: string[] }
+  | { type: 'online_count'; chatId: string; online: number; members: number }
+  | ({ type: 'presence_config' } & PresenceConfig)
   | { type: typeof EventType.QUEUED; requestId: string; chatId?: string; recipientId?: string }
   | { type: typeof EventType.SUBSCRIBED; chatId: string; room: string }
   | ({
@@ -174,14 +182,15 @@ const messageFields = [
 ]
 const eventFields = {
   sidebar_activity: ['chatId', 'sequence', ...activityMessageFields],
-  sidebar_presence: ['observedAt', 'validForMs', 'statuses'],
   history_changed: [...liveFields, 'chatId', 'sequence', 'seq', 'memberSeq'],
   message_changed: [...liveFields, ...messageFields, 'seq'],
   chat_deleted: [...liveFields, 'chatId', 'seq'],
   reads_changed: [...liveFields, 'chatId', 'memberSeq'],
   chat_preferences_changed: [...liveFields, 'chatId', 'memberSeq', 'userSeq'],
   pins_changed: [...liveFields, 'chatId', 'seq', 'memberSeq'],
-  presence: ['chatId', 'observedAt', 'validForMs', 'statuses'],
+  presence: ['statuses', 'unavailable'],
+  online_count: ['chatId', 'online', 'members'],
+  presence_config: ['idleAfterHiddenMs', 'idleAfterInputMs', 'releaseAfterHiddenMs'],
   [EventType.QUEUED]: ['requestId', 'chatId', 'recipientId'],
   [EventType.SUBSCRIBED]: ['chatId', 'room'],
   [EventType.CHAT_CREATED]: [...liveFields, 'chatId', 'requestId', 'userSeq'],
@@ -204,6 +213,21 @@ const eventFields = {
   [EventType.MEMBER_REMOVED]: [...liveFields, 'chatId', 'memberId', 'seq', 'userSeq'],
   [EventType.MEMBERSHIP_CHANGED]: [...liveFields, 'chatId', 'seq'],
 } satisfies Record<SocketEvent['type'], readonly string[]>
+
+function isCount(value: unknown): boolean {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+}
+
+function isPresenceStatus(status: unknown): boolean {
+  if (!isRecord(status) || !isId(status.userId) || typeof status.online !== 'boolean') return false
+  if (
+    Object.keys(status).some((key) => !['userId', 'online', 'lastSeenAt', 'lastSeen'].includes(key))
+  )
+    return false
+  if ('lastSeenAt' in status && 'lastSeen' in status) return false
+  if ('lastSeenAt' in status && !isDateTime(status.lastSeenAt)) return false
+  return !('lastSeen' in status) || LAST_SEEN_BUCKETS.includes(status.lastSeen as LastSeenBucket)
+}
 
 function isRoom(value: unknown): value is string {
   return (
@@ -268,26 +292,33 @@ export function decodeSocketEvent(data: unknown): SocketEvent | null {
             [...frame.preview].length <= 160))
       break
     }
-    case 'sidebar_presence':
     case 'presence':
       valid =
-        (frame.type === 'sidebar_presence' || isId(frame.chatId)) &&
-        isDateTime(frame.observedAt) &&
-        typeof frame.validForMs === 'number' &&
-        Number.isSafeInteger(frame.validForMs) &&
-        frame.validForMs > 0 &&
-        frame.validForMs <= 30000 &&
         Array.isArray(frame.statuses) &&
-        frame.statuses.length <= 100 &&
-        frame.statuses.every(
-          (status) =>
-            isRecord(status) &&
-            Object.keys(status).every((key) => ['userId', 'state'].includes(key)) &&
-            isId(status.userId) &&
-            ['online', 'offline', 'unknown'].includes(String(status.state)),
-        ) &&
+        frame.statuses.length <= 500 &&
+        frame.statuses.every(isPresenceStatus) &&
         new Set(frame.statuses.map((status) => (status as PresenceStatus).userId)).size ===
-          frame.statuses.length
+          frame.statuses.length &&
+        (!('unavailable' in frame) ||
+          (Array.isArray(frame.unavailable) &&
+            frame.unavailable.length <= 500 &&
+            frame.unavailable.every(isId)))
+      break
+    case 'online_count':
+      valid =
+        isId(frame.chatId) &&
+        isCount(frame.online) &&
+        isCount(frame.members) &&
+        (frame.members as number) >= 1 &&
+        (frame.online as number) <= (frame.members as number)
+      break
+    case 'presence_config':
+      valid =
+        isCount(frame.idleAfterHiddenMs) &&
+        isCount(frame.idleAfterInputMs) &&
+        isCount(frame.releaseAfterHiddenMs) &&
+        (frame.idleAfterInputMs as number) >= 1000 &&
+        (frame.releaseAfterHiddenMs as number) >= 1000
       break
     case 'chat_deleted':
     case 'reads_changed':

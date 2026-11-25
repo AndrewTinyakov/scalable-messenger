@@ -4,7 +4,7 @@ The main workloads are idle connections and group fanout. More sockets increase 
 
 The gateway now shares one encoded event across recipients, keeps compact frame references in outbound and replay queues, and schedules ACK expiry only while an ACK is pending. Room membership locks are local to a room, and disconnect lookup visits only that connection's memberships. Quiet-room maintenance batches Redis position checks. Send and subscription commands use ordered, bounded workers so the physical reader can continue processing ACKs and pongs while authorization or broker confirmation waits.
 
-Transport close and grant revocation happen before bounded Redis lease cleanup. Draining rejects new upgrades, spreads connection closure over the configured drain interval, and joins owned work before shutdown completes. SQL commit, request deduplication, publisher confirmation and membership checks keep their existing guarantees. See the [broker decision](adr/0001-messenger-broker-split.md) for delivery and recovery rules.
+Transport close and grant revocation happen first; connection counts and presence are written asynchronously by the gateway, never per idle socket. Draining rejects new upgrades, spreads connection closure over the configured drain interval, and joins owned work before shutdown completes. SQL commit, request deduplication, publisher confirmation and membership checks keep their existing guarantees. See the [broker decision](adr/0001-messenger-broker-split.md) for delivery and recovery rules.
 
 ## Measured allocations
 

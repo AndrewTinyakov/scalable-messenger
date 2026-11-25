@@ -3,6 +3,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { Chat } from '../entities/chat/model'
+import { PresenceStore } from '../features/presence/presenceStore'
 import { ChatKind } from '../shared/api/generated/socket-vocabulary'
 import type { OutgoingSocketFrame } from '../shared/api/socket'
 import { useSidebarWatch } from './useSidebarWatch'
@@ -19,16 +20,17 @@ const direct: Chat = {
 }
 let dom: JSDOM
 let root: Root
-let watch: ReturnType<typeof useSidebarWatch>
 let sent: OutgoingSocketFrame[]
+let presence: PresenceStore
 
-function Harness({ selectedChat }: { selectedChat?: Chat }) {
-  watch = useSidebarWatch({
+function Harness({ selectedChat, loaded = [] }: { selectedChat?: Chat; loaded?: Chat[] }) {
+  useSidebarWatch({
     connectionGeneration: 1,
     connected: true,
     userId: alice.id,
     selectedChat,
-    listChats: () => [],
+    presence,
+    listChats: () => loaded,
     send: (frame) => sent.push(frame),
   })
   return null
@@ -41,6 +43,7 @@ beforeEach(() => {
   vi.stubGlobal('document', dom.window.document)
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   sent = []
+  presence = new PresenceStore()
   const container = document.createElement('div')
   document.body.append(container)
   root = createRoot(container)
@@ -52,21 +55,13 @@ afterEach(async () => {
   vi.useRealTimers()
 })
 
-it('accepts presence for a selected direct chat that the chat list has not loaded yet', async () => {
-  await act(async () => root.render(<Harness selectedChat={direct} />))
+it('follows activity for the selected chat and presence for every loaded direct peer', async () => {
+  const watched: OutgoingSocketFrame[] = []
+  presence.connect((frame) => watched.push(frame))
+  await act(async () => root.render(<Harness selectedChat={direct} loaded={[direct]} />))
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(300)
+    await vi.advanceTimersByTimeAsync(1300)
   })
   expect(sent).toEqual([{ type: 'watch_sidebar', version: 1, chatIds: [direct.id] }])
-  expect(watch.sidebarPresence).toEqual({ [bob.id]: 'unknown' })
-  await act(async () => {
-    watch.onEvent({
-      type: 'sidebar_presence',
-      version: 1,
-      observedAt: new Date().toISOString(),
-      validForMs: 15000,
-      statuses: [{ userId: bob.id, state: 'online' }],
-    })
-  })
-  expect(watch.sidebarPresence[bob.id]).toBe('online')
+  expect(watched.at(-1)).toEqual({ type: 'watch_presence', version: 1, add: [bob.id], remove: [] })
 })

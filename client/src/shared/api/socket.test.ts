@@ -293,7 +293,7 @@ describe('socket event decoding', () => {
 
 describe('shared sidebar contracts', () => {
   it('decodes bodyless observations and rejects extra content', () => {
-    for (const name of ['sidebar-activity', 'sidebar-presence']) {
+    for (const name of ['sidebar-activity', 'socket-presence', 'online-count', 'presence-config']) {
       const raw = readFileSync(
         new URL(`../../../../contracts/fixtures/valid/${name}.json`, import.meta.url),
         'utf8',

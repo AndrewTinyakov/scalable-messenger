@@ -9,7 +9,6 @@ import (
 	"time"
 )
 
-
 func TestSubscribeLimitSharedAcrossClients(t *testing.T) {
 	first, second := connectionTestClients(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

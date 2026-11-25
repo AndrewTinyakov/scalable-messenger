@@ -15,7 +15,6 @@ import com.andrewtinyakov.messenger.generated.grpc.AuthorizeSidebarResponse
 import com.andrewtinyakov.messenger.generated.grpc.ChatAuthorizationGrpc
 import com.andrewtinyakov.messenger.generated.grpc.OnlineCountMembersRequest
 import com.andrewtinyakov.messenger.generated.grpc.OnlineCountMembersResponse
-import com.andrewtinyakov.messenger.generated.grpc.PresenceLevel as WirePresenceLevel
 import com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest
 import com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityResponse
 import com.andrewtinyakov.messenger.generated.grpc.RecordLastSeenRequest
@@ -45,6 +44,7 @@ import java.time.Clock
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
+import com.andrewtinyakov.messenger.generated.grpc.PresenceLevel as WirePresenceLevel
 
 private const val MAX_SESSIONS_PER_REQUEST = 100
 private const val MAX_LAST_SEEN_SKEW_SECONDS = 60L

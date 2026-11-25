@@ -1,4 +1,5 @@
 export const FrameType = {
+  ACTIVITY: "activity",
   APPLIED: "applied",
   DISMISSED: "dismissed",
   RECEIVED_MESSAGE: "received_message",
@@ -6,7 +7,7 @@ export const FrameType = {
   SUBSCRIBE: "subscribe",
   SUBSCRIBE_MANY: "subscribe_many",
   UNSUBSCRIBE: "unsubscribe",
-  UNWATCH_PRESENCE: "unwatch_presence",
+  WATCH_ONLINE_COUNT: "watch_online_count",
   WATCH_PRESENCE: "watch_presence",
   WATCH_SIDEBAR: "watch_sidebar",
 } as const
@@ -23,15 +24,16 @@ export const EventType = {
   MEMBERSHIP_CHANGED: "membership_changed",
   MESSAGE_CHANGED: "message_changed",
   MESSAGE_SAVED: "message_saved",
+  ONLINE_COUNT: "online_count",
   PINS_CHANGED: "pins_changed",
   PRESENCE: "presence",
+  PRESENCE_CONFIG: "presence_config",
   QUEUED: "queued",
   READS_CHANGED: "reads_changed",
   RECOVERY_FAILED: "recovery_failed",
   SEND_REJECTED: "send_rejected",
   SESSION_REVOKED: "session_revoked",
   SIDEBAR_ACTIVITY: "sidebar_activity",
-  SIDEBAR_PRESENCE: "sidebar_presence",
   SUBSCRIBED: "subscribed",
   SUBSCRIPTION_EXPIRED: "subscription_expired",
 } as const

@@ -445,14 +445,14 @@ groups:
 
   - name: messenger-chat-features
     rules:
-      - alert: MessengerPresenceSnapshotsFailing
-        expr: sum(rate(messenger_ws_presence_snapshots_total{result="failed"}[5m])) / clamp_min(sum(rate(messenger_ws_presence_snapshots_total[5m])), 0.000001) > 0.1 and sum(increase(messenger_ws_presence_snapshots_total[5m])) > 20
-        for: 5m
+      - alert: MessengerPresenceResyncing
+        expr: sum(rate(messenger_ws_presence_resyncs_total[5m])) > 1
+        for: 10m
         labels:
           severity: warning
         annotations:
-          summary: Presence snapshots are returning unknown states
-          description: Check Redis health, batch timeouts and the presence sweep duration in Chat features.
+          summary: Presence buckets keep reloading
+          description: Gateways keep losing presence subscriptions or seeing sequence gaps. Check Redis Cluster health, slot migrations and pub/sub output buffers.
 
       - alert: MessengerReadCleanupBehind
         expr: max(messenger_read_cleanup_oldest_age_seconds) > 300 and max(messenger_read_cleanup_backlog) > 0

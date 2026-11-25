@@ -5,24 +5,17 @@ import type { Session, User } from '../../entities/session/model'
 import { api } from '../../shared/api/http'
 import { Avatar } from '../../shared/ui/Avatar'
 import { fadeOutDialog, useExitAnimation } from '../../shared/ui/useExitAnimation'
+import { isOnline, presenceLabel } from '../presence/presenceLabel'
+import { usePresence } from '../presence/usePresence'
 
 interface Props {
   chat: Chat
   session: Session
   onClose(): void
   onUpdated(chat: Chat): void
-  presence?: Record<string, 'online' | 'offline' | 'unknown'>
-  onVisibleMembers?: (ids: string[] | null) => void
 }
 
-export function GroupMembersDialog({
-  chat,
-  session,
-  onClose,
-  onUpdated,
-  presence,
-  onVisibleMembers,
-}: Props) {
+export function GroupMembersDialog({ chat, session, onClose, onUpdated }: Props) {
   const sessionApi = useMemo(() => api.forSession(session), [session.user.id, session.deviceId])
   const [details, setDetails] = useState(chat)
   const [members, setMembers] = useState<User[]>([])
@@ -43,24 +36,10 @@ export function GroupMembersDialog({
   const dialogRef = useRef<HTMLElement>(null)
   const backdrop = useRef<HTMLDivElement>(null)
   useExitAnimation(backdrop, fadeOutDialog)
-  const listRef = useRef<HTMLUListElement>(null)
-  function observeMembers() {
-    const list = listRef.current
-    if (!list) return
-    const bounds = list.getBoundingClientRect()
-    const ids = [...list.querySelectorAll<HTMLElement>('[data-member-id]')]
-      .filter((row) => {
-        const rect = row.getBoundingClientRect()
-        return rect.bottom > bounds.top && rect.top < bounds.bottom
-      })
-      .slice(0, 100)
-      .map((row) => row.dataset.memberId!)
-    onVisibleMembers?.(ids)
-  }
-  useEffect(() => {
-    observeMembers()
-  }, [members])
-  useEffect(() => () => onVisibleMembers?.(null), [onVisibleMembers])
+  const presence = usePresence(
+    'members',
+    members.map((member) => member.id),
+  )
   const owner = details.ownerId === session.user.id
 
   const reload = useCallback(async () => {
@@ -258,12 +237,7 @@ export function GroupMembersDialog({
             {notice}
           </p>
         )}
-        <ul
-          ref={listRef}
-          className="members-list"
-          aria-label="Group members"
-          onScroll={observeMembers}
-        >
+        <ul className="members-list" aria-label="Group members">
           {members.map((member) => (
             <li key={member.id} data-member-id={member.id} className="group-member-row">
               <div className="group-member-main">
@@ -271,18 +245,18 @@ export function GroupMembersDialog({
                   seed={member.id}
                   name={member.username}
                   size={42}
-                  online={presence?.[member.id] === 'online'}
+                  online={isOnline(presence.get(member.id))}
                 />
                 <span className="group-member-name">
                   {member.username}
                   {member.id === session.user.id && <small>You</small>}
-                  {presence &&
-                    presence[member.id] !== undefined &&
-                    presence[member.id] !== 'unknown' && (
-                      <small className={`member-presence ${presence[member.id]}`}>
-                        {presence[member.id] === 'online' ? 'online' : 'offline'}
-                      </small>
-                    )}
+                  {presence.has(member.id) && (
+                    <small
+                      className={`member-presence ${isOnline(presence.get(member.id)) ? 'online' : 'offline'}`}
+                    >
+                      {presenceLabel(presence.get(member.id))}
+                    </small>
+                  )}
                 </span>
                 {member.id === details.ownerId ? (
                   <span className="member-owner">Owner</span>

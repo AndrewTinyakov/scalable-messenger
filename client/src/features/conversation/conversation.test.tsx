@@ -253,40 +253,6 @@ describe('selected conversation features', () => {
     }
     return { Harness, get: () => features, service, send, recovery, fail }
   }
-  it('merges presence diffs, keeps peers through empty heartbeats and becomes unknown when disconnected or expired', async () => {
-    const fixture = setup()
-    await act(async () => root.render(<fixture.Harness />))
-    const event = {
-      type: 'presence' as const,
-      version: 1 as const,
-      chatId: chat.id,
-      validForMs: 15000,
-      observedAt: new Date().toISOString(),
-      statuses: [{ userId: bob.id, state: 'online' as const }],
-    }
-    await act(async () => {
-      fixture.get().onEvent(event)
-    })
-    expect(fixture.get().presence[bob.id]).toBe('online')
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(10000)
-      fixture.get().onEvent({ ...event, observedAt: new Date().toISOString(), statuses: [] })
-    })
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(10000)
-    })
-    expect(fixture.get().presence[bob.id]).toBe('online')
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(5000)
-    })
-    expect(fixture.get().presence[bob.id]).toBeUndefined()
-    await act(async () => {
-      fixture.get().onEvent({ ...event, observedAt: new Date().toISOString() })
-      root.render(<fixture.Harness connected={false} />)
-    })
-    expect(fixture.get().presence).toEqual({})
-    fixture.recovery.dispose()
-  })
   it('retains the deletion request identity after an uncertain response and bounds selected messages', async () => {
     const fixture = setup()
     fixture.service.delete.mockRejectedValueOnce(new Error('Connection lost'))

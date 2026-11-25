@@ -195,7 +195,12 @@ func TestFleetRemovesDeadGatewaysAndRenewsItsOwnIdentity(t *testing.T) {
 	}
 	crashedCtx, crash := context.WithCancel(ctx)
 	go crashed.Run(crashedCtx)
-	eventually(t, func() bool { store.mu.Lock(); defer store.mu.Unlock(); _, ok := store.gateways[crashed.ID()]; return ok })
+	eventually(t, func() bool {
+		store.mu.Lock()
+		defer store.mu.Unlock()
+		_, ok := store.gateways[crashed.ID()]
+		return ok
+	})
 	crash()
 	go survivor.Run(ctx)
 	select {

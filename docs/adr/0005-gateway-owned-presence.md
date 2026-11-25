@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Gateway-owned presence with bucketed transition channels
@@ -16,7 +16,7 @@ When a gateway's last active connection for a user goes away, the gateway waits 
 
 ## Publisher state
 
-Each user belongs to one of 4,096 buckets. One versioned `bucket(userId)` function, shared by Go and Kotlin and checked by golden test vectors, assigns the bucket. A generated tag table spreads buckets evenly across cluster slots. A user's state is the hash `presence:{b}:u:<userId>`. It holds one field per gateway epoch for that gateway's active and established connection counts, plus the version `v` and the last-seen time `ls`.
+Each user belongs to one of 4,096 buckets. One Go function, `roomname.PresenceBucketOf` (FNV-1a), assigns the bucket and is pinned by golden test vectors; Kotlin never reads presence state. The hash tags `{presence:<b>}` land on distinct cluster slots. A user's state is the hash `messenger:{presence:<b>}:u:<userId>`. It holds one field per gateway epoch for that gateway's active and established connection counts, plus the version `v` and the last-seen time `ls`.
 
 A gateway writes absolute counts, never increments, so retries and rewrites are idempotent. A Lua script computes the account state. On a transition it does three things:
 
@@ -26,7 +26,7 @@ A gateway writes absolute counts, never increments, so retries and rewrites are 
 
 The hash, the sequence counter and the channel share a hash tag, so the write and the publish are atomic. Versions keep rising after a failover that loses writes, which matters because watchers drop versions lower than the last one they saw.
 
-Gateways register in a `presence:gateways` sorted set and heartbeat every five seconds. When a gateway's deadline passes, the other gateways race for a `SET NX` lock on its epoch. The winner marks the epoch dead and removes its fields for every user listed in that gateway's user set, which publishes offline wherever a total reaches zero. A gateway that finds its epoch marked dead registers under a new epoch and rewrites its users. It does the same after a Redis failover or topology change.
+Gateways register in a `messenger:gateways` sorted set and heartbeat every five seconds. Each gateway also keeps a set of the users it holds connections for. When a gateway's deadline passes, the other gateways race for a `SET NX` lock on its epoch. The winner removes the dead gateway's connection counts and presence fields for every user in its user set, which publishes offline wherever a total reaches zero, and then marks the gateway dead. A gateway that finds its epoch marked dead registers under a new epoch and rewrites its users. It does the same after a Redis failover or topology change.
 
 A Redis error never closes a socket. The current lease renewal does close sockets on error, and the new design removes that behavior.
 
@@ -43,7 +43,7 @@ Kotlin's `presenceVisibility(viewer, subjects)` decides, for each subject:
 
 Today's rule is that the viewer shares a chat with the subject. Later rules (user settings, blocks, public profiles) change only that function.
 
-Authorization runs only for added users, batched per gateway tick. Removal from a chat, chat deletion, account deletion and privacy changes revoke a grant at once. User-room events carry most revocations, and a `policy_changed` event on the subject's presence channel carries privacy changes. Grants expire after 15 minutes. The gateway then reauthorizes, in one batch, the users still watched. A missed revocation is therefore bounded by 15 minutes. Coarse viewers get a snapshot without live updates. Viewers with level `none` get no bytes at all.
+Authorization runs only for added users, in one batched call per watch command. Removal from a chat, chat deletion, account deletion and privacy changes revoke a grant at once. User-room events carry most revocations, and a `policy_changed` event on the subject's presence channel carries privacy changes. Grants expire after 15 minutes. The gateway then reauthorizes, in one batch, the users still watched. A missed revocation is therefore bounded by 15 minutes. Coarse viewers get a snapshot without live updates. Viewers with level `none` get no bytes at all.
 
 Each gateway keeps one in-memory table, subject → `{state, v, local watcher sockets}`. It subscribes to the subject's bucket before reading the snapshot, then keeps whichever version is higher. Every later socket that watches the same subject reads from memory. The gateway tracks the last sequence per bucket. A sequence gap makes it read the bucket's watched subjects again. A disconnect, an unsolicited `sunsubscribe` or a topology change does three things:
 
@@ -61,7 +61,7 @@ The sidebar watches the peers of every loaded direct chat, ranked visible first,
 
 ## Group online count
 
-A group of up to 200 members shows "N members, M online" while the chat is open. The client sends `presence.count {groupId}`. Kotlin authorizes the viewer and returns the member IDs the viewer may see. The gateway tracks those members internally and sends only `{online: M}` when M changes. A membership change invalidates the set, and the gateway resolves it again. Larger groups show only their member count. The member list is paginated and shows live dots for its loaded rows through ordinary watches.
+A group of up to 200 members shows "N members, M online" while the chat is open. The client sends `presence.count {groupId}`. Kotlin authorizes the viewer and returns the member IDs the viewer may see. The gateway tracks those members internally and sends only `{online: M}` when M changes. A membership change invalidates the set, and the gateway resolves it again. Larger groups show only their member count. Hovering the count shows a paginated member preview, and clicking it opens the members dialog; both show live status for their loaded rows through ordinary watches.
 
 ## Last seen
 

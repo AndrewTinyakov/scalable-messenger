@@ -8,6 +8,8 @@ import type { SendRequests } from '../entities/message/sendRequests'
 import type { Session } from '../entities/session/model'
 import { useConversationFeatures } from '../features/conversation/useConversationFeatures'
 import { useMessagePins } from '../features/message-pins/useMessagePins'
+import { watchActivity, type Activity } from '../features/presence/activity'
+import { PresenceStore } from '../features/presence/presenceStore'
 import { ChatKind } from '../shared/api/generated/socket-vocabulary'
 import { api } from '../shared/api/http'
 import {
@@ -112,11 +114,48 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
 
   useEffect(() => () => watchPacer.reset(), [watchPacer, connectionGeneration])
 
+  const presence = useMemo(() => new PresenceStore(), [])
+  const activity = useRef<Activity>({ active: true, visible: true })
+  const sendNow = useCallback((frame: OutgoingSocketFrame) => {
+    const socket = socketRef.current
+    if (socket?.readyState !== WebSocket.OPEN) return
+    try {
+      sendSocketFrame(socket, frame)
+    } catch {
+      socket.close()
+    }
+  }, [])
+  useEffect(() => {
+    if (connection !== 'connected') {
+      presence.connect(null)
+      return
+    }
+    presence.connect(sendNow)
+    const { active, visible } = activity.current
+    if (!active || !visible) sendNow({ type: 'activity', version: 1, active, visible })
+  }, [presence, sendNow, connection, connectionGeneration])
+  const onPresenceEvent = useCallback(
+    (event: Parameters<PresenceStore['onEvent']>[0]) => presence.onEvent(event),
+    [presence],
+  )
+  useEffect(
+    () =>
+      watchActivity(
+        () => presence.config,
+        (next) => {
+          activity.current = next
+          sendNow({ type: 'activity', version: 1, ...next })
+        },
+        (released) => presence.setReleased(released),
+      ),
+    [presence, sendNow],
+  )
+
   const sendConnectedFrame = useCallback(
     (frame: OutgoingSocketFrame | null) => {
       const socket = socketRef.current
       if (!frame || socket?.readyState !== WebSocket.OPEN) return
-      if (['watch_presence', 'watch_sidebar', 'unwatch_presence'].includes(frame.type)) {
+      if (frame.type === 'watch_sidebar') {
         watchPacer.offer(frame)
         return
       }
@@ -222,6 +261,7 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     userId: session.user.id,
     selectedChat,
     listChats,
+    presence,
     send: sendConnectedFrame,
   })
   const features = useConversationFeatures({
@@ -237,7 +277,6 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     onReadCommitted: settleRead,
     onReadFailed: settleRead,
     fail: setError,
-    sharedPresence: sidebar.sidebarPresence,
   })
   const pins = useMessagePins(
     selectedId && !selectedId.startsWith('draft:') ? selectedId : undefined,
@@ -461,7 +500,7 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
 
   useMessengerSocket({
     onFeatureEvent,
-    onSidebarEvent: sidebar.onEvent,
+    onSidebarEvent: onPresenceEvent,
     sessionApi,
     userId: session.user.id,
     recovery,
@@ -536,7 +575,7 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
   }, [refreshChats])
 
   return {
-    sidebarPresence: sidebar.sidebarPresence,
+    presence,
     watchSidebarPeers: sidebar.watchSidebarPeers,
     reconnect: { nextRetryAt },
     retryNow,

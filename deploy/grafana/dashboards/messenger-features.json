@@ -87,8 +87,7 @@
     },
     {
       "id": 2,
-      "title": "Active watches and shared peers",
-      "description": "References count socket-to-peer watches; targets count unique peers queried once per node. Compare them to see node-level query sharing.",
+      "title": "Presence watches and subjects",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
@@ -127,28 +126,21 @@
       "targets": [
         {
           "expr": "sum(messenger_ws_presence_watches)",
-          "legendFormat": "watch sets",
+          "legendFormat": "watching sockets",
           "refId": "A",
           "instant": false
         },
         {
-          "expr": "sum(messenger_ws_presence_references)",
-          "legendFormat": "peer references",
+          "expr": "sum(messenger_ws_presence_subjects)",
+          "legendFormat": "tracked users",
           "refId": "B",
-          "instant": false
-        },
-        {
-          "expr": "sum(messenger_ws_presence_targets)",
-          "legendFormat": "unique peer targets",
-          "refId": "C",
           "instant": false
         }
       ]
     },
     {
       "id": 3,
-      "title": "Presence query p95 and p99",
-      "description": "Redis batches contain at most100 unique peers with bounded worker concurrency. Empty charts mean no observation, rather than zero latency.",
+      "title": "Presence transitions received",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
@@ -186,23 +178,16 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95,sum by(le)(rate(messenger_ws_presence_query_seconds_bucket[$__rate_interval])))",
-          "legendFormat": "p95",
+          "expr": "sum by(result)(rate(messenger_ws_presence_events_total[$__rate_interval]))",
+          "legendFormat": "{{result}}",
           "refId": "A",
-          "instant": false
-        },
-        {
-          "expr": "histogram_quantile(0.99,sum by(le)(rate(messenger_ws_presence_query_seconds_bucket[$__rate_interval])))",
-          "legendFormat": "p99",
-          "refId": "B",
           "instant": false
         }
       ]
     },
     {
       "id": 4,
-      "title": "Snapshot and authorization outcomes",
-      "description": "Failed snapshots produce unknown status. Authorization is rechecked before the30-second grant expires; missing or expired grants stop delivery.",
+      "title": "Presence bucket resyncs",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
@@ -240,23 +225,16 @@
       },
       "targets": [
         {
-          "expr": "sum by(result)(rate(messenger_ws_presence_snapshots_total[$__rate_interval]))",
-          "legendFormat": "snapshot {{result}}",
+          "expr": "sum by(reason)(rate(messenger_ws_presence_resyncs_total[$__rate_interval]))",
+          "legendFormat": "{{reason}}",
           "refId": "A",
-          "instant": false
-        },
-        {
-          "expr": "sum by(result)(rate(messenger_ws_presence_authorization_seconds_count[$__rate_interval]))",
-          "legendFormat": "authorization {{result}}",
-          "refId": "B",
           "instant": false
         }
       ]
     },
     {
       "id": 5,
-      "title": "Presence changes and delivered heartbeats",
-      "description": "State counters count changes; feature deliveries also include empty freshness heartbeats. No user or chat ID labels.",
+      "title": "Presence frames delivered",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
@@ -294,8 +272,8 @@
       },
       "targets": [
         {
-          "expr": "sum by(state)(rate(messenger_ws_presence_states_total[$__rate_interval]))",
-          "legendFormat": "{{state}} changes",
+          "expr": "sum(rate(messenger_ws_presence_deliveries_total[$__rate_interval]))",
+          "legendFormat": "presence and count frames",
           "refId": "A",
           "instant": false
         },
@@ -309,8 +287,7 @@
     },
     {
       "id": 6,
-      "title": "Presence sweep duration",
-      "description": "One node-owned sweep joins all bounded workers; long sweeps can delay the next observation. Client freshness expires after15seconds.",
+      "title": "Gateway connections",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
@@ -348,8 +325,8 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.99,sum by(le)(rate(messenger_ws_presence_sweep_seconds_bucket[$__rate_interval])))",
-          "legendFormat": "p99 sweep",
+          "expr": "sum(messenger_ws_connections)",
+          "legendFormat": "connections",
           "refId": "A",
           "instant": false
         }
@@ -357,8 +334,7 @@
     },
     {
       "id": 7,
-      "title": "Watch query sharing",
-      "description": "Ratio of authorized peer references to unique queried peers across the fleet. A value above1 represents deduplicated repeated watches.",
+      "title": "Matched transition share",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
@@ -396,8 +372,8 @@
       },
       "targets": [
         {
-          "expr": "sum(messenger_ws_presence_references) / clamp_min(sum(messenger_ws_presence_targets),1)",
-          "legendFormat": "references / unique peers",
+          "expr": "sum(rate(messenger_ws_presence_events_total{result=\"matched\"}[$__rate_interval])) / clamp_min(sum(rate(messenger_ws_presence_events_total[$__rate_interval])),0.000001)",
+          "legendFormat": "matched / received",
           "refId": "A",
           "instant": false
         }

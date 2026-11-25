@@ -1,6 +1,14 @@
 import { useHotkey } from '@tanstack/react-hotkeys'
 import { ChevronDown, Copy, Forward, Trash2, X } from 'lucide-react'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentProps,
+} from 'react'
 import { isMuted, type Chat } from '../../entities/chat/model'
 import type { DeleteScope } from '../../entities/message/historySnapshot'
 import { groupByDay } from '../../entities/message/messageDays'
@@ -44,6 +52,7 @@ interface Props {
   onRetry: (requestId: string) => void
   onBack: () => void
   onMembers?: () => void
+  loadMembers?: ComponentProps<typeof ChatHeader>['loadMembers']
   lookupUser?: (id: string) => Promise<User>
   hasOlder: boolean
   hasNewer: boolean
@@ -93,6 +102,7 @@ export function ChatPanel({
   onRetry,
   onBack,
   onMembers,
+  loadMembers,
   lookupUser,
   hasOlder,
   hasNewer,
@@ -398,9 +408,9 @@ export function ChatPanel({
       <ChatHeader
         chat={chat}
         currentUser={currentUser}
-        presence={features?.presence}
         onBack={onBack}
         onMembers={onMembers}
+        loadMembers={loadMembers}
         onDelete={
           features
             ? () => {

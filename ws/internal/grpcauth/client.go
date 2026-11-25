@@ -156,4 +156,3 @@ func decodeSession(response *authorization.ValidateSessionResponse) (Session, er
 }
 
 func (c *Client) Close() error { return c.connection.Close() }
-

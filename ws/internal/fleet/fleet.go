@@ -46,15 +46,18 @@ type Fleet struct {
 	config   Config
 	logger   *slog.Logger
 	wake     chan struct{}
-	mu       sync.Mutex
-	id       string
-	renewal  renewalPhase
-	renewals uint64
-	counts   map[string]int
-	dirty    map[string]bool
-	locks    map[string]*userLock
-	retired  []string
-	renewed  []func(string)
+	// admitting is held shared by each admission's Redis check and
+	// exclusively while the heartbeat detects and starts a renewal, so no
+	// admission can count against state that a renewal replaces.
+	admitting sync.RWMutex
+	mu        sync.Mutex
+	id        string
+	renewal   renewalPhase
+	counts    map[string]int
+	dirty     map[string]bool
+	locks     map[string]*userLock
+	retired   []string
+	renewed   []func(string)
 }
 
 // renewalPhase blocks admission while Redis may undercount this gateway's
@@ -142,49 +145,21 @@ func (f *Fleet) Admit(ctx context.Context, userID string) (bool, error) {
 		return false, err
 	}
 	defer unlock()
+	f.admitting.RLock()
+	defer f.admitting.RUnlock()
 	f.mu.Lock()
 	if f.renewal != renewalNone {
 		f.mu.Unlock()
 		return false, ErrRenewing
 	}
 	f.counts[userID]++
-	id, renewals := f.id, f.renewals
+	id := f.id
 	f.mu.Unlock()
 	admitted, err := f.store.AdmitConnection(ctx, userID, id, f.config.ConnectionLimit)
-	f.mu.Lock()
-	renewed, current := f.renewals != renewals, f.id
-	f.mu.Unlock()
-	if renewed {
-		// Redis state changed under this admission, so its check may have
-		// counted against lost or retired state. Undo it; the client retries.
-		if current != id {
-			f.retire(ctx, userID, id)
-		}
-		f.forget(userID)
-		return false, ErrRenewing
-	}
 	if err != nil || !admitted {
 		f.forget(userID)
 	}
 	return admitted, err
-}
-
-// retire clears what an admission wrote under a retired identity. If that
-// fails, the identity is cleaned again through its index, which still holds
-// the user.
-func (f *Fleet) retire(ctx context.Context, userID, old string) {
-	if f.write(ctx, func(ctx context.Context) error { return f.store.SetConnections(ctx, userID, old, 0) }) == nil {
-		_ = f.write(ctx, func(ctx context.Context) error { return f.store.UnindexConnections(ctx, userID, old) })
-		return
-	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	for _, gateway := range f.retired {
-		if gateway == old {
-			return
-		}
-	}
-	f.retired = append(f.retired, old)
 }
 
 // Release forgets one local connection; the writer stores the new count.
@@ -292,26 +267,46 @@ func (f *Fleet) write(ctx context.Context, operation func(context.Context) error
 // identity is registered before any writer uses it, and the old identity is
 // cleaned up like any dead gateway.
 func (f *Fleet) heartbeat(ctx context.Context) {
+	f.admitting.Lock()
+	renewed := f.renew(ctx)
+	f.admitting.Unlock()
+	if !renewed {
+		return
+	}
+	f.mu.Lock()
+	callbacks := append([]func(string){}, f.renewed...)
+	current := f.id
+	f.mu.Unlock()
+	for _, callback := range callbacks {
+		callback(current)
+	}
+	f.signal()
+}
+
+// renew extends the registration and reports whether state must be written
+// again. If Redis lost the registration, every count is restored; if another
+// gateway declared this one dead, a new identity is registered first and
+// the old one is cleaned up like any dead gateway.
+func (f *Fleet) renew(ctx context.Context) bool {
 	f.mu.Lock()
 	id := f.id
 	f.mu.Unlock()
 	registered, dead, err := f.beat(ctx, id)
 	if err != nil {
 		f.logger.Warn("gateway heartbeat", "error", err)
-		return
+		return false
 	}
 	if registered {
-		return
+		return false
 	}
 	if dead {
 		f.mu.Lock()
 		f.renewal = renewalRegistering
-		f.renewals++
 		f.mu.Unlock()
 		next := newID()
 		if _, _, err := f.beat(ctx, next); err != nil {
 			f.logger.Warn("register new gateway identity", "error", err)
-			return
+			return false
 		}
 		f.logger.Warn("gateway was removed by the fleet; registered a new identity", "previous", id, "gateway", next)
 		f.mu.Lock()
@@ -320,18 +315,12 @@ func (f *Fleet) heartbeat(ctx context.Context) {
 		f.mu.Unlock()
 	}
 	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.renewal = renewalRestoring
-	f.renewals++
 	for userID := range f.counts {
 		f.dirty[userID] = true
 	}
-	callbacks := append([]func(string){}, f.renewed...)
-	current := f.id
-	f.mu.Unlock()
-	for _, callback := range callbacks {
-		callback(current)
-	}
-	f.signal()
+	return true
 }
 
 func (f *Fleet) beat(ctx context.Context, id string) (bool, bool, error) {

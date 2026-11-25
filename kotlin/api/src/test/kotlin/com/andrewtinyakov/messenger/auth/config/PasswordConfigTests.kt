@@ -16,7 +16,7 @@ class PasswordConfigTests {
         val bcrypt = BCryptPasswordEncoder().encode(password)
         val properties = PasswordProperties(
             idForEncode = "pbkdf2-next",
-            pbkdf2 = PasswordProperties().pbkdf2 + ("pbkdf2-next" to PasswordProperties.Pbkdf2Properties(iterations = 1000)),
+            pbkdf2 = PasswordProperties().pbkdf2 + ("pbkdf2-next" to Pbkdf2Properties(iterations = 1000)),
         )
         val encoder = PasswordConfig().passwordEncoder(properties)
 

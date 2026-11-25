@@ -23,19 +23,28 @@ export async function api(path, { cookie, method = 'GET', body } = {}) {
   assert.ok(response.ok, `${method} ${path} returned ${response.status}: ${JSON.stringify(payload)}`);
   if (path === '/auth/register' || path === '/auth/login') {
     assert.deepEqual(Object.keys(payload).sort(), ['deviceId', 'user']);
-    const cookies = response.headers.getSetCookie().filter((value) => value.startsWith('messenger_session='));
+    const cookies = response.headers.getSetCookie().filter(isSessionCookie);
     assert.equal(cookies.length, 1);
     const setCookie = cookies[0];
     assert.match(setCookie, /; HttpOnly(?:;|$)/i);
     assert.match(setCookie, /; SameSite=Strict(?:;|$)/i);
-    assert.match(setCookie, new RegExp(`; Path=${new URL(apiBase).pathname}(?:;|$)`, 'i'));
+    if (setCookie.startsWith('__Host-')) {
+      assert.match(setCookie, /; Secure(?:;|$)/i);
+      assert.match(setCookie, /; Path=\/(?:;|$)/i);
+    } else {
+      assert.match(setCookie, new RegExp(`; Path=${new URL(apiBase).pathname}(?:;|$)`, 'i'));
+    }
     assert.doesNotMatch(setCookie, /; Domain=/i);
     return { ...payload, cookie: setCookie.split(';')[0] };
   }
   if (path === '/auth/logout') {
-    assert.ok(response.headers.getSetCookie().some((value) => value.startsWith('messenger_session=') && /; Max-Age=0(?:;|$)/i.test(value)));
+    assert.ok(response.headers.getSetCookie().some((value) => isSessionCookie(value) && /; Max-Age=0(?:;|$)/i.test(value)));
   }
   return payload;
+}
+
+function isSessionCookie(value) {
+  return value.startsWith('__Host-messenger_session=') || value.startsWith('messenger_session=');
 }
 
 export function csrfHeaders(method) {

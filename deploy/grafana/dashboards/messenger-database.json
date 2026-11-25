@@ -14,11 +14,11 @@
   },
   "editable": false,
   "graphTooltip": 1,
-  "description": "Fixed application SQL operations, transaction phases, connection pools and numeric PostgreSQL diagnosis. Application timings and server digest statistics have different boundaries. No raw SQL is exported.",
+  "description": "Application SQL timed by entry point (HTTP route, scheduled job, RPC or thread), transaction phases, connection pools and numeric PostgreSQL diagnosis. Application timings and server digest statistics have different boundaries. No raw SQL is exported.",
   "panels": [
     {
       "id": 1,
-      "title": "Application SQL operations",
+      "title": "Application SQL by entry point",
       "type": "row",
       "collapsed": false,
       "gridPos": {
@@ -30,8 +30,8 @@
     },
     {
       "id": 2,
-      "title": "Operations ranked by accumulated query time",
-      "description": "Top 15 fixed operations by accumulated application query lifecycle seconds in the selected range. Concurrent work can exceed elapsed wall time. Mean, calls and failures use the selected range. p95 and p99 use the rate interval at its end. These are application measurements and cannot be joined to PostgreSQL query IDs.",
+      "title": "Entry points ranked by accumulated query time",
+      "description": "Top 15 entry points by accumulated application query lifecycle seconds in the selected range. Concurrent work can exceed elapsed wall time. Mean, calls and failures use the selected range. p95 and p99 use the rate interval at its end. These are application measurements and cannot be joined to PostgreSQL query IDs.",
       "type": "table",
       "datasource": {
         "type": "prometheus",
@@ -105,7 +105,7 @@
       },
       "targets": [
         {
-          "expr": "topk(15, sum by (operation) (increase(messenger_database_query_seconds_sum{job=~\"$service\",operation=~\"$operation\"}[$__range])))",
+          "expr": "topk(15, sum by (entrypoint) (increase(messenger_database_query_seconds_sum{job=~\"$service\",entrypoint=~\"$entrypoint\",entrypoint!=\"\"}[$__range])))",
           "legendFormat": "Total time",
           "refId": "A",
           "instant": true,
@@ -113,7 +113,7 @@
           "format": "table"
         },
         {
-          "expr": "(sum by (operation) (increase(messenger_database_query_seconds_sum{job=~\"$service\",operation=~\"$operation\"}[$__range])) / ignoring(operation) group_left sum(sum by (operation) (increase(messenger_database_query_seconds_sum{job=~\"$service\",operation=~\"$operation\"}[$__range])))) and on(operation) topk(15, sum by (operation) (increase(messenger_database_query_seconds_sum{job=~\"$service\",operation=~\"$operation\"}[$__range])))",
+          "expr": "(sum by (entrypoint) (increase(messenger_database_query_seconds_sum{job=~\"$service\",entrypoint=~\"$entrypoint\",entrypoint!=\"\"}[$__range])) / ignoring(entrypoint) group_left sum(sum by (entrypoint) (increase(messenger_database_query_seconds_sum{job=~\"$service\",entrypoint=~\"$entrypoint\",entrypoint!=\"\"}[$__range])))) and on(entrypoint) topk(15, sum by (entrypoint) (increase(messenger_database_query_seconds_sum{job=~\"$service\",entrypoint=~\"$entrypoint\",entrypoint!=\"\"}[$__range])))",
           "legendFormat": "Time share",
           "refId": "B",
           "instant": true,
@@ -121,7 +121,7 @@
           "format": "table"
         },
         {
-          "expr": "(sum by (operation) (increase(messenger_database_query_seconds_sum{job=~\"$service\",operation=~\"$operation\"}[$__range])) / sum by (operation) (increase(messenger_database_query_seconds_count{job=~\"$service\",operation=~\"$operation\"}[$__range]))) and on(operation) topk(15, sum by (operation) (increase(messenger_database_query_seconds_sum{job=~\"$service\",operation=~\"$operation\"}[$__range])))",
+          "expr": "(sum by (entrypoint) (increase(messenger_database_query_seconds_sum{job=~\"$service\",entrypoint=~\"$entrypoint\",entrypoint!=\"\"}[$__range])) / sum by (entrypoint) (increase(messenger_database_query_seconds_count{job=~\"$service\",entrypoint=~\"$entrypoint\",entrypoint!=\"\"}[$__range]))) and on(entrypoint) topk(15, sum by (entrypoint) (increase(messenger_database_query_seconds_sum{job=~\"$service\",entrypoint=~\"$entrypoint\",entrypoint!=\"\"}[$__range])))",
           "legendFormat": "Mean",
           "refId": "C",
           "instant": true,
@@ -129,7 +129,7 @@
           "format": "table"
         },
         {
-          "expr": "histogram_quantile(0.95, sum by (le,operation) (rate(messenger_database_query_seconds_bucket{job=~\"$service\",operation=~\"$operation\"}[$__rate_interval]))) and on(operation) topk(15, sum by (operation) (increase(messenger_database_query_seconds_sum{job=~\"$service\",operation=~\"$operation\"}[$__range])))",
+          "expr": "histogram_quantile(0.95, sum by (le,entrypoint) (rate(messenger_database_query_seconds_bucket{job=~\"$service\",entrypoint=~\"$entrypoint\",entrypoint!=\"\"}[$__rate_interval]))) and on(entrypoint) topk(15, sum by (entrypoint) (increase(messenger_database_query_seconds_sum{job=~\"$service\",entrypoint=~\"$entrypoint\",entrypoint!=\"\"}[$__range])))",
           "legendFormat": "p95",
           "refId": "D",
           "instant": true,
@@ -137,7 +137,7 @@
           "format": "table"
         },
         {
-          "expr": "histogram_quantile(0.99, sum by (le,operation) (rate(messenger_database_query_seconds_bucket{job=~\"$service\",operation=~\"$operation\"}[$__rate_interval]))) and on(operation) topk(15, sum by (operation) (increase(messenger_database_query_seconds_sum{job=~\"$service\",operation=~\"$operation\"}[$__range])))",
+          "expr": "histogram_quantile(0.99, sum by (le,entrypoint) (rate(messenger_database_query_seconds_bucket{job=~\"$service\",entrypoint=~\"$entrypoint\",entrypoint!=\"\"}[$__rate_interval]))) and on(entrypoint) topk(15, sum by (entrypoint) (increase(messenger_database_query_seconds_sum{job=~\"$service\",entrypoint=~\"$entrypoint\",entrypoint!=\"\"}[$__range])))",
           "legendFormat": "p99",
           "refId": "E",
           "instant": true,
@@ -145,7 +145,7 @@
           "format": "table"
         },
         {
-          "expr": "sum by (operation) (increase(messenger_database_query_seconds_count{job=~\"$service\",operation=~\"$operation\"}[$__range])) and on(operation) topk(15, sum by (operation) (increase(messenger_database_query_seconds_sum{job=~\"$service\",operation=~\"$operation\"}[$__range])))",
+          "expr": "sum by (entrypoint) (increase(messenger_database_query_seconds_count{job=~\"$service\",entrypoint=~\"$entrypoint\",entrypoint!=\"\"}[$__range])) and on(entrypoint) topk(15, sum by (entrypoint) (increase(messenger_database_query_seconds_sum{job=~\"$service\",entrypoint=~\"$entrypoint\",entrypoint!=\"\"}[$__range])))",
           "legendFormat": "Calls",
           "refId": "F",
           "instant": true,
@@ -153,7 +153,7 @@
           "format": "table"
         },
         {
-          "expr": "(sum by (operation) (increase(messenger_database_query_seconds_count{job=~\"$service\",operation=~\"$operation\",outcome=\"failure\"}[$__range])) or on(operation) (0 * sum by (operation) (increase(messenger_database_query_seconds_count{job=~\"$service\",operation=~\"$operation\"}[$__range])))) and on(operation) topk(15, sum by (operation) (increase(messenger_database_query_seconds_sum{job=~\"$service\",operation=~\"$operation\"}[$__range])))",
+          "expr": "(sum by (entrypoint) (increase(messenger_database_query_seconds_count{job=~\"$service\",entrypoint=~\"$entrypoint\",entrypoint!=\"\",outcome=\"failure\"}[$__range])) or on(entrypoint) (0 * sum by (entrypoint) (increase(messenger_database_query_seconds_count{job=~\"$service\",entrypoint=~\"$entrypoint\",entrypoint!=\"\"}[$__range])))) and on(entrypoint) topk(15, sum by (entrypoint) (increase(messenger_database_query_seconds_sum{job=~\"$service\",entrypoint=~\"$entrypoint\",entrypoint!=\"\"}[$__range])))",
           "legendFormat": "Failures",
           "refId": "G",
           "instant": true,
@@ -165,7 +165,7 @@
         {
           "id": "joinByField",
           "options": {
-            "byField": "operation",
+            "byField": "entrypoint",
             "mode": "outerTabular"
           }
         },
@@ -183,7 +183,7 @@
               "Time 7": true
             },
             "renameByName": {
-              "operation": "Operation",
+              "entrypoint": "Entry point",
               "Value #A": "Total time",
               "Value #B": "Time share",
               "Value #C": "Mean",
@@ -199,7 +199,7 @@
     {
       "id": 3,
       "title": "Query lifecycle mean and p95",
-      "description": "Lifecycle includes jOOQ rendering, connection acquisition when needed, preparation, binding, JDBC execution, eager fetching and resource closing. A lazy query completes at cursor close. Idle operations have no percentile.",
+      "description": "Lifecycle includes jOOQ rendering, connection acquisition when needed, preparation, binding, JDBC execution, eager fetching and resource closing. A lazy query completes at cursor close. Idle entry points have no percentile.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
@@ -236,15 +236,15 @@
       },
       "targets": [
         {
-          "expr": "topk(10, sum by (operation) (rate(messenger_database_query_seconds_sum{job=~\"$service\",operation=~\"$operation\"}[$__rate_interval])) / sum by (operation) (rate(messenger_database_query_seconds_count{job=~\"$service\",operation=~\"$operation\"}[$__rate_interval])))",
-          "legendFormat": "{{operation}} mean",
+          "expr": "topk(10, sum by (entrypoint) (rate(messenger_database_query_seconds_sum{job=~\"$service\",entrypoint=~\"$entrypoint\",entrypoint!=\"\"}[$__rate_interval])) / sum by (entrypoint) (rate(messenger_database_query_seconds_count{job=~\"$service\",entrypoint=~\"$entrypoint\",entrypoint!=\"\"}[$__rate_interval])))",
+          "legendFormat": "{{entrypoint}} mean",
           "refId": "A",
           "instant": false,
           "range": true
         },
         {
-          "expr": "topk(10, histogram_quantile(0.95, sum by (le,operation) (rate(messenger_database_query_seconds_bucket{job=~\"$service\",operation=~\"$operation\"}[$__rate_interval]))))",
-          "legendFormat": "{{operation}} p95",
+          "expr": "topk(10, histogram_quantile(0.95, sum by (le,entrypoint) (rate(messenger_database_query_seconds_bucket{job=~\"$service\",entrypoint=~\"$entrypoint\",entrypoint!=\"\"}[$__rate_interval]))))",
+          "legendFormat": "{{entrypoint}} p95",
           "refId": "B",
           "instant": false,
           "range": true
@@ -291,8 +291,8 @@
       },
       "targets": [
         {
-          "expr": "topk(10, histogram_quantile(0.99, sum by (le,operation) (rate(messenger_database_query_seconds_bucket{job=~\"$service\",operation=~\"$operation\"}[$__rate_interval]))))",
-          "legendFormat": "{{operation}} p99",
+          "expr": "topk(10, histogram_quantile(0.99, sum by (le,entrypoint) (rate(messenger_database_query_seconds_bucket{job=~\"$service\",entrypoint=~\"$entrypoint\",entrypoint!=\"\"}[$__rate_interval]))))",
+          "legendFormat": "{{entrypoint}} p99",
           "refId": "A",
           "instant": false,
           "range": true
@@ -339,8 +339,8 @@
       },
       "targets": [
         {
-          "expr": "topk(15, sum by (operation) (rate(messenger_database_query_seconds_count{job=~\"$service\",operation=~\"$operation\"}[$__rate_interval])))",
-          "legendFormat": "{{operation}}",
+          "expr": "topk(15, sum by (entrypoint) (rate(messenger_database_query_seconds_count{job=~\"$service\",entrypoint=~\"$entrypoint\",entrypoint!=\"\"}[$__rate_interval])))",
+          "legendFormat": "{{entrypoint}}",
           "refId": "A",
           "instant": false,
           "range": true
@@ -350,7 +350,7 @@
     {
       "id": 6,
       "title": "Query lifecycle failure ratio",
-      "description": "Failed lifecycle observations divided by all lifecycle observations. Zero appears only for operations with observed calls. A failed SQL call does not establish the final transaction outcome.",
+      "description": "Failed lifecycle observations divided by all lifecycle observations. Zero appears only for entry points with observed calls. A failed SQL call does not establish the final transaction outcome.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
@@ -387,119 +387,9 @@
       },
       "targets": [
         {
-          "expr": "(sum by (operation) (rate(messenger_database_query_seconds_count{job=~\"$service\",operation=~\"$operation\",outcome=\"failure\"}[$__rate_interval])) or on(operation) (0 * sum by (operation) (rate(messenger_database_query_seconds_count{job=~\"$service\",operation=~\"$operation\"}[$__rate_interval])))) / sum by (operation) (rate(messenger_database_query_seconds_count{job=~\"$service\",operation=~\"$operation\"}[$__rate_interval]))",
-          "legendFormat": "{{operation}}",
+          "expr": "(sum by (entrypoint) (rate(messenger_database_query_seconds_count{job=~\"$service\",entrypoint=~\"$entrypoint\",entrypoint!=\"\",outcome=\"failure\"}[$__rate_interval])) or on(entrypoint) (0 * sum by (entrypoint) (rate(messenger_database_query_seconds_count{job=~\"$service\",entrypoint=~\"$entrypoint\",entrypoint!=\"\"}[$__rate_interval])))) / sum by (entrypoint) (rate(messenger_database_query_seconds_count{job=~\"$service\",entrypoint=~\"$entrypoint\",entrypoint!=\"\"}[$__rate_interval]))",
+          "legendFormat": "{{entrypoint}}",
           "refId": "A",
-          "instant": false,
-          "range": true
-        }
-      ]
-    },
-    {
-      "id": 7,
-      "title": "Statement execution mean and p95",
-      "description": "Each jOOQ executeStart through executeEnd phase includes JDBC driver and network work. Result fetching can do further I/O after this phase. Batch phases can repeat within one query lifecycle.",
-      "type": "timeseries",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "x": 0,
-        "y": 28,
-        "w": 12,
-        "h": 8
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "min": 0,
-          "color": {
-            "mode": "palette-classic"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "max"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "expr": "topk(10, sum by (operation) (rate(messenger_database_statement_seconds_sum{job=~\"$service\",operation=~\"$operation\"}[$__rate_interval])) / sum by (operation) (rate(messenger_database_statement_seconds_count{job=~\"$service\",operation=~\"$operation\"}[$__rate_interval])))",
-          "legendFormat": "{{operation}} mean",
-          "refId": "A",
-          "instant": false,
-          "range": true
-        },
-        {
-          "expr": "topk(10, histogram_quantile(0.95, sum by (le,operation) (rate(messenger_database_statement_seconds_bucket{job=~\"$service\",operation=~\"$operation\"}[$__rate_interval]))))",
-          "legendFormat": "{{operation}} p95",
-          "refId": "B",
-          "instant": false,
-          "range": true
-        }
-      ]
-    },
-    {
-      "id": 8,
-      "title": "Result fetching mean and p95",
-      "description": "jOOQ fetchStart through fetchEnd phases, recorded only when a fetch phase exists. Fetching can include driver and network I/O. This overlaps the full query lifecycle; do not add percentiles.",
-      "type": "timeseries",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "x": 12,
-        "y": 28,
-        "w": 12,
-        "h": 8
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "min": 0,
-          "color": {
-            "mode": "palette-classic"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "max"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "expr": "topk(10, sum by (operation) (rate(messenger_database_fetch_seconds_sum{job=~\"$service\",operation=~\"$operation\"}[$__rate_interval])) / sum by (operation) (rate(messenger_database_fetch_seconds_count{job=~\"$service\",operation=~\"$operation\"}[$__rate_interval])))",
-          "legendFormat": "{{operation}} mean",
-          "refId": "A",
-          "instant": false,
-          "range": true
-        },
-        {
-          "expr": "topk(10, histogram_quantile(0.95, sum by (le,operation) (rate(messenger_database_fetch_seconds_bucket{job=~\"$service\",operation=~\"$operation\"}[$__rate_interval]))))",
-          "legendFormat": "{{operation}} p95",
-          "refId": "B",
           "instant": false,
           "range": true
         }
@@ -557,15 +447,15 @@
       },
       "targets": [
         {
-          "expr": "topk(10, sum by (operation) (rate(messenger_database_transaction_seconds_sum{job=~\"$service\"}[$__rate_interval])) / sum by (operation) (rate(messenger_database_transaction_seconds_count{job=~\"$service\"}[$__rate_interval])))",
-          "legendFormat": "{{operation}} mean",
+          "expr": "topk(10, sum by (entrypoint) (rate(messenger_database_transaction_seconds_sum{job=~\"$service\",entrypoint!=\"\"}[$__rate_interval])) / sum by (entrypoint) (rate(messenger_database_transaction_seconds_count{job=~\"$service\",entrypoint!=\"\"}[$__rate_interval])))",
+          "legendFormat": "{{entrypoint}} mean",
           "refId": "A",
           "instant": false,
           "range": true
         },
         {
-          "expr": "topk(10, histogram_quantile(0.95, sum by (le,operation) (rate(messenger_database_transaction_seconds_bucket{job=~\"$service\"}[$__rate_interval]))))",
-          "legendFormat": "{{operation}} p95",
+          "expr": "topk(10, histogram_quantile(0.95, sum by (le,entrypoint) (rate(messenger_database_transaction_seconds_bucket{job=~\"$service\",entrypoint!=\"\"}[$__rate_interval]))))",
+          "legendFormat": "{{entrypoint}} p95",
           "refId": "B",
           "instant": false,
           "range": true
@@ -612,8 +502,8 @@
       },
       "targets": [
         {
-          "expr": "sum by (operation,outcome) (rate(messenger_database_transaction_seconds_count{job=~\"$service\"}[$__rate_interval]))",
-          "legendFormat": "{{operation}} {{outcome}}",
+          "expr": "sum by (entrypoint,outcome) (rate(messenger_database_transaction_seconds_count{job=~\"$service\",entrypoint!=\"\"}[$__rate_interval]))",
+          "legendFormat": "{{entrypoint}} {{outcome}}",
           "refId": "A",
           "instant": false,
           "range": true
@@ -660,8 +550,8 @@
       },
       "targets": [
         {
-          "expr": "sum by (operation,phase) (rate(messenger_database_transaction_phase_seconds_sum{job=~\"$service\"}[$__rate_interval])) / sum by (operation,phase) (rate(messenger_database_transaction_phase_seconds_count{job=~\"$service\"}[$__rate_interval]))",
-          "legendFormat": "{{operation}} {{phase}}",
+          "expr": "sum by (entrypoint,phase) (rate(messenger_database_transaction_phase_seconds_sum{job=~\"$service\",entrypoint!=\"\"}[$__rate_interval])) / sum by (entrypoint,phase) (rate(messenger_database_transaction_phase_seconds_count{job=~\"$service\",entrypoint!=\"\"}[$__rate_interval]))",
+          "legendFormat": "{{entrypoint}} {{phase}}",
           "refId": "A",
           "instant": false,
           "range": true
@@ -671,7 +561,7 @@
     {
       "id": 13,
       "title": "Transaction phase p95",
-      "description": "Separate histograms per operation and phase. Do not add phase, query or transaction percentiles. Failure samples remain included in each phase distribution.",
+      "description": "Separate histograms per entry point and phase. Do not add phase, query or transaction percentiles. Failure samples remain included in each phase distribution.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
@@ -708,8 +598,8 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le,operation,phase) (rate(messenger_database_transaction_phase_seconds_bucket{job=~\"$service\"}[$__rate_interval])))",
-          "legendFormat": "{{operation}} {{phase}}",
+          "expr": "histogram_quantile(0.95, sum by (le,entrypoint,phase) (rate(messenger_database_transaction_phase_seconds_bucket{job=~\"$service\",entrypoint!=\"\"}[$__rate_interval])))",
+          "legendFormat": "{{entrypoint}} {{phase}}",
           "refId": "A",
           "instant": false,
           "range": true
@@ -1308,7 +1198,7 @@
     {
       "id": 27,
       "title": "Exported digests ranked by execution time",
-      "description": "Top 15 within the exporter subset, selected by interval execution seconds. Exporter v0.20.1 exports at most 25 entries ordered by cumulative server execution time and excludes its lowest-time percentile. Missing entries and churn can undercount the selected interval. Query IDs have no verified mapping to fixed application operations.",
+      "description": "Top 15 within the exporter subset, selected by interval execution seconds. Exporter v0.20.1 exports at most 25 entries ordered by cumulative server execution time and excludes its lowest-time percentile. Missing entries and churn can undercount the selected interval. Query IDs have no verified mapping to fixed application entry points.",
       "type": "table",
       "datasource": {
         "type": "prometheus",
@@ -1732,16 +1622,16 @@
         "sort": 1
       },
       {
-        "name": "operation",
-        "label": "Query operation",
+        "name": "entrypoint",
+        "label": "Entry point",
         "type": "query",
         "datasource": {
           "type": "prometheus",
           "uid": "prometheus"
         },
         "query": {
-          "query": "label_values(messenger_database_query_seconds_count{job=~\"$service\"},operation)",
-          "refId": "operation"
+          "query": "label_values(messenger_database_query_seconds_count{job=~\"$service\"},entrypoint)",
+          "refId": "entrypoint"
         },
         "refresh": 1,
         "multi": false,

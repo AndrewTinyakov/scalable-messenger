@@ -23,6 +23,20 @@ The launcher provisions local gRPC certificates and the service-key group before
 
 Runtime defaults match local Compose. Set `MESSENGER_API_BASE_URL`, `MESSENGER_WS_URL` and `MESSENGER_CLIENT_ORIGIN` for alternate endpoints. Set `MESSENGER_COMPOSE_PROJECT` and `MESSENGER_COMPOSE_OVERRIDE` when the failure scenarios target a named project or an override file. Load that deployment's environment files into the test process too, so Docker subprocesses retain its network and runtime settings. `MESSENGER_WS_REPLICAS` sets the expected gateway count.
 
+The headless clients can use the published loopback ports directly and send session cookies themselves. To test HTTP forwarding and non-Secure cookies explicitly, start a dedicated stack with these overrides and give the tests the same Origin:
+
+```sh
+export MESSENGER_PUBLIC_SCHEME=http
+export MESSENGER_SESSION_COOKIE_SECURE=false
+export MESSENGER_CLIENT_ORIGIN=http://localhost:5173
+export MESSENGER_API_BASE_URL=http://localhost:8081/api
+export MESSENGER_WS_URL=ws://localhost:8082/ws
+scripts/dev-up.sh
+npm run test:system
+```
+
+Use a separate shell for these exports. To run both stacks at once, give the test stack its own Compose project, loopback ports and network ranges, and point the test URLs at those ports. For browser HTTPS and Secure cookie checks, use the [Portless workflow](../README.md).
+
 The load module has tests that run without a stack:
 
 ```sh

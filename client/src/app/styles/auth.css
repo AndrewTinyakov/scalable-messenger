@@ -181,3 +181,9 @@
     transform: scale(0.85);
   }
 }
+
+.field-error {
+  margin: -6px 2px 4px;
+  color: var(--danger);
+  font-size: 13px;
+}

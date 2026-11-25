@@ -4,14 +4,13 @@ import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.Chat
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.model.ChatKind
+import com.andrewtinyakov.messenger.chat.model.MemberChange
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Routines
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHATS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHAT_MEMBERS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSENGER_OUTBOX_EVENTS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.ChatsRecord
-import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseObservation
-import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseOperation
-import com.andrewtinyakov.messenger.infrastructure.outbox.model.OutboxMessage
+import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxMessage
 import com.andrewtinyakov.messenger.message.model.SendBatch
 import org.jooq.DSLContext
 import org.jooq.JSONB
@@ -31,7 +30,7 @@ class JooqChatRepository(
     override fun existingMemberIds(
         chatId: ChatId,
         userIds: List<UserId>,
-    ): Set<UserId> = DatabaseObservation.query(DatabaseOperation.CHAT_EXISTING_MEMBER_IDS) {
+    ): Set<UserId> =
         db.select(CHAT_MEMBERS.USER_ID)
             .from(CHAT_MEMBERS)
             .join(CHATS).on(CHATS.ID.eq(CHAT_MEMBERS.CHAT_ID))
@@ -44,34 +43,30 @@ class JooqChatRepository(
             .filterNotNull()
             .map(::UserId)
             .toSet()
-    }
 
-    override fun findByDirectKey(key: String): ChatId? = DatabaseObservation.query(DatabaseOperation.CHAT_FIND_BY_DIRECT_KEY) {
+    override fun findByDirectKey(key: String): ChatId? =
         db.select(CHATS.ID)
             .from(CHATS)
             .where(CHATS.DIRECT_PAIR_KEY.eq(key), CHATS.DELETED_AT.isNull)
             .fetchOne(CHATS.ID)
             ?.let(::ChatId)
-    }
 
-    override fun lockDirectPair(key: String) = DatabaseObservation.query(DatabaseOperation.CHAT_LOCK_DIRECT_PAIR) {
+    override fun lockDirectPair(key: String) =
         Routines.acquireTransactionLock(db.configuration(), "direct:$key")
-    }
 
-    override fun findByIdForUpdate(chatId: ChatId): Chat? = DatabaseObservation.query(DatabaseOperation.CHAT_FIND_BY_ID_FOR_UPDATE) {
+    override fun findByIdForUpdate(chatId: ChatId): Chat? =
         db.selectFrom(CHATS)
             .where(CHATS.ID.eq(chatId.value), CHATS.DELETED_AT.isNull)
             .forNoKeyUpdate()
             .fetchOne()
             ?.toModel()
-    }
 
     override fun insertDirectWithMembersAndEvents(
         id: ChatId,
         key: String,
         members: List<UserId>,
         events: List<OutboxMessage>,
-    ) = DatabaseObservation.query(DatabaseOperation.CHAT_INSERT_DIRECT_WITH_MEMBERS_AND_EVENTS) {
+    ) {
         require(members.size == 2 && members.distinct().size == 2)
         val chat = db.insertInto(CHATS)
             .set(
@@ -104,7 +99,7 @@ class JooqChatRepository(
         ownerId: UserId,
         members: List<UserId>,
         events: List<OutboxMessage>,
-    ) = DatabaseObservation.query(DatabaseOperation.CHAT_INSERT_GROUP_WITH_MEMBERS_AND_EVENTS) {
+    ) {
         require(members.size in 2..Chat.MAX_INITIAL_GROUP_MEMBERS && members.distinct().size == members.size && ownerId in members)
         val chat = db.insertInto(CHATS)
             .set(
@@ -187,7 +182,7 @@ class JooqChatRepository(
     override fun isMember(
         chatId: ChatId,
         userId: UserId,
-    ): Boolean = DatabaseObservation.query(DatabaseOperation.CHAT_IS_MEMBER) {
+    ): Boolean =
         db.fetchExists(
             db.selectOne()
                 .from(CHAT_MEMBERS)
@@ -198,18 +193,8 @@ class JooqChatRepository(
                     CHATS.DELETED_AT.isNull,
                 ),
         )
-    }
 
-    override fun allocateSequenceForMember(
-        chatId: ChatId,
-        userId: UserId,
-    ): Long? = DatabaseObservation.query(DatabaseOperation.CHAT_ALLOCATE_SEQUENCE_FOR_MEMBER) {
-        allocateSequencesForMembers(chatId, listOf(userId))
-    }
-
-    override fun allocateSequencesForMembers(chatId: ChatId, userIds: List<UserId>): Long? = DatabaseObservation.query(
-        DatabaseOperation.CHAT_ALLOCATE_SEQUENCES_FOR_MEMBERS,
-    ) {
+    override fun allocateSequencesForMembers(chatId: ChatId, userIds: List<UserId>, recordActivity: Boolean): Long? {
         require(userIds.size in 1..SendBatch.MAX_SIZE) { "Sequence allocation must contain 1 to ${SendBatch.MAX_SIZE} senders" }
         val distinctUsers = userIds.distinct()
         val activityNow = DSL.field("clock_timestamp()", OffsetDateTime::class.java)
@@ -220,7 +205,18 @@ class JooqChatRepository(
             )
             .set(
                 CHATS.LAST_ACTIVITY_AT,
-                DSL.greatest(DSL.coalesce(CHATS.LAST_ACTIVITY_AT, activityNow), activityNow),
+                if (recordActivity) {
+                    DSL.greatest(
+                        DSL.coalesce(CHATS.LAST_ACTIVITY_AT, activityNow),
+                        activityNow,
+                    )
+                } else {
+                    CHATS.LAST_ACTIVITY_AT
+                },
+            )
+            .set(
+                CHATS.LAST_MESSAGE_SEQUENCE,
+                if (recordActivity) CHATS.NEXT_SEQUENCE.plus(userIds.size.toLong() - 1) else CHATS.LAST_MESSAGE_SEQUENCE,
             )
             .where(CHATS.ID.eq(chatId.value), CHATS.DELETED_AT.isNull)
             .and(
@@ -237,14 +233,25 @@ class JooqChatRepository(
             .fetchOne()?.nextSequence?.minus(userIds.size.toLong())
     }
 
-    override fun findMemberIds(chatId: ChatId): List<UserId> = DatabaseObservation.query(DatabaseOperation.CHAT_FIND_MEMBER_IDS) {
+    override fun allocateMemberSequence(chatId: ChatId, userId: UserId, change: MemberChange): Long? =
+        db.update(CHAT_MEMBERS)
+            .set(CHAT_MEMBERS.MEMBER_SEQ, CHAT_MEMBERS.MEMBER_SEQ.plus(1L))
+            .set(
+                CHAT_MEMBERS.VISIBILITY_SEQ,
+                if (change == MemberChange.VISIBILITY) CHAT_MEMBERS.MEMBER_SEQ.plus(1L) else CHAT_MEMBERS.VISIBILITY_SEQ,
+            )
+            .set(CHAT_MEMBERS.PINS_SEQ, if (change == MemberChange.PINS) CHAT_MEMBERS.MEMBER_SEQ.plus(1L) else CHAT_MEMBERS.PINS_SEQ)
+            .where(CHAT_MEMBERS.CHAT_ID.eq(chatId.value), CHAT_MEMBERS.USER_ID.eq(userId.value))
+            .returning(CHAT_MEMBERS.MEMBER_SEQ)
+            .fetchOne()?.memberSeq
+
+    override fun findMemberIds(chatId: ChatId): List<UserId> =
         db.select(CHAT_MEMBERS.USER_ID)
             .from(CHAT_MEMBERS)
             .where(CHAT_MEMBERS.CHAT_ID.eq(chatId.value))
             .fetch(CHAT_MEMBERS.USER_ID)
             .filterNotNull()
             .map(::UserId)
-    }
 }
 
 fun ChatsRecord.toModel(): Chat =

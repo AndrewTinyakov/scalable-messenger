@@ -7,4 +7,6 @@ type MemberRemovedEventV1 struct {
 	Room         string `json:"room" binding:"required"`
 	ChatId       string `json:"chatId" binding:"required"`
 	MemberId     string `json:"memberId" binding:"required"`
+	Seq          string `json:"seq,omitempty"`
+	UserSeq      string `json:"userSeq,omitempty"`
 }

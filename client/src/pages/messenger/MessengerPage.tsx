@@ -3,6 +3,7 @@ import { useMessenger } from '../../app/useMessenger'
 import { hasUnread } from '../../entities/chat/model'
 import type { Message } from '../../entities/message/model'
 import type { Session } from '../../entities/session/model'
+import { SecurityDialog } from '../../features/account-security/SecurityDialog'
 import { ChatActions, type ChatMenuTarget } from '../../features/chat-actions/ChatActions'
 import { CreateChatDialog } from '../../features/chat-create/CreateChatDialog'
 import { GroupMembersDialog } from '../../features/group-members/GroupMembersDialog'
@@ -33,6 +34,8 @@ export function MessengerPage({ session, onSignOut, onSessionRevoked }: Props) {
   const messenger = useMessenger(session, onSessionRevoked)
   const [creating, setCreating] = useState<'direct' | 'group' | null>(null)
   const [managingMembers, setManagingMembers] = useState(false)
+  const [managingSecurity, setManagingSecurity] = useState(false)
+  const closeSecurity = useCallback(() => setManagingSecurity(false), [])
   const [folder, setFolder] = useState<ChatFolder>('all')
   const [chatMenu, setChatMenu] = useState<ChatMenuTarget | null>(null)
   const closeMembers = useCallback(() => setManagingMembers(false), [])
@@ -103,6 +106,7 @@ export function MessengerPage({ session, onSignOut, onSessionRevoked }: Props) {
           unreadChats={unreadChats}
           onFolder={setFolder}
           onCreate={setCreating}
+          onSecurity={() => setManagingSecurity(true)}
           onSignOut={onSignOut}
         />
         <ChatList
@@ -220,6 +224,20 @@ export function MessengerPage({ session, onSignOut, onSessionRevoked }: Props) {
             onMarkUnread={messenger.markChatUnread}
             onError={messenger.reportError}
             onClose={() => setChatMenu(null)}
+          />
+        )}
+        {managingSecurity && (
+          <SecurityDialog
+            session={session}
+            onClose={closeSecurity}
+            onSignOut={() => {
+              setManagingSecurity(false)
+              onSignOut()
+            }}
+            onSessionInvalid={() => {
+              setManagingSecurity(false)
+              onSessionRevoked()
+            }}
           />
         )}
         {managingMembers && selected?.kind === ChatKind.GROUP && (

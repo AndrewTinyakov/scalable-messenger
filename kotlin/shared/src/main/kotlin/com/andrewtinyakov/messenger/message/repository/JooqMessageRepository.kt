@@ -9,8 +9,6 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MES
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.SEND_REQUESTS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.MessagesRecord
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.SendRequestsRecord
-import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseObservation
-import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseOperation
 import com.andrewtinyakov.messenger.message.model.Message
 import com.andrewtinyakov.messenger.message.model.MessageId
 import com.andrewtinyakov.messenger.message.model.RequestId
@@ -19,7 +17,6 @@ import com.andrewtinyakov.messenger.message.model.SendBatch
 import com.andrewtinyakov.messenger.message.model.SendResult
 import com.andrewtinyakov.messenger.message.model.SendResultStatus
 import com.andrewtinyakov.messenger.message.model.asReply
-import com.andrewtinyakov.messenger.message.visibility.repository.visibleMessage
 import org.jooq.DSLContext
 import org.jooq.impl.DSL
 import org.springframework.stereotype.Repository
@@ -32,10 +29,10 @@ class JooqMessageRepository(
 ) : MessageRepository {
     override fun findMessagesForPublication(
         messageIds: List<MessageId>,
-    ): List<Message> = DatabaseObservation.query(DatabaseOperation.MESSAGE_PUBLICATION_HYDRATE) {
+    ): List<Message> {
         require(messageIds.size <= Message.MAX_LOOKUP_IDS)
-        if (messageIds.isEmpty()) return@query emptyList()
-        return@query db.select(MESSAGES.asterisk()).from(MESSAGES).join(CHATS).on(CHATS.ID.eq(MESSAGES.CHAT_ID))
+        if (messageIds.isEmpty()) return emptyList()
+        return db.select(MESSAGES.asterisk()).from(MESSAGES).join(CHATS).on(CHATS.ID.eq(MESSAGES.CHAT_ID))
             .where(
                 MESSAGES.ID.`in`(
                     messageIds.map {
@@ -55,9 +52,7 @@ class JooqMessageRepository(
         through: Long,
         ascending: Boolean,
         limit: Int,
-    ): List<Message> = DatabaseObservation.query(
-        DatabaseOperation.MESSAGE_VISIBLE_SPAN,
-    ) {
+    ): List<Message> =
         db.selectFrom(
             MESSAGES,
         ).where(
@@ -68,38 +63,28 @@ class JooqMessageRepository(
         )
             .orderBy(if (ascending) MESSAGES.SEQUENCE.asc() else MESSAGES.SEQUENCE.desc()).limit(limit)
             .fetch().let { hydrate(it, userId) }
-    }
 
-    override fun lockSend(senderId: UserId, requestId: RequestId) = DatabaseObservation.query(DatabaseOperation.MESSAGE_LOCK_SEND) {
+    override fun lockSend(senderId: UserId, requestId: RequestId) =
         Routines.acquireTransactionLock(db.configuration(), "send:${senderId.value}:${requestId.value}")
-    }
 
-    override fun findSendResult(senderId: UserId, requestId: RequestId): SendResult? = DatabaseObservation.query(
-        DatabaseOperation.MESSAGE_FIND_SEND_RESULT,
-    ) {
+    override fun findSendResult(senderId: UserId, requestId: RequestId): SendResult? =
         db.selectFrom(SEND_REQUESTS)
             .where(
                 SEND_REQUESTS.SENDER_ID.eq(senderId.value),
                 SEND_REQUESTS.REQUEST_ID.eq(requestId.value),
             ).fetchOne()?.toSendResult()
-    }
 
-    override fun findSendResults(senderId: UserId, requestIds: List<RequestId>): List<SendResult> = DatabaseObservation.query(
-        DatabaseOperation.MESSAGE_FIND_SEND_RESULTS,
-    ) {
+    override fun findSendResults(senderId: UserId, requestIds: List<RequestId>): List<SendResult> {
         if (requestIds.isEmpty()) return emptyList()
         return db.selectFrom(SEND_REQUESTS)
             .where(SEND_REQUESTS.SENDER_ID.eq(senderId.value), SEND_REQUESTS.REQUEST_ID.`in`(requestIds.map { it.value }))
             .fetch { it.toSendResult() }
     }
 
-    override fun insertSendResult(result: SendResult) = DatabaseObservation.query(DatabaseOperation.MESSAGE_INSERT_SEND_RESULT) {
+    override fun insertSendResult(result: SendResult) =
         check(sendResultsInsert(listOf(result)).execute() == 1)
-    }
 
-    override fun findSendResults(requests: Map<UserId, List<RequestId>>): List<SendResult> = DatabaseObservation.query(
-        DatabaseOperation.MESSAGE_FIND_SEND_RESULTS,
-    ) {
+    override fun findSendResults(requests: Map<UserId, List<RequestId>>): List<SendResult> {
         if (requests.isEmpty()) return emptyList()
         return db.selectFrom(SEND_REQUESTS)
             .where(
@@ -140,16 +125,11 @@ class JooqMessageRepository(
         )
     }
 
-    override fun insertSavedMessage(message: Message, result: SendResult) = DatabaseObservation.query(
-        DatabaseOperation.MESSAGE_INSERT_SAVED_MESSAGE,
-    ) {
+    override fun insertSavedMessage(message: Message, result: SendResult) =
         insertSavedMessages(listOf(SavedMessage(message, result)))
-    }
 
-    override fun insertSavedMessages(messages: List<SavedMessage>) = DatabaseObservation.query(
-        DatabaseOperation.MESSAGE_INSERT_SAVED_MESSAGES,
-    ) {
-        if (messages.isEmpty()) return@query
+    override fun insertSavedMessages(messages: List<SavedMessage>) {
+        if (messages.isEmpty()) return
         require(messages.size <= SendBatch.MAX_SIZE) { "Saved message batch must contain at most ${SendBatch.MAX_SIZE} messages" }
         val messageInsert = db.insertInto(
             MESSAGES,
@@ -183,9 +163,7 @@ class JooqMessageRepository(
         userId: UserId,
         afterSequence: Long,
         limit: Int,
-    ): List<Message> = DatabaseObservation.query(
-        DatabaseOperation.MESSAGE_FIND_MESSAGES_AFTER,
-    ) {
+    ): List<Message> =
         db.selectFrom(MESSAGES)
             .where(
                 MESSAGES.CHAT_ID.eq(chatId.value),
@@ -195,41 +173,34 @@ class JooqMessageRepository(
             .orderBy(MESSAGES.SEQUENCE)
             .limit(limit)
             .fetch().let { hydrate(it, userId) }
-    }
 
     override fun findMessagesBefore(
         chatId: ChatId,
         userId: UserId,
         beforeSequence: Long?,
         limit: Int,
-    ): List<Message> = DatabaseObservation.query(
-        DatabaseOperation.MESSAGE_FIND_MESSAGES_BEFORE,
-    ) {
+    ): List<Message> =
         db.selectFrom(MESSAGES)
             .where(MESSAGES.CHAT_ID.eq(chatId.value), visibleToMember(chatId = chatId, userId = userId))
             .and(beforeSequence?.let { MESSAGES.SEQUENCE.lt(it) } ?: DSL.trueCondition())
             .orderBy(MESSAGES.SEQUENCE.desc())
             .limit(limit)
             .fetch().let { hydrate(it, userId) }
-    }
 
     private fun visibleToMember(chatId: ChatId, userId: UserId) = visibleMessage(chatId, userId, MESSAGES.SEQUENCE)
 
-    override fun findMessagesByIds(chatId: ChatId, userId: UserId, messageIds: List<MessageId>): List<Message> =
-        DatabaseObservation.query(DatabaseOperation.MESSAGE_FIND_MESSAGES_BY_IDS) {
-            require(messageIds.size <= Message.MAX_LOOKUP_IDS)
-            if (messageIds.isEmpty()) return@query emptyList()
-            db.selectFrom(MESSAGES)
-                .where(MESSAGES.CHAT_ID.eq(chatId.value), MESSAGES.ID.`in`(messageIds.map { it.value }), visibleToMember(chatId, userId))
-                .fetch().let { hydrate(it, userId) }
-        }
+    override fun findMessagesByIds(chatId: ChatId, userId: UserId, messageIds: List<MessageId>): List<Message> {
+        require(messageIds.size <= Message.MAX_LOOKUP_IDS)
+        if (messageIds.isEmpty()) return emptyList()
+        return db.selectFrom(MESSAGES)
+            .where(MESSAGES.CHAT_ID.eq(chatId.value), MESSAGES.ID.`in`(messageIds.map { it.value }), visibleToMember(chatId, userId))
+            .fetch().let { hydrate(it, userId) }
+    }
 
     override fun findMessage(chatId: ChatId, userId: UserId, messageId: MessageId): Message? =
-        DatabaseObservation.query(DatabaseOperation.MESSAGE_FIND_MESSAGE) {
-            db.selectFrom(MESSAGES)
-                .where(MESSAGES.CHAT_ID.eq(chatId.value), MESSAGES.ID.eq(messageId.value), visibleToMember(chatId, userId))
-                .fetch().let { hydrate(it, userId) }.singleOrNull()
-        }
+        db.selectFrom(MESSAGES)
+            .where(MESSAGES.CHAT_ID.eq(chatId.value), MESSAGES.ID.eq(messageId.value), visibleToMember(chatId, userId))
+            .fetch().let { hydrate(it, userId) }.singleOrNull()
 
     override fun findReply(chatId: ChatId, userId: UserId, messageId: MessageId): Message? =
         findMessage(chatId, userId, messageId)?.takeIf { it.deletedAt == null }

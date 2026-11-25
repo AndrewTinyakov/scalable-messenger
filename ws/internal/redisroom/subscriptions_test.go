@@ -344,7 +344,7 @@ func publishTestEvent(t *testing.T, ctx context.Context, client *Client, room st
 	t.Helper()
 	event := map[string]any{
 		"type": "chat_created", "version": 1, "eventId": fmt.Sprintf("01ARZ3NDEKTSV4RRFFQ69G5F%02d", id),
-		"room": room, "chatId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+		"room": room, "chatId": "01ARZ3NDEKTSV4RRFFQ69G5FAV", "userSeq": fmt.Sprintf("%d", id+1),
 	}
 	envelope := map[string]any{"epoch": "test", "streamId": fmt.Sprintf("%d-0", id+1), "event": event}
 	payload, err := json.Marshal(envelope)

@@ -63,9 +63,21 @@ describe('socket event decoding', () => {
         streamId: '1-0',
       } as Record<string, unknown>
       expect(decodeSocketEvent(JSON.stringify(fixture))).toEqual(fixture)
+      if (name === 'history-changed') {
+        const replay = { ...fixture, seq: undefined }
+        expect(decodeSocketEvent(JSON.stringify(replay))).toEqual(
+          JSON.parse(JSON.stringify(replay)),
+        )
+        expect(
+          decodeSocketEvent(
+            JSON.stringify({ ...fixture, memberSeq: '2', room: `group:${fixture.chatId}` }),
+          ),
+        ).toBeNull()
+      }
       if (name === 'history-changed')
-        for (const field of ['sequence', 'mutationRevision', 'visibilityRevision']) {
-          expect(decodeSocketEvent(JSON.stringify({ ...fixture, [field]: undefined }))).toBeNull()
+        for (const field of ['sequence', 'seq', 'memberSeq']) {
+          if (field === 'sequence')
+            expect(decodeSocketEvent(JSON.stringify({ ...fixture, [field]: undefined }))).toBeNull()
           expect(
             decodeSocketEvent(JSON.stringify({ ...fixture, [field]: '9223372036854775808' })),
           ).toBeNull()
@@ -116,7 +128,7 @@ describe('socket event decoding', () => {
       ...saved,
       type: 'message_changed',
       messageVersion: '2',
-      mutationRevision: '1',
+      seq: '1',
     }
     expect(decodeSocketEvent(JSON.stringify(changed))).toEqual(changed)
     for (const fields of [
@@ -168,7 +180,7 @@ describe('socket event decoding', () => {
     const controls = [
       { type: 'queued', version: 1, requestId: id, recipientId: id },
       { type: 'subscribed', version: 1, chatId: id, room: `user:${id}` },
-      { type: 'error', version: 1, requestId: id, code: 'publish_unknown' },
+      { type: 'error', version: 1, requestId: id, code: 'PUBLISH_UNKNOWN' },
       { type: 'recovery_failed', version: 1, chatId: id },
       { type: 'subscription_expired', version: 1, chatId: id },
     ]
@@ -179,7 +191,7 @@ describe('socket event decoding', () => {
     const controls = [
       { type: 'queued', version: 1, requestId: id, recipientId: id, epoch: 'unexpected' },
       { type: 'subscribed', version: 1, chatId: id, room: `user:${id}`, requestId: id },
-      { type: 'error', version: 1, code: 'publish_unknown', body: 'unexpected' },
+      { type: 'error', version: 1, code: 'PUBLISH_UNKNOWN', body: 'unexpected' },
       { type: 'recovery_failed', version: 1, chatId: id, sequence: '1' },
       { type: 'subscription_expired', version: 1, chatId: id, room: `user:${id}` },
       {
@@ -239,6 +251,7 @@ describe('socket event decoding', () => {
       eventId: id,
       room: `group:${id}`,
       chatId: id,
+      seq: '7',
       epoch: 'epoch',
       streamId: '1-0',
     }
@@ -260,11 +273,13 @@ describe('socket event decoding', () => {
       room: `user:${id}`,
       chatId: id,
       memberId: id,
+      userSeq: '4',
       epoch: 'epoch',
       streamId: '1-0',
     }
     expect(decodeSocketEvent(JSON.stringify(frame))).toEqual(frame)
-    const group = { ...frame, room: `group:${id}` }
+    const { userSeq: _userSeq, ...shared } = frame
+    const group = { ...shared, room: `group:${id}`, seq: '7' }
     expect(decodeSocketEvent(JSON.stringify(group))).toEqual(group)
     expect(
       decodeSocketEvent(JSON.stringify({ ...group, room: 'group:01ARZ3NDEKTSV4RRFFQ69G5FAW' })),
@@ -287,6 +302,25 @@ describe('shared sidebar contracts', () => {
       expect(decodeSocketEvent(raw)).toEqual(value)
       expect(decodeSocketEvent(JSON.stringify({ ...value, body: 'forbidden' }))).toBeNull()
     }
+  })
+  it('decodes a complete activity preview and rejects a partial one', () => {
+    const raw = readFileSync(
+      new URL(
+        '../../../../contracts/fixtures/valid/sidebar-activity-message.json',
+        import.meta.url,
+      ),
+      'utf8',
+    )
+    const value = JSON.parse(raw)
+    expect(decodeSocketEvent(raw)).toEqual(value)
+    const { preview: _, ...partial } = value
+    expect(decodeSocketEvent(JSON.stringify(partial))).toBeNull()
+    expect(decodeSocketEvent(JSON.stringify({ ...value, preview: 'x'.repeat(161) }))).toBeNull()
+    expect(
+      decodeSocketEvent(JSON.stringify({ ...value, preview: '😀'.repeat(160) })),
+    ).not.toBeNull()
+    expect(decodeSocketEvent(JSON.stringify({ ...value, senderUsername: 'Not Valid' }))).toBeNull()
+    expect(decodeSocketEvent(JSON.stringify({ ...value, createdAt: 'yesterday' }))).toBeNull()
   })
 })
 

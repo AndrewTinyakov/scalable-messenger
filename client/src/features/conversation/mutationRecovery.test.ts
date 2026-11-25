@@ -5,9 +5,9 @@ import { MutationRecovery } from './mutationRecovery'
 describe('durable mutation recovery', () => {
   it('keeps its cursor after ten rejected pages and retries from that cursor later', async () => {
     const changes = vi.fn(async (_chat: string, _after: string) => ({
-      changes: [{ revision: '8', message: message('1') }],
-      lastRevision: '8',
-      nextRevision: '8',
+      changes: [{ seq: '8', message: message('1') }],
+      lastSeq: '8',
+      nextSeq: '8',
       resetRequired: false,
     }))
     const apply = vi.fn().mockReturnValue(false)
@@ -28,17 +28,15 @@ describe('durable mutation recovery', () => {
     const changes = vi
       .fn()
       .mockResolvedValueOnce({
-        changes: [
-          { revision: '8', message: { ...message('1'), body: 'edited', messageVersion: '2' } },
-        ],
-        lastRevision: '9',
-        nextRevision: '8',
+        changes: [{ seq: '8', message: { ...message('1'), body: 'edited', messageVersion: '2' } }],
+        lastSeq: '9',
+        nextSeq: '8',
         resetRequired: false,
       })
       .mockResolvedValueOnce({
         changes: [
           {
-            revision: '9',
+            seq: '9',
             message: {
               ...message('1'),
               body: '',
@@ -47,8 +45,8 @@ describe('durable mutation recovery', () => {
             },
           },
         ],
-        lastRevision: '9',
-        nextRevision: '9',
+        lastSeq: '9',
+        nextSeq: '9',
         resetRequired: false,
       })
     const recovery = new MutationRecovery({ changes, patch, reset: vi.fn() })
@@ -71,14 +69,14 @@ describe('durable mutation recovery', () => {
       .fn()
       .mockResolvedValueOnce({
         changes: [],
-        lastRevision: '200',
-        nextRevision: '1',
+        lastSeq: '200',
+        nextSeq: '1',
         resetRequired: true,
       })
       .mockResolvedValueOnce({
         changes: [],
-        lastRevision: '200',
-        nextRevision: '200',
+        lastSeq: '200',
+        nextSeq: '200',
         resetRequired: false,
       })
     const reset = vi.fn().mockResolvedValue('200')
@@ -96,9 +94,9 @@ describe('durable mutation recovery', () => {
 
   it('discards a completion after chat removal or selection change', async () => {
     let finish!: (value: {
-      changes: { revision: string; message: ReturnType<typeof message> }[]
-      lastRevision: string
-      nextRevision: string
+      changes: { seq: string; message: ReturnType<typeof message> }[]
+      lastSeq: string
+      nextSeq: string
       resetRequired: boolean
     }) => void
     const patch = vi.fn()
@@ -115,9 +113,9 @@ describe('durable mutation recovery', () => {
     const running = recovery.refresh()
     recovery.select('new')
     finish({
-      changes: [{ revision: '2', message: message('1') }],
-      lastRevision: '2',
-      nextRevision: '2',
+      changes: [{ seq: '2', message: message('1') }],
+      lastSeq: '2',
+      nextSeq: '2',
       resetRequired: false,
     })
     await running
@@ -128,8 +126,8 @@ describe('durable mutation recovery', () => {
     let revision = 0
     const changes = vi.fn(async () => ({
       changes: [],
-      lastRevision: '99999',
-      nextRevision: String(++revision),
+      lastSeq: '99999',
+      nextSeq: String(++revision),
       resetRequired: false,
     }))
     const reset = vi.fn().mockResolvedValue('99999')

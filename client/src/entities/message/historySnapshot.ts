@@ -2,8 +2,8 @@ import type { Message } from './model'
 
 export interface SnapshotMetadata {
   snapshotSequence: string
-  mutationRevision: string
-  visibilityRevision: string
+  mutationSeq: string
+  visibilitySeq: string
   clearedThroughSequence: string
   globalClearedThroughSequence: string
 }
@@ -25,14 +25,14 @@ export interface DeletionResult {
   scope: DeleteScope
   target: DeleteTarget
   clearedThroughSequence: string
-  mutationRevision: string
-  visibilityRevision: string
+  seq: string
+  visibilitySeq: string
   state: 'ACCEPTED' | 'COMPLETED'
   deletedRows: string
 }
 
 export type MessageChange = {
-  revision: string
+  seq: string
   kind?: 'UPSERT' | 'REMOVED' | 'CLEARED'
   message: Message | null
   messageId?: string | null
@@ -42,8 +42,8 @@ export type MessageChange = {
 
 export type ChangesSnapshot = Partial<SnapshotMetadata> & {
   changes: MessageChange[]
-  lastRevision: string
-  nextRevision: string
+  lastSeq: string
+  nextSeq: string
   resetRequired: boolean
 }
 

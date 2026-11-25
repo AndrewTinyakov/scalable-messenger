@@ -2,6 +2,7 @@ package com.andrewtinyakov.messenger.auth.web
 
 import com.andrewtinyakov.messenger.auth.model.ExpectedSessionIdentity
 import com.andrewtinyakov.messenger.auth.service.AuthenticationService
+import com.andrewtinyakov.messenger.auth.service.SessionRenewalService
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
 import org.springframework.stereotype.Component
@@ -13,13 +14,16 @@ const val AUTHENTICATED_SESSION_ATTRIBUTE = "authenticatedSession"
 @Component
 class ApiSessionInterceptor(
     private val authenticationService: AuthenticationService,
+    private val sessionRenewalService: SessionRenewalService,
     private val sessionCookie: SessionCookie,
 ) : HandlerInterceptor {
     override fun preHandle(request: HttpServletRequest, response: HttpServletResponse, handler: Any): Boolean {
         if (handler is ResourceHttpRequestHandler) return true
-        val session = authenticationService.authenticatedSession(sessionCookie.read(request))
+        val token = sessionCookie.read(request)
+        val session = authenticationService.authenticatedSession(token)
         authenticationService.requireExpectedIdentity(expectedIdentity = request.expectedSessionIdentity(), session = session)
-        request.setAttribute(AUTHENTICATED_SESSION_ATTRIBUTE, session)
+        val renewed = sessionRenewalService.renewIfDue(session)
+        request.setAttribute(AUTHENTICATED_SESSION_ATTRIBUTE, renewed ?: session)
         return true
     }
 }

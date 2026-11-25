@@ -59,7 +59,7 @@ func TestExpiredAdmissionDeniesGroupOperationsBeforeRPC(t *testing.T) {
 				t.Error("expired admission started an authorization RPC")
 				return roomname.Group(raceChatID), nil
 			}))
-			connection.session.ExpiresAt = time.Now().Add(-time.Second)
+			connection.authorizedUntil.Store(time.Now().Add(-time.Second).UnixNano())
 			frame := protocol.Frame{Type: protocol.FrameSubscribe, Kind: protocol.ChatGroup, ChatID: raceChatID}
 			if batch {
 				frame = protocol.Frame{Type: protocol.FrameSubscribeMany, Subscriptions: []protocol.Subscription{{ChatID: raceChatID, Kind: protocol.ChatGroup}}}
@@ -85,12 +85,12 @@ func TestAdmissionExpiryDuringGroupAuthorizationDiscardsResult(t *testing.T) {
 						t.Fatalf("authorization used session %q", sessionID)
 					}
 					if calls == expiresOnCall {
-						connection.session.ExpiresAt = time.Now().Add(-time.Second)
+						connection.authorizedUntil.Store(time.Now().Add(-time.Second).UnixNano())
 					}
 					return roomname.Group(chatID), nil
 				}))
 				connection.session.SessionID = strings.Repeat("a", 64)
-				connection.session.ExpiresAt = time.Now().Add(time.Hour)
+				connection.authorizedUntil.Store(time.Now().Add(time.Hour).UnixNano())
 				frame := protocol.Frame{Type: protocol.FrameSubscribe, Kind: protocol.ChatGroup, ChatID: raceChatID}
 				if batch {
 					frame = protocol.Frame{Type: protocol.FrameSubscribeMany, Subscriptions: []protocol.Subscription{{ChatID: raceChatID, Kind: protocol.ChatGroup}}}

@@ -7,4 +7,5 @@ type ChatCreatedEventV1 struct {
 	Room         string `json:"room" binding:"required"`
 	ChatId       string `json:"chatId" binding:"required"`
 	RequestId    string `json:"requestId,omitempty"`
+	UserSeq      string `json:"userSeq" binding:"required"`
 }

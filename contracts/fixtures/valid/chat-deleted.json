@@ -3,5 +3,6 @@
   "eventId": "01ARZ3NDEKTSV4RRFFQ69G5FAY",
   "room": "user:01ARZ3NDEKTSV4RRFFQ69G5FAX",
   "chatId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  "seq": "13",
   "type": "chat_deleted"
 }

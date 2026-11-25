@@ -74,6 +74,37 @@ public final class ChatAuthorizationGrpc {
     return getValidateSessionMethod;
   }
 
+  private static volatile io.grpc.MethodDescriptor<com.andrewtinyakov.messenger.generated.grpc.ValidateSessionsRequest,
+      com.andrewtinyakov.messenger.generated.grpc.ValidateSessionsResponse> getValidateSessionsMethod;
+
+  @io.grpc.stub.annotations.RpcMethod(
+      fullMethodName = SERVICE_NAME + '/' + "ValidateSessions",
+      requestType = com.andrewtinyakov.messenger.generated.grpc.ValidateSessionsRequest.class,
+      responseType = com.andrewtinyakov.messenger.generated.grpc.ValidateSessionsResponse.class,
+      methodType = io.grpc.MethodDescriptor.MethodType.UNARY)
+  public static io.grpc.MethodDescriptor<com.andrewtinyakov.messenger.generated.grpc.ValidateSessionsRequest,
+      com.andrewtinyakov.messenger.generated.grpc.ValidateSessionsResponse> getValidateSessionsMethod() {
+    io.grpc.MethodDescriptor<com.andrewtinyakov.messenger.generated.grpc.ValidateSessionsRequest, com.andrewtinyakov.messenger.generated.grpc.ValidateSessionsResponse> getValidateSessionsMethod;
+    if ((getValidateSessionsMethod = ChatAuthorizationGrpc.getValidateSessionsMethod) == null) {
+      synchronized (ChatAuthorizationGrpc.class) {
+        if ((getValidateSessionsMethod = ChatAuthorizationGrpc.getValidateSessionsMethod) == null) {
+          ChatAuthorizationGrpc.getValidateSessionsMethod = getValidateSessionsMethod =
+              io.grpc.MethodDescriptor.<com.andrewtinyakov.messenger.generated.grpc.ValidateSessionsRequest, com.andrewtinyakov.messenger.generated.grpc.ValidateSessionsResponse>newBuilder()
+              .setType(io.grpc.MethodDescriptor.MethodType.UNARY)
+              .setFullMethodName(generateFullMethodName(SERVICE_NAME, "ValidateSessions"))
+              .setSampledToLocalTracing(true)
+              .setRequestMarshaller(io.grpc.protobuf.ProtoUtils.marshaller(
+                  com.andrewtinyakov.messenger.generated.grpc.ValidateSessionsRequest.getDefaultInstance()))
+              .setResponseMarshaller(io.grpc.protobuf.ProtoUtils.marshaller(
+                  com.andrewtinyakov.messenger.generated.grpc.ValidateSessionsResponse.getDefaultInstance()))
+              .setSchemaDescriptor(new ChatAuthorizationMethodDescriptorSupplier("ValidateSessions"))
+              .build();
+        }
+      }
+    }
+    return getValidateSessionsMethod;
+  }
+
   private static volatile io.grpc.MethodDescriptor<com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupRequest,
       com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupResponse> getAuthorizeGroupMethod;
 
@@ -246,6 +277,13 @@ public final class ChatAuthorizationGrpc {
 
     /**
      */
+    default void validateSessions(com.andrewtinyakov.messenger.generated.grpc.ValidateSessionsRequest request,
+        io.grpc.stub.StreamObserver<com.andrewtinyakov.messenger.generated.grpc.ValidateSessionsResponse> responseObserver) {
+      io.grpc.stub.ServerCalls.asyncUnimplementedUnaryCall(getValidateSessionsMethod(), responseObserver);
+    }
+
+    /**
+     */
     default void authorizeGroup(com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupRequest request,
         io.grpc.stub.StreamObserver<com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupResponse> responseObserver) {
       io.grpc.stub.ServerCalls.asyncUnimplementedUnaryCall(getAuthorizeGroupMethod(), responseObserver);
@@ -311,6 +349,14 @@ public final class ChatAuthorizationGrpc {
 
     /**
      */
+    public void validateSessions(com.andrewtinyakov.messenger.generated.grpc.ValidateSessionsRequest request,
+        io.grpc.stub.StreamObserver<com.andrewtinyakov.messenger.generated.grpc.ValidateSessionsResponse> responseObserver) {
+      io.grpc.stub.ClientCalls.asyncUnaryCall(
+          getChannel().newCall(getValidateSessionsMethod(), getCallOptions()), request, responseObserver);
+    }
+
+    /**
+     */
     public void authorizeGroup(com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupRequest request,
         io.grpc.stub.StreamObserver<com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupResponse> responseObserver) {
       io.grpc.stub.ClientCalls.asyncUnaryCall(
@@ -366,6 +412,13 @@ public final class ChatAuthorizationGrpc {
 
     /**
      */
+    public com.andrewtinyakov.messenger.generated.grpc.ValidateSessionsResponse validateSessions(com.andrewtinyakov.messenger.generated.grpc.ValidateSessionsRequest request) throws io.grpc.StatusException {
+      return io.grpc.stub.ClientCalls.blockingV2UnaryCall(
+          getChannel(), getValidateSessionsMethod(), getCallOptions(), request);
+    }
+
+    /**
+     */
     public com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupResponse authorizeGroup(com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupRequest request) throws io.grpc.StatusException {
       return io.grpc.stub.ClientCalls.blockingV2UnaryCall(
           getChannel(), getAuthorizeGroupMethod(), getCallOptions(), request);
@@ -414,6 +467,13 @@ public final class ChatAuthorizationGrpc {
     public com.andrewtinyakov.messenger.generated.grpc.ValidateSessionResponse validateSession(com.andrewtinyakov.messenger.generated.grpc.ValidateSessionRequest request) {
       return io.grpc.stub.ClientCalls.blockingUnaryCall(
           getChannel(), getValidateSessionMethod(), getCallOptions(), request);
+    }
+
+    /**
+     */
+    public com.andrewtinyakov.messenger.generated.grpc.ValidateSessionsResponse validateSessions(com.andrewtinyakov.messenger.generated.grpc.ValidateSessionsRequest request) {
+      return io.grpc.stub.ClientCalls.blockingUnaryCall(
+          getChannel(), getValidateSessionsMethod(), getCallOptions(), request);
     }
 
     /**
@@ -472,6 +532,14 @@ public final class ChatAuthorizationGrpc {
 
     /**
      */
+    public com.google.common.util.concurrent.ListenableFuture<com.andrewtinyakov.messenger.generated.grpc.ValidateSessionsResponse> validateSessions(
+        com.andrewtinyakov.messenger.generated.grpc.ValidateSessionsRequest request) {
+      return io.grpc.stub.ClientCalls.futureUnaryCall(
+          getChannel().newCall(getValidateSessionsMethod(), getCallOptions()), request);
+    }
+
+    /**
+     */
     public com.google.common.util.concurrent.ListenableFuture<com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupResponse> authorizeGroup(
         com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupRequest request) {
       return io.grpc.stub.ClientCalls.futureUnaryCall(
@@ -497,9 +565,10 @@ public final class ChatAuthorizationGrpc {
 
   private static final int METHODID_AUTHORIZE_SIDEBAR = 0;
   private static final int METHODID_VALIDATE_SESSION = 1;
-  private static final int METHODID_AUTHORIZE_GROUP = 2;
-  private static final int METHODID_AUTHORIZE_GROUPS = 3;
-  private static final int METHODID_AUTHORIZE_PRESENCE = 4;
+  private static final int METHODID_VALIDATE_SESSIONS = 2;
+  private static final int METHODID_AUTHORIZE_GROUP = 3;
+  private static final int METHODID_AUTHORIZE_GROUPS = 4;
+  private static final int METHODID_AUTHORIZE_PRESENCE = 5;
 
   private static final class MethodHandlers<Req, Resp> implements
       io.grpc.stub.ServerCalls.UnaryMethod<Req, Resp>,
@@ -525,6 +594,10 @@ public final class ChatAuthorizationGrpc {
         case METHODID_VALIDATE_SESSION:
           serviceImpl.validateSession((com.andrewtinyakov.messenger.generated.grpc.ValidateSessionRequest) request,
               (io.grpc.stub.StreamObserver<com.andrewtinyakov.messenger.generated.grpc.ValidateSessionResponse>) responseObserver);
+          break;
+        case METHODID_VALIDATE_SESSIONS:
+          serviceImpl.validateSessions((com.andrewtinyakov.messenger.generated.grpc.ValidateSessionsRequest) request,
+              (io.grpc.stub.StreamObserver<com.andrewtinyakov.messenger.generated.grpc.ValidateSessionsResponse>) responseObserver);
           break;
         case METHODID_AUTHORIZE_GROUP:
           serviceImpl.authorizeGroup((com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupRequest) request,
@@ -570,6 +643,13 @@ public final class ChatAuthorizationGrpc {
               com.andrewtinyakov.messenger.generated.grpc.ValidateSessionRequest,
               com.andrewtinyakov.messenger.generated.grpc.ValidateSessionResponse>(
                 service, METHODID_VALIDATE_SESSION)))
+        .addMethod(
+          getValidateSessionsMethod(),
+          io.grpc.stub.ServerCalls.asyncUnaryCall(
+            new MethodHandlers<
+              com.andrewtinyakov.messenger.generated.grpc.ValidateSessionsRequest,
+              com.andrewtinyakov.messenger.generated.grpc.ValidateSessionsResponse>(
+                service, METHODID_VALIDATE_SESSIONS)))
         .addMethod(
           getAuthorizeGroupMethod(),
           io.grpc.stub.ServerCalls.asyncUnaryCall(
@@ -641,6 +721,7 @@ public final class ChatAuthorizationGrpc {
               .setSchemaDescriptor(new ChatAuthorizationFileDescriptorSupplier())
               .addMethod(getAuthorizeSidebarMethod())
               .addMethod(getValidateSessionMethod())
+              .addMethod(getValidateSessionsMethod())
               .addMethod(getAuthorizeGroupMethod())
               .addMethod(getAuthorizeGroupsMethod())
               .addMethod(getAuthorizePresenceMethod())

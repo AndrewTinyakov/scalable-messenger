@@ -162,6 +162,7 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     listChats,
     rememberChat,
     refreshChatSummary,
+    applyActivity,
     applyPreferences,
     applyPinnedOrder,
     markRead,
@@ -171,6 +172,7 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     removeChat,
   } = useChatDirectory({
     sessionApi,
+    userId: session.user.id,
     selectedId,
     selectedIdRef: selectedRef,
     recordLatest,
@@ -241,22 +243,22 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     selectedId && !selectedId.startsWith('draft:') ? selectedId : undefined,
     sessionApi,
     connection === 'connected',
+    features.pinsState,
   )
   const pinsEventRef = useRef(pins.onEvent)
   pinsEventRef.current = pins.onEvent
   const featuresEventRef = useRef(features.onEvent)
   featuresEventRef.current = features.onEvent
-  const onFeatureEvent = useCallback(
-    (event: Parameters<typeof features.onEvent>[0]) =>
-      pinsEventRef.current(event) || featuresEventRef.current(event),
-    [],
-  )
+  const onFeatureEvent = useCallback((event: Parameters<typeof features.onEvent>[0]) => {
+    const handledByPins = pinsEventRef.current(event)
+    return featuresEventRef.current(event) || handledByPins
+  }, [])
   const withSnapshot = async (
     chatId: string,
     request: ReturnType<typeof sessionApi.latestMessages>,
   ) => {
     const result = await request
-    features.snapshot(chatId, result.mutationRevision ?? '0')
+    features.snapshot(chatId, result.mutationSeq ?? '0')
     return result
   }
 
@@ -269,7 +271,19 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
         withSnapshot(chatId, sessionApi.olderMessages(chatId, sequence, HISTORY_PAGE_SIZE)),
       around: (chatId, messageId, sequence) =>
         sessionApi.aroundMessage(chatId, messageId, sequence),
-      visibility: sessionApi.visibility,
+      visibility: async (chatId) => {
+        const request = features.stateRequest(chatId)
+        const state = await sessionApi.chatState(chatId, request.floors)
+        features.observeState(chatId, state, request)
+        return {
+          snapshotSequence: state.lastSeq,
+          mutationSeq: state.mutationSeq,
+          visibilitySeq: state.visibilitySeq,
+          clearedThroughSequence: state.clearedThroughSequence,
+          globalClearedThroughSequence: state.globalClearedThroughSequence,
+          hidden: state.hidden,
+        }
+      },
       resolve: sessionApi.resolveMessages,
     },
     context: (chatId) => ({
@@ -309,7 +323,8 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
   useRecoveryLifecycle({ recovery, selectedId, selectedRef, activeRef, focusRequestRef })
 
   const catchUp = useCallback(
-    (chatId: string, fromStart = false) => recovery.catchUp(chatId, fromStart),
+    (chatId: string, fromStart = false, fresh = false) =>
+      recovery.catchUp(chatId, fromStart, '0', false, fresh),
     [recovery],
   )
 
@@ -465,6 +480,7 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     refreshChats,
     listChats,
     refreshChatSummary,
+    applyActivity,
     catchUp,
     selectResolvedDraft,
     removeChat,

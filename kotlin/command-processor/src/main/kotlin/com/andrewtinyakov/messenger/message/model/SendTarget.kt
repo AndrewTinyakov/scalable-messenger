@@ -3,7 +3,6 @@ package com.andrewtinyakov.messenger.message.model
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.model.orderedDirectPair
-import com.andrewtinyakov.messenger.message.service.SendRequest
 
 sealed interface SendTarget {
     data class ExistingChat(

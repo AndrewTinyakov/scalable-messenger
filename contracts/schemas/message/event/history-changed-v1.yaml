@@ -1,4 +1,5 @@
 $schema: http://json-schema.org/draft-07/schema#
+description: A shared change carries seq, a personal change memberSeq, and a replayed saved message neither.
 title: HistoryChangedEventV1
 type: object
 additionalProperties: false
@@ -9,8 +10,6 @@ required:
   - room
   - chatId
   - sequence
-  - mutationRevision
-  - visibilityRevision
 properties:
   type:
     const: history_changed
@@ -27,5 +26,9 @@ properties:
   sequence: &sequence
     type: string
     pattern: ^(0|[1-9][0-9]{0,18})$
-  mutationRevision: *sequence
-  visibilityRevision: *sequence
+  seq:
+    type: string
+    pattern: ^[1-9][0-9]{0,18}$
+  memberSeq:
+    type: string
+    pattern: ^[1-9][0-9]{0,18}$

@@ -4,7 +4,8 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Chat } from '../../entities/chat/model'
 import { connectedRecovery, message } from '../../entities/message/chatRecovery.fixtures'
-import type { api } from '../../shared/api/http'
+import type { Message } from '../../entities/message/model'
+import { ApiError, type api } from '../../shared/api/http'
 import type { OutgoingSocketFrame } from '../../shared/api/socket'
 import { useConversationFeatures } from './useConversationFeatures'
 import { isReadVisible, useVisibleReads } from './useVisibleReads'
@@ -187,9 +188,10 @@ describe('human read visibility', () => {
 })
 
 describe('selected conversation features', () => {
-  function setup() {
+  function setup(latest: Message[] = [message('1000000')]) {
+    const fail = vi.fn()
     const recovery = connectedRecovery({
-      latest: async () => ({ messages: [message('1000000')] }),
+      latest: async () => ({ messages: latest }),
       older: async () => ({ messages: [] }),
       after: async () => ({ messages: [], nextSequence: '1000000', hasMore: false }),
     }).recovery
@@ -205,8 +207,8 @@ describe('selected conversation features', () => {
           scope,
           target,
           clearedThroughSequence: '0',
-          mutationRevision: '1',
-          visibilityRevision: '1',
+          seq: '1',
+          visibilitySeq: '1',
           state: 'COMPLETED' as const,
           deletedRows: '1',
         }),
@@ -224,7 +226,7 @@ describe('selected conversation features', () => {
       aroundMessage: vi.fn(async () => ({
         messages: [message('1')],
         anchorMessageId: 'message-1',
-        mutationRevision: '0',
+        seq: '0',
         hasOlder: false,
         hasNewer: true,
       })),
@@ -245,11 +247,11 @@ describe('selected conversation features', () => {
         recovery,
         send,
         remove: vi.fn(),
-        fail: vi.fn(),
+        fail,
       })
       return null
     }
-    return { Harness, get: () => features, service, send, recovery }
+    return { Harness, get: () => features, service, send, recovery, fail }
   }
   it('merges presence diffs, keeps peers through empty heartbeats and becomes unknown when disconnected or expired', async () => {
     const fixture = setup()
@@ -331,6 +333,30 @@ describe('selected conversation features', () => {
       await fixture.get().jumpToMessage('message-1', false)
     })
     expect(fixture.service.aroundMessage).toHaveBeenCalledTimes(1)
+    fixture.recovery.dispose()
+  })
+  it('shows a quote as unavailable when its message is gone instead of reporting an error', async () => {
+    const reply = {
+      ...message('2'),
+      replyToMessageId: 'message-gone',
+      replySenderId: bob.id,
+      replyBody: 'deleted a moment ago',
+      replyDeleted: false,
+      replyVersion: '1',
+    }
+    const fixture = setup([reply])
+    fixture.service.aroundMessage.mockRejectedValueOnce(new ApiError(404, 'Not found'))
+    await fixture.recovery.catchUp('chat', true)
+    await act(async () => root.render(<fixture.Harness />))
+    await act(async () => {
+      await fixture.get().jumpToMessage('message-gone', true)
+    })
+    expect(fixture.fail).not.toHaveBeenCalled()
+    expect(fixture.recovery.visibleWindows().chat[0]).toMatchObject({
+      replyToMessageId: 'message-gone',
+      replyBody: null,
+      replySenderId: null,
+    })
     fixture.recovery.dispose()
   })
   it('retries a failed cumulative read after reconnect without inferring read from received history', async () => {

@@ -17,10 +17,16 @@ func signedTicket(secret []byte, payload string) string {
 	return signed + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
+func claimsWith(name, value string) string {
+	values := map[string]string{"iss": `"messenger-api"`, "aud": `"messenger-ws"`}
+	values[name] = value
+	return `{"iss":` + values["iss"] + `,"aud":` + values["aud"] + `,"sub":"user","deviceId":"device","sid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","exp":1800003600}`
+}
+
 func TestVerify(t *testing.T) {
 	secret := []byte("test-ws-ticket-secret-long-enough-for-hmac-2026")
 	now := time.Unix(1_800_000_000, 0)
-	valid := signedTicket(secret, `{"iss":"messenger-api","aud":"messenger-ws","sub":"user","deviceId":"device","sid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","exp":1800003600}`)
+	valid := signedTicket(secret, claimsWith("iss", `"messenger-api"`))
 	got, err := Verify(valid, secret, now)
 	if err != nil || got.UserID != "user" || got.DeviceID != "device" || got.SessionID != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
 		t.Fatalf("Verify(valid) = %+v, %v", got, err)
@@ -34,7 +40,14 @@ func TestVerify(t *testing.T) {
 		{"unknown claim", signedTicket(secret, `{"iss":"messenger-api","aud":"messenger-ws","sub":"user","deviceId":"device","sid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","exp":1800003600,"extra":true}`), now},
 		{"expired", valid, now.Add(time.Hour)},
 		{"tampered", valid[:len(valid)-1] + "x", now},
-		{"wrong audience", signedTicket(secret, `{"iss":"messenger-api","aud":"other","sub":"user","deviceId":"device","exp":1800003600}`), now},
+		{"wrong issuer", signedTicket(secret, claimsWith("iss", `"other"`)), now},
+		{"empty issuer", signedTicket(secret, claimsWith("iss", `""`)), now},
+		{"audience as issuer", signedTicket(secret, claimsWith("iss", `"messenger-ws"`)), now},
+		{"issuer with different case", signedTicket(secret, claimsWith("iss", `"Messenger-API"`)), now},
+		{"wrong audience", signedTicket(secret, claimsWith("aud", `"other"`)), now},
+		{"empty audience", signedTicket(secret, claimsWith("aud", `""`)), now},
+		{"issuer as audience", signedTicket(secret, claimsWith("aud", `"messenger-api"`)), now},
+		{"audience array", signedTicket(secret, claimsWith("aud", `["messenger-ws"]`)), now},
 		{"missing session", signedTicket(secret, `{"iss":"messenger-api","aud":"messenger-ws","sub":"user","deviceId":"device","exp":1800003600}`), now},
 		{"uppercase session", signedTicket(secret, `{"iss":"messenger-api","aud":"messenger-ws","sub":"user","deviceId":"device","sid":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","exp":1800003600}`), now},
 	}

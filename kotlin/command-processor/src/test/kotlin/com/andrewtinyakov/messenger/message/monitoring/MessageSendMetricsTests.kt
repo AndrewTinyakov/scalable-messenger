@@ -1,7 +1,6 @@
 package com.andrewtinyakov.messenger.message.monitoring
 
 import com.andrewtinyakov.messenger.message.model.CommandResult
-import com.andrewtinyakov.messenger.message.monitoring.MessageSendMetrics.BatchOutcome
 import io.micrometer.prometheusmetrics.PrometheusConfig
 import io.micrometer.prometheusmetrics.PrometheusMeterRegistry
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -56,9 +55,9 @@ class MessageSendMetricsTests {
 
     @Test
     fun `completed batches record duration size and completion outcome`() {
-        metrics.batchCompleted(3, BatchOutcome.COMMITTED, Duration.ofMillis(250), Duration.ofMillis(50))
-        metrics.batchCompleted(2, BatchOutcome.ROLLED_BACK, Duration.ofMillis(500), Duration.ofMillis(100))
-        metrics.batchCompleted(1, BatchOutcome.UNKNOWN, Duration.ofSeconds(1), Duration.ofMillis(200))
+        metrics.batchCompleted(3, SendBatchOutcome.COMMITTED, Duration.ofMillis(250), Duration.ofMillis(50))
+        metrics.batchCompleted(2, SendBatchOutcome.ROLLED_BACK, Duration.ofMillis(500), Duration.ofMillis(100))
+        metrics.batchCompleted(1, SendBatchOutcome.UNKNOWN, Duration.ofSeconds(1), Duration.ofMillis(200))
 
         assertScraped(
             "messenger_send_batch_transaction_seconds_count{outcome=\"committed\"} 1",

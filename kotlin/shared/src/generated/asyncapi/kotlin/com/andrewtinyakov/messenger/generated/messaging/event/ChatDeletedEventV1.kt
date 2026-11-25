@@ -7,6 +7,7 @@ data class ChatDeletedEventV1(
     val eventId: String,
     val room: String,
     val chatId: String,
+    val seq: String,
 ) {
     init {
         require(type == "chat_deleted" && version == 1)
@@ -17,12 +18,14 @@ data class ChatDeletedEventV1(
             eventId: String,
             room: String,
             chatId: String,
+            seq: String,
         ): ChatDeletedEventV1 = ChatDeletedEventV1(
             type = RoomEventType.CHAT_DELETED.value,
             version = 1,
             eventId = eventId,
             room = room,
             chatId = chatId,
+            seq = seq,
         )
     }
 }

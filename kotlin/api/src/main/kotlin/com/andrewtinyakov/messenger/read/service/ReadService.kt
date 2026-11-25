@@ -2,30 +2,24 @@ package com.andrewtinyakov.messenger.read.service
 
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.ChatId
-import com.andrewtinyakov.messenger.generated.messaging.event.ReadsChangedEventV1
-import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseTransaction
-import com.andrewtinyakov.messenger.infrastructure.database.observability.observedExecute
-import com.andrewtinyakov.messenger.infrastructure.outbox.model.toOutboxMessage
-import com.andrewtinyakov.messenger.infrastructure.outbox.repository.OutboxRepository
-import com.andrewtinyakov.messenger.infrastructure.redis.RoomAddress
+import com.andrewtinyakov.messenger.chat.model.MemberChange
+import com.andrewtinyakov.messenger.chat.repository.ChatRepository
 import com.andrewtinyakov.messenger.message.model.MessageId
 import com.andrewtinyakov.messenger.read.config.ReadProperties
+import com.andrewtinyakov.messenger.read.messaging.ReadOutbox
+import com.andrewtinyakov.messenger.read.model.CommittedAdvance
 import com.andrewtinyakov.messenger.read.model.MessageReadTarget
-import com.andrewtinyakov.messenger.read.model.ReadAdvance
 import com.andrewtinyakov.messenger.read.monitoring.ReadMetrics
 import com.andrewtinyakov.messenger.read.repository.ReadRepository
 import com.andrewtinyakov.messenger.read.web.payload.MessageReaderResponse
 import com.andrewtinyakov.messenger.read.web.payload.MessageReadsResponse
 import com.andrewtinyakov.messenger.read.web.payload.ReadProgressResponse
 import com.andrewtinyakov.messenger.read.web.payload.ReadSummaryResponse
-import com.andrewtinyakov.messenger.shared.id.newId
-import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
-import com.andrewtinyakov.messenger.shared.web.badRequest
+import com.andrewtinyakov.messenger.shared.web.invalidInput
 import com.andrewtinyakov.messenger.shared.web.notFound
 import com.andrewtinyakov.messenger.shared.web.requirePageLimit
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
-import tools.jackson.databind.ObjectMapper
 import java.time.Clock
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
@@ -33,27 +27,23 @@ import java.time.ZoneOffset
 @Service
 class ReadService(
     private val readRepository: ReadRepository,
-    private val outboxRepository: OutboxRepository,
+    private val chatRepository: ChatRepository,
+    private val readOutbox: ReadOutbox,
     private val properties: ReadProperties,
-    private val mapper: ObjectMapper,
     private val tx: TransactionTemplate,
     private val clock: Clock,
     private val metrics: ReadMetrics,
 ) {
-    private data class CommittedAdvance(
-        val advance: ReadAdvance,
-        val notificationCoalesced: Boolean,
-    )
-
     fun advance(chatId: ChatId, userId: UserId, throughSequence: Long): ReadProgressResponse {
-        val committed = tx.observedExecute(DatabaseTransaction.READ_ADVANCE) {
+        val committed = tx.execute {
             val lastSequence = readRepository.requireMember(chatId, userId)
-            if (throughSequence > lastSequence) badRequest(ApiErrorCode.INVALID_SEQUENCE, "throughSequence exceeds saved history")
+            if (throughSequence > lastSequence) invalidInput("throughSequence", "throughSequence exceeds saved history")
             val advance = readRepository.advance(chatId, userId, throughSequence)
-            if (!advance.advanced) return@observedExecute CommittedAdvance(advance, notificationCoalesced = false)
+            if (!advance.advanced) return@execute CommittedAdvance(advance, notificationCoalesced = false)
+            val memberSeq = chatRepository.allocateMemberSequence(chatId, userId, MemberChange.OTHER) ?: notFound()
             val sharedRooms = readRepository.notificationRooms(chatId, advance.progress.readAt!!)
             if (sharedRooms.isNotEmpty()) readRepository.completeNotification(chatId, userId)
-            publishReadsChanged(chatId, (sharedRooms + RoomAddress.user(userId)).distinct())
+            readOutbox.enqueueReadAdvanced(chatId, userId, memberSeq, sharedRooms)
             CommittedAdvance(advance, notificationCoalesced = sharedRooms.isEmpty())
         }
         val advance = committed.advance
@@ -66,9 +56,9 @@ class ReadService(
     }
 
     fun publishPendingNotifications() {
-        tx.observedExecute(DatabaseTransaction.READ_ADVANCE) {
+        tx.execute {
             readRepository.pendingNotifications(OffsetDateTime.now(clock), properties.notificationBatchSize).forEach { (chatId, rooms) ->
-                publishReadsChanged(chatId, rooms)
+                readOutbox.enqueueReadsChanged(chatId, rooms)
             }
         }
     }
@@ -113,14 +103,6 @@ class ReadService(
             detailsAvailable = true,
             detailsExpiresAt = expiresAt,
             serverTime = now,
-        )
-    }
-
-    private fun publishReadsChanged(chatId: ChatId, rooms: List<String>) {
-        outboxRepository.enqueue(
-            rooms.map { room ->
-                ReadsChangedEventV1.create(eventId = newId(), room = room, chatId = chatId.value).toOutboxMessage(mapper)
-            },
         )
     }
 }

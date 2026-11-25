@@ -52,6 +52,9 @@ func (serverTestDependencies) AuthorizeGroups(context.Context, string, []string)
 func (serverTestDependencies) ValidateSession(context.Context, string) (grpcauth.Session, error) {
 	return grpcauth.Session{}, grpcauth.ErrUnauthorized
 }
+func (serverTestDependencies) ValidateSessions(context.Context, []string) (map[string]grpcauth.Session, error) {
+	return map[string]grpcauth.Session{}, nil
+}
 
 func testDependencies(rooms RoomCoordinator) Dependencies {
 	adapter := serverTestDependencies{}
@@ -171,12 +174,12 @@ func TestSocketErrorCodesKeepWireAndMetricValues(t *testing.T) {
 		code     protocol.ErrorCode
 		wireCode string
 	}{
-		{"dependency", errors.New("dependency failure"), protocol.ErrorDependencyUnavailable, "dependency_unavailable"},
-		{"unauthorized", grpcauth.ErrUnauthorized, protocol.ErrorUnauthorized, "unauthorized"},
-		{"rate limit", errRateLimited, protocol.ErrorRateLimited, "rate_limited"},
-		{"command capacity", errCommandCapacity, protocol.ErrorRateLimited, "rate_limited"},
-		{"room limit", errRoomLimit, protocol.ErrorRoomLimit, "room_limit"},
-		{"invalid acknowledgement", errInvalidACK, protocol.ErrorInvalidFrame, "invalid_frame"},
+		{"dependency", errors.New("dependency failure"), protocol.ErrorDependencyUnavailable, "DEPENDENCY_UNAVAILABLE"},
+		{"UNAUTHORIZED", grpcauth.ErrUnauthorized, protocol.ErrorUnauthorized, "UNAUTHORIZED"},
+		{"rate limit", errRateLimited, protocol.ErrorRateLimited, "RATE_LIMITED"},
+		{"command capacity", errCommandCapacity, protocol.ErrorRateLimited, "RATE_LIMITED"},
+		{"room limit", errRoomLimit, protocol.ErrorRoomLimit, "ROOM_LIMIT"},
+		{"invalid acknowledgement", errInvalidACK, protocol.ErrorInvalidFrame, "INVALID_FRAME"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			server := newTestServer(t, config.Config{MaxGroupAuths: 1, QueueItems: 8, QueueBytes: 4096}, testDependencies(&sessionRooms{}))

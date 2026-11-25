@@ -200,11 +200,16 @@ func (h *handshake) validateSession(c *Connection) bool {
 		c.Close()
 		return false
 	}
-	if live.UserID != h.identity.UserID || live.DeviceID != h.identity.DeviceID || live.SessionID != h.identity.SessionID {
+	if !c.matchesSession(live) {
 		h.record(monitoring.HandshakeSessionMismatch)
 		c.closeRevoked()
 		return false
 	}
+	now := time.Now()
+	c.sessionValidated(live, now)
+	s.mu.Lock()
+	c.nextSessionCheck = now.Add(jitteredSessionCheckInterval())
+	s.mu.Unlock()
 	return true
 }
 

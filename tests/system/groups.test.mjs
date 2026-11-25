@@ -43,7 +43,7 @@ test('group members receive saved events and removed members lose history access
   await memberSocket.waitFor((frame) => frame.type === 'member_removed' && frame.chatId === group.id, 15000);
   const afterRemoval = memberSocket.frames.length;
   memberSocket.send({ type: 'subscribe', kind: 'GROUP', chatId: group.id });
-  await memberSocket.waitFor((frame) => frame.type === 'error' && frame.code === 'unauthorized', 15000, afterRemoval);
+  await memberSocket.waitFor((frame) => frame.type === 'error' && frame.code === 'UNAUTHORIZED', 15000, afterRemoval);
   const rejectedRequestId = ulid();
   memberSocket.send({ type: 'send', chatId: group.id, requestId: rejectedRequestId, body: 'After removal' });
   await memberSocket.waitFor((frame) => frame.type === 'queued' && frame.requestId === rejectedRequestId);

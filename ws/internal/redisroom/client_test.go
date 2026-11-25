@@ -39,7 +39,7 @@ func (client *replayRedis) XRangeN(_ context.Context, _, start, end string, _ in
 		return redis.NewXMessageSliceCmdResult([]redis.XMessage{{ID: start}}, nil)
 	}
 	const id = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
-	payload := `{"type":"chat_created","version":1,"eventId":"` + id + `","room":"user:` + id + `","chatId":"` + id + `"}`
+	payload := `{"type":"chat_created","version":1,"eventId":"` + id + `","room":"user:` + id + `","chatId":"` + id + `","userSeq":"1"}`
 	if client.eventPayload != "" {
 		payload = client.eventPayload
 	}
@@ -62,7 +62,7 @@ func TestRoomKeysShareClusterSlot(t *testing.T) {
 func TestDecodeLivePreservesPreviousStreamID(t *testing.T) {
 	const id = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 	room := "user:" + id
-	payload := `{"epoch":"epoch","streamId":"3-0","previousStreamId":"2-0","event":{"type":"chat_created","version":1,"eventId":"` + id + `","room":"` + room + `","chatId":"` + id + `"}}`
+	payload := `{"epoch":"epoch","streamId":"3-0","previousStreamId":"2-0","event":{"type":"chat_created","version":1,"eventId":"` + id + `","room":"` + room + `","chatId":"` + id + `","userSeq":"1"}}`
 	live, err := decodeLive(room, payload)
 	if err != nil {
 		t.Fatal(err)
@@ -137,7 +137,7 @@ func TestReplayRequiresRetainedAnchorAndEpochAfterReading(t *testing.T) {
 func TestDecodeLiveRejectsAmbiguousEnvelope(t *testing.T) {
 	const id = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 	room := "user:" + id
-	payload := `{"epoch":"epoch","streamId":"3-0","event":{"type":"chat_created","version":1,"eventId":"` + id + `","room":"` + room + `","chatId":"` + id + `"}}`
+	payload := `{"epoch":"epoch","streamId":"3-0","event":{"type":"chat_created","version":1,"eventId":"` + id + `","room":"` + room + `","chatId":"` + id + `","userSeq":"1"}}`
 	for _, invalid := range []string{
 		strings.Replace(payload, `"epoch":"epoch"`, `"epoch":"epoch","epoch":"changed"`, 1),
 		strings.Replace(payload, `"epoch":"epoch"`, `"Epoch":"epoch"`, 1),

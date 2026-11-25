@@ -55,21 +55,26 @@ let fakeUnread: number
 let holdReadRequests: boolean
 let readRequests: ((value: Response) => void)[]
 let readCalls: string[]
-let visibilityRevision: string
+let memberSeq: string
 let clearedThrough: string
 let lastSummary: Chat['lastMessage']
 let hidden: boolean
 let deletionCalls: { chatId: string; requestId: string; scope: string; target: string }[]
 let failDeletion: boolean
 let markedUnread: boolean
+let userSeq = 0
+let pinFailures = 0
+let stateMemberSeq: string | undefined
+let stateRequests: { primary: boolean; fail?: boolean; release?: () => void }[] = []
+let holdState = false
 let unreadMarkCalls: string[]
 
 function snapshotFor(id: string) {
   return {
     snapshotSequence:
       historyMessages.filter((message) => message.chatId === id).at(-1)?.sequence ?? '0',
-    mutationRevision: '0',
-    visibilityRevision,
+    mutationSeq: '0',
+    visibilitySeq: memberSeq,
     clearedThroughSequence: clearedThrough,
     globalClearedThroughSequence: '0',
   }
@@ -128,6 +133,7 @@ function chatCreated(socket: TestSocket, eventId: string) {
     epoch: 'epoch',
     streamId: '1-0',
     chatId,
+    userSeq: String(++userSeq),
   })
 }
 
@@ -164,7 +170,7 @@ beforeEach(() => {
   holdReadRequests = false
   readRequests = []
   readCalls = []
-  visibilityRevision = '0'
+  memberSeq = '0'
   clearedThrough = '0'
   hidden = false
   lastSummary = null
@@ -182,7 +188,8 @@ beforeEach(() => {
     },
   )
   vi.stubGlobal('fetch', async (input: string, options?: RequestInit) => {
-    const path = new URL(input, 'http://localhost').pathname
+    const url = new URL(input, 'http://localhost')
+    const path = url.pathname
     paths.push(path)
     const requestedChat = path.split('/chats/')[1]?.split('/')[0] ?? chatId
     const metadata = snapshotFor(requestedChat)
@@ -195,8 +202,8 @@ beforeEach(() => {
         scope: body.scope,
         target: body.target,
         clearedThroughSequence: '0',
-        mutationRevision: '0',
-        visibilityRevision: '1',
+        seq: '0',
+        visibilitySeq: '1',
         state: 'COMPLETED',
         deletedRows: '0',
       })
@@ -212,6 +219,10 @@ beforeEach(() => {
         markedUnread,
       })
     }
+    if (path.endsWith('/pins') && pinFailures > 0) {
+      pinFailures -= 1
+      return Response.json({ message: 'Unavailable' }, { status: 503 })
+    }
     if (path.endsWith('/pins'))
       return Response.json({
         pins: [],
@@ -220,13 +231,34 @@ beforeEach(() => {
         nextBeforeSequence: null,
       })
     if (path.endsWith('/visibility')) return Response.json({ ...metadata, hidden })
+    if (path.endsWith('/state')) {
+      const request: (typeof stateRequests)[number] = { primary: !url.searchParams.has('minSeq') }
+      stateRequests.push(request)
+      if (holdState) await new Promise<void>((resolve) => (request.release = resolve))
+      if (request.fail) return Response.json({ message: 'Unavailable' }, { status: 503 })
+    }
+    if (path.endsWith('/state'))
+      return Response.json({
+        lastSeq: metadata.snapshotSequence,
+        pinsSeq: '0',
+        mutationFloor: '0',
+        mutationSeq: metadata.mutationSeq,
+        memberSeq: stateMemberSeq ?? metadata.visibilitySeq,
+        visibilitySeq: metadata.visibilitySeq,
+        memberPinsSeq: '0',
+        clearedThroughSequence: metadata.clearedThroughSequence,
+        globalClearedThroughSequence: metadata.globalClearedThroughSequence,
+        hidden,
+        ownReadThrough: readCalls.at(-1) ?? '0',
+        otherReadThrough: '0',
+        userSeq: '0',
+      })
     if (path.endsWith('/changes'))
       return Response.json({
         ...metadata,
-        mutationRevision: undefined,
         changes: [],
-        lastRevision: '0',
-        nextRevision: '0',
+        lastSeq: '0',
+        nextSeq: '0',
         resetRequired: false,
       })
     if (path.endsWith('/resolve')) {
@@ -527,6 +559,7 @@ describe('messenger request coordination', () => {
     })
     fakeUnread = 0
     paths = []
+    stateMemberSeq = '1'
     await act(async () => {
       sockets[0].event({
         type: 'reads_changed',
@@ -536,11 +569,35 @@ describe('messenger request coordination', () => {
         epoch: 'epoch',
         streamId: '1-0',
         chatId,
+        memberSeq: '1',
       })
       await vi.advanceTimersByTimeAsync(500)
     })
     expect(messenger.chats.find((chat) => chat.id === chatId)?.unreadCount).toBe(0)
     expect(paths.some((path) => path.endsWith('/messages'))).toBe(false)
+  })
+
+  it("leaves the chat-list row alone when another member's read reaches the group room", async () => {
+    vi.useFakeTimers()
+    await renderMessenger()
+    await act(async () => {
+      sockets[0].open()
+      messenger.closeChat()
+    })
+    paths = []
+    await act(async () => {
+      sockets[0].event({
+        type: 'reads_changed',
+        version: 1,
+        eventId: recipient.id,
+        room: `group:${chatId}`,
+        epoch: 'epoch',
+        streamId: '1-0',
+        chatId,
+      })
+      await vi.advanceTimersByTimeAsync(2000)
+    })
+    expect(paths.filter((path) => path.endsWith(`/chats/${chatId}`))).toHaveLength(0)
   })
 
   it('keeps an unread mark made while the chat stays selected and clears it on the next opening', async () => {
@@ -579,7 +636,7 @@ describe('messenger request coordination', () => {
     expect(chat().markedUnread).toBe(false)
   })
 
-  it.each(['rate_limited', 'room_limit', 'dependency_unavailable', 'publish_failed'])(
+  it.each(['RATE_LIMITED', 'ROOM_LIMIT', 'DEPENDENCY_UNAVAILABLE', 'PUBLISH_FAILED'])(
     'silently retries %s sends with their original request ID',
     async (code) => {
       vi.useFakeTimers()
@@ -741,6 +798,39 @@ describe('messenger request coordination', () => {
     expect(messenger.selectedId).toBeNull()
   })
 
+  it('shows group activity that carries its preview without fetching the row', async () => {
+    vi.useFakeTimers()
+    await renderMessenger()
+    await act(async () => {
+      sockets[0].open()
+      messenger.closeChat()
+    })
+    const row = messenger.chats.find((chat) => chat.id === chatId)!
+    const next = String(BigInt(row.lastSequence) + 1n)
+    paths = []
+    const activity = {
+      type: 'sidebar_activity',
+      version: 1,
+      chatId,
+      sequence: next,
+      messageId: '01BX5ZZKBKACTAV9WEVGEMMVRZ',
+      senderId: recipient.id,
+      senderUsername: 'katya',
+      createdAt: '2026-11-19T10:00:00Z',
+      preview: 'Хорошо',
+    }
+    await act(async () => {
+      sockets[0].event(activity)
+      sockets[0].event(activity)
+      await vi.advanceTimersByTimeAsync(2000)
+    })
+    expect(messenger.chats.find((chat) => chat.id === chatId)).toMatchObject({
+      lastSequence: next,
+      lastMessage: { id: activity.messageId, senderUsername: 'katya', bodyPreview: 'Хорошо' },
+    })
+    expect(paths.filter((path) => path.endsWith(`/chats/${chatId}`))).toHaveLength(0)
+  })
+
   it('deletes a never-opened chat without changing selection or loading its history', async () => {
     await renderMessenger()
     const selected = messenger.selectedId
@@ -841,7 +931,7 @@ describe('messenger request coordination', () => {
     await act(async () => sockets[0].open())
     expect(messenger.messages[chatId]).toHaveLength(2)
     clearedThrough = '2'
-    visibilityRevision = '1'
+    memberSeq = '1'
     hidden = true
     await act(async () =>
       sockets[0].event({
@@ -853,8 +943,7 @@ describe('messenger request coordination', () => {
         streamId: '3-0',
         chatId,
         sequence: '2',
-        mutationRevision: '0',
-        visibilityRevision: '1',
+        memberSeq: '1',
       }),
     )
     expect(messenger.selectedId).toBeNull()
@@ -1006,6 +1095,7 @@ describe('messenger request coordination', () => {
         epoch: 'epoch',
         streamId: '3-0',
         chatId,
+        seq: '5',
       })
     })
     expect(messenger.chats.find((chat) => chat.id === chatId)).toMatchObject({
@@ -1040,6 +1130,7 @@ describe('messenger request coordination', () => {
           streamId: '2-0',
           chatId,
           memberId: recipient.id,
+          seq: '5',
         })
       })
 
@@ -1415,6 +1506,212 @@ describe('messenger request coordination', () => {
     expect(
       sockets[1].sent.filter((data) => JSON.parse(data).type === 'subscribe_many'),
     ).toHaveLength(1)
+  })
+
+  it('checks chat state on a sequence gap and once a minute instead of polling each feature', async () => {
+    vi.useFakeTimers()
+    window.history.replaceState(null, '', `/groups/${chatId}`)
+    await renderMessenger()
+    await act(async () => {
+      sockets[0].open()
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+    const head = BigInt(snapshotFor(chatId).snapshotSequence)
+    const pinsChanged = (seq: bigint, eventId: string) =>
+      sockets[0].event({
+        type: 'pins_changed',
+        version: 1,
+        eventId,
+        room: `group:${chatId}`,
+        epoch: 'epoch',
+        streamId: '5-0',
+        chatId,
+        seq: String(seq),
+      })
+    paths = []
+
+    await act(async () => pinsChanged(head + 1n, '01ARZ3NDEKTSV4RRFFQ69G5FB0'))
+    expect(paths.filter((path) => path.split('?')[0].endsWith('/state'))).toHaveLength(0)
+
+    await act(async () => pinsChanged(head + 3n, '01ARZ3NDEKTSV4RRFFQ69G5FB1'))
+    expect(paths.filter((path) => path.split('?')[0].endsWith('/state'))).toHaveLength(1)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000)
+    })
+
+    paths = []
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(120_000)
+    })
+    const routes = paths.map((path) => path.split('?')[0])
+    for (const route of ['/reads', '/visibility', '/changes', '/pins'])
+      expect(routes.filter((path) => path.endsWith(route))).toHaveLength(0)
+    expect(routes.filter((path) => path.endsWith('/state'))).toHaveLength(2)
+  })
+
+  it('retries a failed pin load after the next state check and then stays quiet', async () => {
+    vi.useFakeTimers()
+    pinFailures = 1
+    window.history.replaceState(null, '', `/groups/${chatId}`)
+    paths = []
+    await renderMessenger()
+    await act(async () => {
+      sockets[0].open()
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+    const pinLoads = () => paths.filter((path) => path.split('?')[0].endsWith('/pins')).length
+    expect(pinLoads()).toBe(2)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(61_000)
+    })
+    expect(pinLoads()).toBe(2)
+    pinFailures = 0
+  })
+
+  it('checks state after an own read without re-checking history visibility', async () => {
+    vi.useFakeTimers()
+    historyMessages = Array.from({ length: 3 }, (_, index) => ({
+      id: String(index + 1).padStart(26, '0'),
+      chatId,
+      senderId: recipient.id,
+      sequence: String(index + 1),
+      body: `Message ${index + 1}`,
+      createdAt: '2026-11-04T10:00:00Z',
+    }))
+    window.history.replaceState(null, '', `/groups/${chatId}`)
+    await renderMessenger()
+    await act(async () => {
+      sockets[0].open()
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+    paths = []
+    await act(async () => {
+      sockets[0].event({
+        type: 'reads_changed',
+        version: 1,
+        eventId: '01ARZ3NDEKTSV4RRFFQ69G5FB2',
+        room: `user:${userId}`,
+        epoch: 'epoch',
+        streamId: '6-0',
+        chatId,
+        memberSeq: '1',
+      })
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+    const routes = paths.map((path) => path.split('?')[0])
+    expect(routes.filter((path) => path.endsWith('/state'))).toHaveLength(1)
+    for (const route of ['/messages/resolve', '/messages', '/pins'])
+      expect(routes.filter((path) => path.endsWith(route))).toHaveLength(0)
+    stateMemberSeq = undefined
+  })
+
+  it('keeps a read hint that arrived during a primary check owed until a later primary check', async () => {
+    vi.useFakeTimers()
+    window.history.replaceState(null, '', `/groups/${chatId}`)
+    await renderMessenger()
+    await act(async () => {
+      sockets[0].open()
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+    const readHint = (eventId: string, streamId: string) =>
+      sockets[0].event({
+        type: 'reads_changed',
+        version: 1,
+        eventId,
+        room: `group:${chatId}`,
+        epoch: 'epoch',
+        streamId,
+        chatId,
+      })
+    stateRequests = []
+    holdState = true
+    await act(async () => {
+      readHint('01ARZ3NDEKTSV4RRFFQ69G5FB3', '7-0')
+      await vi.advanceTimersByTimeAsync(10)
+    })
+    await act(async () => {
+      readHint('01ARZ3NDEKTSV4RRFFQ69G5FB4', '8-0')
+      await vi.advanceTimersByTimeAsync(10)
+    })
+    holdState = false
+    await act(async () => {
+      stateRequests[0].release?.()
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+    expect(stateRequests.map((request) => request.primary)).toEqual([true, true])
+  })
+
+  it('leaves a chat-list row alone when someone else reads', async () => {
+    vi.useFakeTimers()
+    await renderMessenger()
+    await act(async () => {
+      sockets[0].open()
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+    paths = []
+    await act(async () => {
+      sockets[0].event({
+        type: 'reads_changed',
+        version: 1,
+        eventId: '01ARZ3NDEKTSV4RRFFQ69G5FB5',
+        room: `user:${userId}`,
+        epoch: 'epoch',
+        streamId: '9-0',
+        chatId,
+      })
+      await vi.advanceTimersByTimeAsync(3000)
+    })
+    expect(paths.filter((path) => path.endsWith(`/chats/${chatId}`))).toHaveLength(0)
+  })
+
+  it('still runs the queued primary check when the running one fails', async () => {
+    vi.useFakeTimers()
+    window.history.replaceState(null, '', `/groups/${chatId}`)
+    await renderMessenger()
+    await act(async () => {
+      sockets[0].open()
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+    const readHint = (eventId: string, streamId: string) =>
+      sockets[0].event({
+        type: 'reads_changed',
+        version: 1,
+        eventId,
+        room: `group:${chatId}`,
+        epoch: 'epoch',
+        streamId,
+        chatId,
+      })
+    stateRequests = []
+    holdState = true
+    await act(async () => {
+      readHint('01ARZ3NDEKTSV4RRFFQ69G5FB6', '10-0')
+      await vi.advanceTimersByTimeAsync(10)
+    })
+    await act(async () => {
+      readHint('01ARZ3NDEKTSV4RRFFQ69G5FB7', '11-0')
+      await vi.advanceTimersByTimeAsync(10)
+    })
+    holdState = false
+    await act(async () => {
+      stateRequests[0].fail = true
+      stateRequests[0].release?.()
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+    expect(stateRequests.length).toBeGreaterThan(1)
+    expect(stateRequests.every((request) => request.primary)).toBe(true)
   })
 
   it('coalesces repeated focus work while the selected group is current', async () => {

@@ -11,7 +11,6 @@ test('public ingress hides internal endpoints and rejects oversized authenticati
   socketBase.protocol = socketBase.protocol === 'wss:' ? 'https:' : 'http:';
   for (const url of [
     new URL('/metrics', socketBase),
-    new URL('/healthz', socketBase),
     new URL('/readyz', socketBase),
     new URL(`${new URL(apiBase).pathname}/actuator`, apiBase),
     new URL(`${new URL(apiBase).pathname}/actuator/prometheus`, apiBase),
@@ -20,6 +19,9 @@ test('public ingress hides internal endpoints and rejects oversized authenticati
     const response = await fetch(url);
     assert.equal(response.status, 404, `${url.pathname} must remain private`);
   }
+  const liveness = await fetch(new URL('/healthz', socketBase));
+  assert.equal(liveness.status, 200);
+  assert.equal(await liveness.text(), 'ok\n', 'nginx answers liveness without proxying gateway health');
   const response = await fetch(`${apiBase}/v1/auth/login`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...csrfHeaders('POST') },

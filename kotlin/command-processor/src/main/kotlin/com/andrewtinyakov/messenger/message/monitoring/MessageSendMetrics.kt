@@ -27,8 +27,8 @@ class MessageSendMetrics(
             .tag("result", result.metricValue)
             .register(registry)
     }
-    private val batches = BatchOutcome.entries.associateWith { outcome ->
-        BatchMeters(
+    private val batches = SendBatchOutcome.entries.associateWith { outcome ->
+        SendBatchMeters(
             transaction = Timer.builder("messenger.send.batch.transaction")
                 .description("Send batch transaction duration by completion outcome.")
                 .tag("outcome", outcome.metricValue)
@@ -50,7 +50,7 @@ class MessageSendMetrics(
 
     fun commandCompleted(result: CommandResult) = commandResults.getValue(result).increment()
 
-    fun batchCompleted(size: Int, outcome: BatchOutcome, transactionDuration: Duration, completionDuration: Duration) {
+    fun batchCompleted(size: Int, outcome: SendBatchOutcome, transactionDuration: Duration, completionDuration: Duration) {
         val meters = batches.getValue(outcome)
         meters.transaction.record(transactionDuration)
         meters.completion.record(completionDuration)
@@ -66,59 +66,7 @@ class MessageSendMetrics(
         }
     }
 
-    internal fun transactionStarted(requests: Int = 1) = TransactionWindow(requests)
-
-    internal inner class TransactionWindow(
-        private val requests: Int,
-    ) {
-        private val started = System.nanoTime()
-        private var state: TransactionWindowState = TransactionWindowState.Executing()
-
-        fun chatLocked() {
-            if (state is TransactionWindowState.Executing) {
-                state = TransactionWindowState.Executing(System.nanoTime())
-            }
-        }
-
-        fun callbackFinished() {
-            state = when (val current = state) {
-                is TransactionWindowState.Executing -> TransactionWindowState.CallbackFinished(current.locked, System.nanoTime())
-                is TransactionWindowState.CallbackFinished -> current.copy(finished = System.nanoTime())
-                TransactionWindowState.Observed -> return
-            }
-        }
-
-        fun completed() {
-            val current = state
-            if (current == TransactionWindowState.Observed) return
-            state = TransactionWindowState.Observed
-            val locked = when (current) {
-                is TransactionWindowState.Executing -> current.locked
-                is TransactionWindowState.CallbackFinished -> current.locked
-                TransactionWindowState.Observed -> return
-            }
-            val callbackFinished = (current as? TransactionWindowState.CallbackFinished)?.finished
-            val finished = System.nanoTime()
-            repeat(requests) {
-                transaction.record(Duration.ofNanos(finished - started))
-                locked?.let { hold.record(Duration.ofNanos(finished - it)) }
-                callbackFinished?.let { completion.record(Duration.ofNanos(finished - it)) }
-            }
-        }
-    }
-
-    private sealed interface TransactionWindowState {
-        data class Executing(
-            val locked: Long? = null,
-        ) : TransactionWindowState
-
-        data class CallbackFinished(
-            val locked: Long?,
-            val finished: Long,
-        ) : TransactionWindowState
-
-        data object Observed : TransactionWindowState
-    }
+    internal fun transactionStarted(requests: Int = 1) = TransactionWindow(requests, transaction, hold, completion)
 
     private fun histogram(registry: MeterRegistry, name: String, description: String): Timer =
         Timer.builder(name)
@@ -127,19 +75,4 @@ class MessageSendMetrics(
             .minimumExpectedValue(Duration.ofMillis(1))
             .maximumExpectedValue(Duration.ofMinutes(2))
             .register(registry)
-
-    enum class BatchOutcome {
-        COMMITTED,
-        ROLLED_BACK,
-        UNKNOWN,
-        ;
-
-        val metricValue: String get() = name.lowercase()
-    }
-
-    private data class BatchMeters(
-        val transaction: Timer,
-        val completion: Timer,
-        val size: DistributionSummary,
-    )
 }

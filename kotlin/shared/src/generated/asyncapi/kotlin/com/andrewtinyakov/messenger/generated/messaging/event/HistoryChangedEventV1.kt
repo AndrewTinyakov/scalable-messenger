@@ -8,8 +8,8 @@ data class HistoryChangedEventV1(
     val room: String,
     val chatId: String,
     val sequence: String,
-    val mutationRevision: String,
-    val visibilityRevision: String,
+    val seq: String? = null,
+    val memberSeq: String? = null,
 ) {
     init {
         require(type == "history_changed" && version == 1)
@@ -21,8 +21,8 @@ data class HistoryChangedEventV1(
             room: String,
             chatId: String,
             sequence: String,
-            mutationRevision: String,
-            visibilityRevision: String,
+            seq: String? = null,
+            memberSeq: String? = null,
         ): HistoryChangedEventV1 = HistoryChangedEventV1(
             type = RoomEventType.HISTORY_CHANGED.value,
             version = 1,
@@ -30,8 +30,8 @@ data class HistoryChangedEventV1(
             room = room,
             chatId = chatId,
             sequence = sequence,
-            mutationRevision = mutationRevision,
-            visibilityRevision = visibilityRevision,
+            seq = seq,
+            memberSeq = memberSeq,
         )
     }
 }

@@ -3,11 +3,11 @@ package protocol
 type ErrorCode string
 
 const (
-	ErrorInvalidFrame          ErrorCode = "invalid_frame"
-	ErrorDependencyUnavailable ErrorCode = "dependency_unavailable"
-	ErrorUnauthorized          ErrorCode = "unauthorized"
-	ErrorRateLimited           ErrorCode = "rate_limited"
-	ErrorRoomLimit             ErrorCode = "room_limit"
-	ErrorPublishFailed         ErrorCode = "publish_failed"
-	ErrorPublishUnknown        ErrorCode = "publish_unknown"
+	ErrorInvalidFrame          ErrorCode = "INVALID_FRAME"
+	ErrorDependencyUnavailable ErrorCode = "DEPENDENCY_UNAVAILABLE"
+	ErrorUnauthorized          ErrorCode = "UNAUTHORIZED"
+	ErrorRateLimited           ErrorCode = "RATE_LIMITED"
+	ErrorRoomLimit             ErrorCode = "ROOM_LIMIT"
+	ErrorPublishFailed         ErrorCode = "PUBLISH_FAILED"
+	ErrorPublishUnknown        ErrorCode = "PUBLISH_UNKNOWN"
 )

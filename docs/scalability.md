@@ -74,7 +74,7 @@ Large ramps behind one source IP also hit ingress limits. Compose exposes these 
 | `MESSENGER_TICKET_IP_RATE` / `MESSENGER_TICKET_IP_BURST` | `5r/s` / `20` | Ticket requests |
 | `MESSENGER_AUTH_IP_RATE` / `MESSENGER_AUTH_IP_BURST` | `1r/s` / `10` | Registration and login |
 
-Set them for a controlled load environment before increasing `-ramp`. For example, a 100-socket-per-second ramp needs both ticket and upgrade ingress rates to allow it. Registration is separate from the measurement period. Reuse a session manifest to avoid registering users on every run. The gateway's per-user admission checks still apply.
+Set them for a controlled load environment before increasing `-ramp`. For example, a 100-socket-per-second ramp needs both ticket and upgrade ingress rates to allow it. Registration is separate from the measurement period. Reuse a session manifest to avoid registering users on every run. The gateway's per-user admission checks still apply. Behind an LB, configure trusted proxy CIDRs so nginx limits use the actual client IP. `MESSENGER_CONNECTION_LIMIT`, default 200 per client IP at each nginx layer, also bounds concurrent sockets and requests. See [deployment](deployment.md) for the network map, TLS, firewall and credential setup.
 
 The existing send limiter allows 20 messages per user in a Redis one-second window. A sender scheduled at exactly 20 messages per second can cross a window boundary unevenly and receive rate-limit errors. Use 18 or fewer for delivery checks, or several distinct senders for higher group event rates.
 

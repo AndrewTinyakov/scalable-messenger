@@ -12,6 +12,7 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Cha
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.DeletionOperations;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.HiddenMessageRanges;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.HistoryPurgeJobs;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.LoginThrottles;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.MessageChanges;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.MessagePins;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Messages;
@@ -68,6 +69,11 @@ public class Tables {
      * The table <code>public.history_purge_jobs</code>.
      */
     public static final HistoryPurgeJobs HISTORY_PURGE_JOBS = HistoryPurgeJobs.HISTORY_PURGE_JOBS;
+
+    /**
+     * The table <code>public.login_throttles</code>.
+     */
+    public static final LoginThrottles LOGIN_THROTTLES = LoginThrottles.LOGIN_THROTTLES;
 
     /**
      * The table <code>public.message_changes</code>.

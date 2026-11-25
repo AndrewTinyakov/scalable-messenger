@@ -7,11 +7,15 @@ import {
 } from '../entities/chat/model'
 import { ChatKind } from '../shared/api/generated/socket-vocabulary'
 import { ApiError, type api } from '../shared/api/http'
+import type { ActivityMessage } from '../shared/api/socket'
 
 type SessionApi = ReturnType<typeof api.forSession>
+/** The server counts unread messages among the newest 256; past that it reports a capped count. */
+const UNREAD_WINDOW = 256
 
 interface ChatDirectoryOptions {
   sessionApi: SessionApi
+  userId: string
   selectedId: string | null
   selectedIdRef: MutableRefObject<string | null>
   recordLatest(chatId: string, sequence: string): void
@@ -21,6 +25,7 @@ interface ChatDirectoryOptions {
 
 export function useChatDirectory({
   sessionApi,
+  userId,
   selectedId,
   selectedIdRef,
   recordLatest,
@@ -335,6 +340,46 @@ export function useChatDirectory({
     },
     [refreshChatSummary],
   )
+  /**
+   * Shows a newly saved message in its chat-list row without asking the server.
+   * Returns false when the row can't be updated exactly, so the caller refreshes it instead:
+   * a message was missed in between, or the unread count would reach the server's cap.
+   */
+  const applyActivity = useCallback(
+    (chatId: string, sequence: string, message: ActivityMessage): boolean => {
+      const existing = chatsRef.current.find((chat) => chat.id === chatId)
+      if (!existing || removedChatRef.current.has(chatId)) return true
+      if (BigInt(existing.lastSequence) >= BigInt(sequence)) return true
+      if (BigInt(existing.lastSequence) + 1n !== BigInt(sequence)) return false
+      const unread = existing.unreadCount ?? 0
+      const fromOther = message.senderId !== userId
+      if (fromOther && !existing.unreadCountCapped && unread + 1 >= UNREAD_WINDOW) return false
+      appliedSummaryGenerationsRef.current.set(chatId, ++requestGenerationRef.current)
+      const updated = applyOptimisticRead({
+        ...existing,
+        lastSequence: sequence,
+        activityAt: message.createdAt,
+        unreadCount: fromOther && !existing.unreadCountCapped ? unread + 1 : unread,
+        lastMessage: {
+          id: message.messageId,
+          sequence,
+          senderId: message.senderId,
+          senderUsername: message.senderUsername,
+          createdAt: message.createdAt,
+          bodyPreview: message.preview,
+          deleted: false,
+        },
+      })
+      const next = chatsRef.current.filter((chat) => chat.id !== chatId)
+      const index = next.findIndex((chat) => compareChats(updated, chat) < 0)
+      next.splice(index < 0 ? next.length : index, 0, updated)
+      chatsRef.current = next
+      setChats(next)
+      recordLatest(chatId, sequence)
+      return true
+    },
+    [userId, recordLatest, applyOptimisticRead],
+  )
   const applyPreferences = useCallback((chatId: string, preferences: ChatPreferences) => {
     appliedSummaryGenerationsRef.current.set(chatId, ++requestGenerationRef.current)
     const next = chatsRef.current
@@ -373,6 +418,7 @@ export function useChatDirectory({
     listChats,
     rememberChat,
     refreshChatSummary,
+    applyActivity,
     applyPreferences,
     applyPinnedOrder,
     markRead,

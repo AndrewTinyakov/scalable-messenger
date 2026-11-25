@@ -24,13 +24,13 @@ describe('pending history requests', () => {
     }
     let release!: (page: {
       messages: Message[]
-      mutationRevision: string
-      visibilityRevision: string
+      mutationSeq: string
+      visibilitySeq: string
     }) => void
     const loading = requests.run(
       'chat',
       () =>
-        new Promise<{ messages: Message[]; mutationRevision: string; visibilityRevision: string }>(
+        new Promise<{ messages: Message[]; mutationSeq: string; visibilitySeq: string }>(
           (resolve) => {
             release = resolve
           },
@@ -38,7 +38,7 @@ describe('pending history requests', () => {
       (page) => page.messages,
     )
     requests.patch('chat', [{ ...reply, body: 'newer edit body', messageVersion: '3' }])
-    requests.observe('chat', { mutationRevision: '1', visibilityRevision: '1' })
+    requests.observe('chat', { mutationSeq: '1', visibilitySeq: '1' })
     release({
       messages: [
         {
@@ -51,8 +51,8 @@ describe('pending history requests', () => {
           replyDeleted: null,
         },
       ],
-      mutationRevision: '1',
-      visibilityRevision: '1',
+      mutationSeq: '1',
+      visibilitySeq: '1',
     })
     expect(await loading).toEqual([
       expect.objectContaining({
@@ -90,30 +90,30 @@ describe('pending history requests', () => {
     const requests = new HistoryRequests()
     let release!: (page: {
       messages: Message[]
-      mutationRevision: string
-      visibilityRevision: string
+      mutationSeq: string
+      visibilitySeq: string
     }) => void
     const install = (page: { messages: Message[] }) => page.messages
     const loading = requests.run(
       'selected',
       () =>
-        new Promise<{ messages: Message[]; mutationRevision: string; visibilityRevision: string }>(
+        new Promise<{ messages: Message[]; mutationSeq: string; visibilitySeq: string }>(
           (resolve) => {
             release = resolve
           },
         ),
       install,
     )
-    requests.observe('selected', { mutationRevision: '3', visibilityRevision: '2' })
+    requests.observe('selected', { mutationSeq: '3', visibilitySeq: '2' })
     for (let index = 0; index < 2000; index += 1)
-      requests.observe(`other-${index}`, { mutationRevision: '1', visibilityRevision: '1' })
-    requests.observe('selected', { mutationRevision: '1', visibilityRevision: '1' })
-    release({ messages: [message('1')], mutationRevision: '2', visibilityRevision: '1' })
+      requests.observe(`other-${index}`, { mutationSeq: '1', visibilitySeq: '1' })
+    requests.observe('selected', { mutationSeq: '1', visibilitySeq: '1' })
+    release({ messages: [message('1')], mutationSeq: '2', visibilitySeq: '1' })
     expect(await loading).toBeUndefined()
     expect(
       await requests.run(
         'selected',
-        async () => ({ messages: [message('2')], mutationRevision: '3', visibilityRevision: '2' }),
+        async () => ({ messages: [message('2')], mutationSeq: '3', visibilitySeq: '2' }),
         install,
       ),
     ).toEqual([message('2')])

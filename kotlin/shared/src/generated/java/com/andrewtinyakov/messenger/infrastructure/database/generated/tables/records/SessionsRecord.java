@@ -90,6 +90,34 @@ public class SessionsRecord extends UpdatableRecordImpl<SessionsRecord> {
         return (OffsetDateTime) get(4);
     }
 
+    /**
+     * Setter for <code>public.sessions.last_used_at</code>.
+     */
+    public void setLastUsedAt(OffsetDateTime value) {
+        set(5, value);
+    }
+
+    /**
+     * Getter for <code>public.sessions.last_used_at</code>.
+     */
+    public OffsetDateTime getLastUsedAt() {
+        return (OffsetDateTime) get(5);
+    }
+
+    /**
+     * Setter for <code>public.sessions.device_label</code>.
+     */
+    public void setDeviceLabel(String value) {
+        set(6, value);
+    }
+
+    /**
+     * Getter for <code>public.sessions.device_label</code>.
+     */
+    public String getDeviceLabel() {
+        return (String) get(6);
+    }
+
     // -------------------------------------------------------------------------
     // Primary key information
     // -------------------------------------------------------------------------
@@ -113,7 +141,7 @@ public class SessionsRecord extends UpdatableRecordImpl<SessionsRecord> {
     /**
      * Create a detached, initialised SessionsRecord
      */
-    public SessionsRecord(String tokenHash, String userId, String deviceId, OffsetDateTime expiresAt, OffsetDateTime createdAt) {
+    public SessionsRecord(String tokenHash, String userId, String deviceId, OffsetDateTime expiresAt, OffsetDateTime createdAt, OffsetDateTime lastUsedAt, String deviceLabel) {
         super(Sessions.SESSIONS);
 
         setTokenHash(tokenHash);
@@ -121,6 +149,8 @@ public class SessionsRecord extends UpdatableRecordImpl<SessionsRecord> {
         setDeviceId(deviceId);
         setExpiresAt(expiresAt);
         setCreatedAt(createdAt);
+        setLastUsedAt(lastUsedAt);
+        setDeviceLabel(deviceLabel);
         resetTouchedOnNotNull();
     }
 }

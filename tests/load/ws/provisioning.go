@@ -68,7 +68,7 @@ func (work *run) prepare(ctx context.Context) error {
 	}
 	counts := make(map[string]int)
 	for _, account := range work.manifest.Sessions {
-		if account.UserID == "" || !strings.HasPrefix(account.Cookie, "messenger_session=") || strings.ContainsAny(account.Cookie, "\r\n;") {
+		if account.UserID == "" || !(strings.HasPrefix(account.Cookie, "__Host-messenger_session=") || strings.HasPrefix(account.Cookie, "messenger_session=")) || strings.ContainsAny(account.Cookie, "\r\n;") {
 			return errors.New("manifest contains an invalid session")
 		}
 	}

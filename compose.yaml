@@ -1,9 +1,27 @@
 name: messenger
 
 x-database-environment: &database-environment
-  SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/messenger
-  SPRING_DATASOURCE_USERNAME: messenger
-  SPRING_DATASOURCE_PASSWORD: messenger
+  SPRING_DATASOURCE_URL: jdbc:postgresql://pgbouncer:6432/messenger
+  SPRING_FLYWAY_URL: jdbc:postgresql://postgres:5432/messenger
+  SPRING_DATASOURCE_USERNAME: messenger_api
+  SPRING_DATASOURCE_PASSWORD: ${POSTGRES_API_PASSWORD:?Run scripts/dev-up.sh}
+  SPRING_FLYWAY_USER: messenger_migrator
+  SPRING_FLYWAY_PASSWORD: ${POSTGRES_MIGRATOR_PASSWORD:?Run scripts/dev-up.sh}
+
+x-public-nginx: &public-nginx
+  cap_drop: [ALL]
+  cap_add: [CHOWN, SETUID, SETGID, NET_BIND_SERVICE]
+  security_opt: [no-new-privileges:true]
+  read_only: true
+  tmpfs:
+    - /etc/nginx/conf.d
+    - /var/cache/nginx
+    - /var/run
+  healthcheck:
+    test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1/healthz]
+    interval: 10s
+    timeout: 3s
+    retries: 3
 
 x-api: &api
   image: messenger-api:local
@@ -15,9 +33,11 @@ x-api: &api
   environment: &api-environment
     <<: *database-environment
     METRICS_USERNAME: metrics
-    METRICS_PASSWORD: messenger-metrics
-    CLIENT_ORIGIN: ${MESSENGER_CLIENT_ORIGIN:-http://localhost:8080}
-    SESSION_COOKIE_SECURE: ${MESSENGER_SESSION_COOKIE_SECURE:-false}
+    METRICS_PASSWORD: ${METRICS_PASSWORD:?Run scripts/dev-up.sh}
+    SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: ${MESSENGER_API_DB_POOL:-16}
+    MESSENGER_HTTP_PROXY_PATTERN: '${MESSENGER_HTTP_PROXY_PATTERN:-10\.246\.0\.10}'
+    CLIENT_ORIGIN: ${MESSENGER_CLIENT_ORIGIN:-https://messenger.localhost}
+    SESSION_COOKIE_SECURE: ${MESSENGER_SESSION_COOKIE_SECURE:-true}
     WS_TICKET_SECRET: ${WS_TICKET_SECRET:?Run scripts/dev-up.sh to generate a local secret}
     MESSENGER_GRPC_CA_FILE: /run/messenger-grpc/ca.pem
     MESSENGER_GRPC_CERT_FILE: /run/messenger-grpc/api-cert.pem
@@ -31,6 +51,8 @@ x-api: &api
     - ./.local/grpc/api-key.pem:/run/messenger-grpc/api-key.pem:ro
   depends_on:
     postgres:
+      condition: service_healthy
+    pgbouncer:
       condition: service_healthy
   restart: unless-stopped
 
@@ -47,9 +69,10 @@ x-ws: &ws
     API_GRPC_CERT_FILE: /run/messenger-grpc/ws-cert.pem
     API_GRPC_KEY_FILE: /run/messenger-grpc/ws-key.pem
     WS_TICKET_SECRET: ${WS_TICKET_SECRET:?Run scripts/dev-up.sh to generate a local secret}
-    RABBITMQ_URLS: amqp://messenger:messenger@rabbitmq-1:5672/,amqp://messenger:messenger@rabbitmq-2:5672/,amqp://messenger:messenger@rabbitmq-3:5672/
+    RABBITMQ_URLS: amqp://messenger:${RABBITMQ_PASSWORD:?Run scripts/dev-up.sh}@rabbitmq-1:5672/,amqp://messenger:${RABBITMQ_PASSWORD:?Run scripts/dev-up.sh}@rabbitmq-2:5672/,amqp://messenger:${RABBITMQ_PASSWORD:?Run scripts/dev-up.sh}@rabbitmq-3:5672/
+    REDIS_URL: redis://:${REDIS_PASSWORD:?Run scripts/dev-up.sh}@redis-1:6379/0
     REDIS_CLUSTER_NODES: redis-1:6379,redis-2:6379,redis-3:6379
-    WS_ALLOWED_ORIGIN: ${MESSENGER_CLIENT_ORIGIN:-http://localhost:8080}
+    WS_ALLOWED_ORIGIN: ${MESSENGER_CLIENT_ORIGIN:-https://messenger.localhost}
     WS_MAX_CONNECTIONS: ${WS_MAX_CONNECTIONS:-10000}
     WS_MAX_ROOMS: ${WS_MAX_ROOMS:-100000}
     WS_MAX_MEMBERSHIPS: ${WS_MAX_MEMBERSHIPS:-1000000}
@@ -63,7 +86,9 @@ x-ws: &ws
     - ./.local/grpc/ws-cert.pem:/run/messenger-grpc/ws-cert.pem:ro
     - ./.local/grpc/ws-key.pem:/run/messenger-grpc/ws-key.pem:ro
   networks:
-    default:
+    app:
+    data:
+    monitoring:
     grpc:
   ulimits:
     nofile: { soft: 262144, hard: 262144 }
@@ -83,6 +108,7 @@ x-ws: &ws
 
 services:
   postgres:
+    networks: [data]
     image: postgres:17-alpine
     command:
       - postgres
@@ -91,32 +117,67 @@ services:
       - -c
       - track_wal_io_timing=on
       - -c
-      - shared_preload_libraries=pg_stat_statements
+      - shared_preload_libraries=pg_stat_statements,auto_explain
+      - -c
+      # Slow-plan logging is off unless explicitly enabled for diagnosis on an isolated dataset:
+      # plans and statement text can contain inlined values.
+      - auto_explain.log_min_duration=${POSTGRES_SLOW_PLAN_MS:--1}
+      - -c
+      - auto_explain.log_parameter_max_length=0
+      - -c
+      - auto_explain.log_nested_statements=on
       - -c
       - pg_stat_statements.max=5000
       - -c
       - pg_stat_statements.track_planning=off
     environment:
       POSTGRES_DB: messenger
-      POSTGRES_USER: messenger
-      POSTGRES_PASSWORD: messenger
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?Run scripts/dev-up.sh}
+      POSTGRES_API_PASSWORD: ${POSTGRES_API_PASSWORD:?Run scripts/dev-up.sh}
+      POSTGRES_COMMAND_PASSWORD: ${POSTGRES_COMMAND_PASSWORD:?Run scripts/dev-up.sh}
+      POSTGRES_PUBLISHER_PASSWORD: ${POSTGRES_PUBLISHER_PASSWORD:?Run scripts/dev-up.sh}
+      POSTGRES_MIGRATOR_PASSWORD: ${POSTGRES_MIGRATOR_PASSWORD:?Run scripts/dev-up.sh}
+      POSTGRES_EXPORTER_PASSWORD: ${POSTGRES_EXPORTER_PASSWORD:?Run scripts/dev-up.sh}
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      - ./deploy/postgres/init-roles.sh:/docker-entrypoint-initdb.d/10-roles.sh:ro
     healthcheck:
-      test: [CMD-SHELL, "pg_isready -U messenger -d messenger"]
+      test: [CMD-SHELL, "pg_isready -h 127.0.0.1 -U postgres -d messenger"]
       interval: 5s
       timeout: 3s
       retries: 20
     restart: unless-stopped
 
+  pgbouncer:
+    networks: [data]
+    image: messenger-pgbouncer:local
+    build: ./deploy/pgbouncer
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      POSTGRES_API_PASSWORD: ${POSTGRES_API_PASSWORD:?Run scripts/dev-up.sh}
+      POSTGRES_COMMAND_PASSWORD: ${POSTGRES_COMMAND_PASSWORD:?Run scripts/dev-up.sh}
+      POSTGRES_PUBLISHER_PASSWORD: ${POSTGRES_PUBLISHER_PASSWORD:?Run scripts/dev-up.sh}
+      PGBOUNCER_API_POOL_SIZE: ${MESSENGER_API_BOUNCER_POOL:-32}
+    healthcheck:
+      test: [CMD, nc, -z, 127.0.0.1, '6432']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: unless-stopped
+
   rabbitmq-1:
+    networks: [data, monitoring]
     image: rabbitmq:4.3.5-management
     hostname: rabbitmq-1
     environment:
       RABBITMQ_NODENAME: rabbit@rabbitmq-1
-      RABBITMQ_ERLANG_COOKIE: messenger-local-cluster-cookie
+      RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE:?Run scripts/dev-up.sh}
       RABBITMQ_DEFAULT_USER: messenger
-      RABBITMQ_DEFAULT_PASS: messenger
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Run scripts/dev-up.sh}
     volumes:
       - rabbitmq-1-data:/var/lib/rabbitmq
       - ./deploy/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
@@ -129,11 +190,12 @@ services:
     restart: unless-stopped
 
   rabbitmq-2:
+    networks: [data, monitoring]
     image: rabbitmq:4.3.5-management
     hostname: rabbitmq-2
     environment:
       RABBITMQ_NODENAME: rabbit@rabbitmq-2
-      RABBITMQ_ERLANG_COOKIE: messenger-local-cluster-cookie
+      RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE:?Run scripts/dev-up.sh}
     volumes:
       - rabbitmq-2-data:/var/lib/rabbitmq
       - ./deploy/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
@@ -148,11 +210,12 @@ services:
     restart: unless-stopped
 
   rabbitmq-3:
+    networks: [data, monitoring]
     image: rabbitmq:4.3.5-management
     hostname: rabbitmq-3
     environment:
       RABBITMQ_NODENAME: rabbit@rabbitmq-3
-      RABBITMQ_ERLANG_COOKIE: messenger-local-cluster-cookie
+      RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE:?Run scripts/dev-up.sh}
     volumes:
       - rabbitmq-3-data:/var/lib/rabbitmq
       - ./deploy/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
@@ -167,9 +230,10 @@ services:
     restart: unless-stopped
 
   rabbitmq-cluster-init:
+    networks: [data]
     image: rabbitmq:4.3.5-management
     environment:
-      RABBITMQ_ERLANG_COOKIE: messenger-local-cluster-cookie
+      RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE:?Run scripts/dev-up.sh}
     entrypoint: [rabbitmqctl, -n, rabbit@rabbitmq-1, -t, '120', await_online_nodes, '3']
     depends_on:
       rabbitmq-1: { condition: service_healthy }
@@ -180,9 +244,11 @@ services:
   redis-1:
     image: redis:7.4-alpine
     mem_limit: ${MESSENGER_REDIS_CONTAINER_MEMORY:-256m}
-    command: [redis-server, --cluster-enabled, 'yes', --cluster-config-file, nodes.conf, --cluster-node-timeout, '5000', --cluster-announce-ip, '${MESSENGER_REDIS_IP_PREFIX:-10.245.0}.11', --appendonly, 'yes', --maxmemory, '${MESSENGER_REDIS_MAXMEMORY:-128mb}', --maxmemory-policy, noeviction]
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?Run scripts/dev-up.sh}
+    command: [redis-server, --requirepass, "${REDIS_PASSWORD:?Run scripts/dev-up.sh}", --masterauth, "${REDIS_PASSWORD:?Run scripts/dev-up.sh}", --cluster-enabled, 'yes', --cluster-config-file, nodes.conf, --cluster-node-timeout, '5000', --cluster-announce-ip, '${MESSENGER_REDIS_IP_PREFIX:-10.245.0}.11', --appendonly, 'yes', --maxmemory, '${MESSENGER_REDIS_MAXMEMORY:-128mb}', --maxmemory-policy, noeviction]
     networks:
-      default:
+      data:
         ipv4_address: ${MESSENGER_REDIS_IP_PREFIX:-10.245.0}.11
     volumes:
       - redis-1-data:/data
@@ -196,9 +262,11 @@ services:
   redis-2:
     image: redis:7.4-alpine
     mem_limit: ${MESSENGER_REDIS_CONTAINER_MEMORY:-256m}
-    command: [redis-server, --cluster-enabled, 'yes', --cluster-config-file, nodes.conf, --cluster-node-timeout, '5000', --cluster-announce-ip, '${MESSENGER_REDIS_IP_PREFIX:-10.245.0}.12', --appendonly, 'yes', --maxmemory, '${MESSENGER_REDIS_MAXMEMORY:-128mb}', --maxmemory-policy, noeviction]
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?Run scripts/dev-up.sh}
+    command: [redis-server, --requirepass, "${REDIS_PASSWORD:?Run scripts/dev-up.sh}", --masterauth, "${REDIS_PASSWORD:?Run scripts/dev-up.sh}", --cluster-enabled, 'yes', --cluster-config-file, nodes.conf, --cluster-node-timeout, '5000', --cluster-announce-ip, '${MESSENGER_REDIS_IP_PREFIX:-10.245.0}.12', --appendonly, 'yes', --maxmemory, '${MESSENGER_REDIS_MAXMEMORY:-128mb}', --maxmemory-policy, noeviction]
     networks:
-      default:
+      data:
         ipv4_address: ${MESSENGER_REDIS_IP_PREFIX:-10.245.0}.12
     volumes:
       - redis-2-data:/data
@@ -212,9 +280,11 @@ services:
   redis-3:
     image: redis:7.4-alpine
     mem_limit: ${MESSENGER_REDIS_CONTAINER_MEMORY:-256m}
-    command: [redis-server, --cluster-enabled, 'yes', --cluster-config-file, nodes.conf, --cluster-node-timeout, '5000', --cluster-announce-ip, '${MESSENGER_REDIS_IP_PREFIX:-10.245.0}.13', --appendonly, 'yes', --maxmemory, '${MESSENGER_REDIS_MAXMEMORY:-128mb}', --maxmemory-policy, noeviction]
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?Run scripts/dev-up.sh}
+    command: [redis-server, --requirepass, "${REDIS_PASSWORD:?Run scripts/dev-up.sh}", --masterauth, "${REDIS_PASSWORD:?Run scripts/dev-up.sh}", --cluster-enabled, 'yes', --cluster-config-file, nodes.conf, --cluster-node-timeout, '5000', --cluster-announce-ip, '${MESSENGER_REDIS_IP_PREFIX:-10.245.0}.13', --appendonly, 'yes', --maxmemory, '${MESSENGER_REDIS_MAXMEMORY:-128mb}', --maxmemory-policy, noeviction]
     networks:
-      default:
+      data:
         ipv4_address: ${MESSENGER_REDIS_IP_PREFIX:-10.245.0}.13
     volumes:
       - redis-3-data:/data
@@ -228,9 +298,11 @@ services:
   redis-4:
     image: redis:7.4-alpine
     mem_limit: ${MESSENGER_REDIS_CONTAINER_MEMORY:-256m}
-    command: [redis-server, --cluster-enabled, 'yes', --cluster-config-file, nodes.conf, --cluster-node-timeout, '5000', --cluster-announce-ip, '${MESSENGER_REDIS_IP_PREFIX:-10.245.0}.14', --appendonly, 'yes', --maxmemory, '${MESSENGER_REDIS_MAXMEMORY:-128mb}', --maxmemory-policy, noeviction]
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?Run scripts/dev-up.sh}
+    command: [redis-server, --requirepass, "${REDIS_PASSWORD:?Run scripts/dev-up.sh}", --masterauth, "${REDIS_PASSWORD:?Run scripts/dev-up.sh}", --cluster-enabled, 'yes', --cluster-config-file, nodes.conf, --cluster-node-timeout, '5000', --cluster-announce-ip, '${MESSENGER_REDIS_IP_PREFIX:-10.245.0}.14', --appendonly, 'yes', --maxmemory, '${MESSENGER_REDIS_MAXMEMORY:-128mb}', --maxmemory-policy, noeviction]
     networks:
-      default:
+      data:
         ipv4_address: ${MESSENGER_REDIS_IP_PREFIX:-10.245.0}.14
     volumes:
       - redis-4-data:/data
@@ -244,9 +316,11 @@ services:
   redis-5:
     image: redis:7.4-alpine
     mem_limit: ${MESSENGER_REDIS_CONTAINER_MEMORY:-256m}
-    command: [redis-server, --cluster-enabled, 'yes', --cluster-config-file, nodes.conf, --cluster-node-timeout, '5000', --cluster-announce-ip, '${MESSENGER_REDIS_IP_PREFIX:-10.245.0}.15', --appendonly, 'yes', --maxmemory, '${MESSENGER_REDIS_MAXMEMORY:-128mb}', --maxmemory-policy, noeviction]
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?Run scripts/dev-up.sh}
+    command: [redis-server, --requirepass, "${REDIS_PASSWORD:?Run scripts/dev-up.sh}", --masterauth, "${REDIS_PASSWORD:?Run scripts/dev-up.sh}", --cluster-enabled, 'yes', --cluster-config-file, nodes.conf, --cluster-node-timeout, '5000', --cluster-announce-ip, '${MESSENGER_REDIS_IP_PREFIX:-10.245.0}.15', --appendonly, 'yes', --maxmemory, '${MESSENGER_REDIS_MAXMEMORY:-128mb}', --maxmemory-policy, noeviction]
     networks:
-      default:
+      data:
         ipv4_address: ${MESSENGER_REDIS_IP_PREFIX:-10.245.0}.15
     volumes:
       - redis-5-data:/data
@@ -260,9 +334,11 @@ services:
   redis-6:
     image: redis:7.4-alpine
     mem_limit: ${MESSENGER_REDIS_CONTAINER_MEMORY:-256m}
-    command: [redis-server, --cluster-enabled, 'yes', --cluster-config-file, nodes.conf, --cluster-node-timeout, '5000', --cluster-announce-ip, '${MESSENGER_REDIS_IP_PREFIX:-10.245.0}.16', --appendonly, 'yes', --maxmemory, '${MESSENGER_REDIS_MAXMEMORY:-128mb}', --maxmemory-policy, noeviction]
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?Run scripts/dev-up.sh}
+    command: [redis-server, --requirepass, "${REDIS_PASSWORD:?Run scripts/dev-up.sh}", --masterauth, "${REDIS_PASSWORD:?Run scripts/dev-up.sh}", --cluster-enabled, 'yes', --cluster-config-file, nodes.conf, --cluster-node-timeout, '5000', --cluster-announce-ip, '${MESSENGER_REDIS_IP_PREFIX:-10.245.0}.16', --appendonly, 'yes', --maxmemory, '${MESSENGER_REDIS_MAXMEMORY:-128mb}', --maxmemory-policy, noeviction]
     networks:
-      default:
+      data:
         ipv4_address: ${MESSENGER_REDIS_IP_PREFIX:-10.245.0}.16
     volumes:
       - redis-6-data:/data
@@ -274,7 +350,10 @@ services:
     restart: unless-stopped
 
   redis-cluster-init:
+    networks: [data]
     image: redis:7.4-alpine
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?Run scripts/dev-up.sh}
     entrypoint: [sh, -ec]
     command:
       - >-
@@ -303,7 +382,9 @@ services:
       <<: *api-environment
       MESSENGER_GRPC_BIND_ADDRESS: api-1-grpc
     networks:
-      default:
+      app:
+      data:
+      monitoring:
       grpc:
         aliases: [api-grpc, api-1-grpc]
 
@@ -313,11 +394,14 @@ services:
       <<: *api-environment
       MESSENGER_GRPC_BIND_ADDRESS: api-2-grpc
     networks:
-      default:
+      app:
+      data:
+      monitoring:
       grpc:
         aliases: [api-grpc, api-2-grpc]
 
   messenger-command-processor:
+    networks: [data, monitoring]
     image: messenger-command-processor:local
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
@@ -328,18 +412,24 @@ services:
       replicas: 2
     environment:
       <<: *database-environment
+      SPRING_DATASOURCE_USERNAME: messenger_command
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_COMMAND_PASSWORD:?Run scripts/dev-up.sh}
       METRICS_USERNAME: metrics
-      METRICS_PASSWORD: messenger-metrics
+      METRICS_PASSWORD: ${METRICS_PASSWORD:?Run scripts/dev-up.sh}
       MESSENGER_SEND_BATCH_SIZE: ${MESSENGER_SEND_BATCH_SIZE:-16}
-      MESSENGER_SEND_CONSUMERS: ${MESSENGER_SEND_CONSUMERS:-1}
+      MESSENGER_SEND_CONSUMERS: ${MESSENGER_SEND_CONSUMERS:-4}
       MESSENGER_SEND_PREFETCH: ${MESSENGER_SEND_PREFETCH:-20}
-      SPRING_RABBITMQ_ADDRESSES: amqp://messenger:messenger@rabbitmq-1:5672/,amqp://messenger:messenger@rabbitmq-2:5672/,amqp://messenger:messenger@rabbitmq-3:5672/
+      SPRING_RABBITMQ_USERNAME: messenger
+      SPRING_RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?Run scripts/dev-up.sh}
+      SPRING_RABBITMQ_ADDRESSES: amqp://messenger:${RABBITMQ_PASSWORD:?Run scripts/dev-up.sh}@rabbitmq-1:5672/,amqp://messenger:${RABBITMQ_PASSWORD:?Run scripts/dev-up.sh}@rabbitmq-2:5672/,amqp://messenger:${RABBITMQ_PASSWORD:?Run scripts/dev-up.sh}@rabbitmq-3:5672/
     depends_on:
       postgres: { condition: service_healthy }
+      pgbouncer: { condition: service_healthy }
       rabbitmq-cluster-init: { condition: service_completed_successfully }
     restart: unless-stopped
 
   messenger-outbox-publisher:
+    networks: [data, monitoring]
     image: messenger-outbox-publisher:local
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
@@ -350,15 +440,25 @@ services:
       replicas: 2
     environment:
       <<: *database-environment
+      SPRING_DATASOURCE_USERNAME: messenger_publisher
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PUBLISHER_PASSWORD:?Run scripts/dev-up.sh}
       METRICS_USERNAME: metrics
-      METRICS_PASSWORD: messenger-metrics
+      METRICS_PASSWORD: ${METRICS_PASSWORD:?Run scripts/dev-up.sh}
+      MESSENGER_PUBLISHER_LISTEN_URL: jdbc:postgresql://postgres:5432/messenger?ApplicationName=messenger-outbox-publisher-listen
+      SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:?Run scripts/dev-up.sh}
       SPRING_DATA_REDIS_CLUSTER_NODES: redis-1:6379,redis-2:6379,redis-3:6379
     depends_on:
       postgres: { condition: service_healthy }
+      pgbouncer: { condition: service_healthy }
       redis-cluster-init: { condition: service_completed_successfully }
     restart: unless-stopped
 
   api-proxy:
+    <<: *public-nginx
+    networks:
+      edge:
+      app:
+        ipv4_address: ${MESSENGER_APP_IP_PREFIX:-10.246.0}.10
     image: nginx:1.30.5-alpine
     ports:
       - '${MESSENGER_BIND_ADDRESS:-127.0.0.1}:${MESSENGER_API_PORT:-8081}:80'
@@ -367,10 +467,15 @@ services:
       AUTH_IP_BURST: ${MESSENGER_AUTH_IP_BURST:-10}
       TICKET_IP_RATE: ${MESSENGER_TICKET_IP_RATE:-5r/s}
       TICKET_IP_BURST: ${MESSENGER_TICKET_IP_BURST:-20}
-      NGINX_ENVSUBST_FILTER: '^(AUTH_IP_|TICKET_IP_)'
+      MESSENGER_PUBLIC_SCHEME: ${MESSENGER_PUBLIC_SCHEME:-https}
+      MESSENGER_TRUSTED_PROXY_CIDRS: ${MESSENGER_TRUSTED_PROXY_CIDRS:-}
+      MESSENGER_CLIENT_ORIGIN: ${MESSENGER_CLIENT_ORIGIN:-https://messenger.localhost}
+      MESSENGER_CONNECTION_LIMIT: ${MESSENGER_CONNECTION_LIMIT:-200}
+      NGINX_ENVSUBST_FILTER: '^(AUTH_IP_|TICKET_IP_|WS_UPGRADE_|MESSENGER_CONNECTION_LIMIT$)'
     ulimits:
       nofile: { soft: 262144, hard: 262144 }
     volumes:
+      - ./deploy/nginx/configure-edge.sh:/docker-entrypoint.d/19-configure-edge.sh:ro
       - ./deploy/nginx/api.conf:/etc/nginx/templates/default.conf.template:ro
       - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
@@ -384,55 +489,58 @@ services:
       replicas: ${MESSENGER_WS_REPLICAS:-2}
 
   ws-proxy:
+    <<: *public-nginx
+    networks:
+      edge:
+      app:
+        ipv4_address: ${MESSENGER_APP_IP_PREFIX:-10.246.0}.11
     image: nginx:1.30.5-alpine
     ports:
       - '${MESSENGER_BIND_ADDRESS:-127.0.0.1}:${MESSENGER_WS_PORT:-8082}:80'
     environment:
       WS_UPGRADE_RATE: ${MESSENGER_WS_UPGRADE_RATE:-30r/s}
       WS_UPGRADE_BURST: ${MESSENGER_WS_UPGRADE_BURST:-100}
-      NGINX_ENVSUBST_FILTER: '^WS_UPGRADE_'
+      MESSENGER_PUBLIC_SCHEME: ${MESSENGER_PUBLIC_SCHEME:-https}
+      MESSENGER_TRUSTED_PROXY_CIDRS: ${MESSENGER_TRUSTED_PROXY_CIDRS:-}
+      MESSENGER_CONNECTION_LIMIT: ${MESSENGER_CONNECTION_LIMIT:-200}
+      NGINX_ENVSUBST_FILTER: '^(AUTH_IP_|TICKET_IP_|WS_UPGRADE_|MESSENGER_CONNECTION_LIMIT$)'
     ulimits:
       nofile: { soft: 262144, hard: 262144 }
     volumes:
+      - ./deploy/nginx/configure-edge.sh:/docker-entrypoint.d/19-configure-edge.sh:ro
       - ./deploy/nginx/ws.conf:/etc/nginx/templates/default.conf.template:ro
       - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
       ws: { condition: service_healthy }
     restart: unless-stopped
 
-  client:
-    build:
-      context: ./client
-      args:
-        VITE_API_BASE_URL: ${MESSENGER_API_BASE_URL:-http://localhost:8081/api}
-        VITE_WS_URL: ${MESSENGER_WS_URL:-ws://localhost:8082/ws}
-    ports:
-      - '${MESSENGER_BIND_ADDRESS:-127.0.0.1}:${MESSENGER_PORT:-8080}:80'
-    restart: unless-stopped
-
   cadvisor:
+    networks: [monitoring]
     image: ghcr.io/google/cadvisor:0.55.1
-    privileged: true
+    profiles: [container-metrics]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     command:
       - --housekeeping_interval=5s
       - --docker_only=true
-      - --containerd=${MESSENGER_CONTAINERD_SOCKET:-/var/run/docker/containerd/containerd.sock}
+      - --containerd=/var/run/containerd.sock
       - --containerd-namespace=moby
       - --store_container_labels=false
       - --whitelisted_container_labels=com.docker.compose.project,com.docker.compose.service
     volumes:
       - /:/rootfs:ro
-      - /var/run:/var/run:ro
+      - ${MESSENGER_CONTAINERD_SOCKET:-/var/run/docker/containerd/containerd.sock}:/var/run/containerd.sock:ro
       - /sys:/sys:ro
       - /var/lib/docker:/var/lib/docker:ro
     mem_limit: 256m
     restart: unless-stopped
 
   postgres-observability-init:
+    networks: [data]
     image: postgres:17-alpine
-    command: [psql, --host=postgres, --username=messenger, --dbname=messenger, --set=ON_ERROR_STOP=1, --file=/observability.sql]
+    command: [psql, --host=postgres, --username=postgres, --dbname=messenger, --set=ON_ERROR_STOP=1, --file=/observability.sql]
     environment:
-      PGPASSWORD: messenger
+      PGPASSWORD: ${POSTGRES_ADMIN_PASSWORD:?Run scripts/dev-up.sh}
     volumes:
       - ./deploy/postgres/observability.sql:/observability.sql:ro
     depends_on:
@@ -440,6 +548,7 @@ services:
     restart: "no"
 
   postgres-exporter:
+    networks: [data, monitoring]
     image: quay.io/prometheuscommunity/postgres-exporter:v0.20.1
     command:
       - --extend.query-path=/etc/postgres-exporter/queries.yaml
@@ -450,63 +559,86 @@ services:
       - ./deploy/postgres-exporter:/etc/postgres-exporter:ro
     environment:
       DATA_SOURCE_URI: postgres:5432/messenger?sslmode=disable&options=-csearch_path%3Dobservability%2Cpublic
-      DATA_SOURCE_USER: messenger
-      DATA_SOURCE_PASS: messenger
+      DATA_SOURCE_USER: messenger_exporter
+      DATA_SOURCE_PASS: ${POSTGRES_EXPORTER_PASSWORD:?Run scripts/dev-up.sh}
     depends_on:
       postgres-observability-init: { condition: service_completed_successfully }
     restart: unless-stopped
 
   redis-exporter:
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Run scripts/dev-up.sh}
+    networks: [data, monitoring]
     image: oliver006/redis_exporter:v1.89.0
     depends_on:
       redis-cluster-init: { condition: service_completed_successfully }
     restart: unless-stopped
 
+  monitoring-access:
+    <<: *public-nginx
+    networks: [edge, monitoring]
+    image: nginx:1.30.5-alpine
+    environment:
+      MONITORING_ALLOWED_PEERS: ${MESSENGER_MONITORING_ALLOWED_PEERS:-}
+      MONITORING_HOST_CIDR: ${MESSENGER_EDGE_IP_PREFIX:-10.247.0}.1/32
+    entrypoint: [/bin/sh, /configure-monitoring.sh]
+    volumes:
+      - ./deploy/nginx/monitoring.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./deploy/nginx/configure-monitoring.sh:/configure-monitoring.sh:ro
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+    ports:
+      - '127.0.0.1:${PROMETHEUS_PORT:-9090}:9090'
+      - '127.0.0.1:${ALERTMANAGER_PORT:-9093}:9093'
+      - '127.0.0.1:${GRAFANA_PORT:-3000}:3000'
+      - '127.0.0.1:${ALERT_INBOX_PORT:-8025}:8025'
+    depends_on: [prometheus, alertmanager, grafana, alert-inbox]
+    restart: unless-stopped
+
   prometheus:
+    group_add: ['${MESSENGER_GRPC_GID:?Run scripts/dev-up.sh}']
+    networks: [monitoring]
     image: prom/prometheus:v3.14.0
     command:
       - --config.file=/etc/prometheus/prometheus.yaml
       - --storage.tsdb.path=/prometheus
       - --storage.tsdb.retention.time=7d
-    ports:
-      - '127.0.0.1:${PROMETHEUS_PORT:-9090}:9090'
     volumes:
       - ./deploy/prometheus:/etc/prometheus:ro
       - prometheus-data:/prometheus
+      - ${MESSENGER_METRICS_PASSWORD_FILE:-./.local/secrets/metrics-password}:/run/secrets/metrics-password:ro
     restart: unless-stopped
 
   alert-inbox:
+    networks: [monitoring]
     image: axllent/mailpit:v1.27.8
     environment:
       MP_DATABASE: /data/mailpit.db
       MP_MAX_MESSAGES: 1000
       MP_SMTP_AUTH_ACCEPT_ANY: 'false'
-    ports:
-      - '127.0.0.1:${ALERT_INBOX_PORT:-8025}:8025'
     volumes:
       - alert-inbox-data:/data
     mem_limit: 128m
     restart: unless-stopped
 
   alertmanager:
+    networks: [monitoring]
     image: prom/alertmanager:v0.34.1
     command:
       - --config.file=/etc/alertmanager/alertmanager.yaml
       - --storage.path=/alertmanager
-    ports:
-      - '127.0.0.1:${ALERTMANAGER_PORT:-9093}:9093'
     volumes:
       - ./deploy/alertmanager:/etc/alertmanager:ro
       - alertmanager-data:/alertmanager
     restart: unless-stopped
 
   grafana:
+    networks: [monitoring]
     image: grafana/grafana:13.2.2
     environment:
       GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
-    ports:
-      - '127.0.0.1:${GRAFANA_PORT:-3000}:3000'
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Run scripts/dev-up.sh}
     volumes:
       - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
@@ -515,19 +647,15 @@ services:
       - prometheus
     restart: unless-stopped
 
-  nginx-exporter-client:
-    image: nginx/nginx-prometheus-exporter:1.5.1
-    command: [--nginx.scrape-uri=http://client:8083/stub_status]
-    depends_on: [client]
-    restart: unless-stopped
-
   nginx-exporter-api:
+    networks: [edge, monitoring]
     image: nginx/nginx-prometheus-exporter:1.5.1
     command: [--nginx.scrape-uri=http://api-proxy:8083/stub_status]
     depends_on: [api-proxy]
     restart: unless-stopped
 
   nginx-exporter-ws:
+    networks: [edge, monitoring]
     image: nginx/nginx-prometheus-exporter:1.5.1
     command: [--nginx.scrape-uri=http://ws-proxy:8083/stub_status]
     depends_on: [ws-proxy]
@@ -550,10 +678,25 @@ volumes:
   grafana-data:
 
 networks:
-  grpc:
+  edge:
+    ipam:
+      config:
+        - subnet: ${MESSENGER_EDGE_SUBNET:-10.247.0.0/24}
+          gateway: ${MESSENGER_EDGE_IP_PREFIX:-10.247.0}.1
+          ip_range: ${MESSENGER_EDGE_IP_PREFIX:-10.247.0}.128/25
+  app:
     internal: true
-  default:
+    ipam:
+      config:
+        - subnet: ${MESSENGER_APP_SUBNET:-10.246.0.0/24}
+          ip_range: ${MESSENGER_APP_IP_PREFIX:-10.246.0}.128/25
+  data:
+    internal: true
     ipam:
       config:
         - subnet: ${MESSENGER_SUBNET:-10.245.0.0/24}
           ip_range: ${MESSENGER_REDIS_IP_PREFIX:-10.245.0}.128/25
+  monitoring:
+    internal: true
+  grpc:
+    internal: true

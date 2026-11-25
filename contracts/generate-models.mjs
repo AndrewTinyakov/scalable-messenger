@@ -136,9 +136,10 @@ const temp = mkdtempSync(join(tmpdir(), 'messenger-asyncapi-'));
 try {
   const output = join(temp, 'models');
   const schemas = new Map(documents[1].allMessages().all().map((message) => [message.name(), message.payload().json()]));
-  for (const name of ['SendMessageCommandV1', 'SendRejectedEventV1']) {
+  for (const name of ['SendMessageCommandV1', 'SendRejectedEventV1', 'PinsChangedEventV1', 'ChatPreferencesChangedEventV1', 'MemberRemovedEventV1']) {
     delete documents[1].components().messages().get(name).payload().json().oneOf;
   }
+  delete documents[1].components().messages().get('HistoryChangedEventV1').payload().json().anyOf;
   for (const name of ['MessageSavedEventV1', 'MessageChangedEventV1']) {
     delete documents[1].components().messages().get(name).payload().json().allOf;
   }

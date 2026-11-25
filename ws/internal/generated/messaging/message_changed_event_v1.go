@@ -12,7 +12,6 @@ type MessageChangedEventV1 struct {
 	Body             string `json:"body" binding:"required"`
 	CreatedAt        string `json:"createdAt" binding:"required"`
 	MessageVersion   string `json:"messageVersion" binding:"required"`
-	MutationRevision string `json:"mutationRevision" binding:"required"`
 	EditedAt         string `json:"editedAt,omitempty"`
 	DeletedAt        string `json:"deletedAt,omitempty"`
 	ReplyToMessageId string `json:"replyToMessageId,omitempty"`
@@ -20,4 +19,5 @@ type MessageChangedEventV1 struct {
 	ReplyBody        string `json:"replyBody,omitempty"`
 	ReplyDeleted     bool   `json:"replyDeleted,omitempty"`
 	ReplyVersion     string `json:"replyVersion,omitempty"`
+	Seq              string `json:"seq" binding:"required"`
 }

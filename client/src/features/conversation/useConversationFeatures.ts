@@ -4,8 +4,9 @@ import type { ChatRecovery } from '../../entities/message/chatRecovery'
 import type { DeleteScope, DeleteTarget } from '../../entities/message/historySnapshot'
 import { isContiguous } from '../../entities/message/historyWindow'
 import { type Message } from '../../entities/message/model'
+import type { ChatState } from '../../shared/api/featureDecode'
 import { ChatKind } from '../../shared/api/generated/socket-vocabulary'
-import type { api } from '../../shared/api/http'
+import { ApiError, type api } from '../../shared/api/http'
 import type { OutgoingSocketFrame, PresenceStatus, SocketEvent } from '../../shared/api/socket'
 import { createUlid } from '../../shared/lib/id'
 import { isId } from '../../shared/lib/validation'
@@ -26,6 +27,14 @@ interface Options {
   onReadFailed?(chatId: string): void
   fail(message: string): void
   sharedPresence?: Record<string, PresenceStatus['state']>
+}
+
+const STATE_CHECK_MS = 60_000
+
+export type StateRequest = {
+  visit: number
+  hint: number
+  floors?: { minSeq: string; minMemberSeq: string }
 }
 
 type ReadWrite =
@@ -50,9 +59,17 @@ export function useConversationFeatures(options: Options) {
   const readPending = useRef('0')
   const readNextAt = useRef(0)
   const readWrite = useRef<ReadWrite>({ phase: 'idle' })
-  const readRefresh = useRef<'idle' | 'refreshing' | 'invalidated'>('idle')
   const mutationBusy = useRef(new Set<string>())
   const reconcileRef = useRef<MutationRecovery | null>(null)
+  const knownSeq = useRef({
+    chatId: '',
+    visit: 0,
+    seeded: false,
+    seq: 0n,
+    memberSeq: 0n,
+    primaryHint: 0,
+  })
+  const [pinsState, setPinsState] = useState({ key: '', tick: 0 })
   if (!reconcileRef.current)
     reconcileRef.current = new MutationRecovery({
       changes: (chatId, after) =>
@@ -64,38 +81,64 @@ export function useConversationFeatures(options: Options) {
         optionsRef.current.recovery.applyChanges(chatId, changes, snapshot),
       reset: async (chatId) => {
         await optionsRef.current.recovery.synchronize(chatId)
-        return optionsRef.current.recovery.mutationRevision(chatId)
+        return optionsRef.current.recovery.mutationSeq(chatId)
       },
     })
   const chatId = options.chat?.id.startsWith('draft:') ? undefined : options.chat?.id
-  const refreshReads = useCallback(async () => {
-    const current = optionsRef.current
-    const id = current.chat?.id
-    const generation = scope.current
-    if (!id || id.startsWith('draft:')) return
-    if (readRefresh.current !== 'idle') {
-      readRefresh.current = 'invalidated'
-      return
+  const checkState = useCallback((id: string, primary = false) => {
+    if (primary && knownSeq.current.chatId === id) knownSeq.current.primaryHint += 1
+    void optionsRef.current.recovery.synchronize(id)
+  }, [])
+  const observeCounters = useCallback((id: string, seq?: string, memberSeq?: string): boolean => {
+    const known = knownSeq.current
+    if (known.chatId !== id) return false
+    let gap = false
+    if (seq !== undefined) {
+      const value = BigInt(seq)
+      gap ||= known.seeded && value > known.seq + 1n
+      if (value > known.seq) known.seq = value
     }
-    readRefresh.current = 'refreshing'
-    const invalidated = () => readRefresh.current === 'invalidated'
-    try {
-      const result = await current.sessionApi.reads(id)
-      if (generation !== scope.current) return
-      setSummary((previous) => ({
-        throughSequence:
-          BigInt(result.throughSequence) > BigInt(previous.throughSequence)
-            ? result.throughSequence
-            : previous.throughSequence,
-        maxOtherReadSequence: result.maxOtherReadSequence,
-      }))
-    } catch {
-    } finally {
-      if (generation === scope.current) {
-        const pending = invalidated()
-        readRefresh.current = 'idle'
-        if (pending) void refreshReads()
-      }
+    if (memberSeq !== undefined) {
+      const value = BigInt(memberSeq)
+      gap ||= known.seeded && value > known.memberSeq + 1n
+      if (value > known.memberSeq) known.memberSeq = value
+    }
+    return gap
+  }, [])
+  const observeState = useCallback((id: string, state: ChatState, request: StateRequest) => {
+    const known = knownSeq.current
+    if (known.chatId !== id || known.visit !== request.visit) return
+    known.seeded = true
+    const fromPrimary = request.floors === undefined
+    if (fromPrimary && request.hint === known.primaryHint) known.primaryHint = 0
+    if (BigInt(state.lastSeq) > known.seq) known.seq = BigInt(state.lastSeq)
+    if (BigInt(state.memberSeq) > known.memberSeq) known.memberSeq = BigInt(state.memberSeq)
+    setPinsState((previous) => ({
+      key: `${state.pinsSeq}:${state.memberPinsSeq}:${state.mutationSeq}`,
+      tick: previous.tick + 1,
+    }))
+    setSummary((previous) => ({
+      throughSequence:
+        BigInt(state.ownReadThrough) > BigInt(previous.throughSequence)
+          ? state.ownReadThrough
+          : previous.throughSequence,
+      maxOtherReadSequence:
+        fromPrimary || BigInt(state.otherReadThrough) > BigInt(previous.maxOtherReadSequence)
+          ? state.otherReadThrough
+          : previous.maxOtherReadSequence,
+    }))
+    if (reconcileRef.current!.behind(id, state.mutationSeq))
+      void reconcileRef.current!.refresh().catch(() => {})
+  }, [])
+  const stateRequest = useCallback((id: string): StateRequest => {
+    const known = knownSeq.current
+    if (known.chatId !== id) return { visit: -1, hint: 0 }
+    if (!known.seeded || known.primaryHint > 0)
+      return { visit: known.visit, hint: known.primaryHint }
+    return {
+      visit: known.visit,
+      hint: 0,
+      floors: { minSeq: known.seq.toString(), minMemberSeq: known.memberSeq.toString() },
     }
   }, [])
   const flushRead = useCallback(async () => {
@@ -170,13 +213,21 @@ export function useConversationFeatures(options: Options) {
     readNextAt.current = 0
     if (readWrite.current.phase === 'waiting') clearTimeout(readWrite.current.timer)
     readWrite.current = { phase: 'idle' }
-    readRefresh.current = 'idle'
     setWatchTargets(null)
     presenceAt.current = 0
     clearTimeout(presenceExpiry.current)
     mutationBusy.current.clear()
     setPresence({})
     setSummary({ throughSequence: '0', maxOtherReadSequence: '0' })
+    knownSeq.current = {
+      chatId: chatId ?? '',
+      visit: knownSeq.current.visit + 1,
+      seeded: false,
+      seq: 0n,
+      memberSeq: 0n,
+      primaryHint: 0,
+    }
+    setPinsState((previous) => ({ key: '', tick: previous.tick + 1 }))
     setReveal(null)
     setJumpLoading(null)
     reconcileRef.current!.select(chatId ?? null)
@@ -207,15 +258,17 @@ export function useConversationFeatures(options: Options) {
         userIds: memberKey ? memberKey.split(',') : [],
       })
     }
-    const refresh = () => {
+    const renew = () => {
       watch()
-      void refreshReads()
       void flushRead()
-      void reconcileRef.current!.refresh().catch(() => {})
-      void optionsRef.current.recovery.synchronize(chatId)
+    }
+    const refresh = () => {
+      renew()
+      checkState(chatId)
     }
     refresh()
-    const timer = window.setInterval(refresh, 12000 + Math.random() * 3000)
+    const timer = window.setInterval(renew, 12000 + Math.random() * 3000)
+    const stateTimer = window.setInterval(() => checkState(chatId), STATE_CHECK_MS)
     const focus = () => {
       if (document.visibilityState === 'visible') refresh()
     }
@@ -223,19 +276,31 @@ export function useConversationFeatures(options: Options) {
     document.addEventListener('visibilitychange', focus)
     return () => {
       window.clearInterval(timer)
+      window.clearInterval(stateTimer)
       window.removeEventListener('focus', focus)
       document.removeEventListener('visibilitychange', focus)
       if (!sharesPresence) optionsRef.current.send({ type: 'unwatch_presence', version: 1 })
     }
-  }, [chatId, memberKey, sharesPresence, options.connected, refreshReads, flushRead])
+  }, [chatId, memberKey, sharesPresence, options.connected, checkState, flushRead])
   const onEvent = useCallback(
     (event: SocketEvent): boolean => {
       const current = optionsRef.current
+      if ('chatId' in event && typeof event.chatId === 'string') {
+        const seq =
+          event.type === 'message_saved'
+            ? event.sequence
+            : 'seq' in event && typeof event.seq === 'string'
+              ? event.seq
+              : undefined
+        const memberSeq =
+          'memberSeq' in event && typeof event.memberSeq === 'string' ? event.memberSeq : undefined
+        if (observeCounters(event.chatId, seq, memberSeq)) checkState(event.chatId)
+      }
       if (event.type === 'history_changed') {
         void current.recovery.synchronize(event.chatId, {
           snapshotSequence: event.sequence,
-          mutationRevision: event.mutationRevision,
-          visibilityRevision: event.visibilityRevision,
+          mutationSeq: event.seq,
+          visibilitySeq: event.memberSeq,
         })
         return true
       }
@@ -245,12 +310,12 @@ export function useConversationFeatures(options: Options) {
       }
       if (event.type === 'message_changed') {
         void current.recovery.synchronize(event.chatId, {
-          mutationRevision: event.mutationRevision,
+          mutationSeq: event.seq,
         })
         return true
       }
       if (event.type === 'reads_changed') {
-        if (event.chatId === current.chat?.id) void refreshReads()
+        if (event.chatId === current.chat?.id) checkState(event.chatId, true)
         return true
       }
       if (event.type === 'presence') {
@@ -277,10 +342,13 @@ export function useConversationFeatures(options: Options) {
         }))
         return true
       }
-      if (event.type === 'recovery_failed') void reconcileRef.current!.refresh().catch(() => {})
+      if (event.type === 'recovery_failed') {
+        void reconcileRef.current!.refresh().catch(() => {})
+        if (event.chatId === current.chat?.id) checkState(event.chatId)
+      }
       return false
     },
-    [refreshReads],
+    [checkState, observeCounters],
   )
   const snapshot = useCallback((id: string, revision: string) => {
     reconcileRef.current!.snapshot(id, revision)
@@ -321,7 +389,10 @@ export function useConversationFeatures(options: Options) {
         },
       )
     } catch (cause) {
-      if (generation === scope.current)
+      if (generation !== scope.current) return
+      if (cause instanceof ApiError && cause.status === 404)
+        current.recovery.quoteTargetGone(id, messageId)
+      else
         current.fail(cause instanceof Error ? cause.message : 'Could not find the original message')
     } finally {
       if (generation === scope.current && jumpRequest.current === revision)
@@ -349,6 +420,14 @@ export function useConversationFeatures(options: Options) {
               message.messageVersion ?? '1',
             )
       if (generation === scope.current) current.recovery.patch(message.chatId, [result])
+    } catch (cause) {
+      if (
+        cause instanceof ApiError &&
+        cause.code === 'VERSION_CHANGED' &&
+        generation === scope.current
+      )
+        await current.recovery.synchronize(message.chatId).catch(() => undefined)
+      throw cause
     } finally {
       mutationBusy.current.delete(message.id)
     }
@@ -370,11 +449,17 @@ export function useConversationFeatures(options: Options) {
       deletionRequests.current.set(key, requestId)
       if (deletionRequests.current.size > 100)
         deletionRequests.current.delete(deletionRequests.current.keys().next().value!)
-      const result = await current.sessionApi.delete(id, requestId, scope, target, ids)
+      const result = await current.sessionApi
+        .delete(id, requestId, scope, target, ids)
+        .catch((cause: unknown) => {
+          if (cause instanceof ApiError && cause.code === 'REQUEST_ID_REUSED')
+            deletionRequests.current.delete(key)
+          throw cause
+        })
       deletionRequests.current.delete(key)
       current.recovery.observe(id, {
-        mutationRevision: result.mutationRevision,
-        visibilityRevision: result.visibilityRevision,
+        ...(scope === 'EVERYONE' ? { mutationSeq: result.seq } : {}),
+        visibilitySeq: result.visibilitySeq,
         ...(scope === 'SELF'
           ? { clearedThroughSequence: result.clearedThroughSequence }
           : { globalClearedThroughSequence: result.clearedThroughSequence }),
@@ -396,6 +481,9 @@ export function useConversationFeatures(options: Options) {
   )
 
   return {
+    pinsState,
+    observeState,
+    stateRequest,
     revisionKey: chatId ? options.recovery.revisionKey(chatId) : '0:0',
     resolveTarget: useCallback(async (messageId: string) => {
       const current = optionsRef.current

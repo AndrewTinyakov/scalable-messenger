@@ -12,6 +12,7 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Cha
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.DeletionOperations;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.HiddenMessageRanges;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.HistoryPurgeJobs;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.LoginThrottles;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.MessageChanges;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.MessagePins;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Messages;
@@ -29,6 +30,7 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.rec
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.DeletionOperationsRecord;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.HiddenMessageRangesRecord;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.HistoryPurgeJobsRecord;
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.LoginThrottlesRecord;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.MessageChangesRecord;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.MessagePinsRecord;
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.MessagesRecord;
@@ -67,7 +69,7 @@ public class Keys {
     public static final UniqueKey<DeletionOperationsRecord> DELETION_OPERATIONS_PKEY = Internal.createUniqueKey(DeletionOperations.DELETION_OPERATIONS, DSL.name("deletion_operations_pkey"), new TableField[] { DeletionOperations.DELETION_OPERATIONS.ACTOR_ID, DeletionOperations.DELETION_OPERATIONS.REQUEST_ID }, true);
     public static final UniqueKey<HiddenMessageRangesRecord> HIDDEN_MESSAGE_RANGES_PKEY = Internal.createUniqueKey(HiddenMessageRanges.HIDDEN_MESSAGE_RANGES, DSL.name("hidden_message_ranges_pkey"), new TableField[] { HiddenMessageRanges.HIDDEN_MESSAGE_RANGES.CHAT_ID, HiddenMessageRanges.HIDDEN_MESSAGE_RANGES.USER_ID, HiddenMessageRanges.HIDDEN_MESSAGE_RANGES.AFTER_SEQUENCE }, true);
     public static final UniqueKey<HistoryPurgeJobsRecord> HISTORY_PURGE_JOBS_PKEY = Internal.createUniqueKey(HistoryPurgeJobs.HISTORY_PURGE_JOBS, DSL.name("history_purge_jobs_pkey"), new TableField[] { HistoryPurgeJobs.HISTORY_PURGE_JOBS.CHAT_ID }, true);
-    public static final UniqueKey<MessageChangesRecord> MESSAGE_CHANGES_PKEY = Internal.createUniqueKey(MessageChanges.MESSAGE_CHANGES, DSL.name("message_changes_pkey"), new TableField[] { MessageChanges.MESSAGE_CHANGES.CHAT_ID, MessageChanges.MESSAGE_CHANGES.REVISION }, true);
+    public static final UniqueKey<LoginThrottlesRecord> LOGIN_THROTTLES_PKEY = Internal.createUniqueKey(LoginThrottles.LOGIN_THROTTLES, DSL.name("login_throttles_pkey"), new TableField[] { LoginThrottles.LOGIN_THROTTLES.THROTTLE_KEY }, true);
     public static final UniqueKey<MessagePinsRecord> MESSAGE_PINS_SCOPE_UNIQUE = Internal.createUniqueKey(MessagePins.MESSAGE_PINS, DSL.name("message_pins_scope_unique"), new TableField[] { MessagePins.MESSAGE_PINS.CHAT_ID, MessagePins.MESSAGE_PINS.SEQUENCE, MessagePins.MESSAGE_PINS.VIEWER_ID }, true);
     public static final UniqueKey<MessagesRecord> MESSAGES_CHAT_ID_ID_UNIQUE = Internal.createUniqueKey(Messages.MESSAGES, DSL.name("messages_chat_id_id_unique"), new TableField[] { Messages.MESSAGES.CHAT_ID, Messages.MESSAGES.ID }, true);
     public static final UniqueKey<MessagesRecord> MESSAGES_CONVERSATION_SEQUENCE_UNIQUE = Internal.createUniqueKey(Messages.MESSAGES, DSL.name("messages_conversation_sequence_unique"), new TableField[] { Messages.MESSAGES.CHAT_ID, Messages.MESSAGES.SEQUENCE }, true);

@@ -1,7 +1,7 @@
 import { JSDOM } from 'jsdom'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Chat } from '../entities/chat/model'
 import type { api } from '../shared/api/http'
 import { useChatDirectory } from './useChatDirectory'
@@ -49,6 +49,7 @@ const chats = vi.fn()
 const chat = vi.fn()
 const options = {
   sessionApi: { chats, chat } as unknown as ReturnType<typeof api.forSession>,
+  userId: '01ARZ3NDEKTSV4RRFFQ69G5FZZ',
   selectedId: null,
   selectedIdRef: { current: null },
   recordLatest: vi.fn(),
@@ -245,3 +246,60 @@ it.each(['remove', 'summary', 'refresh'] as const)(
     expect(directory.hasMoreChats).toBe(false)
   },
 )
+
+describe('applying a new message to its chat-list row', () => {
+  const message = (senderId: string) => ({
+    messageId: 'next',
+    senderId,
+    senderUsername: 'peer',
+    createdAt: '2026-03-01T00:00:00Z',
+    preview: 'hello',
+  })
+  beforeEach(async () => {
+    await act(async () => {
+      await directory.refreshChats()
+    })
+  })
+  it('shows the next message from someone else and counts it unread without fetching', async () => {
+    let applied = false
+    await act(async () => {
+      applied = directory.applyActivity('chat', '3', message('peer'))
+    })
+    expect(applied).toBe(true)
+    expect(chat).not.toHaveBeenCalled()
+    expect(directory.chats[0]).toMatchObject({
+      lastSequence: '3',
+      unreadCount: 3,
+      activityAt: '2026-03-01T00:00:00Z',
+      lastMessage: { id: 'next', sequence: '3', senderUsername: 'peer', bodyPreview: 'hello' },
+    })
+  })
+  it('keeps the unread count for my own message', async () => {
+    await act(async () => {
+      directory.applyActivity('chat', '3', message(options.userId))
+    })
+    expect(directory.chats[0]).toMatchObject({ lastSequence: '3', unreadCount: 2 })
+  })
+  it('asks for a refresh after a missed message and ignores activity it already shows', async () => {
+    let results: boolean[] = []
+    await act(async () => {
+      results = [
+        directory.applyActivity('chat', '5', message('peer')),
+        directory.applyActivity('chat', '2', message('peer')),
+      ]
+    })
+    expect(results).toEqual([false, true])
+    expect(directory.chats[0]).toMatchObject({ lastSequence: '2', unreadCount: 2 })
+  })
+  it('leaves the capped unread count to the server', async () => {
+    chats.mockResolvedValueOnce({ chats: [{ ...older, unreadCount: 255 }], nextCursor: null })
+    await act(async () => {
+      await directory.refreshChats()
+    })
+    let applied = true
+    await act(async () => {
+      applied = directory.applyActivity('chat', '3', message('peer'))
+    })
+    expect(applied).toBe(false)
+  })
+})

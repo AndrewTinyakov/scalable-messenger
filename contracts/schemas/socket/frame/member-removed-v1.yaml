@@ -4,6 +4,11 @@ x-messenger-direction: server
 type: object
 additionalProperties: false
 required: [type, version, eventId, room, chatId, memberId, epoch, streamId]
+oneOf:
+  - required:
+      - seq
+  - required:
+      - userSeq
 properties:
   type:
     const: member_removed
@@ -22,6 +27,12 @@ properties:
   memberId:
     type: string
     pattern: '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'
+  seq:
+    type: string
+    pattern: ^[1-9][0-9]{0,18}$
+  userSeq:
+    type: string
+    pattern: ^[1-9][0-9]{0,18}$
   epoch:
     type: string
     minLength: 1

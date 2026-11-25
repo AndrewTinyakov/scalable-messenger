@@ -5,6 +5,8 @@ export type User = components['schemas']['UserResponse']
 
 export type Session = components['schemas']['AuthResponse']
 
+export type ActiveSession = components['schemas']['ActiveSessionResponse']
+
 const deviceKey = 'relay.device.v1'
 let fallbackDeviceId: string | undefined
 

@@ -8,6 +8,11 @@ required:
   - eventId
   - room
   - chatId
+oneOf:
+  - required:
+      - seq
+  - required:
+      - memberSeq
 properties:
   type:
     const: pins_changed
@@ -21,3 +26,9 @@ properties:
     type: string
     pattern: ^(user|group):[0-7][0-9A-HJKMNP-TV-Z]{25}$
   chatId: *a1
+  seq:
+    type: string
+    pattern: ^[1-9][0-9]{0,18}$
+  memberSeq:
+    type: string
+    pattern: ^[1-9][0-9]{0,18}$

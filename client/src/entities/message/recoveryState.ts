@@ -155,6 +155,11 @@ export class RecoveryState {
       this.historyBuffered[chatId] = filter(this.historyBuffered[chatId])
   }
 
+  /** Shows quotes of a message the server no longer returns as unavailable. */
+  quoteTargetGone(chatId: string, messageId: string): void {
+    this.filterWindows(chatId, () => true, new Set([messageId]))
+  }
+
   observeSnapshot(chatId: string, snapshot: Partial<SnapshotMetadata>): void {
     const previousCutoff = this.cutoff(chatId)
     const ids = this.retainedIds(chatId)
@@ -237,9 +242,7 @@ export class RecoveryState {
     }
   }
 
-  verifiedSnapshot(
-    chatId: string,
-  ): { mutationRevision: string; visibilityRevision: string } | undefined {
+  verifiedSnapshot(chatId: string): { mutationSeq: string; visibilitySeq: string } | undefined {
     return this.visibility.verified(chatId)
   }
 
@@ -247,19 +250,16 @@ export class RecoveryState {
     return { ...this.visibility.snapshot(chatId) }
   }
 
-  verifySnapshot(
-    chatId: string,
-    snapshot: { mutationRevision: string; visibilityRevision: string },
-  ): void {
+  verifySnapshot(chatId: string, snapshot: { mutationSeq: string; visibilitySeq: string }): void {
     this.visibility.verify(chatId, snapshot)
   }
 
-  mutationRevision(chatId: string): string {
-    return this.visibility.snapshot(chatId).mutationRevision ?? '0'
+  mutationSeq(chatId: string): string {
+    return this.visibility.snapshot(chatId).mutationSeq ?? '0'
   }
 
   revisionKey(chatId: string): string {
-    return `${this.mutationRevision(chatId)}:${this.visibility.snapshot(chatId).visibilityRevision ?? '0'}`
+    return `${this.mutationSeq(chatId)}:${this.visibility.snapshot(chatId).visibilitySeq ?? '0'}`
   }
 
   snapshotSequence(chatId: string): string {

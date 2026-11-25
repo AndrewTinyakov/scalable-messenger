@@ -21,7 +21,7 @@ scrape_configs:
     metrics_path: /api/actuator/prometheus
     basic_auth:
       username: metrics
-      password: messenger-metrics
+      password_file: /run/secrets/metrics-password
     static_configs:
       - targets: [api-1:8080, api-2:8080]
 
@@ -29,7 +29,7 @@ scrape_configs:
     metrics_path: /actuator/prometheus
     basic_auth:
       username: metrics
-      password: messenger-metrics
+      password_file: /run/secrets/metrics-password
     dns_sd_configs:
       - names: [messenger-command-processor]
         type: A
@@ -40,7 +40,7 @@ scrape_configs:
     metrics_path: /actuator/prometheus
     basic_auth:
       username: metrics
-      password: messenger-metrics
+      password_file: /run/secrets/metrics-password
     dns_sd_configs:
       - names: [messenger-outbox-publisher]
         type: A
@@ -90,16 +90,17 @@ scrape_configs:
 
   - job_name: ingress
     static_configs:
-      - targets: [nginx-exporter-client:9113]
-        labels: {tier: client}
       - targets: [nginx-exporter-api:9113]
         labels: {tier: api}
       - targets: [nginx-exporter-ws:9113]
         labels: {tier: ws}
 
   - job_name: containers
-    static_configs:
-      - targets: [cadvisor:8080]
+    dns_sd_configs:
+      - names: [cadvisor]
+        type: A
+        port: 8080
+        refresh_interval: 30s
 
   - job_name: alertmanager
     static_configs:

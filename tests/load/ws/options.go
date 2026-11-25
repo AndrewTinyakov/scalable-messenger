@@ -22,7 +22,7 @@ func parseOptions() (options, error) {
 	flag.StringVar(&opts.mode, "mode", "idle", "idle, fanout, slow, reconnect, drain, or mixed")
 	flag.StringVar(&opts.apiURL, "api-url", env("MESSENGER_API_BASE_URL", "http://localhost:8081/api"), "public API base URL")
 	flag.StringVar(&opts.wsURL, "ws-url", env("MESSENGER_WS_URL", "ws://localhost:8082/ws"), "public WebSocket URL")
-	flag.StringVar(&opts.origin, "origin", env("MESSENGER_CLIENT_ORIGIN", "http://localhost:8080"), "allowed client origin")
+	flag.StringVar(&opts.origin, "origin", env("MESSENGER_CLIENT_ORIGIN", "https://messenger.localhost"), "allowed client origin")
 	flag.StringVar(&opts.sessionsFile, "sessions", "", "JSON manifest of existing userId/cookie sessions and optional groupId")
 	flag.StringVar(&opts.saveSessions, "save-sessions", "", "write provisioned manifest to a new file with mode 0600")
 	flag.StringVar(&opts.scenarioFile, "scenario", "", "seeded multi-group workload JSON, required by mixed mode")

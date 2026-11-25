@@ -32,6 +32,7 @@ type GatewayMetrics struct {
 	ContinuityReplayEvents prometheus.Counter
 	ContinuityReplayBytes  prometheus.Counter
 	CatchupSeconds         *prometheus.HistogramVec
+	SessionChecks          *prometheus.CounterVec
 }
 
 func newGatewayMetrics(registry *prometheus.Registry) *GatewayMetrics {
@@ -56,8 +57,9 @@ func newGatewayMetrics(registry *prometheus.Registry) *GatewayMetrics {
 		ContinuityReplayEvents: prometheus.NewCounter(prometheus.CounterOpts{Name: "messenger_ws_continuity_replay_events_total", Help: "Validated continuity replay events offered to room fanout, counted once per room replay item, independent of recipient queue acceptance."}),
 		ContinuityReplayBytes:  prometheus.NewCounter(prometheus.CounterOpts{Name: "messenger_ws_continuity_replay_bytes_total", Help: "Encoded event payload bytes offered to room fanout by continuity replay, counted once per room replay item."}),
 		CatchupSeconds:         prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "messenger_ws_catchup_seconds", Help: "Room join duration through replay and buffered-live handoff; fallback delegates complete recovery to SQL.", Buckets: latencyBuckets}, []string{"result"}),
+		SessionChecks:          prometheus.NewCounterVec(prometheus.CounterOpts{Name: "messenger_ws_session_checks_total", Help: "Periodic SQL session checks of open sockets by result."}, []string{"result"}),
 	}
-	registry.MustRegister(m.BrokerEvents, m.PendingACKs, m.ACKTimeouts, m.PendingUpgrades, m.CommandWorkers, m.AppliedLatency, m.Closes, m.ConnectionLifetime, m.CommandWait, m.CommandService, m.SendAdmission, m.Messages, m.MessageBytes, m.PingRTT, m.ReplaySeconds, m.ReplayEvents, m.ReplayBytes, m.ContinuityReplayEvents, m.ContinuityReplayBytes, m.CatchupSeconds)
+	registry.MustRegister(m.BrokerEvents, m.PendingACKs, m.ACKTimeouts, m.PendingUpgrades, m.CommandWorkers, m.AppliedLatency, m.Closes, m.ConnectionLifetime, m.CommandWait, m.CommandService, m.SendAdmission, m.Messages, m.MessageBytes, m.PingRTT, m.ReplaySeconds, m.ReplayEvents, m.ReplayBytes, m.ContinuityReplayEvents, m.ContinuityReplayBytes, m.CatchupSeconds, m.SessionChecks)
 	return m
 }
 

@@ -27,6 +27,7 @@ export function useMessagePins(
   chatId: string | undefined,
   sessionApi: SessionApi,
   connected: boolean,
+  pinsState: { key: string; tick: number } = { key: '', tick: 0 },
 ) {
   const [state, setState] = useState<PinsState | null>(null)
   const stateRef = useRef(state)
@@ -39,6 +40,10 @@ export function useMessagePins(
   const refreshState = useRef<PinRefresh>({ phase: 'idle' })
   const wanted = useRef(0)
 
+  const loadedKey = useRef<string | null>(null)
+  const fetched = useRef(false)
+  const pinsKey = useRef(pinsState.key)
+  pinsKey.current = pinsState.key
   const refresh = useCallback(async () => {
     const id = chatRef.current
     if (!id || id.startsWith('draft:')) return
@@ -56,6 +61,7 @@ export function useMessagePins(
       try {
         do {
           operation.phase = 'refreshing'
+          const key = pinsKey.current
           let page = await sessionApi.pinnedMessages(id)
           if (current !== generation.current) return
           const ids = page.pinnedMessageIds.join()
@@ -82,6 +88,8 @@ export function useMessagePins(
             ids: page.pinnedMessageIds,
             next: page.nextBeforeSequence,
           })
+          fetched.current = true
+          if (key) loadedKey.current = key
           if (pins.length >= wanted.current || !page.nextBeforeSequence) setLoadingOlder(false)
         } while (operation.phase === 'invalidated' && current === generation.current)
       } catch {
@@ -109,19 +117,20 @@ export function useMessagePins(
   }, [chatId, connected, refresh])
 
   useEffect(() => {
-    if (!chatId || chatId.startsWith('draft:') || !connected) return
-    const timer = window.setInterval(() => void refresh(), 12000 + Math.random() * 3000)
-    const focus = () => {
-      if (document.visibilityState === 'visible') void refresh()
+    loadedKey.current = null
+    fetched.current = false
+  }, [chatId])
+  useEffect(() => {
+    if (!chatId || chatId.startsWith('draft:') || !connected || !pinsState.key) return
+    if (loadedKey.current === null) {
+      if (refreshState.current.phase !== 'idle') return
+      if (fetched.current) {
+        loadedKey.current = pinsState.key
+        return
+      }
     }
-    window.addEventListener('focus', focus)
-    document.addEventListener('visibilitychange', focus)
-    return () => {
-      window.clearInterval(timer)
-      window.removeEventListener('focus', focus)
-      document.removeEventListener('visibilitychange', focus)
-    }
-  }, [chatId, connected, refresh])
+    if (loadedKey.current !== pinsState.key) schedule()
+  }, [chatId, connected, pinsState, schedule])
 
   const loadOlder = useCallback(async () => {
     const current = stateRef.current

@@ -14,7 +14,7 @@ required:
   - body
   - createdAt
   - messageVersion
-  - mutationRevision
+  - seq
   - epoch
   - streamId
 properties:
@@ -42,7 +42,6 @@ properties:
     type: string
     format: date-time
   messageVersion: *a2
-  mutationRevision: *a2
   editedAt: *a3
   deletedAt: *a3
   replyToMessageId: *a1
@@ -53,6 +52,9 @@ properties:
   replyDeleted:
     type: boolean
   replyVersion: *a2
+  seq:
+    type: string
+    pattern: ^[1-9][0-9]{0,18}$
   epoch:
     type: string
     minLength: 1

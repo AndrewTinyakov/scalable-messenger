@@ -5,8 +5,8 @@ private val decimalSequence = Regex("0|[1-9][0-9]{0,18}")
 
 fun requirePageLimit(limit: Int) {
     if (limit !in 1..MAX_PAGE_SIZE) {
-        badRequest(
-            ApiErrorCode.INVALID_LIMIT,
+        invalidInput(
+            "limit",
             "limit must be 1 to $MAX_PAGE_SIZE",
         )
     }

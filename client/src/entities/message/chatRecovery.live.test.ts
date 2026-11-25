@@ -221,3 +221,37 @@ describe('ChatRecovery live', () => {
     })
   })
 })
+
+it('reads history again after a recovery hint that arrives during an older catch-up', async () => {
+  let release!: () => void
+  const inFlight = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const after = vi
+    .fn()
+    .mockImplementationOnce(async () => {
+      await inFlight
+      return { messages: [], hasMore: false, nextSequence: '1' }
+    })
+    .mockResolvedValue({ messages: [message('2')], hasMore: false, nextSequence: '2' })
+  const { recovery } = connectedRecovery(
+    {
+      after,
+      latest: async () => ({ messages: [message('1')] }),
+      older: async () => ({ messages: [] }),
+    },
+    baselineStorage('1'),
+  )
+  const opening = recovery.catchUp('chat')
+  await vi.waitFor(() => expect(after).toHaveBeenCalledTimes(1))
+  // Message 2 commits after the running request took its snapshot; the socket reports recovery_failed.
+  const hints = [
+    recovery.catchUp('chat', false, '0', false, true),
+    recovery.catchUp('chat', false, '0', false, true),
+  ]
+  release()
+  await Promise.all([opening, ...hints])
+  expect(recovery.baseline('chat')).toBe('2')
+  expect(after).toHaveBeenCalledTimes(2)
+  recovery.dispose()
+})

@@ -84,7 +84,7 @@ openApi {
                 "--messenger.scheduling.enabled=false",
                 "--server.port=$openApiPort",
                 "--messenger.grpc.enabled=false",
-                "--messenger.auth.ws-ticket-secret=test-ws-ticket-secret-long-enough-for-hmac-2026",
+                "--messenger.ws.ticket-secret=test-ws-ticket-secret-long-enough-for-hmac-2026",
             ),
         )
     }

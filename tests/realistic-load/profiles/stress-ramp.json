@@ -1,0 +1,152 @@
+{
+  "name": "stress-ramp",
+  "users": 8000,
+  "durationMs": 1440000,
+  "personas": [
+    {
+      "name": "lurker",
+      "share": 0.6,
+      "sessions": 1,
+      "sessionMedianMs": 47000,
+      "visitMedianMs": 12000,
+      "sendChance": 0.055,
+      "burst": 0,
+      "favoriteChats": 3
+    },
+    {
+      "name": "casual",
+      "share": 0.28,
+      "sessions": 3,
+      "sessionMedianMs": 52000,
+      "visitMedianMs": 14000,
+      "sendChance": 0.48,
+      "burst": 1,
+      "favoriteChats": 4
+    },
+    {
+      "name": "active",
+      "share": 0.1,
+      "sessions": 2,
+      "sessionMedianMs": 155000,
+      "visitMedianMs": 22000,
+      "sendChance": 0.82,
+      "burst": 4,
+      "favoriteChats": 6
+    },
+    {
+      "name": "power",
+      "share": 0.02,
+      "sessions": 2,
+      "sessionMedianMs": 210000,
+      "visitMedianMs": 24000,
+      "sendChance": 0.84,
+      "burst": 3,
+      "favoriteChats": 10,
+      "admin": true
+    }
+  ],
+  "devicesPerUser": [
+    0.7,
+    0.25,
+    0.05
+  ],
+  "graph": {
+    "clusterSize": 12,
+    "directDegree": 1,
+    "groupsPerUser": 0.36,
+    "groupSizes": [
+      {
+        "min": 3,
+        "max": 10,
+        "share": 0.92
+      },
+      {
+        "min": 30,
+        "max": 100,
+        "share": 0.08
+      }
+    ],
+    "largeGroups": [
+      {
+        "min": 200,
+        "max": 260
+      },
+      {
+        "min": 210,
+        "max": 300
+      },
+      {
+        "min": 500,
+        "max": 800
+      },
+      {
+        "min": 800,
+        "max": 1000
+      }
+    ]
+  },
+  "history": {
+    "min": 12,
+    "max": 60
+  },
+  "timing": {
+    "sessionSpread": 0.48,
+    "visitSpread": 0.52,
+    "secondaryUse": 0.85,
+    "replyMinMs": 2500,
+    "replyMaxMs": 60000,
+    "lagLimitMs": 1500
+  },
+  "rates": {
+    "scroll": 0.24,
+    "jump": 0.17,
+    "background": 0.32,
+    "blip": 0.22,
+    "reply": 0.15,
+    "mutation": 0.1,
+    "readers": 0.075,
+    "forward": 0.045,
+    "pinMessage": 0.045,
+    "mute": 0.025,
+    "pinChat": 0.018,
+    "unread": 0.02,
+    "sessions": 0.13,
+    "lookup": 0.08,
+    "direct": 0.022,
+    "group": 0.58,
+    "relogin": 0.015
+  },
+  "text": {
+    "median": 52,
+    "spread": 1.05
+  },
+  "ramp": {
+    "periodMs": 600000,
+    "stages": [
+      {
+        "atMs": 0,
+        "users": 1000
+      },
+      {
+        "atMs": 240000,
+        "users": 2000
+      },
+      {
+        "atMs": 480000,
+        "users": 3000
+      },
+      {
+        "atMs": 720000,
+        "users": 4500
+      },
+      {
+        "atMs": 960000,
+        "users": 6000
+      },
+      {
+        "atMs": 1200000,
+        "users": 8000
+      }
+    ]
+  }
+}

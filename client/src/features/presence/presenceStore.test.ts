@@ -138,6 +138,24 @@ it('waits out the rate-limit backoff and replays a refused release', async () =>
   ])
 })
 
+it('keeps a pending rate-limit replay when the tab returns', async () => {
+  store.watchOnlineCount(id(9), 3)
+  await vi.advanceTimersByTimeAsync(1000)
+  store.setReleased(true)
+  store.onEvent({ type: 'error', version: 1, code: 'RATE_LIMITED' })
+  store.watchOnlineCount(undefined)
+  await vi.advanceTimersByTimeAsync(100)
+  store.setReleased(false)
+  const before = sent.length
+  await vi.advanceTimersByTimeAsync(5000)
+  expect(sent.slice(before)).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ type: 'watch_presence', reset: true }),
+      { type: 'watch_online_count', version: 1 },
+    ]),
+  )
+})
+
 it('paces the online count with presence and keys it by group size', async () => {
   const chat = id(9)
   store.watchOnlineCount(chat, 3)

@@ -108,7 +108,10 @@ export class PresenceStore {
   setReleased(released: boolean) {
     if (released === this.released) return
     this.released = released
-    if (this.send) this.connect(this.send)
+    if (!this.send) return
+    // A pending rate-limit replay rebuilds everything for the new state.
+    if (this.resyncAt !== undefined) return this.schedule(this.resyncAt)
+    this.connect(this.send)
   }
 
   onEvent(event: SocketEvent): boolean {

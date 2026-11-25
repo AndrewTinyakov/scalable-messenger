@@ -42,13 +42,24 @@ func (h *Hub) WatchOnlineCount(ctx context.Context, w Watcher, chatID string) er
 // refreshCount authorizes the given roster again unless it was replaced.
 func (h *Hub) refreshCount(wt *watch, count *onlineCount) {
 	h.mu.Lock()
+	refresh := h.startCountRefreshLocked(wt, count)
+	h.mu.Unlock()
+	refresh()
+}
+
+// startCountRefreshLocked advances the count generation, so any refresh
+// already running can no longer install its roster, and returns the new
+// refresh to start after unlocking.
+func (h *Hub) startCountRefreshLocked(wt *watch, count *onlineCount) func() {
 	if count == nil || wt.count != count {
-		h.mu.Unlock()
-		return
+		return func() {}
 	}
 	wt.counted++
 	generation := wt.counted
-	h.mu.Unlock()
+	return func() { h.runCountRefresh(wt, count, generation) }
+}
+
+func (h *Hub) runCountRefresh(wt *watch, count *onlineCount, generation uint64) {
 	h.wg.Add(1)
 	go func() {
 		defer h.wg.Done()

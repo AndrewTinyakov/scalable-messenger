@@ -254,3 +254,22 @@ func TestFleetRemovesDeadGatewaysAndRenewsItsOwnIdentity(t *testing.T) {
 		t.Fatal("state was not rewritten under the new identity")
 	}
 }
+
+func TestFleetAdmissionGivesUpWaitingWhenItsContextEnds(t *testing.T) {
+	f := testFleet(newFakeStore())
+	unlock, err := f.lockUser(context.Background(), "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if _, err := f.Admit(ctx, "alice"); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("admit while locked = %v", err)
+	}
+	unlock()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.locks) != 0 || f.counts["alice"] != 0 {
+		t.Fatalf("locks=%d counts=%v", len(f.locks), f.counts)
+	}
+}

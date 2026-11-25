@@ -54,8 +54,9 @@ type Fleet struct {
 	renewed  []func(string)
 }
 
+// userLock is a mutex whose waiters can give up when their context ends.
 type userLock struct {
-	sync.Mutex
+	held    chan struct{}
 	holders int
 }
 
@@ -67,23 +68,31 @@ func New(store Store, config Config, logger *slog.Logger) *Fleet {
 	}
 }
 
-func (f *Fleet) lockUser(userID string) func() {
+func (f *Fleet) lockUser(ctx context.Context, userID string) (func(), error) {
 	f.mu.Lock()
 	lock := f.locks[userID]
 	if lock == nil {
-		lock = &userLock{}
+		lock = &userLock{held: make(chan struct{}, 1)}
 		f.locks[userID] = lock
 	}
 	lock.holders++
 	f.mu.Unlock()
-	lock.Lock()
-	return func() {
-		lock.Unlock()
+	leave := func() {
 		f.mu.Lock()
 		if lock.holders--; lock.holders == 0 {
 			delete(f.locks, userID)
 		}
 		f.mu.Unlock()
+	}
+	select {
+	case lock.held <- struct{}{}:
+		return func() {
+			<-lock.held
+			leave()
+		}, nil
+	case <-ctx.Done():
+		leave()
+		return nil, ctx.Err()
 	}
 }
 
@@ -116,7 +125,10 @@ func (f *Fleet) OnRenewed(callback func(string)) {
 }
 
 func (f *Fleet) Admit(ctx context.Context, userID string) (bool, error) {
-	unlock := f.lockUser(userID)
+	unlock, err := f.lockUser(ctx, userID)
+	if err != nil {
+		return false, err
+	}
 	defer unlock()
 	f.mu.Lock()
 	f.counts[userID]++
@@ -212,9 +224,14 @@ func (f *Fleet) writeCounts(ctx context.Context) {
 }
 
 // writeUser brings Redis in line with one user's local connections. It
-// holds the user's lock, so no admission for that user runs meanwhile.
+// holds the user's lock, so no admission for that user runs meanwhile. A
+// failed decrement may still have applied, so it is retried as an absolute
+// count instead.
 func (f *Fleet) writeUser(ctx context.Context, userID string) {
-	unlock := f.lockUser(userID)
+	unlock, err := f.lockUser(ctx, userID)
+	if err != nil {
+		return
+	}
 	defer unlock()
 	f.mu.Lock()
 	id, count, closed, rewrite, unindex := f.id, f.counts[userID], f.released[userID], f.rewrite[userID], f.unindex[userID]
@@ -222,25 +239,25 @@ func (f *Fleet) writeUser(ctx context.Context, userID string) {
 	delete(f.rewrite, userID)
 	delete(f.unindex, userID)
 	f.mu.Unlock()
-	var err error
 	switch {
 	case rewrite:
 		err = f.write(ctx, func(ctx context.Context) error { return f.store.SetConnections(ctx, userID, id, count) })
 	case closed > 0:
 		err = f.write(ctx, func(ctx context.Context) error { return f.store.ReleaseConnections(ctx, userID, id, closed) })
 	}
-	if err == nil && unindex && count == 0 {
-		err = f.write(ctx, func(ctx context.Context) error { return f.store.UnindexConnections(ctx, userID, id) })
-	}
 	if err != nil {
 		f.mu.Lock()
-		if rewrite {
-			f.rewrite[userID] = true
-		} else if closed > 0 {
-			f.released[userID] += closed
-		}
+		f.rewrite[userID] = true
 		f.unindex[userID] = f.unindex[userID] || unindex
 		f.mu.Unlock()
+		return
+	}
+	if unindex && count == 0 {
+		if err := f.write(ctx, func(ctx context.Context) error { return f.store.UnindexConnections(ctx, userID, id) }); err != nil {
+			f.mu.Lock()
+			f.unindex[userID] = true
+			f.mu.Unlock()
+		}
 	}
 }
 
@@ -273,20 +290,19 @@ func (f *Fleet) heartbeat(ctx context.Context) {
 	for userID := range f.counts {
 		f.rewrite[userID] = true
 	}
-	users := make([]string, 0, len(f.counts))
+	users := make([]string, 0, len(f.counts)+len(f.locks))
 	for userID := range f.counts {
+		users = append(users, userID)
+	}
+	for userID := range f.locks {
 		users = append(users, userID)
 	}
 	callbacks := append([]func(string){}, f.renewed...)
 	f.mu.Unlock()
 	if dead {
 		f.logger.Warn("gateway was removed by the fleet; registering again", "gateway", id)
+		f.retire(ctx, id, users)
 		_ = f.write(ctx, func(ctx context.Context) error {
-			for _, userID := range users {
-				if err := f.store.SetConnections(ctx, userID, id, 0); err != nil {
-					return err
-				}
-			}
 			_, _, err := f.store.Heartbeat(ctx, renewedID, f.config.TTL)
 			return err
 		})
@@ -295,6 +311,21 @@ func (f *Fleet) heartbeat(ctx context.Context) {
 		callback(id)
 	}
 	f.signal()
+}
+
+// retire clears the counts an old identity of this gateway may still hold.
+// Each user's clear waits for that user's in-flight write, so no write under
+// the old identity lands afterwards.
+func (f *Fleet) retire(ctx context.Context, old string, users []string) {
+	for _, userID := range users {
+		unlock, err := f.lockUser(ctx, userID)
+		if err != nil {
+			return
+		}
+		_ = f.write(ctx, func(ctx context.Context) error { return f.store.SetConnections(ctx, userID, old, 0) })
+		unlock()
+	}
+	_ = f.write(ctx, func(ctx context.Context) error { return f.store.ForgetGateway(ctx, old) })
 }
 
 func (f *Fleet) reap(ctx context.Context) {

@@ -163,12 +163,12 @@ func (h *Hub) Revalidate(w Watcher) {
 		wt.count.expires = now
 	}
 	ids, generation, renew := h.startRenewalLocked(wt)
-	count := wt.count
+	refreshCount := h.startCountRefreshLocked(wt, wt.count)
 	h.mu.Unlock()
 	if renew {
 		h.renew(wt, ids, generation)
 	}
-	h.refreshCount(wt, count)
+	refreshCount()
 }
 
 func (h *Hub) Remove(w Watcher) {

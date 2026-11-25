@@ -16,3 +16,31 @@ properties:
   sequence:
     type: string
     pattern: ^[1-9][0-9]{0,18}$
+  messageId: &id
+    type: string
+    pattern: ^[0-7][0-9A-HJKMNP-TV-Z]{25}$
+  senderId: *id
+  senderUsername:
+    type: string
+    pattern: ^[a-z0-9_]{3,40}$
+  createdAt:
+    type: string
+    format: date-time
+  preview:
+    type: string
+    minLength: 1
+    maxLength: 160
+    description: First 160 code points of the saved message body, as the chat list shows it.
+description: >-
+  A group chat gained a message. When the message fields are present, a client whose chat-list row
+  already shows the previous sequence can apply the new row locally; otherwise it refreshes the row.
+allOf:
+  - if:
+      anyOf:
+        - required: [messageId]
+        - required: [senderId]
+        - required: [senderUsername]
+        - required: [createdAt]
+        - required: [preview]
+    then:
+      required: [messageId, senderId, senderUsername, createdAt, preview]

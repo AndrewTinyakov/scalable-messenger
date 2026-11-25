@@ -4,7 +4,7 @@ import com.andrewtinyakov.messenger.generated.messaging.event.SendRejectionReaso
 import com.andrewtinyakov.messenger.message.model.Message
 import com.andrewtinyakov.messenger.message.model.MessageId
 import com.andrewtinyakov.messenger.message.model.SendResult
-import com.andrewtinyakov.messenger.message.visibility.model.VisibilitySnapshot
+import com.andrewtinyakov.messenger.message.model.visibility.VisibilitySnapshot
 import com.andrewtinyakov.messenger.shared.web.StrictStringDeserializer
 import com.fasterxml.jackson.annotation.JsonInclude
 import io.swagger.v3.oas.annotations.media.Schema
@@ -60,11 +60,11 @@ data class MessageHistoryResponse(
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val hasMore: Boolean,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
-    val mutationRevision: String = "0",
-    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val snapshotSequence: String = "0",
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
-    val visibilityRevision: String = "0",
+    val mutationSeq: String = "0",
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val visibilitySeq: String = "0",
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val clearedThroughSequence: String = "0",
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
@@ -146,11 +146,11 @@ data class MessageAroundResponse(
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val hasNewer: Boolean,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
-    val mutationRevision: String,
-    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val snapshotSequence: String = "0",
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
-    val visibilityRevision: String = "0",
+    val mutationSeq: String = "0",
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val visibilitySeq: String = "0",
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val clearedThroughSequence: String = "0",
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
@@ -165,7 +165,7 @@ enum class MessageChangeKind { UPSERT, REMOVED, CLEARED }
 
 data class MessageChangeResponse(
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
-    val revision: String,
+    val seq: String,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val kind: MessageChangeKind,
     @field:JsonInclude(JsonInclude.Include.ALWAYS)
@@ -186,15 +186,17 @@ data class MessageChangesResponse(
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val changes: List<MessageChangeResponse>,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
-    val lastRevision: String,
+    val lastSeq: String,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
-    val nextRevision: String,
+    val nextSeq: String,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val resetRequired: Boolean,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val snapshotSequence: String = "0",
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
-    val visibilityRevision: String = "0",
+    val mutationSeq: String = "0",
+    @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+    val visibilitySeq: String = "0",
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val clearedThroughSequence: String = "0",
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
@@ -213,9 +215,9 @@ data class MessageResolveResponse(
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val snapshotSequence: String,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
-    val mutationRevision: String,
+    val mutationSeq: String,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
-    val visibilityRevision: String,
+    val visibilitySeq: String,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val clearedThroughSequence: String,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
@@ -226,9 +228,9 @@ data class MessageVisibilityResponse(
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val snapshotSequence: String,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
-    val mutationRevision: String,
+    val mutationSeq: String,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
-    val visibilityRevision: String,
+    val visibilitySeq: String,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     val clearedThroughSequence: String,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
@@ -239,8 +241,8 @@ data class MessageVisibilityResponse(
 
 fun VisibilitySnapshot.toVisibilityResponse(): MessageVisibilityResponse = MessageVisibilityResponse(
     snapshotSequence = snapshotSequence.toString(),
-    mutationRevision = mutationRevision.toString(),
-    visibilityRevision = visibilityRevision.toString(),
+    mutationSeq = mutationSeq.toString(),
+    visibilitySeq = visibilitySeq.toString(),
     clearedThroughSequence = clearedThroughSequence.toString(),
     globalClearedThroughSequence = globalClearedThroughSequence.toString(),
     hidden = hidden,
@@ -257,9 +259,9 @@ fun VisibilitySnapshot.toHistoryResponse(
         messages = messages.map { it.toResponse() },
         nextSequence = nextSequence.toString(),
         hasMore = hasMore,
-        mutationRevision = visibility.mutationRevision,
         snapshotSequence = visibility.snapshotSequence,
-        visibilityRevision = visibility.visibilityRevision,
+        mutationSeq = visibility.mutationSeq,
+        visibilitySeq = visibility.visibilitySeq,
         clearedThroughSequence = visibility.clearedThroughSequence,
         globalClearedThroughSequence = visibility.globalClearedThroughSequence,
         coverageAfterSequence = coverageAfterSequence.toString(),
@@ -280,9 +282,9 @@ fun VisibilitySnapshot.toAroundResponse(
         messages = messages.map { it.toResponse() },
         hasOlder = hasOlder,
         hasNewer = hasNewer,
-        mutationRevision = visibility.mutationRevision,
         snapshotSequence = visibility.snapshotSequence,
-        visibilityRevision = visibility.visibilityRevision,
+        mutationSeq = visibility.mutationSeq,
+        visibilitySeq = visibility.visibilitySeq,
         clearedThroughSequence = visibility.clearedThroughSequence,
         globalClearedThroughSequence = visibility.globalClearedThroughSequence,
         coverageAfterSequence = coverageAfterSequence.toString(),
@@ -294,8 +296,8 @@ fun VisibilitySnapshot.toResolveResponse(messages: List<Message>): MessageResolv
     MessageResolveResponse(
         messages = messages.map { it.toResponse() },
         snapshotSequence = visibility.snapshotSequence,
-        mutationRevision = visibility.mutationRevision,
-        visibilityRevision = visibility.visibilityRevision,
+        mutationSeq = visibility.mutationSeq,
+        visibilitySeq = visibility.visibilitySeq,
         clearedThroughSequence = visibility.clearedThroughSequence,
         globalClearedThroughSequence = visibility.globalClearedThroughSequence,
     )
@@ -303,17 +305,18 @@ fun VisibilitySnapshot.toResolveResponse(messages: List<Message>): MessageResolv
 
 fun VisibilitySnapshot.toChangesResponse(
     changes: List<MessageChangeResponse>,
-    lastRevision: Long,
-    nextRevision: Long,
+    lastSeq: Long,
+    nextSeq: Long,
     resetRequired: Boolean,
 ): MessageChangesResponse = toVisibilityResponse().let { visibility ->
     MessageChangesResponse(
         changes = changes,
-        lastRevision = lastRevision.toString(),
-        nextRevision = nextRevision.toString(),
+        lastSeq = lastSeq.toString(),
+        nextSeq = nextSeq.toString(),
         resetRequired = resetRequired,
         snapshotSequence = visibility.snapshotSequence,
-        visibilityRevision = visibility.visibilityRevision,
+        mutationSeq = visibility.mutationSeq,
+        visibilitySeq = visibility.visibilitySeq,
         clearedThroughSequence = visibility.clearedThroughSequence,
         globalClearedThroughSequence = visibility.globalClearedThroughSequence,
     )

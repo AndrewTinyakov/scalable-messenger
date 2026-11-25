@@ -1,18 +1,19 @@
 package com.andrewtinyakov.messenger.message.messaging.listener
 
 import com.andrewtinyakov.messenger.generated.messaging.command.SendMessageCommandV1
-import com.andrewtinyakov.messenger.infrastructure.messaging.config.CommandTopology
-import com.andrewtinyakov.messenger.infrastructure.messaging.listener.consumeMessage
-import com.andrewtinyakov.messenger.infrastructure.messaging.model.CommandKind
-import com.andrewtinyakov.messenger.infrastructure.messaging.monitoring.CommandMetrics
+import com.andrewtinyakov.messenger.infrastructure.messaging.consumption.CommandKind
+import com.andrewtinyakov.messenger.infrastructure.messaging.consumption.CommandMetrics
+import com.andrewtinyakov.messenger.infrastructure.messaging.consumption.consumeMessage
+import com.andrewtinyakov.messenger.infrastructure.messaging.rabbit.CommandTopology
 import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStage
 import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStageEvent
 import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStageRecorder
+import com.andrewtinyakov.messenger.message.model.PendingSend
 import com.andrewtinyakov.messenger.message.model.SendBatch
 import com.andrewtinyakov.messenger.message.model.SendTarget
+import com.andrewtinyakov.messenger.message.model.toSendRequest
 import com.andrewtinyakov.messenger.message.service.MessageSendBatchService
 import com.andrewtinyakov.messenger.message.service.MessageSendService
-import com.andrewtinyakov.messenger.message.service.toSendRequest
 import com.rabbitmq.client.Channel
 import org.slf4j.LoggerFactory
 import org.springframework.amqp.core.Message
@@ -110,13 +111,6 @@ class SendMessageListener(
         val command: SendMessageCommandV1 = reader.readValue(message.body)
         messageSendService.rejectExhausted(command)
     }
-
-    private data class PendingSend(
-        val message: Message,
-        val command: SendMessageCommandV1,
-        val target: SendTarget,
-        val started: Long,
-    )
 
     companion object {
         const val MAX_COMMAND_BYTES = 65536

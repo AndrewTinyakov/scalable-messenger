@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	roomregistry "messenger/ws/internal/room"
+
 	"messenger/ws/internal/grpcauth"
 	"messenger/ws/internal/monitoring"
 	"messenger/ws/internal/protocol"
@@ -38,7 +40,12 @@ func (subscriptions *chatSubscriptions) subscribe(items []protocol.Subscription,
 	return subscriptions.subscribeContext(subscriptions.connection.ctx, items, mode)
 }
 
-func (subscriptions *chatSubscriptions) subscribeContext(base context.Context, items []protocol.Subscription, mode subscriptionMode) error {
+func (subscriptions *chatSubscriptions) subscribeContext(base context.Context, items []protocol.Subscription, mode subscriptionMode) (err error) {
+	defer func() {
+		if errors.Is(err, roomregistry.ErrCapacity) {
+			subscriptions.metrics.RecordSubscriptionRefusal(monitoring.SubscriptionRefusedRoomLimit)
+		}
+	}()
 	if err := base.Err(); err != nil {
 		return err
 	}
@@ -56,6 +63,7 @@ func (subscriptions *chatSubscriptions) subscribeContext(base context.Context, i
 		}
 	}
 	if subscriptions.count()+newRooms > subscriptions.config.MaxRoomsPerConnection {
+		subscriptions.metrics.RecordSubscriptionRefusal(monitoring.SubscriptionRefusedRoomLimit)
 		return errRoomLimit
 	}
 	if err := subscriptions.chargeSubscriptionAttempts(base, len(items), mode); err != nil {
@@ -84,6 +92,7 @@ func (subscriptions *chatSubscriptions) chargeSubscriptionAttempts(base context.
 		return nil
 	}
 	if mode == batchSubscription && count > subscriptions.config.SubscribeRate {
+		subscriptions.metrics.RecordSubscriptionRefusal(monitoring.SubscriptionRefusedUserLimit)
 		return errRateLimited
 	}
 	ctx, cancel := context.WithTimeout(base, subscriptions.config.APITimeout)
@@ -99,6 +108,7 @@ func (subscriptions *chatSubscriptions) chargeSubscriptionAttempts(base context.
 		return fmt.Errorf("limit subscriptions: %w", err)
 	}
 	if !allowed {
+		subscriptions.metrics.RecordSubscriptionRefusal(monitoring.SubscriptionRefusedUserLimit)
 		return errRateLimited
 	}
 	return nil
@@ -106,7 +116,7 @@ func (subscriptions *chatSubscriptions) chargeSubscriptionAttempts(base context.
 
 func (subscriptions *chatSubscriptions) authorizeSubscriptions(base context.Context, groupIDs []string, mode subscriptionMode) (subscriptionAuthorization, error) {
 	if mode == batchSubscription {
-		return subscriptions.authorizeSubscriptionBatch(base, groupIDs)
+		return subscriptions.authorizeSubscriptionBatch(base, groupIDs, monitoring.SubscriptionRefusedAuthSlots)
 	}
 	return subscriptions.authorizeSingleSubscription(base, groupIDs)
 }
@@ -137,6 +147,7 @@ func (subscriptions *chatSubscriptions) authorizeSingleSubscription(base context
 				cancel()
 			}
 		default:
+			subscriptions.metrics.RecordSubscriptionRefusal(monitoring.SubscriptionRefusedAuthSlots)
 			return authorization, errRateLimited
 		}
 	}
@@ -155,7 +166,7 @@ func (subscriptions *chatSubscriptions) authorizeSingleSubscription(base context
 	return authorization, err
 }
 
-func (subscriptions *chatSubscriptions) authorizeSubscriptionBatch(base context.Context, groupIDs []string) (subscriptionAuthorization, error) {
+func (subscriptions *chatSubscriptions) authorizeSubscriptionBatch(base context.Context, groupIDs []string, refusal monitoring.SubscriptionRefusal) (subscriptionAuthorization, error) {
 	authorization := subscriptionAuthorization{
 		rooms:   make(map[string]string, len(groupIDs)),
 		release: func() {},
@@ -170,6 +181,7 @@ func (subscriptions *chatSubscriptions) authorizeSubscriptionBatch(base context.
 		case <-subscriptions.connection.ctx.Done():
 			return authorization, subscriptions.connection.ctx.Err()
 		default:
+			subscriptions.metrics.RecordSubscriptionRefusal(refusal)
 			return authorization, errRateLimited
 		}
 	}
@@ -295,7 +307,7 @@ func (subscriptions *chatSubscriptions) groupAuthorizationContext(base context.C
 		return nil, func() {}, err
 	}
 	deadline := time.Now().Add(subscriptions.config.APITimeout)
-	if admission := subscriptions.connection.session.ExpiresAt; !admission.IsZero() && admission.Before(deadline) {
+	if admission := subscriptions.connection.authorizationDeadline(); !admission.IsZero() && admission.Before(deadline) {
 		deadline = admission
 	}
 	ctx, cancel := context.WithDeadline(base, deadline)

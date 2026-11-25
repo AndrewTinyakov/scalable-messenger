@@ -29,6 +29,8 @@ import (
 	"messenger/ws/internal/grpcauth"
 )
 
+const testSessionExpiry = 2_000_000_000
+
 type authorizationServer struct {
 	authorization.UnimplementedChatAuthorizationServer
 	t         *testing.T
@@ -64,7 +66,14 @@ func (s *authorizationServer) ValidateSession(ctx context.Context, request *auth
 	if err := s.validate(ctx, request.GetSessionId()); err != nil {
 		return nil, err
 	}
-	return &authorization.ValidateSessionResponse{UserId: "user", DeviceId: "device", SessionId: s.sessionID}, nil
+	return &authorization.ValidateSessionResponse{UserId: "user", DeviceId: "device", SessionId: s.sessionID, ExpiresAtUnixSeconds: testSessionExpiry}, nil
+}
+
+func (s *authorizationServer) ValidateSessions(ctx context.Context, request *authorization.ValidateSessionsRequest) (*authorization.ValidateSessionsResponse, error) {
+	if err := s.validate(ctx, request.GetSessionIds()[0]); err != nil {
+		return nil, err
+	}
+	return &authorization.ValidateSessionsResponse{Sessions: []*authorization.ValidateSessionResponse{{UserId: "user", DeviceId: "device", SessionId: s.sessionID, ExpiresAtUnixSeconds: testSessionExpiry}}}, nil
 }
 
 func (s *authorizationServer) AuthorizeGroup(ctx context.Context, request *authorization.AuthorizeGroupRequest) (*authorization.AuthorizeGroupResponse, error) {
@@ -182,13 +191,18 @@ func TestClientUsesMutualTLSAndSessionIDs(t *testing.T) {
 			session, sessionErr := client.ValidateSession(ctx, service.sessionID)
 			room, groupErr := client.AuthorizeGroup(ctx, service.sessionID, "chat")
 			allowed, batchErr := client.AuthorizeGroups(ctx, service.sessionID, []string{"chat", "other"})
+			live, liveErr := client.ValidateSessions(ctx, []string{service.sessionID})
+			want := grpcauth.Session{UserID: "user", DeviceID: "device", SessionID: service.sessionID, ExpiresAt: time.Unix(testSessionExpiry, 0)}
 			if revoked {
+				if liveErr == nil || errors.Is(liveErr, grpcauth.ErrUnauthorized) {
+					t.Errorf("failed batch validation error = %v, want a dependency error", liveErr)
+				}
 				for _, err := range []error{sessionErr, groupErr, batchErr} {
 					if !errors.Is(err, grpcauth.ErrUnauthorized) {
 						t.Errorf("revoked authorization error = %v", err)
 					}
 				}
-			} else if sessionErr != nil || groupErr != nil || batchErr != nil || session != (grpcauth.Session{UserID: "user", DeviceID: "device", SessionID: service.sessionID}) || room != "group:chat" || !reflect.DeepEqual(allowed, map[string]bool{"chat": true, "other": true}) {
+			} else if sessionErr != nil || groupErr != nil || batchErr != nil || liveErr != nil || session != want || !reflect.DeepEqual(live, map[string]grpcauth.Session{service.sessionID: want}) || room != "group:chat" || !reflect.DeepEqual(allowed, map[string]bool{"chat": true, "other": true}) {
 				t.Fatalf("mutual TLS RPCs: session=%+v/%v room=%q/%v allowed=%v/%v", session, sessionErr, room, groupErr, allowed, batchErr)
 			}
 		})

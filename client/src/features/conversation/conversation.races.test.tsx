@@ -42,8 +42,8 @@ async function fixture() {
   let hidden = false
   const metadata = () => ({
     snapshotSequence: '2',
-    mutationRevision: hidden ? '1' : '0',
-    visibilityRevision: hidden ? '1' : '0',
+    mutationSeq: hidden ? '1' : '0',
+    visibilitySeq: hidden ? '1' : '0',
     clearedThroughSequence: '0',
     globalClearedThroughSequence: '0',
   })
@@ -69,12 +69,12 @@ async function fixture() {
   await recovery.catchUp('chat', true)
   const oldChanges: ChangesSnapshot = {
     snapshotSequence: '2',
-    visibilityRevision: '0',
+    visibilitySeq: '0',
     clearedThroughSequence: '0',
     globalClearedThroughSequence: '0',
     changes: [
       {
-        revision: '1',
+        seq: '1',
         kind: 'UPSERT' as const,
         message: edited,
         messageId: edited.id,
@@ -82,8 +82,8 @@ async function fixture() {
         clearedThroughSequence: null,
       },
     ],
-    lastRevision: '1',
-    nextRevision: '1',
+    lastSeq: '1',
+    nextSeq: '1',
     resetRequired: false,
   }
   const changing = deferred<typeof oldChanges>()
@@ -125,9 +125,7 @@ async function fixture() {
     get: () => features,
     hide: async () => {
       hidden = true
-      await act(async () =>
-        recovery.synchronize('chat', { mutationRevision: '1', visibilityRevision: '1' }),
-      )
+      await act(async () => recovery.synchronize('chat', { mutationSeq: '1', visibilitySeq: '1' }))
     },
     close: async () => {
       await act(async () => root.unmount())
@@ -147,7 +145,7 @@ describe('viewer snapshots racing with conversation callers', () => {
       await f.hide()
       f.service.messageChanges.mockImplementation(async () => ({
         ...f.oldChanges,
-        visibilityRevision: '1',
+        visibilitySeq: '1',
         changes: [{ ...f.oldChanges.changes[0], message: f.unavailable }],
       }))
       await act(async () => f.changing.resolve(f.oldChanges))

@@ -15,6 +15,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 
+import org.jooq.Check;
 import org.jooq.Condition;
 import org.jooq.Field;
 import org.jooq.ForeignKey;
@@ -84,6 +85,16 @@ public class Sessions extends TableImpl<SessionsRecord> {
      * The column <code>public.sessions.created_at</code>.
      */
     public final TableField<SessionsRecord, OffsetDateTime> CREATED_AT = createField(DSL.name("created_at"), SQLDataType.TIMESTAMPWITHTIMEZONE(6).nullable(false).defaultValue(DSL.field(DSL.raw("now()"), SQLDataType.TIMESTAMPWITHTIMEZONE)), this, "");
+
+    /**
+     * The column <code>public.sessions.last_used_at</code>.
+     */
+    public final TableField<SessionsRecord, OffsetDateTime> LAST_USED_AT = createField(DSL.name("last_used_at"), SQLDataType.TIMESTAMPWITHTIMEZONE(6).nullable(false).defaultValue(DSL.field(DSL.raw("now()"), SQLDataType.TIMESTAMPWITHTIMEZONE)), this, "");
+
+    /**
+     * The column <code>public.sessions.device_label</code>.
+     */
+    public final TableField<SessionsRecord, String> DEVICE_LABEL = createField(DSL.name("device_label"), SQLDataType.VARCHAR(64).nullable(false).defaultValue(DSL.field(DSL.raw("'Unknown device'::character varying"), SQLDataType.VARCHAR)), this, "");
 
     private Sessions(Name alias, Table<SessionsRecord> aliased) {
         this(alias, aliased, (Field<?>[]) null, null);
@@ -177,6 +188,13 @@ public class Sessions extends TableImpl<SessionsRecord> {
             _users = new UsersPath(this, Keys.SESSIONS__SESSIONS_USER_ID_FKEY, null);
 
         return _users;
+    }
+
+    @Override
+    public List<Check<SessionsRecord>> getChecks() {
+        return Arrays.asList(
+            Internal.createCheck(this, DSL.name("sessions_device_label_present"), "((length((device_label)::text) > 0))", true)
+        );
     }
 
     @Override

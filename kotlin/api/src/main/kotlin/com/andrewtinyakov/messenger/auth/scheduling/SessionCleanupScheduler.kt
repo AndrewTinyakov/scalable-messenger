@@ -9,8 +9,8 @@ class SessionCleanupScheduler(
     private val sessionCleanupService: SessionCleanupService,
 ) {
     @Scheduled(
-        fixedDelayString = "\${messenger.sessions.cleanup-delay-ms:60000}",
-        initialDelayString = "\${messenger.sessions.cleanup-initial-delay-ms:30000}",
+        fixedDelayString = $$"${messenger.sessions.cleanup-delay-ms:60000}",
+        initialDelayString = $$"${messenger.sessions.cleanup-initial-delay-ms:30000}",
     )
     fun runCleanup() = sessionCleanupService.deleteExpiredSessions()
 }

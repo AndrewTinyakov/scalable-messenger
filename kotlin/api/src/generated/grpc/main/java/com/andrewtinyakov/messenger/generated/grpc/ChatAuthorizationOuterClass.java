@@ -36,6 +36,16 @@ public final class ChatAuthorizationOuterClass {
     com.google.protobuf.GeneratedMessage.FieldAccessorTable
       internal_static_messenger_authorization_v1_ValidateSessionResponse_fieldAccessorTable;
   static final com.google.protobuf.Descriptors.Descriptor
+    internal_static_messenger_authorization_v1_ValidateSessionsRequest_descriptor;
+  static final
+    com.google.protobuf.GeneratedMessage.FieldAccessorTable
+      internal_static_messenger_authorization_v1_ValidateSessionsRequest_fieldAccessorTable;
+  static final com.google.protobuf.Descriptors.Descriptor
+    internal_static_messenger_authorization_v1_ValidateSessionsResponse_descriptor;
+  static final
+    com.google.protobuf.GeneratedMessage.FieldAccessorTable
+      internal_static_messenger_authorization_v1_ValidateSessionsResponse_fieldAccessorTable;
+  static final com.google.protobuf.Descriptors.Descriptor
     internal_static_messenger_authorization_v1_AuthorizeGroupRequest_descriptor;
   static final
     com.google.protobuf.GeneratedMessage.FieldAccessorTable
@@ -91,44 +101,51 @@ public final class ChatAuthorizationOuterClass {
     java.lang.String[] descriptorData = {
       "\n\030chat_authorization.proto\022\032messenger.au" +
       "thorization.v1\"=\n\026ValidateSessionRequest" +
-      "\022\022\n\nsession_id\030\002 \001(\tJ\004\010\001\020\002R\tws_ticket\"Q\n" +
+      "\022\022\n\nsession_id\030\002 \001(\tJ\004\010\001\020\002R\tws_ticket\"r\n" +
       "\027ValidateSessionResponse\022\017\n\007user_id\030\001 \001(" +
       "\t\022\021\n\tdevice_id\030\002 \001(\t\022\022\n\nsession_id\030\003 \001(\t" +
-      "\"M\n\025AuthorizeGroupRequest\022\017\n\007chat_id\030\001 \001" +
-      "(\t\022\022\n\nsession_id\030\003 \001(\tJ\004\010\002\020\003R\tws_ticket\"" +
-      "&\n\026AuthorizeGroupResponse\022\014\n\004room\030\001 \001(\t\"" +
-      "O\n\026AuthorizeGroupsRequest\022\020\n\010chat_ids\030\001 " +
-      "\003(\t\022\022\n\nsession_id\030\003 \001(\tJ\004\010\002\020\003R\tws_ticket" +
-      "\"6\n\027AuthorizeGroupsResponse\022\033\n\023authorize" +
-      "d_chat_ids\030\001 \003(\t\"Q\n\030AuthorizePresenceReq" +
-      "uest\022\022\n\nsession_id\030\001 \001(\t\022\017\n\007chat_id\030\002 \001(" +
-      "\t\022\020\n\010user_ids\030\003 \003(\t\"8\n\031AuthorizePresence" +
-      "Response\022\033\n\023authorized_user_ids\030\001 \003(\t\"?\n" +
-      "\027AuthorizeSidebarRequest\022\022\n\nsession_id\030\001" +
-      " \001(\t\022\020\n\010chat_ids\030\002 \003(\t\">\n\013SidebarChat\022\017\n" +
-      "\007chat_id\030\001 \001(\t\022\017\n\007peer_id\030\002 \001(\t\022\r\n\005group" +
-      "\030\003 \001(\010\"R\n\030AuthorizeSidebarResponse\0226\n\005ch" +
-      "ats\030\001 \003(\0132\'.messenger.authorization.v1.S" +
-      "idebarChat2\206\005\n\021ChatAuthorization\022}\n\020Auth" +
-      "orizeSidebar\0223.messenger.authorization.v" +
-      "1.AuthorizeSidebarRequest\0324.messenger.au" +
-      "thorization.v1.AuthorizeSidebarResponse\022" +
-      "z\n\017ValidateSession\0222.messenger.authoriza" +
-      "tion.v1.ValidateSessionRequest\0323.messeng" +
-      "er.authorization.v1.ValidateSessionRespo" +
-      "nse\022w\n\016AuthorizeGroup\0221.messenger.author" +
-      "ization.v1.AuthorizeGroupRequest\0322.messe" +
-      "nger.authorization.v1.AuthorizeGroupResp" +
-      "onse\022z\n\017AuthorizeGroups\0222.messenger.auth" +
-      "orization.v1.AuthorizeGroupsRequest\0323.me" +
-      "ssenger.authorization.v1.AuthorizeGroups" +
-      "Response\022\200\001\n\021AuthorizePresence\0224.messeng" +
-      "er.authorization.v1.AuthorizePresenceReq" +
-      "uest\0325.messenger.authorization.v1.Author" +
-      "izePresenceResponseBc\n+com.andrewtinyako" +
-      "v.messenger.generated.grpcP\001Z2messenger/" +
-      "ws/internal/generated/grpc;authorization" +
-      "b\006proto3"
+      "\022\037\n\027expires_at_unix_seconds\030\004 \001(\003\".\n\027Val" +
+      "idateSessionsRequest\022\023\n\013session_ids\030\001 \003(" +
+      "\t\"a\n\030ValidateSessionsResponse\022E\n\010session" +
+      "s\030\001 \003(\01323.messenger.authorization.v1.Val" +
+      "idateSessionResponse\"M\n\025AuthorizeGroupRe" +
+      "quest\022\017\n\007chat_id\030\001 \001(\t\022\022\n\nsession_id\030\003 \001" +
+      "(\tJ\004\010\002\020\003R\tws_ticket\"&\n\026AuthorizeGroupRes" +
+      "ponse\022\014\n\004room\030\001 \001(\t\"O\n\026AuthorizeGroupsRe" +
+      "quest\022\020\n\010chat_ids\030\001 \003(\t\022\022\n\nsession_id\030\003 " +
+      "\001(\tJ\004\010\002\020\003R\tws_ticket\"6\n\027AuthorizeGroupsR" +
+      "esponse\022\033\n\023authorized_chat_ids\030\001 \003(\t\"Q\n\030" +
+      "AuthorizePresenceRequest\022\022\n\nsession_id\030\001" +
+      " \001(\t\022\017\n\007chat_id\030\002 \001(\t\022\020\n\010user_ids\030\003 \003(\t\"" +
+      "8\n\031AuthorizePresenceResponse\022\033\n\023authoriz" +
+      "ed_user_ids\030\001 \003(\t\"?\n\027AuthorizeSidebarReq" +
+      "uest\022\022\n\nsession_id\030\001 \001(\t\022\020\n\010chat_ids\030\002 \003" +
+      "(\t\">\n\013SidebarChat\022\017\n\007chat_id\030\001 \001(\t\022\017\n\007pe" +
+      "er_id\030\002 \001(\t\022\r\n\005group\030\003 \001(\010\"R\n\030AuthorizeS" +
+      "idebarResponse\0226\n\005chats\030\001 \003(\0132\'.messenge" +
+      "r.authorization.v1.SidebarChat2\205\006\n\021ChatA" +
+      "uthorization\022}\n\020AuthorizeSidebar\0223.messe" +
+      "nger.authorization.v1.AuthorizeSidebarRe" +
+      "quest\0324.messenger.authorization.v1.Autho" +
+      "rizeSidebarResponse\022z\n\017ValidateSession\0222" +
+      ".messenger.authorization.v1.ValidateSess" +
+      "ionRequest\0323.messenger.authorization.v1." +
+      "ValidateSessionResponse\022}\n\020ValidateSessi" +
+      "ons\0223.messenger.authorization.v1.Validat" +
+      "eSessionsRequest\0324.messenger.authorizati" +
+      "on.v1.ValidateSessionsResponse\022w\n\016Author" +
+      "izeGroup\0221.messenger.authorization.v1.Au" +
+      "thorizeGroupRequest\0322.messenger.authoriz" +
+      "ation.v1.AuthorizeGroupResponse\022z\n\017Autho" +
+      "rizeGroups\0222.messenger.authorization.v1." +
+      "AuthorizeGroupsRequest\0323.messenger.autho" +
+      "rization.v1.AuthorizeGroupsResponse\022\200\001\n\021" +
+      "AuthorizePresence\0224.messenger.authorizat" +
+      "ion.v1.AuthorizePresenceRequest\0325.messen" +
+      "ger.authorization.v1.AuthorizePresenceRe" +
+      "sponseBc\n+com.andrewtinyakov.messenger.g" +
+      "enerated.grpcP\001Z2messenger/ws/internal/g" +
+      "enerated/grpc;authorizationb\006proto3"
     };
     descriptor = com.google.protobuf.Descriptors.FileDescriptor
       .internalBuildGeneratedFileFrom(descriptorData,
@@ -145,57 +162,69 @@ public final class ChatAuthorizationOuterClass {
     internal_static_messenger_authorization_v1_ValidateSessionResponse_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessage.FieldAccessorTable(
         internal_static_messenger_authorization_v1_ValidateSessionResponse_descriptor,
-        new java.lang.String[] { "UserId", "DeviceId", "SessionId", });
-    internal_static_messenger_authorization_v1_AuthorizeGroupRequest_descriptor =
+        new java.lang.String[] { "UserId", "DeviceId", "SessionId", "ExpiresAtUnixSeconds", });
+    internal_static_messenger_authorization_v1_ValidateSessionsRequest_descriptor =
       getDescriptor().getMessageTypes().get(2);
+    internal_static_messenger_authorization_v1_ValidateSessionsRequest_fieldAccessorTable = new
+      com.google.protobuf.GeneratedMessage.FieldAccessorTable(
+        internal_static_messenger_authorization_v1_ValidateSessionsRequest_descriptor,
+        new java.lang.String[] { "SessionIds", });
+    internal_static_messenger_authorization_v1_ValidateSessionsResponse_descriptor =
+      getDescriptor().getMessageTypes().get(3);
+    internal_static_messenger_authorization_v1_ValidateSessionsResponse_fieldAccessorTable = new
+      com.google.protobuf.GeneratedMessage.FieldAccessorTable(
+        internal_static_messenger_authorization_v1_ValidateSessionsResponse_descriptor,
+        new java.lang.String[] { "Sessions", });
+    internal_static_messenger_authorization_v1_AuthorizeGroupRequest_descriptor =
+      getDescriptor().getMessageTypes().get(4);
     internal_static_messenger_authorization_v1_AuthorizeGroupRequest_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessage.FieldAccessorTable(
         internal_static_messenger_authorization_v1_AuthorizeGroupRequest_descriptor,
         new java.lang.String[] { "ChatId", "SessionId", });
     internal_static_messenger_authorization_v1_AuthorizeGroupResponse_descriptor =
-      getDescriptor().getMessageTypes().get(3);
+      getDescriptor().getMessageTypes().get(5);
     internal_static_messenger_authorization_v1_AuthorizeGroupResponse_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessage.FieldAccessorTable(
         internal_static_messenger_authorization_v1_AuthorizeGroupResponse_descriptor,
         new java.lang.String[] { "Room", });
     internal_static_messenger_authorization_v1_AuthorizeGroupsRequest_descriptor =
-      getDescriptor().getMessageTypes().get(4);
+      getDescriptor().getMessageTypes().get(6);
     internal_static_messenger_authorization_v1_AuthorizeGroupsRequest_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessage.FieldAccessorTable(
         internal_static_messenger_authorization_v1_AuthorizeGroupsRequest_descriptor,
         new java.lang.String[] { "ChatIds", "SessionId", });
     internal_static_messenger_authorization_v1_AuthorizeGroupsResponse_descriptor =
-      getDescriptor().getMessageTypes().get(5);
+      getDescriptor().getMessageTypes().get(7);
     internal_static_messenger_authorization_v1_AuthorizeGroupsResponse_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessage.FieldAccessorTable(
         internal_static_messenger_authorization_v1_AuthorizeGroupsResponse_descriptor,
         new java.lang.String[] { "AuthorizedChatIds", });
     internal_static_messenger_authorization_v1_AuthorizePresenceRequest_descriptor =
-      getDescriptor().getMessageTypes().get(6);
+      getDescriptor().getMessageTypes().get(8);
     internal_static_messenger_authorization_v1_AuthorizePresenceRequest_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessage.FieldAccessorTable(
         internal_static_messenger_authorization_v1_AuthorizePresenceRequest_descriptor,
         new java.lang.String[] { "SessionId", "ChatId", "UserIds", });
     internal_static_messenger_authorization_v1_AuthorizePresenceResponse_descriptor =
-      getDescriptor().getMessageTypes().get(7);
+      getDescriptor().getMessageTypes().get(9);
     internal_static_messenger_authorization_v1_AuthorizePresenceResponse_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessage.FieldAccessorTable(
         internal_static_messenger_authorization_v1_AuthorizePresenceResponse_descriptor,
         new java.lang.String[] { "AuthorizedUserIds", });
     internal_static_messenger_authorization_v1_AuthorizeSidebarRequest_descriptor =
-      getDescriptor().getMessageTypes().get(8);
+      getDescriptor().getMessageTypes().get(10);
     internal_static_messenger_authorization_v1_AuthorizeSidebarRequest_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessage.FieldAccessorTable(
         internal_static_messenger_authorization_v1_AuthorizeSidebarRequest_descriptor,
         new java.lang.String[] { "SessionId", "ChatIds", });
     internal_static_messenger_authorization_v1_SidebarChat_descriptor =
-      getDescriptor().getMessageTypes().get(9);
+      getDescriptor().getMessageTypes().get(11);
     internal_static_messenger_authorization_v1_SidebarChat_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessage.FieldAccessorTable(
         internal_static_messenger_authorization_v1_SidebarChat_descriptor,
         new java.lang.String[] { "ChatId", "PeerId", "Group", });
     internal_static_messenger_authorization_v1_AuthorizeSidebarResponse_descriptor =
-      getDescriptor().getMessageTypes().get(10);
+      getDescriptor().getMessageTypes().get(12);
     internal_static_messenger_authorization_v1_AuthorizeSidebarResponse_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessage.FieldAccessorTable(
         internal_static_messenger_authorization_v1_AuthorizeSidebarResponse_descriptor,

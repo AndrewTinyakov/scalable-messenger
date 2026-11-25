@@ -1,90 +1,91 @@
 package com.andrewtinyakov.messenger.auth.service
 
+import com.andrewtinyakov.messenger.auth.messaging.SessionOutbox
 import com.andrewtinyakov.messenger.auth.model.AuthenticatedSession
 import com.andrewtinyakov.messenger.auth.model.DeviceId
+import com.andrewtinyakov.messenger.auth.model.DeviceLabel
 import com.andrewtinyakov.messenger.auth.model.ExpectedSessionIdentity
+import com.andrewtinyakov.messenger.auth.model.LoginAttempt
 import com.andrewtinyakov.messenger.auth.model.SessionCredentials
-import com.andrewtinyakov.messenger.auth.model.SessionId
 import com.andrewtinyakov.messenger.auth.model.SessionToken
 import com.andrewtinyakov.messenger.auth.model.User
 import com.andrewtinyakov.messenger.auth.model.UserId
-import com.andrewtinyakov.messenger.auth.model.UserSummary
 import com.andrewtinyakov.messenger.auth.repository.SessionRepository
 import com.andrewtinyakov.messenger.auth.repository.UserRepository
-import com.andrewtinyakov.messenger.auth.web.payload.AuthRequest
-import com.andrewtinyakov.messenger.generated.messaging.event.SessionRevokedEventV1
-import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseTransaction
-import com.andrewtinyakov.messenger.infrastructure.database.observability.observedExecute
-import com.andrewtinyakov.messenger.infrastructure.database.observability.observedExecuteWithoutResult
-import com.andrewtinyakov.messenger.infrastructure.outbox.model.toOutboxMessage
-import com.andrewtinyakov.messenger.infrastructure.outbox.repository.OutboxRepository
-import com.andrewtinyakov.messenger.infrastructure.redis.RoomAddress
-import com.andrewtinyakov.messenger.shared.crypto.sha256
 import com.andrewtinyakov.messenger.shared.id.newId
 import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
-import com.andrewtinyakov.messenger.shared.web.badRequest
 import com.andrewtinyakov.messenger.shared.web.conflict
+import com.andrewtinyakov.messenger.shared.web.invalidInput
+import com.andrewtinyakov.messenger.shared.web.tooManyAttempts
 import com.andrewtinyakov.messenger.shared.web.unauthorized
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
-import tools.jackson.databind.ObjectMapper
-import java.security.SecureRandom
 import java.time.Clock
 import java.time.OffsetDateTime
-import java.util.Base64
 import java.util.UUID
-
-private val usernamePattern = Regex("[a-z0-9_]{${User.MIN_USERNAME_LENGTH},${User.MAX_USERNAME_LENGTH}}")
-private const val SESSION_LIFETIME_DAYS = 30L
-private const val SESSION_TOKEN_BYTES = 32
-
-private fun SessionToken.sessionId() = SessionId(sha256(value))
 
 @Service
 class AuthenticationService(
     private val userRepository: UserRepository,
     private val sessionRepository: SessionRepository,
     private val passwordEncoder: PasswordEncoder,
+    private val loginThrottleService: LoginThrottleService,
+    private val sessionOutbox: SessionOutbox,
+    private val sessionIssuanceService: SessionIssuanceService,
     private val clock: Clock,
     private val tx: TransactionTemplate,
-    private val outboxRepository: OutboxRepository,
-    private val mapper: ObjectMapper,
 ) {
-    private val random = SecureRandom()
     private val rejectedPasswordHash = requireNotNull(passwordEncoder.encode(UUID.randomUUID().toString()))
 
-    fun register(input: AuthRequest): SessionCredentials {
-        validateInput(input)
-        val username = input.username.trim().lowercase()
-        if (!usernamePattern.matches(username)) {
-            badRequest(ApiErrorCode.INVALID_USERNAME, "Use letters, digits, or underscore")
+    fun register(username: String, password: String, deviceId: String? = null, userAgent: String? = null): SessionCredentials {
+        val device = validateInput(password = password, deviceId = deviceId)
+        val normalized = normalize(username)
+        if (!User.isValidUsername(normalized)) {
+            invalidInput("username", "Use letters, digits, or underscore")
         }
         val user = User(
             id = UserId(newId()),
-            username = username,
-            passwordHash = requireNotNull(passwordEncoder.encode(input.password)),
+            username = normalized,
+            passwordHash = requireNotNull(passwordEncoder.encode(password)),
         )
         try {
-            return tx.observedExecute(DatabaseTransaction.AUTH_REGISTER) {
+            return tx.execute {
                 userRepository.insertUser(user = user)
-                issue(user = user, requestedDeviceId = input.deviceId?.let(::DeviceId))
+                sessionIssuanceService.issue(user = user, requestedDeviceId = device, deviceLabel = DeviceLabel.fromUserAgent(userAgent))
             }
         } catch (_: DuplicateKeyException) {
             conflict(ApiErrorCode.USERNAME_TAKEN, "Username already exists")
         }
     }
 
-    fun login(input: AuthRequest): SessionCredentials {
-        validateInput(input)
-        val username = input.username.trim().lowercase()
-        val user = userRepository.findUserByUsername(username = username)
-        val matches = passwordEncoder.matches(input.password, user?.passwordHash ?: rejectedPasswordHash)
+    fun login(
+        username: String,
+        password: String,
+        deviceId: String? = null,
+        userAgent: String? = null,
+        clientIp: String? = null,
+    ): SessionCredentials {
+        val device = validateInput(password = password, deviceId = deviceId)
+        val normalized = normalize(username)
+        val attempt = loginThrottleService.reserveAttempt(username = normalized, clientIp = clientIp)
+        if (attempt is LoginAttempt.Blocked) tooManyAttempts(attempt.retryAfter)
+        val user = userRepository.findUserByUsername(username = normalized)
+        val matches = passwordEncoder.matches(password, user?.passwordHash ?: rejectedPasswordHash)
         if (user == null || !matches) {
             unauthorized(ApiErrorCode.INVALID_CREDENTIALS, "Invalid username or password")
         }
-        return issue(user = user, requestedDeviceId = input.deviceId?.let(::DeviceId))
+        val upgradedHash = if (passwordEncoder.upgradeEncoding(user.passwordHash)) passwordEncoder.encode(password) else null
+        val credentials = tx.execute {
+            if (userRepository.lockPasswordHash(userId = user.id) != user.passwordHash) {
+                unauthorized(ApiErrorCode.INVALID_CREDENTIALS, "Invalid username or password")
+            }
+            upgradedHash?.let { userRepository.replacePasswordHash(userId = user.id, expectedHash = user.passwordHash, newHash = it) }
+            sessionIssuanceService.issue(user = user, requestedDeviceId = device, deviceLabel = DeviceLabel.fromUserAgent(userAgent))
+        }
+        loginThrottleService.clear(username = normalized, clientIp = clientIp)
+        return credentials
     }
 
     fun authenticatedSession(token: SessionToken?): AuthenticatedSession =
@@ -96,15 +97,10 @@ class AuthenticationService(
     fun logout(token: SessionToken?, expectedIdentity: ExpectedSessionIdentity = ExpectedSessionIdentity()) {
         if (token == null) return
         val sessionId = token.sessionId()
-        tx.observedExecuteWithoutResult(DatabaseTransaction.AUTH_LOGOUT) {
-            val session = sessionRepository.deleteSession(sessionId = sessionId) ?: return@observedExecuteWithoutResult
+        tx.executeWithoutResult {
+            val session = sessionRepository.deleteSession(sessionId = sessionId) ?: return@executeWithoutResult
             if (session.expiresAt > clock.instant()) requireExpectedIdentity(expectedIdentity = expectedIdentity, session = session)
-            val event = SessionRevokedEventV1.create(
-                eventId = newId(),
-                room = RoomAddress.user(session.userId),
-                sessionId = sessionId.value,
-            )
-            outboxRepository.enqueue(event.toOutboxMessage(mapper))
+            sessionOutbox.enqueueRevoked(userId = session.userId, sessionIds = listOf(sessionId))
         }
     }
 
@@ -114,31 +110,27 @@ class AuthenticationService(
         }
     }
 
-    private fun issue(user: User, requestedDeviceId: DeviceId?): SessionCredentials {
-        val deviceId = requestedDeviceId ?: DeviceId(UUID.randomUUID().toString())
-        val bytes = ByteArray(SESSION_TOKEN_BYTES).also(random::nextBytes)
-        val token = SessionToken(Base64.getUrlEncoder().withoutPadding().encodeToString(bytes))
-        val expiresAt = OffsetDateTime.now(clock).plusDays(SESSION_LIFETIME_DAYS)
-        val sessionId = token.sessionId()
-        sessionRepository.insertSession(sessionId = sessionId, userId = user.id, deviceId = deviceId, expiresAt = expiresAt)
-        return SessionCredentials(
-            token = token,
-            user = UserSummary(id = user.id, username = user.username),
-            session = AuthenticatedSession(
-                userId = user.id,
-                deviceId = deviceId,
-                sessionId = sessionId,
-                expiresAt = expiresAt.toInstant(),
-            ),
-        )
+    private fun normalize(username: String): String {
+        val normalized = username.trim().lowercase()
+        if (normalized.length !in User.MIN_USERNAME_LENGTH..User.MAX_USERNAME_LENGTH) {
+            invalidInput(
+                "username",
+                "Username must be ${User.MIN_USERNAME_LENGTH} to ${User.MAX_USERNAME_LENGTH} characters",
+            )
+        }
+        return normalized
     }
 
-    private fun validateInput(input: AuthRequest) {
-        if (input.password.length !in 8..100 || input.password.isBlank()) {
-            badRequest(ApiErrorCode.INVALID_REQUEST, "Password must be 8 to 100 characters")
+    private fun validateInput(password: String, deviceId: String?): DeviceId? {
+        if (!User.isValidPassword(password)) invalidPassword()
+        if (deviceId != null && (deviceId.isBlank() || deviceId.length !in 1..DeviceId.MAX_LENGTH)) {
+            invalidInput("deviceId", "deviceId must be 1 to ${DeviceId.MAX_LENGTH} characters")
         }
-        if (input.deviceId != null && (input.deviceId.isBlank() || input.deviceId.length !in 1..64)) {
-            badRequest(ApiErrorCode.INVALID_DEVICE_ID, "deviceId must be 1 to 64 characters")
-        }
+        return deviceId?.let(::DeviceId)
     }
+
+    private fun invalidPassword(): Nothing = invalidInput(
+        "password",
+        "Password must be ${User.MIN_PASSWORD_LENGTH} to ${User.MAX_PASSWORD_LENGTH} characters",
+    )
 }

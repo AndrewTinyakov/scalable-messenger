@@ -121,11 +121,6 @@ public class Chats extends TableImpl<ChatsRecord> {
     public final TableField<ChatsRecord, String> DELETED_BY = createField(DSL.name("deleted_by"), SQLDataType.VARCHAR(26), this, "");
 
     /**
-     * The column <code>public.chats.mutation_revision</code>.
-     */
-    public final TableField<ChatsRecord, Long> MUTATION_REVISION = createField(DSL.name("mutation_revision"), SQLDataType.BIGINT.nullable(false).defaultValue(DSL.field(DSL.raw("0"), SQLDataType.BIGINT)), this, "");
-
-    /**
      * The column <code>public.chats.mutation_floor</code>.
      */
     public final TableField<ChatsRecord, Long> MUTATION_FLOOR = createField(DSL.name("mutation_floor"), SQLDataType.BIGINT.nullable(false).defaultValue(DSL.field(DSL.raw("0"), SQLDataType.BIGINT)), this, "");
@@ -149,6 +144,16 @@ public class Chats extends TableImpl<ChatsRecord> {
      * The column <code>public.chats.last_activity_at</code>.
      */
     public final TableField<ChatsRecord, OffsetDateTime> LAST_ACTIVITY_AT = createField(DSL.name("last_activity_at"), SQLDataType.TIMESTAMPWITHTIMEZONE(6), this, "");
+
+    /**
+     * The column <code>public.chats.pins_seq</code>.
+     */
+    public final TableField<ChatsRecord, Long> PINS_SEQ = createField(DSL.name("pins_seq"), SQLDataType.BIGINT.nullable(false).defaultValue(DSL.field(DSL.raw("0"), SQLDataType.BIGINT)), this, "");
+
+    /**
+     * The column <code>public.chats.last_message_sequence</code>.
+     */
+    public final TableField<ChatsRecord, Long> LAST_MESSAGE_SEQUENCE = createField(DSL.name("last_message_sequence"), SQLDataType.BIGINT.nullable(false).defaultValue(DSL.field(DSL.raw("0"), SQLDataType.BIGINT)), this, "");
 
     private Chats(Name alias, Table<ChatsRecord> aliased) {
         this(alias, aliased, (Field<?>[]) null, null);
@@ -425,10 +430,11 @@ public class Chats extends TableImpl<ChatsRecord> {
         return Arrays.asList(
             Internal.createCheck(this, DSL.name("chats_cleared_through_sequence_check"), "((cleared_through_sequence >= 0))", true),
             Internal.createCheck(this, DSL.name("chats_kind_shape"), "((((kind = 'DIRECT'::chat_kind) AND (name IS NULL) AND ((direct_pair_key IS NOT NULL) OR (deleted_at IS NOT NULL))) OR ((kind = 'GROUP'::chat_kind) AND (name IS NOT NULL) AND (direct_pair_key IS NULL))))", true),
+            Internal.createCheck(this, DSL.name("chats_last_message_sequence_check"), "((last_message_sequence >= 0))", true),
             Internal.createCheck(this, DSL.name("chats_member_count_check"), "(((member_count >= 0) AND (member_count <= 100000)))", true),
             Internal.createCheck(this, DSL.name("chats_mutation_floor_check"), "((mutation_floor >= 0))", true),
-            Internal.createCheck(this, DSL.name("chats_mutation_revision_check"), "((mutation_revision >= 0))", true),
             Internal.createCheck(this, DSL.name("chats_next_sequence_check"), "((next_sequence > 0))", true),
+            Internal.createCheck(this, DSL.name("chats_pins_seq_check"), "((pins_seq >= 0))", true),
             Internal.createCheck(this, DSL.name("chats_purged_rows_check"), "((purged_rows >= 0))", true),
             Internal.createCheck(this, DSL.name("chats_purged_through_sequence_check"), "((purged_through_sequence >= 0))", true)
         );

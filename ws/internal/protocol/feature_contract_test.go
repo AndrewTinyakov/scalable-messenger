@@ -29,7 +29,7 @@ func featureChanged() map[string]any {
 	fields["type"] = "message_changed"
 	delete(fields, "requestId")
 	fields["messageVersion"] = "2"
-	fields["mutationRevision"] = "9007199254740993"
+	fields["seq"] = "9007199254740993"
 	fields["editedAt"] = "2026-09-27T09:00:01Z"
 	return fields
 }
@@ -177,7 +177,7 @@ func TestFeatureMessageVersionAndReplyPreviewContracts(t *testing.T) {
 		{"live preview empty", func(f map[string]any) { f["replyBody"] = "" }},
 		{"unknown reply property", func(f map[string]any) { f["replyUnknown"] = true }},
 		{"presence on saved", func(f map[string]any) { f["observedAt"] = "2026-09-27T09:00:01Z" }},
-		{"mutation on saved", func(f map[string]any) { f["mutationRevision"] = "1" }},
+		{"chat sequence on saved", func(f map[string]any) { f["seq"] = "1" }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fields := featureSaved()
@@ -229,8 +229,9 @@ func TestFeatureTombstoneWireRetainsEmptyBodyAndDeletedQuote(t *testing.T) {
 		{"deleted body leaks", func(f map[string]any) { f["body"] = "old secret" }},
 		{"empty live body", func(f map[string]any) { delete(f, "deletedAt") }},
 		{"missing version", func(f map[string]any) { delete(f, "messageVersion") }},
-		{"missing mutation revision", func(f map[string]any) { delete(f, "mutationRevision") }},
-		{"zero mutation revision", func(f map[string]any) { f["mutationRevision"] = "0" }},
+		{"missing chat sequence", func(f map[string]any) { delete(f, "seq") }},
+		{"zero chat sequence", func(f map[string]any) { f["seq"] = "0" }},
+		{"member sequence", func(f map[string]any) { f["memberSeq"] = "1" }},
 		{"malformed deleted time", func(f map[string]any) { f["deletedAt"] = "yesterday" }},
 		{"foreign request", func(f map[string]any) { f["requestId"] = testID }},
 	} {
@@ -251,12 +252,16 @@ func TestFeatureChatInvalidationsContainOnlyDurableMetadata(t *testing.T) {
 	for _, kind := range []string{"chat_deleted", "reads_changed"} {
 		t.Run(kind, func(t *testing.T) {
 			base := func() map[string]any {
-				return map[string]any{"type": kind, "version": 1, "eventId": testID, "room": "group:" + testID, "chatId": testID}
+				fields := map[string]any{"type": kind, "version": 1, "eventId": testID, "room": "group:" + testID, "chatId": testID}
+				if kind == "chat_deleted" {
+					fields["seq"] = "7"
+				}
+				return fields
 			}
 			if event, err := DecodeEvent(featureJSON(t, base())); err != nil || string(event.Type) != kind {
 				t.Fatalf("invalidation = %+v, %v", event, err)
 			}
-			for _, field := range []string{"messageVersion", "mutationRevision", "replyToMessageId", "observedAt", "body", "requestId", "sessionId", "unknown"} {
+			for _, field := range []string{"messageVersion", "mutationRevision", "memberSeq", "userSeq", "replyToMessageId", "observedAt", "body", "requestId", "sessionId", "unknown"} {
 				fields := base()
 				fields[field] = "1"
 				if _, err := DecodeEvent(featureJSON(t, fields)); err == nil {
@@ -397,19 +402,19 @@ func TestFeatureSharedReplyCommandMatchesGeneratedWire(t *testing.T) {
 	featureAssertJSONEqual(t, wire, payload)
 }
 
-func TestHistoryHintsRejectContentAndInvalidRevisions(t *testing.T) {
+func TestHistoryHintsRejectContentAndInvalidSequences(t *testing.T) {
 	payload, err := os.ReadFile("../../../contracts/fixtures/valid/history-changed.json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, value := range []any{nil, 1, "-1", "01", "9223372036854775808"} {
+	for _, value := range []any{nil, 1, "0", "-1", "01", "9223372036854775808"} {
 		fields := map[string]any{}
 		if err := json.Unmarshal(payload, &fields); err != nil {
 			t.Fatal(err)
 		}
-		fields["visibilityRevision"] = value
+		fields["seq"] = value
 		if _, err := DecodeEvent(featureJSON(t, fields)); err == nil {
-			t.Fatalf("accepted invalid revision %v", value)
+			t.Fatalf("accepted invalid sequence %v", value)
 		}
 	}
 	fields := map[string]any{}

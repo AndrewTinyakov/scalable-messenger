@@ -16,7 +16,7 @@ const { values } = parseArgs({ options: {
   'send-rate': { type: 'string', default: '2' }, scenario: { type: 'string', default: 'mixed' }, 'reconnect-fraction': { type: 'string', default: '0.1' }, drain: { type: 'string', default: '20' },
   api: { type: 'string', default: process.env.MESSENGER_API_BASE_URL ?? 'http://localhost:8081/api' },
   ws: { type: 'string', default: process.env.MESSENGER_WS_URL ?? 'ws://localhost:8082/ws' },
-  origin: { type: 'string', default: process.env.MESSENGER_CLIENT_ORIGIN ?? 'http://localhost:8080' },
+  origin: { type: 'string', default: process.env.MESSENGER_CLIENT_ORIGIN ?? 'https://messenger.localhost' },
   help: { type: 'boolean', default: false },
 } });
 

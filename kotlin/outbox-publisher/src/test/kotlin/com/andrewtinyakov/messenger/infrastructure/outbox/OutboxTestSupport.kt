@@ -1,10 +1,7 @@
 package com.andrewtinyakov.messenger.infrastructure.outbox
 
 import com.andrewtinyakov.messenger.generated.messaging.event.RoomEventType
-import com.andrewtinyakov.messenger.infrastructure.outbox.model.EventId
-import com.andrewtinyakov.messenger.infrastructure.outbox.model.OutboxBacklog
-import com.andrewtinyakov.messenger.infrastructure.outbox.model.OutboxMessage
-import com.andrewtinyakov.messenger.infrastructure.outbox.repository.OutboxClaimRepository
+import com.andrewtinyakov.messenger.infrastructure.outbox.backlog.OutboxBacklog
 import com.andrewtinyakov.messenger.shared.id.newId
 import org.mockito.ArgumentMatchers.any
 import org.mockito.Mockito.mock

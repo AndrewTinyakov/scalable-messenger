@@ -6,8 +6,8 @@ function snapshot(messages: Message[], revision = '0') {
   return {
     messages,
     snapshotSequence: '2',
-    mutationRevision: revision,
-    visibilityRevision: revision,
+    mutationSeq: revision,
+    visibilitySeq: revision,
     clearedThroughSequence: '0',
     globalClearedThroughSequence: '0',
     coverageAfterSequence: '0',
@@ -74,7 +74,7 @@ describe('pending viewer-authorized history overlays', () => {
             { ...target, body: 'erased target overlay secret', messageVersion: '3' },
           ])
         revision = '1'
-        await recovery.synchronize('chat', { mutationRevision: '1', visibilityRevision: '1' })
+        await recovery.synchronize('chat', { mutationSeq: '1', visibilitySeq: '1' })
         expect(recovery.visibleWindows().chat[0].replyBody).toBeNull()
         release(snapshot([unavailable], revision))
         expect(await loading).toBe(true)

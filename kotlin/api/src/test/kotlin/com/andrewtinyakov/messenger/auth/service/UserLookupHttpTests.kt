@@ -2,7 +2,6 @@ package com.andrewtinyakov.messenger.auth.service
 
 import com.andrewtinyakov.messenger.ApiApplication
 import com.andrewtinyakov.messenger.auth.model.UserId
-import com.andrewtinyakov.messenger.auth.web.payload.AuthRequest
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.service.ChatMembershipService
 import com.andrewtinyakov.messenger.chat.service.ChatService
@@ -28,7 +27,7 @@ import java.time.Duration
 class UserLookupHttpTests
     @Autowired
     constructor(
-        @Value("\${local.server.port}") private val port: Int,
+        @Value($$"${local.server.port}") private val port: Int,
         private val authenticationService: AuthenticationService,
         private val chatService: ChatService,
         private val membershipService: ChatMembershipService,
@@ -62,9 +61,9 @@ class UserLookupHttpTests
         fun `missing and malformed user IDs return distinct client errors`() {
             val viewer = account()
             for ((id, status, code) in listOf(
-                Triple(newId(), 404, "USER_NOT_FOUND"),
-                Triple("invalid", 400, "INVALID_ID"),
-                Triple(newId().lowercase(), 400, "INVALID_ID"),
+                Triple(newId(), 404, "NOT_FOUND"),
+                Triple("invalid", 400, "VALIDATION_FAILED"),
+                Triple(newId().lowercase(), 400, "VALIDATION_FAILED"),
             )) {
                 val response = get(id, viewer.second)
                 assertEquals(status, response.statusCode(), response.body())
@@ -75,7 +74,7 @@ class UserLookupHttpTests
         @Test
         fun `user lookup requires an authenticated session`() {
             val target = user("unauth_${newId()}")
-            for (cookie in listOf(null, "messenger_session=${"A".repeat(43)}")) {
+            for (cookie in listOf(null, "__Host-messenger_session=${"A".repeat(43)}")) {
                 val response = get(target, cookie)
                 assertEquals(401, response.statusCode())
                 assertEquals("UNAUTHORIZED", mapper.readTree(response.body()).path("code").stringValue())
@@ -93,8 +92,8 @@ class UserLookupHttpTests
 
         private fun account(): Triple<String, String, String> {
             val username = "lookup_${newId().lowercase()}"
-            val credentials = authenticationService.register(AuthRequest(username, "long-demo-password"))
-            return Triple(credentials.user.id.value, "messenger_session=${credentials.token.value}", username)
+            val credentials = authenticationService.register(username, "long-demo-password")
+            return Triple(credentials.user.id.value, "__Host-messenger_session=${credentials.token.value}", username)
         }
 
         private fun get(id: String, cookie: String? = null): HttpResponse<String> {

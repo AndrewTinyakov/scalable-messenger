@@ -1,14 +1,14 @@
 package com.andrewtinyakov.messenger.message.service
 
 import com.andrewtinyakov.messenger.generated.messaging.command.SendMessageCommandV1
-import com.andrewtinyakov.messenger.infrastructure.database.observability.DatabaseTransaction
-import com.andrewtinyakov.messenger.infrastructure.database.observability.observedExecute
 import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStage
 import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStageRecorder
 import com.andrewtinyakov.messenger.message.model.CommandResult
 import com.andrewtinyakov.messenger.message.model.SendBatch
 import com.andrewtinyakov.messenger.message.model.SendTarget
+import com.andrewtinyakov.messenger.message.model.toSendRequest
 import com.andrewtinyakov.messenger.message.monitoring.MessageSendMetrics
+import com.andrewtinyakov.messenger.message.monitoring.SendTransactionCompletion
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate
@@ -36,8 +36,8 @@ class MessageSendBatchService(
     private fun processInOwnTransaction(commands: List<SendMessageCommandV1>): List<CommandResult> {
         val started = System.nanoTime()
         var callbackFinished = started
-        return tx.observedExecute(DatabaseTransaction.SEND_BATCH) {
-            afterSendTransactionCompletes { completion ->
+        return tx.execute {
+            SendTransactionCompletion.onCompletion { completion ->
                 SendStageRecorder.requests(completion.stage, commands) { it.requestId }
                 val finished = System.nanoTime()
                 metrics.batchCompleted(

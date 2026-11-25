@@ -158,10 +158,9 @@ describe('history snapshots racing with unseen mutations', () => {
         changes: async (_, after) => {
           cursors.push(after)
           return {
-            changes:
-              after === '0' ? mutations.map((item) => ({ revision: '1', message: item })) : [],
-            lastRevision: '1',
-            nextRevision: '1',
+            changes: after === '0' ? mutations.map((item) => ({ seq: '1', message: item })) : [],
+            lastSeq: '1',
+            nextSeq: '1',
             resetRequired: false,
           }
         },
@@ -384,9 +383,9 @@ it.each(['edit', 'delete'])(
       changes: async (_chat, after) => {
         cursors.push(after)
         return {
-          changes: after === '0' ? [{ revision: '1', message: changed }] : [],
-          lastRevision: '1',
-          nextRevision: '1',
+          changes: after === '0' ? [{ seq: '1', message: changed }] : [],
+          lastSeq: '1',
+          nextSeq: '1',
           resetRequired: false,
         }
       },
@@ -711,4 +710,83 @@ it('backs off transient paging failures without losing the edge', async () => {
     recovery.dispose()
     vi.useRealTimers()
   }
+})
+
+describe('synchronizing quotes while every history slot is busy', () => {
+  const quoted = { ...message('1'), body: 'original' }
+  const reply = {
+    ...message('2'),
+    replyToMessageId: quoted.id,
+    replyBody: quoted.body,
+    replySenderId: quoted.senderId,
+    replyVersion: '1',
+    replyDeleted: false,
+  }
+  it.each([
+    ['edit', 'edited'],
+    ['EVERYONE', null],
+    ['SELF', null],
+  ] as const)('waits for capacity and applies the %s to the quote', async (operation, expected) => {
+    let mutated = false
+    const metadata = () => ({
+      snapshotSequence: '2',
+      mutationSeq: mutated && operation !== 'SELF' ? '1' : '0',
+      visibilitySeq: mutated && operation === 'SELF' ? '1' : '0',
+      clearedThroughSequence: '0',
+      globalClearedThroughSequence: '0',
+    })
+    const current = () =>
+      !mutated
+        ? reply
+        : operation === 'edit'
+          ? { ...reply, replyBody: 'edited', replyVersion: '2' }
+          : {
+              ...reply,
+              replyBody: null,
+              replySenderId: null,
+              replyVersion: null,
+              replyDeleted: null,
+            }
+    const snapshot = () => ({
+      ...metadata(),
+      messages: [current()],
+      coverageAfterSequence: '1',
+      coverageThroughSequence: '2',
+      nextSequence: '2',
+      hasMore: false,
+    })
+    const { recovery } = connectedRecovery({
+      latest: async () => snapshot(),
+      after: async () => snapshot(),
+      older: async () => snapshot(),
+      visibility: async () => ({ ...metadata(), hidden: false }),
+      resolve: async (_id, ids) => ({
+        ...metadata(),
+        messages: snapshot().messages.filter((row) => ids.includes(row.id)),
+      }),
+    })
+    await recovery.catchUp('chat', true)
+    const stale = snapshot()
+    let release!: (page: typeof stale) => void
+    const blocked = new Promise<typeof stale>((done) => {
+      release = done
+    })
+    const busy = Array.from({ length: 16 }, () =>
+      recovery.withHistorySnapshot(
+        'chat',
+        () => blocked,
+        () => true,
+      ),
+    )
+    mutated = true
+    const synchronized = recovery.synchronize('chat', metadata())
+    // Let synchronize reach its history requests while all slots are still taken.
+    await new Promise((done) => setTimeout(done, 0))
+    release(stale)
+    await Promise.all([...busy, synchronized])
+    // A later pass at the same revision must not treat the skipped work as verified.
+    await recovery.synchronize('chat')
+    expect(recovery.visibleWindows().chat[0].replyBody).toBe(expected)
+    recovery.dispose()
+  })
 })

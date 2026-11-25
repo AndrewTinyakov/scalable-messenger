@@ -13,6 +13,28 @@ afterEach(() => {
 })
 
 describe('HTTP transport', () => {
+  it('keeps the change cursor apart from the mutation sequence a history page is fenced by', async () => {
+    const page = {
+      changes: [],
+      lastSeq: '5',
+      nextSeq: '5',
+      resetRequired: false,
+      snapshotSequence: '5',
+      mutationSeq: '0',
+      visibilitySeq: '0',
+      clearedThroughSequence: '0',
+      globalClearedThroughSequence: '0',
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<typeof globalThis.fetch>(async () => Response.json(page)),
+    )
+    await expect(authenticated.messageChanges(session.user.id, '0')).resolves.toMatchObject({
+      lastSeq: '5',
+      mutationSeq: '0',
+    })
+  })
+
   it('decodes bounded chat summaries with sender usernames and rejects malformed previews', async () => {
     const id = session.user.id
     const message = {
@@ -67,9 +89,9 @@ describe('HTTP transport', () => {
       messages: [row],
       nextSequence: '10',
       hasMore: false,
-      mutationRevision: '2',
       snapshotSequence: '10',
-      visibilityRevision: '1',
+      mutationSeq: '2',
+      visibilitySeq: '1',
       clearedThroughSequence: '3',
       globalClearedThroughSequence: '0',
       coverageAfterSequence: '3',
@@ -84,7 +106,7 @@ describe('HTTP transport', () => {
       nextSequence: '10',
     })
     for (const fields of [
-      { visibilityRevision: undefined },
+      { visibilitySeq: undefined },
       { snapshotSequence: 10 },
       { coverageAfterSequence: '11' },
       { coverageThroughSequence: '7' },
@@ -104,8 +126,8 @@ describe('HTTP transport', () => {
       scope: 'SELF',
       target: 'MESSAGES',
       clearedThroughSequence: '0',
-      mutationRevision: '0',
-      visibilityRevision: '1',
+      seq: '0',
+      visibilitySeq: '1',
       state: 'COMPLETED',
       deletedRows: '1',
     }
@@ -130,8 +152,8 @@ describe('HTTP transport', () => {
     const snapshot = {
       messages: [],
       snapshotSequence: '10',
-      mutationRevision: '1',
-      visibilityRevision: '1',
+      mutationSeq: '2',
+      visibilitySeq: '1',
       clearedThroughSequence: '0',
       globalClearedThroughSequence: '0',
     }
@@ -596,4 +618,90 @@ it('never replays member removal after losing its response', async () => {
     'response lost',
   )
   expect(fetch).toHaveBeenCalledTimes(1)
+})
+
+describe('account security transport', () => {
+  const active = {
+    id: 'a'.repeat(64),
+    deviceLabel: 'Chrome on macOS',
+    createdAt: '2026-11-01T10:00:00Z',
+    lastUsedAt: '2026-11-17T10:00:00Z',
+    current: true,
+  }
+
+  it('exposes the problem code and field errors and ignores unknown codes', async () => {
+    const problem = (body: unknown, status = 400) =>
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => Response.json(body, { status })),
+      )
+    problem({
+      status: 400,
+      detail: 'Use letters, digits, or underscore',
+      code: 'VALIDATION_FAILED',
+      errors: [{ field: 'username', message: 'Use letters, digits, or underscore' }, { field: 1 }],
+    })
+    const invalid = await api.register('bad name', 'password', 'device').catch((cause) => cause)
+    expect(invalid).toBeInstanceOf(ApiError)
+    expect(invalid.code).toBe('VALIDATION_FAILED')
+    expect(invalid.fieldError('username')).toBe('Use letters, digits, or underscore')
+    expect(invalid.fieldErrors).toHaveLength(1)
+    problem({ status: 409, detail: 'Taken', code: 'SOMETHING_NEW' }, 409)
+    const unknown = await api.register('alice', 'password', 'device').catch((cause) => cause)
+    expect(unknown).toMatchObject({ status: 409, code: null, fieldErrors: [], message: 'Taken' })
+  })
+
+  it('does not retry locked-out credential submissions', async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(
+      async () =>
+        new Response(JSON.stringify({ detail: 'Too many attempts. Try again later.' }), {
+          status: 429,
+          headers: { 'Retry-After': '900' },
+        }),
+    )
+    vi.stubGlobal('fetch', fetch)
+    await expect(api.login('alice', 'password', 'device')).rejects.toMatchObject({
+      status: 429,
+      retryAfter: 900000,
+      message: 'Too many attempts. Try again later.',
+    })
+    await expect(
+      authenticated.changePassword('old-password', 'new-password'),
+    ).rejects.toBeInstanceOf(ApiError)
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(fetch.mock.calls[1][1]?.headers).toEqual({
+      'Content-Type': 'application/json',
+      'X-Messenger-CSRF': '1',
+      'X-Messenger-User': session.user.id,
+      'X-Messenger-Device': session.deviceId,
+    })
+  })
+
+  it('decodes active sessions strictly', async () => {
+    const respond = (body: unknown) =>
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => Response.json(body)),
+      )
+    respond({ sessions: [active] })
+    await expect(authenticated.sessions()).resolves.toEqual([active])
+    for (const body of [
+      { sessions: [{ ...active, id: 'A'.repeat(64) }] },
+      { sessions: [{ ...active, deviceLabel: '' }] },
+      { sessions: [{ ...active, lastUsedAt: 'yesterday' }] },
+      { sessions: [{ ...active, token: 'secret' }] },
+      { sessions: [active, active] },
+      { sessions: [active, { ...active, id: 'b'.repeat(64) }] },
+      { sessions: null },
+    ]) {
+      respond(body)
+      await expect(authenticated.sessions()).rejects.toThrow('Invalid response from server')
+    }
+    respond({ revokedSessions: 2 })
+    await expect(authenticated.revokeOtherSessions()).resolves.toBe(2)
+    respond({ revokedSessions: -1 })
+    await expect(authenticated.revokeOtherSessions()).rejects.toThrow(
+      'Invalid response from server',
+    )
+  })
 })

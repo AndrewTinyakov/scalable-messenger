@@ -138,7 +138,7 @@ test('chat features preserve live state, human reads, mutation recovery and glob
   await saved(authorSocket, readerSocket, { chatId: group.id }, 'A group message');
   assert.equal(await status(`/chats/${group.id}`, reader.cookie, 'DELETE'), 403);
   outsiderSocket.send({ type: 'watch_presence', chatId: group.id, userIds: [author.user.id] });
-  await outsiderSocket.waitFor((frame) => frame.type === 'error' && frame.code === 'unauthorized');
+  await outsiderSocket.waitFor((frame) => frame.type === 'error' && frame.code === 'UNAUTHORIZED');
   await api(`/chats/${group.id}`, { cookie: author.cookie, method: 'DELETE' });
   for (const client of [authorSocket, readerSocket]) await client.waitFor((frame) => frame.type === 'chat_deleted' && frame.chatId === group.id);
   assert.equal(await status(`/chats/${group.id}/messages`, reader.cookie), 404);

@@ -2,9 +2,9 @@ package com.andrewtinyakov.messenger.message.web.controller
 
 import com.andrewtinyakov.messenger.auth.model.AuthenticatedSession
 import com.andrewtinyakov.messenger.chat.model.ChatId
-import com.andrewtinyakov.messenger.message.change.service.MessageMutationService
 import com.andrewtinyakov.messenger.message.model.MessageId
 import com.andrewtinyakov.messenger.message.service.MessageHistoryService
+import com.andrewtinyakov.messenger.message.service.MessageMutationService
 import com.andrewtinyakov.messenger.message.web.payload.EditMessageRequest
 import com.andrewtinyakov.messenger.message.web.payload.MessageAroundResponse
 import com.andrewtinyakov.messenger.message.web.payload.MessageChangesResponse
@@ -12,8 +12,7 @@ import com.andrewtinyakov.messenger.message.web.payload.MessageHistoryResponse
 import com.andrewtinyakov.messenger.message.web.payload.MessageResolveRequest
 import com.andrewtinyakov.messenger.message.web.payload.MessageResolveResponse
 import com.andrewtinyakov.messenger.message.web.payload.MessageResponse
-import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
-import com.andrewtinyakov.messenger.shared.web.badRequest
+import com.andrewtinyakov.messenger.shared.web.invalidInput
 import com.andrewtinyakov.messenger.shared.web.parseSequence
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
@@ -69,7 +68,7 @@ class MessageController(
         chatId = ChatId.parse(id),
         userId = session.userId,
         messageId = messageId?.let(MessageId::parse),
-        anchorSequence = anchorSequence?.let { sequence(it, positive = true) },
+        anchorSequence = anchorSequence?.let { sequence("anchorSequence", it, positive = true) },
         limit = limit,
     )
 
@@ -90,12 +89,12 @@ class MessageController(
     fun changes(
         session: AuthenticatedSession,
         @PathVariable id: String,
-        @RequestParam afterRevision: String,
+        @RequestParam afterSeq: String,
         @RequestParam(defaultValue = "100") limit: Int,
     ): MessageChangesResponse = messageHistoryService.changes(
         chatId = ChatId.parse(id),
         userId = session.userId,
-        after = sequence(afterRevision),
+        after = sequence("afterSeq", afterSeq),
         limit = limit,
     )
 
@@ -108,20 +107,20 @@ class MessageController(
         @RequestParam(defaultValue = "50") limit: Int,
     ): MessageHistoryResponse {
         val chatId = ChatId.parse(id)
-        if (afterSeq != null && beforeSeq != null) badRequest(ApiErrorCode.INVALID_SEQUENCE, "Use either afterSeq or beforeSeq")
+        if (afterSeq != null && beforeSeq != null) invalidInput(null, "Use either afterSeq or beforeSeq")
         return messageHistoryService.messages(
             chatId = chatId,
             userId = session.userId,
-            afterSeq = afterSeq?.let { sequence(it) },
-            beforeSeq = beforeSeq?.let { sequence(it, positive = true) },
+            afterSeq = afterSeq?.let { sequence("afterSeq", it) },
+            beforeSeq = beforeSeq?.let { sequence("beforeSeq", it, positive = true) },
             limit = limit,
         )
     }
 
-    private fun sequence(value: String, positive: Boolean = false): Long =
-        parseSequence(value)?.takeIf { !positive || it > 0 } ?: badRequest(ApiErrorCode.INVALID_SEQUENCE, "Invalid decimal sequence")
+    private fun sequence(field: String, value: String, positive: Boolean = false): Long =
+        parseSequence(value)?.takeIf { !positive || it > 0 } ?: invalidInput(field, "$field must be a decimal sequence")
 
     private fun messageVersion(value: String): Long =
         parseSequence(value)?.takeIf { it > 0 }
-            ?: badRequest(ApiErrorCode.INVALID_REQUEST, "expectedVersion must be a positive decimal integer")
+            ?: invalidInput("expectedVersion", "expectedVersion must be a positive decimal integer")
 }

@@ -9,7 +9,7 @@ import (
 
 func TestReplayCoalescesRecoveryHintsWithoutCrossingControlEvents(t *testing.T) {
 	hint := func(chat, sequence, revision, position string) redisroom.Live {
-		return redisroom.Live{StreamID: position, Event: protocol.Event{Type: protocol.EventHistoryChanged, ChatID: chat, Sequence: sequence, MutationRevision: revision, VisibilityRevision: "0", StreamID: position}}
+		return redisroom.Live{StreamID: position, Event: protocol.Event{Type: protocol.EventHistoryChanged, ChatID: chat, Sequence: sequence, Seq: revision, StreamID: position}}
 	}
 	items := []redisroom.Live{
 		hint("a", "9007199254740993", "9", "1-0"),
@@ -19,7 +19,7 @@ func TestReplayCoalescesRecoveryHintsWithoutCrossingControlEvents(t *testing.T) 
 		hint("a", "10", "11", "5-0"),
 	}
 	result := coalesceHistoryHints(items)
-	if len(result) != 4 || result[0].Event.ChatID != "b" || result[1].StreamID != "3-0" || result[1].Event.Sequence != "9007199254740993" || result[1].Event.MutationRevision != "10" || result[2].Event.Type != protocol.EventMemberRemoved || result[3].StreamID != "5-0" {
+	if len(result) != 4 || result[0].Event.ChatID != "b" || result[1].StreamID != "3-0" || result[1].Event.Sequence != "9007199254740993" || result[1].Event.Seq != "10" || result[2].Event.Type != protocol.EventMemberRemoved || result[3].StreamID != "5-0" {
 		t.Fatalf("unexpected replay: %+v", result)
 	}
 }

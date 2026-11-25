@@ -54,9 +54,6 @@ func validateFeatureEvent(e Event) error {
 	if e.ForwardedFromUserID != "" && (e.Type != EventMessageSaved || !ValidULID(e.ForwardedFromUserID)) {
 		return errors.New("invalid forwarded author")
 	}
-	if e.Type != EventHistoryChanged && e.VisibilityRevision != "" {
-		return errors.New("unexpected visibility revision")
-	}
 	if e.Type == EventHistoryChanged {
 		if e.MessageVersion != "" || e.EditedAt != "" || e.DeletedAt != "" || e.ReplyToMessageID != "" || e.ReplySenderID != "" || e.ReplyBody != "" || e.ReplyDeleted != nil || e.ReplyVersion != "" {
 			return errors.New("unexpected history change metadata")
@@ -64,7 +61,7 @@ func validateFeatureEvent(e Event) error {
 		return nil
 	}
 	if e.Type != EventMessageSaved && e.Type != EventMessageChanged {
-		if e.MessageVersion != "" || e.MutationRevision != "" || e.EditedAt != "" || e.DeletedAt != "" || e.ReplyToMessageID != "" || e.ReplySenderID != "" || e.ReplyBody != "" || e.ReplyDeleted != nil || e.ReplyVersion != "" {
+		if e.MessageVersion != "" || e.EditedAt != "" || e.DeletedAt != "" || e.ReplyToMessageID != "" || e.ReplySenderID != "" || e.ReplyBody != "" || e.ReplyDeleted != nil || e.ReplyVersion != "" {
 			return errors.New("unexpected message metadata")
 		}
 		return nil
@@ -72,7 +69,7 @@ func validateFeatureEvent(e Event) error {
 	if e.MessageVersion != "" && (!validSequence(e.MessageVersion) || e.MessageVersion == "0") {
 		return errors.New("invalid message version")
 	}
-	if e.Type == EventMessageSaved && (e.MutationRevision != "" || e.EditedAt != "" || e.DeletedAt != "") {
+	if e.Type == EventMessageSaved && (e.EditedAt != "" || e.DeletedAt != "") {
 		return errors.New("unexpected mutation metadata")
 	}
 	if e.ReplyToMessageID == "" {
@@ -91,7 +88,7 @@ func validateFeatureEvent(e Event) error {
 }
 
 func validateChangedMessage(e Event) error {
-	if !ValidULID(e.ChatID) || !ValidULID(e.MessageID) || !ValidULID(e.SenderID) || e.RequestID != "" || e.RecipientID != "" || e.Reason != "" || !validSequence(e.Sequence) || e.Sequence == "0" || !validSequence(e.MessageVersion) || e.MessageVersion == "0" || !validSequence(e.MutationRevision) || e.MutationRevision == "0" || utf8.RuneCountInString(e.Body) > 4000 {
+	if !ValidULID(e.ChatID) || !ValidULID(e.MessageID) || !ValidULID(e.SenderID) || e.RequestID != "" || e.RecipientID != "" || e.Reason != "" || !validSequence(e.Sequence) || e.Sequence == "0" || !validSequence(e.MessageVersion) || e.MessageVersion == "0" || !validCounter(e.Seq) || utf8.RuneCountInString(e.Body) > 4000 {
 		return errors.New("invalid changed message")
 	}
 	if (e.DeletedAt != "") != (e.Body == "") {

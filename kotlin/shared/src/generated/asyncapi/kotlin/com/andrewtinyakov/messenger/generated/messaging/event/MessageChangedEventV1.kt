@@ -13,7 +13,6 @@ data class MessageChangedEventV1(
     val body: String,
     val createdAt: java.time.OffsetDateTime,
     val messageVersion: String,
-    val mutationRevision: String,
     val editedAt: java.time.OffsetDateTime? = null,
     val deletedAt: java.time.OffsetDateTime? = null,
     val replyToMessageId: String? = null,
@@ -21,6 +20,7 @@ data class MessageChangedEventV1(
     val replyBody: String? = null,
     val replyDeleted: Boolean? = null,
     val replyVersion: String? = null,
+    val seq: String,
 ) {
     init {
         require(type == "message_changed" && version == 1)
@@ -37,7 +37,6 @@ data class MessageChangedEventV1(
             body: String,
             createdAt: java.time.OffsetDateTime,
             messageVersion: String,
-            mutationRevision: String,
             editedAt: java.time.OffsetDateTime? = null,
             deletedAt: java.time.OffsetDateTime? = null,
             replyToMessageId: String? = null,
@@ -45,6 +44,7 @@ data class MessageChangedEventV1(
             replyBody: String? = null,
             replyDeleted: Boolean? = null,
             replyVersion: String? = null,
+            seq: String,
         ): MessageChangedEventV1 = MessageChangedEventV1(
             type = RoomEventType.MESSAGE_CHANGED.value,
             version = 1,
@@ -57,7 +57,6 @@ data class MessageChangedEventV1(
             body = body,
             createdAt = createdAt,
             messageVersion = messageVersion,
-            mutationRevision = mutationRevision,
             editedAt = editedAt,
             deletedAt = deletedAt,
             replyToMessageId = replyToMessageId,
@@ -65,6 +64,7 @@ data class MessageChangedEventV1(
             replyBody = replyBody,
             replyDeleted = replyDeleted,
             replyVersion = replyVersion,
+            seq = seq,
         )
     }
 }

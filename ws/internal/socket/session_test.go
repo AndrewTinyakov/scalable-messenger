@@ -31,6 +31,21 @@ func (fn sessionAuthorizerFunc) ValidateSession(ctx context.Context, token strin
 	return fn(ctx, token)
 }
 
+func (fn sessionAuthorizerFunc) ValidateSessions(ctx context.Context, sessionIDs []string) (map[string]grpcauth.Session, error) {
+	sessions := make(map[string]grpcauth.Session, len(sessionIDs))
+	for _, id := range sessionIDs {
+		session, err := fn(ctx, id)
+		if errors.Is(err, grpcauth.ErrUnauthorized) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		sessions[id] = session
+	}
+	return sessions, nil
+}
+
 type handshakeLimiterFunc func(context.Context, string, int, time.Duration) (bool, error)
 
 func (fn handshakeLimiterFunc) AllowHandshake(ctx context.Context, userID string, limit int, window time.Duration) (bool, error) {

@@ -17,8 +17,8 @@ describe('ChatRecovery history', () => {
         snapshotSequence: end,
         coverageAfterSequence: '0',
         coverageThroughSequence: end,
-        mutationRevision: '0',
-        visibilityRevision: '0',
+        mutationSeq: '0',
+        visibilitySeq: '0',
         clearedThroughSequence: '0',
         globalClearedThroughSequence: '0',
       })
@@ -82,8 +82,8 @@ describe('ChatRecovery history', () => {
         snapshotSequence: '1',
         coverageAfterSequence: '0',
         coverageThroughSequence: '1',
-        mutationRevision: '0',
-        visibilityRevision: '0',
+        mutationSeq: '0',
+        visibilitySeq: '0',
         clearedThroughSequence: '0',
         globalClearedThroughSequence: '0',
       }),
@@ -113,8 +113,8 @@ describe('ChatRecovery history', () => {
   it('lets a live arrival satisfy a slightly newer visibility snapshot before fetching history', async () => {
     const metadata = {
       snapshotSequence: '1',
-      mutationRevision: '0',
-      visibilityRevision: '0',
+      mutationSeq: '0',
+      visibilitySeq: '0',
       clearedThroughSequence: '0',
       globalClearedThroughSequence: '0',
     }
@@ -150,8 +150,8 @@ describe('ChatRecovery history', () => {
   it('coalesces a saturated 60-frame live burst and recovers its final message after capacity returns', async () => {
     const metadata = {
       snapshotSequence: '1',
-      mutationRevision: '0',
-      visibilityRevision: '0',
+      mutationSeq: '0',
+      visibilitySeq: '0',
       clearedThroughSequence: '0',
       globalClearedThroughSequence: '0',
     }

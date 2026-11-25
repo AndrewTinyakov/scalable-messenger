@@ -1,5 +1,11 @@
 server:
   port: 8080
+  forward-headers-strategy: native
+  tomcat:
+    remoteip:
+      internal-proxies: ${MESSENGER_HTTP_PROXY_PATTERN:127\.0\.0\.1}
+      remote-ip-header: X-Forwarded-For
+      protocol-header: X-Forwarded-Proto
 spring:
   application:
     name: messenger-api
@@ -26,11 +32,15 @@ spring:
       enabled: true
   datasource:
     url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/messenger}
-    username: ${DATABASE_USER:messenger}
-    password: ${DATABASE_PASSWORD:messenger}
+    username: ${DATABASE_USER}
+    password: ${DATABASE_PASSWORD}
     hikari:
       data-source-properties:
         ApplicationName: messenger-api
+        # Each entry point tags its statements, so one query shape can appear with a few
+        # different comments. Keep enough server-prepared statements cached for all of them.
+        preparedStatementCacheQueries: 1024
+        preparedStatementCacheSizeMiB: 16
   flyway:
     enabled: true
   jooq:
@@ -55,9 +65,10 @@ messenger:
     cert-file: ${MESSENGER_GRPC_CERT_FILE:}
     key-file: ${MESSENGER_GRPC_KEY_FILE:}
     allowed-client-identity: ${MESSENGER_GRPC_ALLOWED_CLIENT_IDENTITY:spiffe://messenger/ws}
+  ws:
+    ticket-secret: ${WS_TICKET_SECRET}
   auth:
     cookie-secure: ${SESSION_COOKIE_SECURE:true}
-    ws-ticket-secret: ${WS_TICKET_SECRET}
     password:
       id-for-encode: pbkdf2-sha256-600000
       pbkdf2:

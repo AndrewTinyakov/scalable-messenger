@@ -21,6 +21,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	ChatAuthorization_AuthorizeSidebar_FullMethodName  = "/messenger.authorization.v1.ChatAuthorization/AuthorizeSidebar"
 	ChatAuthorization_ValidateSession_FullMethodName   = "/messenger.authorization.v1.ChatAuthorization/ValidateSession"
+	ChatAuthorization_ValidateSessions_FullMethodName  = "/messenger.authorization.v1.ChatAuthorization/ValidateSessions"
 	ChatAuthorization_AuthorizeGroup_FullMethodName    = "/messenger.authorization.v1.ChatAuthorization/AuthorizeGroup"
 	ChatAuthorization_AuthorizeGroups_FullMethodName   = "/messenger.authorization.v1.ChatAuthorization/AuthorizeGroups"
 	ChatAuthorization_AuthorizePresence_FullMethodName = "/messenger.authorization.v1.ChatAuthorization/AuthorizePresence"
@@ -32,6 +33,7 @@ const (
 type ChatAuthorizationClient interface {
 	AuthorizeSidebar(ctx context.Context, in *AuthorizeSidebarRequest, opts ...grpc.CallOption) (*AuthorizeSidebarResponse, error)
 	ValidateSession(ctx context.Context, in *ValidateSessionRequest, opts ...grpc.CallOption) (*ValidateSessionResponse, error)
+	ValidateSessions(ctx context.Context, in *ValidateSessionsRequest, opts ...grpc.CallOption) (*ValidateSessionsResponse, error)
 	AuthorizeGroup(ctx context.Context, in *AuthorizeGroupRequest, opts ...grpc.CallOption) (*AuthorizeGroupResponse, error)
 	AuthorizeGroups(ctx context.Context, in *AuthorizeGroupsRequest, opts ...grpc.CallOption) (*AuthorizeGroupsResponse, error)
 	AuthorizePresence(ctx context.Context, in *AuthorizePresenceRequest, opts ...grpc.CallOption) (*AuthorizePresenceResponse, error)
@@ -59,6 +61,16 @@ func (c *chatAuthorizationClient) ValidateSession(ctx context.Context, in *Valid
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ValidateSessionResponse)
 	err := c.cc.Invoke(ctx, ChatAuthorization_ValidateSession_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *chatAuthorizationClient) ValidateSessions(ctx context.Context, in *ValidateSessionsRequest, opts ...grpc.CallOption) (*ValidateSessionsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ValidateSessionsResponse)
+	err := c.cc.Invoke(ctx, ChatAuthorization_ValidateSessions_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -101,6 +113,7 @@ func (c *chatAuthorizationClient) AuthorizePresence(ctx context.Context, in *Aut
 type ChatAuthorizationServer interface {
 	AuthorizeSidebar(context.Context, *AuthorizeSidebarRequest) (*AuthorizeSidebarResponse, error)
 	ValidateSession(context.Context, *ValidateSessionRequest) (*ValidateSessionResponse, error)
+	ValidateSessions(context.Context, *ValidateSessionsRequest) (*ValidateSessionsResponse, error)
 	AuthorizeGroup(context.Context, *AuthorizeGroupRequest) (*AuthorizeGroupResponse, error)
 	AuthorizeGroups(context.Context, *AuthorizeGroupsRequest) (*AuthorizeGroupsResponse, error)
 	AuthorizePresence(context.Context, *AuthorizePresenceRequest) (*AuthorizePresenceResponse, error)
@@ -119,6 +132,9 @@ func (UnimplementedChatAuthorizationServer) AuthorizeSidebar(context.Context, *A
 }
 func (UnimplementedChatAuthorizationServer) ValidateSession(context.Context, *ValidateSessionRequest) (*ValidateSessionResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ValidateSession not implemented")
+}
+func (UnimplementedChatAuthorizationServer) ValidateSessions(context.Context, *ValidateSessionsRequest) (*ValidateSessionsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ValidateSessions not implemented")
 }
 func (UnimplementedChatAuthorizationServer) AuthorizeGroup(context.Context, *AuthorizeGroupRequest) (*AuthorizeGroupResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AuthorizeGroup not implemented")
@@ -182,6 +198,24 @@ func _ChatAuthorization_ValidateSession_Handler(srv interface{}, ctx context.Con
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ChatAuthorizationServer).ValidateSession(ctx, req.(*ValidateSessionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ChatAuthorization_ValidateSessions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ValidateSessionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatAuthorizationServer).ValidateSessions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChatAuthorization_ValidateSessions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatAuthorizationServer).ValidateSessions(ctx, req.(*ValidateSessionsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -254,6 +288,10 @@ var ChatAuthorization_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ValidateSession",
 			Handler:    _ChatAuthorization_ValidateSession_Handler,
+		},
+		{
+			MethodName: "ValidateSessions",
+			Handler:    _ChatAuthorization_ValidateSessions_Handler,
 		},
 		{
 			MethodName: "AuthorizeGroup",

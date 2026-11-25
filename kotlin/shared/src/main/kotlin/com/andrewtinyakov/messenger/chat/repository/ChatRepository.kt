@@ -3,7 +3,8 @@ package com.andrewtinyakov.messenger.chat.repository
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.Chat
 import com.andrewtinyakov.messenger.chat.model.ChatId
-import com.andrewtinyakov.messenger.infrastructure.outbox.model.OutboxMessage
+import com.andrewtinyakov.messenger.chat.model.MemberChange
+import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxMessage
 
 interface ChatRepository {
     fun existingMemberIds(chatId: ChatId, userIds: List<UserId>): Set<UserId>
@@ -20,9 +21,12 @@ interface ChatRepository {
 
     fun isMember(chatId: ChatId, userId: UserId): Boolean
 
-    fun allocateSequenceForMember(chatId: ChatId, userId: UserId): Long?
+    fun allocateSequencesForMembers(chatId: ChatId, userIds: List<UserId>, recordActivity: Boolean = true): Long?
 
-    fun allocateSequencesForMembers(chatId: ChatId, userIds: List<UserId>): Long?
+    fun allocateEventSequence(chatId: ChatId, actorId: UserId): Long? =
+        allocateSequencesForMembers(chatId, listOf(actorId), recordActivity = false)
+
+    fun allocateMemberSequence(chatId: ChatId, userId: UserId, change: MemberChange): Long?
 
     fun findMemberIds(chatId: ChatId): List<UserId>
 }

@@ -1,0 +1,2312 @@
+{
+  "measuredRevision": "836dc7f84ea29a4c975fe23179821c93d3ca070c",
+  "applicationImageRevision": "e56bc28",
+  "seed": 1118,
+  "runtime": "v24.21.0",
+  "environment": {
+    "host": "Apple M3 Pro, 36 GiB RAM, shared",
+    "dockerCpus": 11,
+    "dockerMemoryGiB": 15.7,
+    "dockerVmPressureAvailable": false
+  },
+  "conditions": "Fresh fixtures and task volumes per run; identical image digests; server collectors may include verification; workload metrics stop at cutoff. Missing sends means planned sends not confirmed SAVED, including undispatched, rejected and pending work. Sharded recipient checks cover only recipients in the sender shard.",
+  "runs": [
+    {
+      "name": "smoke-one",
+      "profile": "smoke",
+      "workers": 1,
+      "pools": {
+        "api": 16,
+        "pgbouncer": 32
+      },
+      "planSha256": "ca8c2298e36f64e536046fa201f2d886e0359efaf6a8a3143b0d920fec6edea8",
+      "passed": true,
+      "correctness": {
+        "plannedSends": 85,
+        "dispatched": 85,
+        "saved": 85,
+        "missing": 0,
+        "pending": 0,
+        "duplicates": 0,
+        "durableChecks": 95,
+        "durableMismatches": 0,
+        "durableUnverified": 0,
+        "mutationChecks": 20,
+        "recipientsExpected": 75,
+        "recipientsMissing": 0,
+        "recipientsInterrupted": 0,
+        "readPropagationExpected": 5,
+        "readPropagationMissing": 0,
+        "readPropagationInterrupted": 0
+      },
+      "sqlSavedDelta": 85,
+      "actionFailures": 0,
+      "trafficFailures": 0,
+      "verificationFailures": 0,
+      "ownAckP99UpperMs": 89.24391699999978,
+      "stages": [],
+      "host": {
+        "load1Minute": {
+          "n": 0
+        },
+        "swapUsedMiB": {
+          "n": 0
+        },
+        "memoryFreePercent": {
+          "n": 0
+        },
+        "before": {
+          "computeExecutionMs": 86.347,
+          "single8KiBfdatasync": {
+            "opsPerSecond": 1225.428,
+            "microsecondsPerOp": 816
+          }
+        },
+        "after": {
+          "computeExecutionMs": 85.196,
+          "single8KiBfdatasync": {
+            "opsPerSecond": 1699.857,
+            "microsecondsPerOp": 588
+          }
+        }
+      },
+      "driverHttpCapacity": 0,
+      "driverCursorMissing": 0,
+      "notDispatched": 0,
+      "driverRejected": 0
+    },
+    {
+      "name": "smoke-two",
+      "profile": "smoke",
+      "workers": 2,
+      "pools": {
+        "api": 16,
+        "pgbouncer": 32
+      },
+      "planSha256": "ca8c2298e36f64e536046fa201f2d886e0359efaf6a8a3143b0d920fec6edea8",
+      "passed": true,
+      "correctness": {
+        "plannedSends": 85,
+        "dispatched": 85,
+        "saved": 85,
+        "missing": 0,
+        "pending": 0,
+        "duplicates": 0,
+        "durableChecks": 93,
+        "durableMismatches": 0,
+        "durableUnverified": 0,
+        "mutationChecks": 18,
+        "recipientsExpected": 46,
+        "recipientsMissing": 0,
+        "recipientsInterrupted": 1,
+        "readPropagationExpected": 1,
+        "readPropagationMissing": 0,
+        "readPropagationInterrupted": 0
+      },
+      "sqlSavedDelta": 85,
+      "actionFailures": 0,
+      "trafficFailures": 0,
+      "verificationFailures": 0,
+      "ownAckP99UpperMs": 110.14066699999967,
+      "stages": [],
+      "host": {
+        "load1Minute": {
+          "n": 0
+        },
+        "swapUsedMiB": {
+          "n": 0
+        },
+        "memoryFreePercent": {
+          "n": 0
+        },
+        "before": {
+          "computeExecutionMs": 104.392,
+          "single8KiBfdatasync": {
+            "opsPerSecond": 1408.231,
+            "microsecondsPerOp": 710
+          }
+        },
+        "after": {
+          "computeExecutionMs": 94.57,
+          "single8KiBfdatasync": {
+            "opsPerSecond": 1565.176,
+            "microsecondsPerOp": 639
+          }
+        }
+      },
+      "driverHttpCapacity": 0,
+      "driverCursorMissing": 0,
+      "notDispatched": 0,
+      "driverRejected": 0
+    },
+    {
+      "name": "1000-a",
+      "profile": "users-1000",
+      "workers": 1,
+      "pools": {
+        "api": 16,
+        "pgbouncer": 32
+      },
+      "planSha256": "33fb6cb8fa3cdf7b177d3d2973781d210c0f912abd563ed5714f02d2100fb41a",
+      "passed": true,
+      "correctness": {
+        "plannedSends": 8285,
+        "dispatched": 8285,
+        "saved": 8285,
+        "missing": 0,
+        "pending": 0,
+        "duplicates": 0,
+        "durableChecks": 8876,
+        "durableMismatches": 0,
+        "durableUnverified": 0,
+        "mutationChecks": 1182,
+        "recipientsExpected": 12466,
+        "recipientsMissing": 0,
+        "recipientsInterrupted": 12,
+        "readPropagationExpected": 129,
+        "readPropagationMissing": 0,
+        "readPropagationInterrupted": 0
+      },
+      "sqlSavedDelta": 8285,
+      "actionFailures": 0,
+      "trafficFailures": 0,
+      "verificationFailures": 0,
+      "ownAckP99UpperMs": 262.144,
+      "stages": [],
+      "host": {
+        "load1Minute": {
+          "n": 38,
+          "min": 2.91,
+          "median": 4.485,
+          "max": 6.86
+        },
+        "swapUsedMiB": {
+          "n": 38,
+          "min": 3517.81,
+          "median": 3517.81,
+          "max": 3517.81
+        },
+        "memoryFreePercent": {
+          "n": 38,
+          "min": 58.0,
+          "median": 59.0,
+          "max": 61.0
+        },
+        "before": {
+          "computeExecutionMs": 85.209,
+          "single8KiBfdatasync": {
+            "opsPerSecond": 870.28,
+            "microsecondsPerOp": 1149
+          }
+        },
+        "after": {
+          "computeExecutionMs": 83.705,
+          "single8KiBfdatasync": {
+            "opsPerSecond": 1521.504,
+            "microsecondsPerOp": 657
+          }
+        }
+      },
+      "driverHttpCapacity": 0,
+      "driverCursorMissing": 0,
+      "notDispatched": 0,
+      "driverRejected": 0
+    },
+    {
+      "name": "stress-a1",
+      "profile": "stress-ramp",
+      "workers": 2,
+      "pools": {
+        "api": 10,
+        "pgbouncer": 20
+      },
+      "planSha256": "2dd46b5f010f9fb1235fdf4a7eacb66d45b3977e0d526e1159de0d82d5087db6",
+      "passed": false,
+      "correctness": {
+        "plannedSends": 79942,
+        "dispatched": 79388,
+        "saved": 78705,
+        "missing": 1237,
+        "pending": 238,
+        "duplicates": 0,
+        "durableChecks": 83342,
+        "durableMismatches": 0,
+        "durableUnverified": 0,
+        "mutationChecks": 10310,
+        "recipientsExpected": 33584,
+        "recipientsMissing": 0,
+        "recipientsInterrupted": 591,
+        "readPropagationExpected": 376,
+        "readPropagationMissing": 0,
+        "readPropagationInterrupted": 13
+      },
+      "sqlSavedDelta": 78705,
+      "actionFailures": 2099,
+      "trafficFailures": 31561,
+      "verificationFailures": 0,
+      "ownAckP99UpperMs": 8388.608,
+      "stages": [
+        {
+          "users": 1000,
+          "p99OwnAckUpperMs": 7024.731040999992,
+          "trafficFailures": 143,
+          "webSocketErrors": 126
+        },
+        {
+          "users": 2000,
+          "p99OwnAckUpperMs": 12405.504041999986,
+          "trafficFailures": 5576,
+          "webSocketErrors": 4687
+        },
+        {
+          "users": 3000,
+          "p99OwnAckUpperMs": 8388.608,
+          "trafficFailures": 2738,
+          "webSocketErrors": 2395
+        },
+        {
+          "users": 4500,
+          "p99OwnAckUpperMs": 1048.576,
+          "trafficFailures": 92,
+          "webSocketErrors": 80
+        },
+        {
+          "users": 6000,
+          "p99OwnAckUpperMs": 4194.304,
+          "trafficFailures": 9273,
+          "webSocketErrors": 8867
+        },
+        {
+          "users": 8000,
+          "p99OwnAckUpperMs": 8202.269666999811,
+          "trafficFailures": 13739,
+          "webSocketErrors": 13247
+        }
+      ],
+      "host": {
+        "load1Minute": {
+          "n": 92,
+          "min": 5.51,
+          "median": 22.91,
+          "max": 47.38
+        },
+        "swapUsedMiB": {
+          "n": 92,
+          "min": 3469.81,
+          "median": 3469.81,
+          "max": 3517.81
+        },
+        "memoryFreePercent": {
+          "n": 92,
+          "min": 42.0,
+          "median": 51.0,
+          "max": 57.0
+        },
+        "before": {
+          "computeExecutionMs": 102.54,
+          "single8KiBfdatasync": {
+            "opsPerSecond": 1006.65,
+            "microsecondsPerOp": 993
+          }
+        },
+        "after": {
+          "computeExecutionMs": 85.926,
+          "single8KiBfdatasync": {
+            "opsPerSecond": 293.247,
+            "microsecondsPerOp": 3410
+          }
+        }
+      },
+      "driverHttpCapacity": 0,
+      "driverCursorMissing": 0,
+      "notDispatched": 554,
+      "driverRejected": 445,
+      "firstFailureStageUsers": 1000
+    },
+    {
+      "name": "stress-b1",
+      "profile": "stress-ramp",
+      "workers": 2,
+      "pools": {
+        "api": 16,
+        "pgbouncer": 32
+      },
+      "planSha256": "2dd46b5f010f9fb1235fdf4a7eacb66d45b3977e0d526e1159de0d82d5087db6",
+      "passed": false,
+      "correctness": {
+        "plannedSends": 79942,
+        "dispatched": 78849,
+        "saved": 77432,
+        "missing": 2510,
+        "pending": 278,
+        "duplicates": 0,
+        "durableChecks": 81718,
+        "durableMismatches": 0,
+        "durableUnverified": 0,
+        "mutationChecks": 9552,
+        "recipientsExpected": 34707,
+        "recipientsMissing": 0,
+        "recipientsInterrupted": 2508,
+        "readPropagationExpected": 371,
+        "readPropagationMissing": 21,
+        "readPropagationInterrupted": 25
+      },
+      "sqlSavedDelta": 77432,
+      "actionFailures": 8775,
+      "trafficFailures": 38733,
+      "verificationFailures": 0,
+      "ownAckP99UpperMs": 8388.608,
+      "stages": [
+        {
+          "users": 1000,
+          "p99OwnAckUpperMs": 262.144,
+          "trafficFailures": 0,
+          "webSocketErrors": 0
+        },
+        {
+          "users": 2000,
+          "p99OwnAckUpperMs": 262.144,
+          "trafficFailures": 0,
+          "webSocketErrors": 0
+        },
+        {
+          "users": 3000,
+          "p99OwnAckUpperMs": 1048.576,
+          "trafficFailures": 2,
+          "webSocketErrors": 0
+        },
+        {
+          "users": 4500,
+          "p99OwnAckUpperMs": 2097.152,
+          "trafficFailures": 58,
+          "webSocketErrors": 58
+        },
+        {
+          "users": 6000,
+          "p99OwnAckUpperMs": 8288.802084000083,
+          "trafficFailures": 6491,
+          "webSocketErrors": 6294
+        },
+        {
+          "users": 8000,
+          "p99OwnAckUpperMs": 49250.46775000007,
+          "trafficFailures": 32182,
+          "webSocketErrors": 23505
+        }
+      ],
+      "host": {
+        "load1Minute": {
+          "n": 92,
+          "min": 4.05,
+          "median": 8.655,
+          "max": 41.07
+        },
+        "swapUsedMiB": {
+          "n": 92,
+          "min": 3421.81,
+          "median": 3469.81,
+          "max": 3469.81
+        },
+        "memoryFreePercent": {
+          "n": 92,
+          "min": 44.0,
+          "median": 54.0,
+          "max": 63.0
+        },
+        "before": {
+          "computeExecutionMs": 90.202,
+          "single8KiBfdatasync": {
+            "opsPerSecond": 799.362,
+            "microsecondsPerOp": 1251
+          }
+        },
+        "after": {
+          "computeExecutionMs": 87.745,
+          "single8KiBfdatasync": {
+            "opsPerSecond": 773.858,
+            "microsecondsPerOp": 1292
+          }
+        }
+      },
+      "driverHttpCapacity": 928,
+      "driverCursorMissing": 0,
+      "notDispatched": 1093,
+      "driverRejected": 1139,
+      "firstFailureStageUsers": 3000
+    },
+    {
+      "name": "1000-b",
+      "profile": "users-1000",
+      "workers": 1,
+      "pools": {
+        "api": 16,
+        "pgbouncer": 32
+      },
+      "planSha256": "33fb6cb8fa3cdf7b177d3d2973781d210c0f912abd563ed5714f02d2100fb41a",
+      "passed": true,
+      "correctness": {
+        "plannedSends": 8285,
+        "dispatched": 8285,
+        "saved": 8285,
+        "missing": 0,
+        "pending": 0,
+        "duplicates": 0,
+        "durableChecks": 8876,
+        "durableMismatches": 0,
+        "durableUnverified": 0,
+        "mutationChecks": 1182,
+        "recipientsExpected": 12467,
+        "recipientsMissing": 0,
+        "recipientsInterrupted": 11,
+        "readPropagationExpected": 129,
+        "readPropagationMissing": 0,
+        "readPropagationInterrupted": 0
+      },
+      "sqlSavedDelta": 8285,
+      "actionFailures": 0,
+      "trafficFailures": 0,
+      "verificationFailures": 0,
+      "ownAckP99UpperMs": 131.072,
+      "stages": [],
+      "host": {
+        "load1Minute": {
+          "n": 38,
+          "min": 4.51,
+          "median": 6.24,
+          "max": 7.78
+        },
+        "swapUsedMiB": {
+          "n": 38,
+          "min": 3413.81,
+          "median": 3413.81,
+          "max": 3421.81
+        },
+        "memoryFreePercent": {
+          "n": 38,
+          "min": 69.0,
+          "median": 71.0,
+          "max": 73.0
+        },
+        "before": {
+          "computeExecutionMs": 94.716,
+          "single8KiBfdatasync": {
+            "opsPerSecond": 353.033,
+            "microsecondsPerOp": 2833
+          }
+        },
+        "after": {
+          "computeExecutionMs": 86.591,
+          "single8KiBfdatasync": {
+            "opsPerSecond": 1494.233,
+            "microsecondsPerOp": 669
+          }
+        }
+      },
+      "driverHttpCapacity": 0,
+      "driverCursorMissing": 0,
+      "notDispatched": 0,
+      "driverRejected": 0
+    },
+    {
+      "name": "stress-b2",
+      "profile": "stress-ramp",
+      "workers": 2,
+      "pools": {
+        "api": 16,
+        "pgbouncer": 32
+      },
+      "planSha256": "2dd46b5f010f9fb1235fdf4a7eacb66d45b3977e0d526e1159de0d82d5087db6",
+      "passed": false,
+      "correctness": {
+        "plannedSends": 79942,
+        "dispatched": 79905,
+        "saved": 79876,
+        "missing": 66,
+        "pending": 14,
+        "duplicates": 0,
+        "durableChecks": 84574,
+        "durableMismatches": 0,
+        "durableUnverified": 0,
+        "mutationChecks": 10448,
+        "recipientsExpected": 45702,
+        "recipientsMissing": 0,
+        "recipientsInterrupted": 1618,
+        "readPropagationExpected": 438,
+        "readPropagationMissing": 4,
+        "readPropagationInterrupted": 22
+      },
+      "sqlSavedDelta": 79876,
+      "actionFailures": 84,
+      "trafficFailures": 5526,
+      "verificationFailures": 0,
+      "ownAckP99UpperMs": 8330.05241600005,
+      "stages": [
+        {
+          "users": 1000,
+          "p99OwnAckUpperMs": 262.144,
+          "trafficFailures": 0,
+          "webSocketErrors": 0
+        },
+        {
+          "users": 2000,
+          "p99OwnAckUpperMs": 1048.576,
+          "trafficFailures": 4,
+          "webSocketErrors": 4
+        },
+        {
+          "users": 3000,
+          "p99OwnAckUpperMs": 262.144,
+          "trafficFailures": 1,
+          "webSocketErrors": 0
+        },
+        {
+          "users": 4500,
+          "p99OwnAckUpperMs": 262.144,
+          "trafficFailures": 36,
+          "webSocketErrors": 36
+        },
+        {
+          "users": 6000,
+          "p99OwnAckUpperMs": 8330.05241600005,
+          "trafficFailures": 1022,
+          "webSocketErrors": 1008
+        },
+        {
+          "users": 8000,
+          "p99OwnAckUpperMs": 8191.776042000158,
+          "trafficFailures": 4463,
+          "webSocketErrors": 4394
+        }
+      ],
+      "host": {
+        "load1Minute": {
+          "n": 92,
+          "min": 4.62,
+          "median": 8.004999999999999,
+          "max": 19.77
+        },
+        "swapUsedMiB": {
+          "n": 92,
+          "min": 3413.81,
+          "median": 3413.81,
+          "max": 3413.81
+        },
+        "memoryFreePercent": {
+          "n": 92,
+          "min": 54.0,
+          "median": 60.0,
+          "max": 68.0
+        },
+        "before": {
+          "computeExecutionMs": 100.64,
+          "single8KiBfdatasync": {
+            "opsPerSecond": 851.538,
+            "microsecondsPerOp": 1174
+          }
+        },
+        "after": {
+          "computeExecutionMs": 84.418,
+          "single8KiBfdatasync": {
+            "opsPerSecond": 1648.291,
+            "microsecondsPerOp": 607
+          }
+        }
+      },
+      "driverHttpCapacity": 0,
+      "driverCursorMissing": 0,
+      "notDispatched": 37,
+      "driverRejected": 15,
+      "firstFailureStageUsers": 2000
+    },
+    {
+      "name": "stress-a2",
+      "profile": "stress-ramp",
+      "workers": 2,
+      "pools": {
+        "api": 10,
+        "pgbouncer": 20
+      },
+      "planSha256": "2dd46b5f010f9fb1235fdf4a7eacb66d45b3977e0d526e1159de0d82d5087db6",
+      "passed": false,
+      "correctness": {
+        "plannedSends": 79942,
+        "dispatched": 76212,
+        "saved": 68212,
+        "missing": 11730,
+        "pending": 1609,
+        "duplicates": 0,
+        "durableChecks": 72248,
+        "durableMismatches": 0,
+        "durableUnverified": 0,
+        "mutationChecks": 9016,
+        "recipientsExpected": 20004,
+        "recipientsMissing": 0,
+        "recipientsInterrupted": 680,
+        "readPropagationExpected": 305,
+        "readPropagationMissing": 8,
+        "readPropagationInterrupted": 32
+      },
+      "sqlSavedDelta": 68212,
+      "actionFailures": 20369,
+      "trafficFailures": 123776,
+      "verificationFailures": 0,
+      "ownAckP99UpperMs": 12136.904917000094,
+      "stages": [
+        {
+          "users": 1000,
+          "p99OwnAckUpperMs": 524.288,
+          "trafficFailures": 0,
+          "webSocketErrors": 0
+        },
+        {
+          "users": 2000,
+          "p99OwnAckUpperMs": 262.144,
+          "trafficFailures": 0,
+          "webSocketErrors": 0
+        },
+        {
+          "users": 3000,
+          "p99OwnAckUpperMs": 262.144,
+          "trafficFailures": 0,
+          "webSocketErrors": 0
+        },
+        {
+          "users": 4500,
+          "p99OwnAckUpperMs": 1900.0783749999246,
+          "trafficFailures": 183,
+          "webSocketErrors": 182
+        },
+        {
+          "users": 6000,
+          "p99OwnAckUpperMs": 12136.904917000094,
+          "trafficFailures": 59013,
+          "webSocketErrors": 49760
+        },
+        {
+          "users": 8000,
+          "p99OwnAckUpperMs": 11983.302709000185,
+          "trafficFailures": 64580,
+          "webSocketErrors": 52293
+        }
+      ],
+      "host": {
+        "load1Minute": {
+          "n": 92,
+          "min": 3.52,
+          "median": 6.995,
+          "max": 25.71
+        },
+        "swapUsedMiB": {
+          "n": 92,
+          "min": 3413.81,
+          "median": 3413.81,
+          "max": 3413.81
+        },
+        "memoryFreePercent": {
+          "n": 92,
+          "min": 47.0,
+          "median": 60.0,
+          "max": 68.0
+        },
+        "before": {
+          "computeExecutionMs": 92.105,
+          "single8KiBfdatasync": {
+            "opsPerSecond": 427.551,
+            "microsecondsPerOp": 2339
+          }
+        },
+        "after": {
+          "computeExecutionMs": 90.363,
+          "single8KiBfdatasync": {
+            "opsPerSecond": 1033.551,
+            "microsecondsPerOp": 968
+          }
+        }
+      },
+      "driverHttpCapacity": 4752,
+      "driverCursorMissing": 7,
+      "notDispatched": 3730,
+      "driverRejected": 6391,
+      "firstFailureStageUsers": 4500
+    }
+  ],
+  "history": [
+    {
+      "name": "smoke",
+      "profile": "smoke",
+      "revision": "Early benchmark, revision unpinned",
+      "corrected": false,
+      "date": "2026-11-18T20:10:30.093859+00:00",
+      "passed": false,
+      "pool": null,
+      "api": null,
+      "http": 1703,
+      "ack": 76.90133399999468,
+      "failure": 131,
+      "saved": 62,
+      "planned": 71,
+      "missing": 9,
+      "reads": 0,
+      "mismatches": 0,
+      "unverified": null,
+      "stages": [],
+      "sql": null
+    },
+    {
+      "name": "smoke-v2",
+      "profile": "smoke",
+      "revision": "Early benchmark, revision unpinned",
+      "corrected": false,
+      "date": "2026-11-18T20:14:54.144279+00:00",
+      "passed": true,
+      "pool": null,
+      "api": null,
+      "http": 1517,
+      "ack": 53.70941699999821,
+      "failure": 0,
+      "saved": 65,
+      "planned": 65,
+      "missing": 0,
+      "reads": 0,
+      "mismatches": 0,
+      "unverified": null,
+      "stages": [],
+      "sql": null
+    },
+    {
+      "name": "users-200",
+      "profile": "users-200",
+      "revision": "Early benchmark, revision unpinned",
+      "corrected": false,
+      "date": "2026-11-18T20:25:27.745823+00:00",
+      "passed": true,
+      "pool": null,
+      "api": null,
+      "http": 32926,
+      "ack": 65.536,
+      "failure": 0,
+      "saved": 1616,
+      "planned": 1616,
+      "missing": 0,
+      "reads": 2,
+      "mismatches": 0,
+      "unverified": null,
+      "stages": [],
+      "sql": null
+    },
+    {
+      "name": "smoke-final",
+      "profile": "smoke",
+      "revision": "Early benchmark, revision unpinned",
+      "corrected": false,
+      "date": "2026-11-18T20:27:48.080015+00:00",
+      "passed": true,
+      "pool": null,
+      "api": null,
+      "http": 1663,
+      "ack": 58.08987500000512,
+      "failure": 0,
+      "saved": 65,
+      "planned": 65,
+      "missing": 0,
+      "reads": 0,
+      "mismatches": 0,
+      "unverified": null,
+      "stages": [],
+      "sql": null
+    },
+    {
+      "name": "review-smoke",
+      "profile": "smoke",
+      "revision": "Early benchmark, revision unpinned",
+      "corrected": false,
+      "date": "2026-11-18T20:34:01.217684+00:00",
+      "passed": true,
+      "pool": null,
+      "api": null,
+      "http": 2025,
+      "ack": 60.70137499998964,
+      "failure": 0,
+      "saved": 85,
+      "planned": 85,
+      "missing": 0,
+      "reads": 0,
+      "mismatches": 0,
+      "unverified": null,
+      "stages": [],
+      "sql": null
+    },
+    {
+      "name": "users-1000",
+      "profile": "users-1000",
+      "revision": "Early benchmark, revision unpinned",
+      "corrected": false,
+      "date": "2026-11-18T20:37:46.401267+00:00",
+      "passed": false,
+      "pool": null,
+      "api": null,
+      "http": 191364,
+      "ack": 131.072,
+      "failure": 2,
+      "saved": 8285,
+      "planned": 8285,
+      "missing": 0,
+      "reads": 2,
+      "mismatches": 0,
+      "unverified": null,
+      "stages": [],
+      "sql": null
+    },
+    {
+      "name": "fixed-smoke",
+      "profile": "smoke",
+      "revision": "Early benchmark, revision unpinned",
+      "corrected": false,
+      "date": "2026-11-18T21:33:33.252742+00:00",
+      "passed": true,
+      "pool": null,
+      "api": null,
+      "http": 1630,
+      "ack": 106.70091599999978,
+      "failure": 0,
+      "saved": 78,
+      "planned": 78,
+      "missing": 0,
+      "reads": 0,
+      "mismatches": 0,
+      "unverified": null,
+      "stages": [],
+      "sql": null
+    },
+    {
+      "name": "fixed-1000",
+      "profile": "users-1000",
+      "revision": "Earlier driver repair",
+      "corrected": false,
+      "date": "2026-11-18T21:36:32.691542+00:00",
+      "passed": true,
+      "pool": null,
+      "api": null,
+      "http": 129845,
+      "ack": 65.536,
+      "failure": 0,
+      "saved": 8285,
+      "planned": 8285,
+      "missing": 0,
+      "reads": 2,
+      "mismatches": 0,
+      "unverified": null,
+      "stages": [],
+      "sql": null
+    },
+    {
+      "name": "fixed2-smoke",
+      "profile": "smoke",
+      "revision": "Early benchmark, revision unpinned",
+      "corrected": false,
+      "date": "2026-11-18T21:51:23.269450+00:00",
+      "passed": true,
+      "pool": null,
+      "api": null,
+      "http": 1670,
+      "ack": 57.07329200000095,
+      "failure": 0,
+      "saved": 70,
+      "planned": 70,
+      "missing": 0,
+      "reads": 0,
+      "mismatches": 0,
+      "unverified": null,
+      "stages": [],
+      "sql": null
+    },
+    {
+      "name": "final-1000",
+      "profile": "users-1000",
+      "revision": "Earlier baseline, revision unpinned",
+      "corrected": false,
+      "date": "2026-11-18T22:05:22.423547+00:00",
+      "passed": true,
+      "pool": null,
+      "api": 129004.48009702878,
+      "http": 129692,
+      "ack": 65.536,
+      "failure": 0,
+      "saved": 8285,
+      "planned": 8285,
+      "missing": 0,
+      "reads": 0,
+      "mismatches": 0,
+      "unverified": null,
+      "stages": [],
+      "sql": 45.99366223299956
+    },
+    {
+      "name": "stress",
+      "profile": "stress-ramp",
+      "revision": "Early benchmark, revision unpinned",
+      "corrected": false,
+      "date": "2026-11-19T07:48:03.857274+00:00",
+      "passed": false,
+      "pool": null,
+      "api": null,
+      "http": 1120038,
+      "ack": 119763.94750000001,
+      "failure": 67740,
+      "saved": 56263,
+      "planned": 79942,
+      "missing": 23679,
+      "reads": 46,
+      "mismatches": 1,
+      "unverified": null,
+      "stages": [
+        {
+          "users": 1000,
+          "failures": 0,
+          "ack": 65.536
+        },
+        {
+          "users": 2000,
+          "failures": 0,
+          "ack": 131.072
+        },
+        {
+          "users": 3000,
+          "failures": 5,
+          "ack": 2097.152
+        },
+        {
+          "users": 4500,
+          "failures": 72,
+          "ack": 2097.152
+        },
+        {
+          "users": 6000,
+          "failures": 37358,
+          "ack": 98187.80674999999
+        },
+        {
+          "users": 8000,
+          "failures": 30305,
+          "ack": 119763.94750000001
+        }
+      ],
+      "sql": null
+    },
+    {
+      "name": "stress2",
+      "profile": "stress-ramp",
+      "revision": "Early benchmark, revision unpinned",
+      "corrected": false,
+      "date": "2026-11-19T11:51:19.425858+00:00",
+      "passed": false,
+      "pool": null,
+      "api": null,
+      "http": 1137882,
+      "ack": 4194.304,
+      "failure": 11493,
+      "saved": 75606,
+      "planned": 79942,
+      "missing": 4336,
+      "reads": 27,
+      "mismatches": 1,
+      "unverified": null,
+      "stages": [
+        {
+          "users": 1000,
+          "failures": 0,
+          "ack": 65.536
+        },
+        {
+          "users": 2000,
+          "failures": 0,
+          "ack": 262.144
+        },
+        {
+          "users": 3000,
+          "failures": 26,
+          "ack": 262.144
+        },
+        {
+          "users": 4500,
+          "failures": 0,
+          "ack": 524.288
+        },
+        {
+          "users": 6000,
+          "failures": 5285,
+          "ack": 2097.152
+        },
+        {
+          "users": 8000,
+          "failures": 6182,
+          "ack": 6905.799499999965
+        }
+      ],
+      "sql": null
+    },
+    {
+      "name": "seq-smoke-one",
+      "profile": "smoke",
+      "revision": "Early benchmark, revision unpinned",
+      "corrected": false,
+      "date": "2026-11-20T14:36:33.041108+00:00",
+      "passed": true,
+      "pool": null,
+      "api": null,
+      "http": 1296,
+      "ack": 179.12654100000145,
+      "failure": 0,
+      "saved": 85,
+      "planned": 85,
+      "missing": 0,
+      "reads": 0,
+      "mismatches": 0,
+      "unverified": null,
+      "stages": [],
+      "sql": null
+    },
+    {
+      "name": "seq-smoke-two",
+      "profile": "smoke",
+      "revision": "Early benchmark, revision unpinned",
+      "corrected": false,
+      "date": "2026-11-20T14:39:46.362631+00:00",
+      "passed": false,
+      "pool": null,
+      "api": null,
+      "http": 1301,
+      "ack": 150.07916699999987,
+      "failure": 0,
+      "saved": 85,
+      "planned": 170,
+      "missing": 85,
+      "reads": 0,
+      "mismatches": 0,
+      "unverified": null,
+      "stages": [],
+      "sql": null
+    },
+    {
+      "name": "seq2-smoke-one",
+      "profile": "smoke",
+      "revision": "Chat sequences, first driver",
+      "corrected": false,
+      "date": "2026-11-20T14:56:13.122069+00:00",
+      "passed": true,
+      "pool": null,
+      "api": null,
+      "http": 1291,
+      "ack": 114.08049999999639,
+      "failure": 0,
+      "saved": 85,
+      "planned": 85,
+      "missing": 0,
+      "reads": 0,
+      "mismatches": 0,
+      "unverified": null,
+      "stages": [],
+      "sql": null
+    },
+    {
+      "name": "seq2-smoke-two",
+      "profile": "smoke",
+      "revision": "Chat sequences, first driver",
+      "corrected": false,
+      "date": "2026-11-20T14:59:27.999617+00:00",
+      "passed": true,
+      "pool": null,
+      "api": null,
+      "http": 1297,
+      "ack": 130.83120899999994,
+      "failure": 0,
+      "saved": 85,
+      "planned": 85,
+      "missing": 0,
+      "reads": 0,
+      "mismatches": 0,
+      "unverified": null,
+      "stages": [],
+      "sql": null
+    },
+    {
+      "name": "seq2-1000",
+      "profile": "users-1000",
+      "revision": "Chat sequences, first driver",
+      "corrected": false,
+      "date": "2026-11-20T15:03:14.902580+00:00",
+      "passed": true,
+      "pool": null,
+      "api": 101481.38785307581,
+      "http": 103037,
+      "ack": 131.072,
+      "failure": 0,
+      "saved": 8285,
+      "planned": 8285,
+      "missing": 0,
+      "reads": 4,
+      "mismatches": 0,
+      "unverified": null,
+      "stages": [],
+      "sql": 35.31621970900001
+    },
+    {
+      "name": "seq2-stress",
+      "profile": "stress-ramp",
+      "revision": "Chat sequences, first driver",
+      "corrected": false,
+      "date": "2026-11-20T15:20:17.609000+00:00",
+      "passed": false,
+      "pool": null,
+      "api": null,
+      "http": 874802,
+      "ack": 4194.304,
+      "failure": 29872,
+      "saved": 78618,
+      "planned": 79942,
+      "missing": 1324,
+      "reads": 9,
+      "mismatches": 86,
+      "unverified": null,
+      "stages": [
+        {
+          "users": 1000,
+          "failures": 0,
+          "ack": 65.536
+        },
+        {
+          "users": 2000,
+          "failures": 0,
+          "ack": 131.072
+        },
+        {
+          "users": 3000,
+          "failures": 1,
+          "ack": 262.144
+        },
+        {
+          "users": 4500,
+          "failures": 0,
+          "ack": 524.288
+        },
+        {
+          "users": 6000,
+          "failures": 6166,
+          "ack": 4194.304
+        },
+        {
+          "users": 8000,
+          "failures": 23705,
+          "ack": 6624.868583000032
+        }
+      ],
+      "sql": null
+    },
+    {
+      "name": "seq3-smoke-one",
+      "profile": "smoke",
+      "revision": "905221b",
+      "corrected": false,
+      "date": "2026-11-20T16:03:44.429905+00:00",
+      "passed": true,
+      "pool": null,
+      "api": null,
+      "http": 1166,
+      "ack": 77.23837500000081,
+      "failure": 0,
+      "saved": 85,
+      "planned": 85,
+      "missing": 0,
+      "reads": 0,
+      "mismatches": 0,
+      "unverified": null,
+      "stages": [],
+      "sql": null
+    },
+    {
+      "name": "seq3-1000",
+      "profile": "users-1000",
+      "revision": "905221b",
+      "corrected": false,
+      "date": "2026-11-20T16:10:47.717080+00:00",
+      "passed": true,
+      "pool": null,
+      "api": 90869.27473954286,
+      "http": 92777,
+      "ack": 131.072,
+      "failure": 0,
+      "saved": 8285,
+      "planned": 8285,
+      "missing": 0,
+      "reads": 4,
+      "mismatches": 0,
+      "unverified": null,
+      "stages": [],
+      "sql": 31.711984838999996
+    },
+    {
+      "name": "seq3-stress-comparison",
+      "profile": "stress-ramp",
+      "revision": "905221b",
+      "corrected": false,
+      "date": "2026-11-20T16:51:59.025179+00:00",
+      "passed": false,
+      "pool": null,
+      "api": null,
+      "http": 806181,
+      "ack": 4194.304,
+      "failure": 10828,
+      "saved": 79769,
+      "planned": 79942,
+      "missing": 173,
+      "reads": 9,
+      "mismatches": 86,
+      "unverified": null,
+      "stages": [
+        {
+          "users": 1000,
+          "failures": 0,
+          "ack": 65.536
+        },
+        {
+          "users": 2000,
+          "failures": 0,
+          "ack": 131.072
+        },
+        {
+          "users": 3000,
+          "failures": 0,
+          "ack": 262.144
+        },
+        {
+          "users": 4500,
+          "failures": 19,
+          "ack": 524.288
+        },
+        {
+          "users": 6000,
+          "failures": 401,
+          "ack": 524.288
+        },
+        {
+          "users": 8000,
+          "failures": 10408,
+          "ack": 4194.304
+        }
+      ],
+      "sql": null
+    },
+    {
+      "name": "seq3-smoke-two-retry-comparison",
+      "profile": "smoke",
+      "revision": "905221b",
+      "corrected": false,
+      "date": "2026-11-20T16:56:12.848060+00:00",
+      "passed": true,
+      "pool": null,
+      "api": null,
+      "http": 1180,
+      "ack": 94.87091700000019,
+      "failure": 0,
+      "saved": 85,
+      "planned": 85,
+      "missing": 0,
+      "reads": 0,
+      "mismatches": 0,
+      "unverified": null,
+      "stages": [],
+      "sql": null
+    },
+    {
+      "name": "seq3-1000-direct",
+      "profile": "users-1000",
+      "revision": "905221b",
+      "corrected": false,
+      "date": "2026-11-20T17:00:00.988138+00:00",
+      "passed": true,
+      "pool": null,
+      "api": 91128.71434725169,
+      "http": 92719,
+      "ack": 65.536,
+      "failure": 0,
+      "saved": 8285,
+      "planned": 8285,
+      "missing": 0,
+      "reads": 4,
+      "mismatches": 0,
+      "unverified": null,
+      "stages": [],
+      "sql": 31.923311586999954
+    },
+    {
+      "name": "final-smoke",
+      "profile": "smoke",
+      "revision": "Early benchmark, revision unpinned",
+      "corrected": false,
+      "date": "2026-11-20T19:05:02.215265+00:00",
+      "passed": true,
+      "pool": null,
+      "api": null,
+      "http": 1174,
+      "ack": 91.95512500000041,
+      "failure": 0,
+      "saved": 85,
+      "planned": 85,
+      "missing": 0,
+      "reads": 0,
+      "mismatches": 0,
+      "unverified": null,
+      "stages": [],
+      "sql": null
+    },
+    {
+      "name": "seq4-smoke-one",
+      "profile": "smoke",
+      "revision": "0656f09",
+      "corrected": false,
+      "date": "2026-11-20T21:34:43.308923+00:00",
+      "passed": true,
+      "pool": null,
+      "api": null,
+      "http": 1160,
+      "ack": 847.4848750000092,
+      "failure": 0,
+      "saved": 85,
+      "planned": 85,
+      "missing": 0,
+      "reads": 0,
+      "mismatches": 0,
+      "unverified": null,
+      "stages": [],
+      "sql": null
+    },
+    {
+      "name": "seq4-smoke-two",
+      "profile": "smoke",
+      "revision": "0656f09",
+      "corrected": false,
+      "date": "2026-11-20T21:38:00.207362+00:00",
+      "passed": true,
+      "pool": null,
+      "api": null,
+      "http": 1174,
+      "ack": 129.08337499999834,
+      "failure": 0,
+      "saved": 85,
+      "planned": 85,
+      "missing": 0,
+      "reads": 0,
+      "mismatches": 0,
+      "unverified": null,
+      "stages": [],
+      "sql": null
+    },
+    {
+      "name": "seq4-1000",
+      "profile": "users-1000",
+      "revision": "0656f09",
+      "corrected": false,
+      "date": "2026-11-20T21:42:46.870312+00:00",
+      "passed": true,
+      "pool": null,
+      "api": 92281.98915144867,
+      "http": 93960,
+      "ack": 262.144,
+      "failure": 0,
+      "saved": 8285,
+      "planned": 8285,
+      "missing": 0,
+      "reads": 4,
+      "mismatches": 0,
+      "unverified": null,
+      "stages": [],
+      "sql": 37.69357029199995
+    },
+    {
+      "name": "seq4-stress-a",
+      "profile": "stress-ramp",
+      "revision": "0656f09",
+      "corrected": false,
+      "date": "2026-11-20T21:59:55.649000+00:00",
+      "passed": false,
+      "pool": null,
+      "api": null,
+      "http": 818439,
+      "ack": 7395.306124999886,
+      "failure": 12559,
+      "saved": 79526,
+      "planned": 79942,
+      "missing": 416,
+      "reads": 11,
+      "mismatches": 86,
+      "unverified": null,
+      "stages": [
+        {
+          "users": 1000,
+          "failures": 0,
+          "ack": 131.072
+        },
+        {
+          "users": 2000,
+          "failures": 0,
+          "ack": 131.072
+        },
+        {
+          "users": 3000,
+          "failures": 0,
+          "ack": 262.144
+        },
+        {
+          "users": 4500,
+          "failures": 12,
+          "ack": 262.144
+        },
+        {
+          "users": 6000,
+          "failures": 1512,
+          "ack": 4194.304
+        },
+        {
+          "users": 8000,
+          "failures": 11035,
+          "ack": 7395.306124999886
+        }
+      ],
+      "sql": null
+    },
+    {
+      "name": "seq4-stress-b",
+      "profile": "stress-ramp",
+      "revision": "0656f09",
+      "corrected": false,
+      "date": "2026-11-20T22:31:06.080000+00:00",
+      "passed": false,
+      "pool": null,
+      "api": null,
+      "http": 836614,
+      "ack": 4194.304,
+      "failure": 1657,
+      "saved": 79930,
+      "planned": 79942,
+      "missing": 12,
+      "reads": 9,
+      "mismatches": 86,
+      "unverified": null,
+      "stages": [
+        {
+          "users": 1000,
+          "failures": 0,
+          "ack": 65.536
+        },
+        {
+          "users": 2000,
+          "failures": 0,
+          "ack": 262.144
+        },
+        {
+          "users": 3000,
+          "failures": 0,
+          "ack": 262.144
+        },
+        {
+          "users": 4500,
+          "failures": 41,
+          "ack": 524.288
+        },
+        {
+          "users": 6000,
+          "failures": 22,
+          "ack": 1048.576
+        },
+        {
+          "users": 8000,
+          "failures": 1594,
+          "ack": 4745.728124999907
+        }
+      ],
+      "sql": null
+    },
+    {
+      "name": "seq4-1000-repeat",
+      "profile": "users-1000",
+      "revision": "0656f09",
+      "corrected": false,
+      "date": "2026-11-20T22:59:00.824305+00:00",
+      "passed": true,
+      "pool": null,
+      "api": 92542.83367484393,
+      "http": 93905,
+      "ack": 65.536,
+      "failure": 0,
+      "saved": 8285,
+      "planned": 8285,
+      "missing": 0,
+      "reads": 4,
+      "mismatches": 0,
+      "unverified": null,
+      "stages": [],
+      "sql": 31.00449320499998
+    },
+    {
+      "name": "seq5-smoke-one",
+      "profile": "smoke",
+      "revision": "e56bc28",
+      "corrected": false,
+      "date": "2026-11-21T09:42:02.424426+00:00",
+      "passed": true,
+      "pool": null,
+      "api": null,
+      "http": 1155,
+      "ack": 112.55574999999953,
+      "failure": 0,
+      "saved": 85,
+      "planned": 85,
+      "missing": 0,
+      "reads": 0,
+      "mismatches": 0,
+      "unverified": 0,
+      "stages": [],
+      "sql": null
+    },
+    {
+      "name": "seq5-smoke-two",
+      "profile": "smoke",
+      "revision": "e56bc28",
+      "corrected": false,
+      "date": "2026-11-21T09:45:22.271924+00:00",
+      "passed": true,
+      "pool": null,
+      "api": null,
+      "http": 1180,
+      "ack": 99.20379099999991,
+      "failure": 0,
+      "saved": 85,
+      "planned": 85,
+      "missing": 0,
+      "reads": 0,
+      "mismatches": 0,
+      "unverified": 0,
+      "stages": [],
+      "sql": null
+    },
+    {
+      "name": "seq5-1000",
+      "profile": "users-1000",
+      "revision": "e56bc28",
+      "corrected": false,
+      "date": "2026-11-21T09:49:08.019046+00:00",
+      "passed": true,
+      "pool": null,
+      "api": 92367.27968193652,
+      "http": 93891,
+      "ack": 131.072,
+      "failure": 0,
+      "saved": 8285,
+      "planned": 8285,
+      "missing": 0,
+      "reads": 4,
+      "mismatches": 0,
+      "unverified": 0,
+      "stages": [],
+      "sql": 31.602008315999996
+    },
+    {
+      "name": "seq5-stress-a",
+      "profile": "stress-ramp",
+      "revision": "e56bc28",
+      "corrected": false,
+      "date": "2026-11-21T10:13:07.356000+00:00",
+      "passed": false,
+      "pool": null,
+      "api": null,
+      "http": 663706,
+      "ack": 16777.216,
+      "failure": 130750,
+      "saved": 64424,
+      "planned": 79942,
+      "missing": 15518,
+      "reads": 170,
+      "mismatches": 11,
+      "unverified": 16,
+      "stages": [
+        {
+          "users": 1000,
+          "failures": 0,
+          "ack": 131.072
+        },
+        {
+          "users": 2000,
+          "failures": 0,
+          "ack": 1048.576
+        },
+        {
+          "users": 3000,
+          "failures": 7025,
+          "ack": 8388.608
+        },
+        {
+          "users": 4500,
+          "failures": 20199,
+          "ack": 16777.216
+        },
+        {
+          "users": 6000,
+          "failures": 36370,
+          "ack": 8388.608
+        },
+        {
+          "users": 8000,
+          "failures": 67156,
+          "ack": 11710.660166000016
+        }
+      ],
+      "sql": null
+    },
+    {
+      "name": "seq5-stress-b",
+      "profile": "stress-ramp",
+      "revision": "e56bc28",
+      "corrected": false,
+      "date": "2026-11-21T10:52:17.647000+00:00",
+      "passed": false,
+      "pool": null,
+      "api": null,
+      "http": 795712,
+      "ack": 8388.608,
+      "failure": 35166,
+      "saved": 77542,
+      "planned": 79942,
+      "missing": 2400,
+      "reads": 44,
+      "mismatches": 0,
+      "unverified": 0,
+      "stages": [
+        {
+          "users": 1000,
+          "failures": 0,
+          "ack": 131.072
+        },
+        {
+          "users": 2000,
+          "failures": 2,
+          "ack": 524.288
+        },
+        {
+          "users": 3000,
+          "failures": 30,
+          "ack": 524.288
+        },
+        {
+          "users": 4500,
+          "failures": 46,
+          "ack": 2097.152
+        },
+        {
+          "users": 6000,
+          "failures": 7145,
+          "ack": 8284.602124999976
+        },
+        {
+          "users": 8000,
+          "failures": 27943,
+          "ack": 8388.608
+        }
+      ],
+      "sql": null
+    },
+    {
+      "name": "seq5-1000-repeat",
+      "profile": "users-1000",
+      "revision": "e56bc28",
+      "corrected": false,
+      "date": "2026-11-21T11:21:03.932049+00:00",
+      "passed": true,
+      "pool": null,
+      "api": 92180.51877601411,
+      "http": 93792,
+      "ack": 131.072,
+      "failure": 0,
+      "saved": 8285,
+      "planned": 8285,
+      "missing": 0,
+      "reads": 4,
+      "mismatches": 0,
+      "unverified": 0,
+      "stages": [],
+      "sql": 32.586095358000044
+    },
+    {
+      "name": "smoke-one",
+      "profile": "smoke",
+      "revision": "68cd190",
+      "corrected": false,
+      "date": "2026-11-21T13:38:36.653626+00:00",
+      "passed": true,
+      "pool": "16/32",
+      "api": null,
+      "http": 1202,
+      "ack": 112.13787499999944,
+      "failure": 0,
+      "saved": 85,
+      "planned": 85,
+      "missing": 0,
+      "reads": 0,
+      "mismatches": 0,
+      "unverified": 0,
+      "stages": [],
+      "sql": null
+    },
+    {
+      "name": "smoke-two",
+      "profile": "smoke",
+      "revision": "68cd190",
+      "corrected": false,
+      "date": "2026-11-21T13:42:29.669626+00:00",
+      "passed": true,
+      "pool": "16/32",
+      "api": null,
+      "http": 1203,
+      "ack": 104.08120899999994,
+      "failure": 0,
+      "saved": 85,
+      "planned": 85,
+      "missing": 0,
+      "reads": 0,
+      "mismatches": 0,
+      "unverified": 0,
+      "stages": [],
+      "sql": null
+    },
+    {
+      "name": "smoke-one",
+      "profile": "smoke",
+      "revision": "1dcb801",
+      "corrected": false,
+      "date": "2026-11-21T14:55:43.567707+00:00",
+      "passed": true,
+      "pool": "16/32",
+      "api": null,
+      "http": 1217,
+      "ack": 850.7804999999989,
+      "failure": 0,
+      "saved": 85,
+      "planned": 85,
+      "missing": 0,
+      "reads": 0,
+      "mismatches": 0,
+      "unverified": 0,
+      "stages": [],
+      "sql": null
+    },
+    {
+      "name": "smoke-two",
+      "profile": "smoke",
+      "revision": "1dcb801",
+      "corrected": false,
+      "date": "2026-11-21T14:59:41.771250+00:00",
+      "passed": true,
+      "pool": "16/32",
+      "api": null,
+      "http": 1204,
+      "ack": 128.18262500000128,
+      "failure": 0,
+      "saved": 85,
+      "planned": 85,
+      "missing": 0,
+      "reads": 0,
+      "mismatches": 0,
+      "unverified": 0,
+      "stages": [],
+      "sql": null
+    },
+    {
+      "name": "1000-a",
+      "profile": "users-1000",
+      "revision": "1dcb801",
+      "corrected": false,
+      "date": "2026-11-21T15:04:06.505399+00:00",
+      "passed": true,
+      "pool": "16/32",
+      "api": 94571.94763831995,
+      "http": 94251,
+      "ack": 131.072,
+      "failure": 0,
+      "saved": 8285,
+      "planned": 8285,
+      "missing": 0,
+      "reads": 0,
+      "mismatches": 0,
+      "unverified": 0,
+      "stages": [],
+      "sql": 34.82234284600005
+    },
+    {
+      "name": "smoke-one",
+      "profile": "smoke",
+      "revision": "836dc7f",
+      "corrected": true,
+      "date": "2026-11-21T16:07:30.607149+00:00",
+      "passed": true,
+      "pool": "16/32",
+      "api": null,
+      "http": 1204,
+      "ack": 89.24391699999978,
+      "failure": 0,
+      "saved": 85,
+      "planned": 85,
+      "missing": 0,
+      "reads": 0,
+      "mismatches": 0,
+      "unverified": 0,
+      "stages": [],
+      "sql": null
+    },
+    {
+      "name": "smoke-two",
+      "profile": "smoke",
+      "revision": "836dc7f",
+      "corrected": true,
+      "date": "2026-11-21T16:11:22.807364+00:00",
+      "passed": true,
+      "pool": "16/32",
+      "api": null,
+      "http": 1211,
+      "ack": 110.14066699999967,
+      "failure": 0,
+      "saved": 85,
+      "planned": 85,
+      "missing": 0,
+      "reads": 0,
+      "mismatches": 0,
+      "unverified": 0,
+      "stages": [],
+      "sql": null
+    },
+    {
+      "name": "1000-a",
+      "profile": "users-1000",
+      "revision": "836dc7f",
+      "corrected": true,
+      "date": "2026-11-21T16:15:45.996294+00:00",
+      "passed": true,
+      "pool": "16/32",
+      "api": 94680.48370209245,
+      "http": 94119,
+      "ack": 262.144,
+      "failure": 0,
+      "saved": 8285,
+      "planned": 8285,
+      "missing": 0,
+      "reads": 0,
+      "mismatches": 0,
+      "unverified": 0,
+      "stages": [],
+      "sql": 31.291982083999923
+    },
+    {
+      "name": "stress-a1",
+      "profile": "stress-ramp",
+      "revision": "836dc7f",
+      "corrected": true,
+      "date": "2026-11-21T16:33:21.641000+00:00",
+      "passed": false,
+      "pool": "10/20",
+      "api": null,
+      "http": 796029,
+      "ack": 8388.608,
+      "failure": 31561,
+      "saved": 78705,
+      "planned": 79942,
+      "missing": 1237,
+      "reads": 0,
+      "mismatches": 0,
+      "unverified": 0,
+      "stages": [
+        {
+          "users": 1000,
+          "failures": 143,
+          "ack": 7024.731040999992
+        },
+        {
+          "users": 2000,
+          "failures": 5576,
+          "ack": 12405.504041999986
+        },
+        {
+          "users": 3000,
+          "failures": 2738,
+          "ack": 8388.608
+        },
+        {
+          "users": 4500,
+          "failures": 92,
+          "ack": 1048.576
+        },
+        {
+          "users": 6000,
+          "failures": 9273,
+          "ack": 4194.304
+        },
+        {
+          "users": 8000,
+          "failures": 13739,
+          "ack": 8202.269666999811
+        }
+      ],
+      "sql": null
+    },
+    {
+      "name": "stress-b1",
+      "profile": "stress-ramp",
+      "revision": "836dc7f",
+      "corrected": true,
+      "date": "2026-11-21T17:05:21.251000+00:00",
+      "passed": false,
+      "pool": "16/32",
+      "api": null,
+      "http": 774295,
+      "ack": 8388.608,
+      "failure": 38733,
+      "saved": 77432,
+      "planned": 79942,
+      "missing": 2510,
+      "reads": 21,
+      "mismatches": 0,
+      "unverified": 0,
+      "stages": [
+        {
+          "users": 1000,
+          "failures": 0,
+          "ack": 262.144
+        },
+        {
+          "users": 2000,
+          "failures": 0,
+          "ack": 262.144
+        },
+        {
+          "users": 3000,
+          "failures": 2,
+          "ack": 1048.576
+        },
+        {
+          "users": 4500,
+          "failures": 58,
+          "ack": 2097.152
+        },
+        {
+          "users": 6000,
+          "failures": 6491,
+          "ack": 8288.802084000083
+        },
+        {
+          "users": 8000,
+          "failures": 32182,
+          "ack": 49250.46775000007
+        }
+      ],
+      "sql": null
+    },
+    {
+      "name": "1000-b",
+      "profile": "users-1000",
+      "revision": "836dc7f",
+      "corrected": true,
+      "date": "2026-11-21T17:33:51.214448+00:00",
+      "passed": true,
+      "pool": "16/32",
+      "api": 94430.58134159539,
+      "http": 94080,
+      "ack": 131.072,
+      "failure": 0,
+      "saved": 8285,
+      "planned": 8285,
+      "missing": 0,
+      "reads": 0,
+      "mismatches": 0,
+      "unverified": 0,
+      "stages": [],
+      "sql": 38.41579607899998
+    },
+    {
+      "name": "stress-b2",
+      "profile": "stress-ramp",
+      "revision": "836dc7f",
+      "corrected": true,
+      "date": "2026-11-21T17:51:24.166000+00:00",
+      "passed": false,
+      "pool": "16/32",
+      "api": null,
+      "http": 826039,
+      "ack": 8330.05241600005,
+      "failure": 5526,
+      "saved": 79876,
+      "planned": 79942,
+      "missing": 66,
+      "reads": 4,
+      "mismatches": 0,
+      "unverified": 0,
+      "stages": [
+        {
+          "users": 1000,
+          "failures": 0,
+          "ack": 262.144
+        },
+        {
+          "users": 2000,
+          "failures": 4,
+          "ack": 1048.576
+        },
+        {
+          "users": 3000,
+          "failures": 1,
+          "ack": 262.144
+        },
+        {
+          "users": 4500,
+          "failures": 36,
+          "ack": 262.144
+        },
+        {
+          "users": 6000,
+          "failures": 1022,
+          "ack": 8330.05241600005
+        },
+        {
+          "users": 8000,
+          "failures": 4463,
+          "ack": 8191.776042000158
+        }
+      ],
+      "sql": null
+    },
+    {
+      "name": "stress-a2",
+      "profile": "stress-ramp",
+      "revision": "836dc7f",
+      "corrected": true,
+      "date": "2026-11-21T18:23:05.276000+00:00",
+      "passed": false,
+      "pool": "10/20",
+      "api": null,
+      "http": 706012,
+      "ack": 12136.904917000094,
+      "failure": 123776,
+      "saved": 68212,
+      "planned": 79942,
+      "missing": 11730,
+      "reads": 8,
+      "mismatches": 0,
+      "unverified": 0,
+      "stages": [
+        {
+          "users": 1000,
+          "failures": 0,
+          "ack": 524.288
+        },
+        {
+          "users": 2000,
+          "failures": 0,
+          "ack": 262.144
+        },
+        {
+          "users": 3000,
+          "failures": 0,
+          "ack": 262.144
+        },
+        {
+          "users": 4500,
+          "failures": 183,
+          "ack": 1900.0783749999246
+        },
+        {
+          "users": 6000,
+          "failures": 59013,
+          "ack": 12136.904917000094
+        },
+        {
+          "users": 8000,
+          "failures": 64580,
+          "ack": 11983.302709000185
+        }
+      ],
+      "sql": null
+    }
+  ],
+  "images": [
+    {
+      "service": "alert-inbox",
+      "image": "axllent/mailpit:v1.27.8",
+      "digest": "sha256:8fdd651f8abbbf7e51b12b1dc27c7d5185813026055b551c8190f54420d745c7",
+      "instances": 1
+    },
+    {
+      "service": "alertmanager",
+      "image": "prom/alertmanager:v0.34.1",
+      "digest": "sha256:a9e72a5032ccb84a8855186b34db4a68bf1f4983d915a14fa35b0bfe7ff1f56b",
+      "instances": 1
+    },
+    {
+      "service": "api-1",
+      "image": "messenger-bench-seq5-api:e56bc28",
+      "digest": "sha256:6d8507362a1bd8f96e479b7857967ec3e4495daa2efbfa40980290d6cb9ae0ea",
+      "instances": 1
+    },
+    {
+      "service": "api-2",
+      "image": "messenger-bench-seq5-api:e56bc28",
+      "digest": "sha256:6d8507362a1bd8f96e479b7857967ec3e4495daa2efbfa40980290d6cb9ae0ea",
+      "instances": 1
+    },
+    {
+      "service": "api-proxy",
+      "image": "nginx:1.30.5-alpine",
+      "digest": "sha256:a805dc02b9a7ee985b411db35996123b9bb3df80e79a9ab5b194751d3087defe",
+      "instances": 1
+    },
+    {
+      "service": "client",
+      "image": "messenger-bench-seq5-client:e56bc28",
+      "digest": "sha256:7b8e737125c7eb7b917e8832a403f5da2c96e1af269e43eb3a2e5cc3dd79cad0",
+      "instances": 1
+    },
+    {
+      "service": "grafana",
+      "image": "grafana/grafana:13.2.2",
+      "digest": "sha256:c446c4270dcd9a253979d484c258a10679a1b12ed518eef93a60341da018fd69",
+      "instances": 1
+    },
+    {
+      "service": "messenger-command-processor",
+      "image": "messenger-bench-seq5-messenger-command-processor:e56bc28",
+      "digest": "sha256:ce0e1dca5cbdf0f6c300084b9bba6c798aaab6924d5eb9eabeba8198c6cbfabd",
+      "instances": 2
+    },
+    {
+      "service": "messenger-outbox-publisher",
+      "image": "messenger-bench-seq5-messenger-outbox-publisher:e56bc28",
+      "digest": "sha256:39797df05f7b32eb2c3ea453665fac7d563eff0a341d84373560356ff2ed574a",
+      "instances": 2
+    },
+    {
+      "service": "monitoring-access",
+      "image": "nginx:1.30.5-alpine",
+      "digest": "sha256:a805dc02b9a7ee985b411db35996123b9bb3df80e79a9ab5b194751d3087defe",
+      "instances": 1
+    },
+    {
+      "service": "nginx-exporter-api",
+      "image": "nginx/nginx-prometheus-exporter:1.5.1",
+      "digest": "sha256:ce6911e40fcfd4557598fcde436dfedc563e3309375c68282500be5b1e6caa17",
+      "instances": 1
+    },
+    {
+      "service": "nginx-exporter-client",
+      "image": "nginx/nginx-prometheus-exporter:1.5.1",
+      "digest": "sha256:ce6911e40fcfd4557598fcde436dfedc563e3309375c68282500be5b1e6caa17",
+      "instances": 1
+    },
+    {
+      "service": "nginx-exporter-ws",
+      "image": "nginx/nginx-prometheus-exporter:1.5.1",
+      "digest": "sha256:ce6911e40fcfd4557598fcde436dfedc563e3309375c68282500be5b1e6caa17",
+      "instances": 1
+    },
+    {
+      "service": "pgbouncer",
+      "image": "messenger-bench-seq5-pgbouncer:e56bc28",
+      "digest": "sha256:8b14d91b5e6c00a6ff6fc9a17c69a57d2420c2482d0d0d698d2da56b5d1d9379",
+      "instances": 1
+    },
+    {
+      "service": "postgres",
+      "image": "postgres:17-alpine",
+      "digest": "sha256:872a12eb3c5de110145da29dd03154f6de537bda7860a5731df9c02fad256459",
+      "instances": 1
+    },
+    {
+      "service": "postgres-exporter",
+      "image": "quay.io/prometheuscommunity/postgres-exporter:v0.20.1",
+      "digest": "sha256:d991414f980c03f4bdb5b79e6c83b37aea682c5842bd84091ba7cf2e3689b74a",
+      "instances": 1
+    },
+    {
+      "service": "prometheus",
+      "image": "prom/prometheus:v3.14.0",
+      "digest": "sha256:deeef2470dab312d1cade441c2ed31ccbd72c8e78e2fdd51d835e0b740af2b98",
+      "instances": 1
+    },
+    {
+      "service": "rabbitmq-1",
+      "image": "rabbitmq:4.3.5-management",
+      "digest": "sha256:03d95eace92b949b2fd9dc9fbd19c2d65cae25b600e2d6ff42456cce9f110c7c",
+      "instances": 1
+    },
+    {
+      "service": "rabbitmq-2",
+      "image": "rabbitmq:4.3.5-management",
+      "digest": "sha256:03d95eace92b949b2fd9dc9fbd19c2d65cae25b600e2d6ff42456cce9f110c7c",
+      "instances": 1
+    },
+    {
+      "service": "rabbitmq-3",
+      "image": "rabbitmq:4.3.5-management",
+      "digest": "sha256:03d95eace92b949b2fd9dc9fbd19c2d65cae25b600e2d6ff42456cce9f110c7c",
+      "instances": 1
+    },
+    {
+      "service": "redis-1",
+      "image": "redis:7.4-alpine",
+      "digest": "sha256:ec4f171e9ff071bb2a1c936057d3be00206069b028b6c0d61df2477e1dd02c42",
+      "instances": 1
+    },
+    {
+      "service": "redis-2",
+      "image": "redis:7.4-alpine",
+      "digest": "sha256:ec4f171e9ff071bb2a1c936057d3be00206069b028b6c0d61df2477e1dd02c42",
+      "instances": 1
+    },
+    {
+      "service": "redis-3",
+      "image": "redis:7.4-alpine",
+      "digest": "sha256:ec4f171e9ff071bb2a1c936057d3be00206069b028b6c0d61df2477e1dd02c42",
+      "instances": 1
+    },
+    {
+      "service": "redis-4",
+      "image": "redis:7.4-alpine",
+      "digest": "sha256:ec4f171e9ff071bb2a1c936057d3be00206069b028b6c0d61df2477e1dd02c42",
+      "instances": 1
+    },
+    {
+      "service": "redis-5",
+      "image": "redis:7.4-alpine",
+      "digest": "sha256:ec4f171e9ff071bb2a1c936057d3be00206069b028b6c0d61df2477e1dd02c42",
+      "instances": 1
+    },
+    {
+      "service": "redis-6",
+      "image": "redis:7.4-alpine",
+      "digest": "sha256:ec4f171e9ff071bb2a1c936057d3be00206069b028b6c0d61df2477e1dd02c42",
+      "instances": 1
+    },
+    {
+      "service": "redis-exporter",
+      "image": "oliver006/redis_exporter:v1.89.0",
+      "digest": "sha256:8843466c0c2dd79f19d40af405ddd6b7efdecb0862a88a9a51cf8ce345a9a37e",
+      "instances": 1
+    },
+    {
+      "service": "ws",
+      "image": "messenger-bench-seq5-ws:e56bc28",
+      "digest": "sha256:dffe52fb005a726086437f7ad91df3ef8e9c07c8982dfc286cacb18c1ff73104",
+      "instances": 2
+    },
+    {
+      "service": "ws-proxy",
+      "image": "nginx:1.30.5-alpine",
+      "digest": "sha256:a805dc02b9a7ee985b411db35996123b9bb3df80e79a9ab5b194751d3087defe",
+      "instances": 1
+    }
+  ]
+}

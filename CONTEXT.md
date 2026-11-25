@@ -15,14 +15,17 @@
 - **Received message** releases a pending live frame without advancing SQL recovery.
 - **Dismissed** advances recovery to an explicitly chosen sequence without claiming the skipped messages were applied.
 - **Recovery baseline** is the highest sequence applied or dismissed by a device.
-- **Chat sequence** orders accepted messages within one chat. It is monotonic and can have intentional gaps after deletion. SQL recovery uses it; Redis replay uses the separate room, epoch, and Stream ID cursor.
+- **Chat sequence** numbers every shared event in one chat: saved messages, edits, deletions for everyone, shared clears, shared pins and membership changes. It is monotonic. Message sequences are chat sequences, so history has gaps where other events took numbers or messages were deleted. A device that sees a number more than one above its last one has missed an event. SQL recovery uses it; Redis replay uses the separate room, epoch, and Stream ID cursor.
 - **History coverage** is an authoritative snapshot's examined sequence interval. A device can apply its returned rows and certified absences without treating those absences as human reads.
 - **Read through** is an account's declaration that the messages up to a chat sequence have been read. It is shared across devices and does not prove that each message crossed a viewport.
 - **First read time** is the server acceptance time when an account first advanced through a message. Timestamp details are available for seven days after that message was created.
 - **Online** means at least one established connection was observed for a user. An unavailable or stale observation is unknown.
 - **Message version** orders changes to one message while its original chat sequence stays the same.
-- **Mutation revision** orders shared edits and deletions within a chat, independently of new-message sequences.
-- **Visibility revision** orders one account's history visibility changes in one chat. It is separate from the shared mutation revision.
+- **Mutation sequence** is the chat sequence of a chat's latest shared edit, deletion or clear. Changes are retained above the mutation floor.
+- **Member sequence** numbers one account's private changes in one chat: personal deletion and clear, hiding the chat, personal pins, mute, the unread mark and its own read-through. Other members never see it.
+- **Visibility sequence** is the member sequence of an account's latest personal deletion, clear or hide in one chat. History pages are fenced by it, not by every private change.
+- **Account sequence** numbers an account's changes that belong to no single chat: being added to or removed from a chat and chat pin order.
+- **Chat state** is one authorized snapshot of a chat's sequences, cutoffs and read positions. Devices compare it with what they hold and fetch only what moved.
 - **Personal deletion** hides content for one account across its devices, using a prefix cutoff and merged sequence exclusions. Membership remains an authorization fact.
 - **Clear history** removes the accepted prefix at the operation's server snapshot and keeps the chat active. Later accepted messages survive.
 - **Hidden chat** has a personal history cutoff and a hidden sidebar entry. A later saved message above the hide cutoff makes it visible again.
@@ -42,6 +45,6 @@
 - **Unread mark** is an account's reminder to return to a chat. It is separate from read progress and clears when the account opens the chat.
 - **Pinned message** is a message shown at the top of a chat for everyone or, in direct chats only, for one participant. Each scope keeps at most 200 pins. Pins follow the viewer's history visibility and disappear when the message row is removed.
 - **Forward** saves a new message whose body is copied from a source message visible to the sender at processing time, crediting the source's original author. Forwarded messages cannot be edited.
-- **Personal chat event** is a bodyless hint in the account's user room. It covers pin, mute and unread-mark changes. Devices refetch the chat summary.
+- **Personal chat event** is a bodyless hint in the account's user room that carries a member sequence. It covers pin, mute and unread-mark changes. Devices refetch the chat summary.
 
 State the actual guarantee instead of calling a message "delivered". Request IDs identify retries, message IDs identify saved messages, and event IDs identify publications.

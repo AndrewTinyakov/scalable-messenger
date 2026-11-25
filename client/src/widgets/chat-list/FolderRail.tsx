@@ -6,6 +6,7 @@ import {
   MessageCircleMore,
   MessageSquarePlus,
   MessagesSquare,
+  ShieldCheck,
   User as UserIcon,
   UsersRound,
   Volume2,
@@ -38,10 +39,19 @@ interface Props {
   unreadChats: Record<ChatFolder, number>
   onFolder(folder: ChatFolder): void
   onCreate(mode: 'direct' | 'group'): void
+  onSecurity(): void
   onSignOut(): void
 }
 
-export function FolderRail({ user, folder, unreadChats, onFolder, onCreate, onSignOut }: Props) {
+export function FolderRail({
+  user,
+  folder,
+  unreadChats,
+  onFolder,
+  onCreate,
+  onSecurity,
+  onSignOut,
+}: Props) {
   const [open, setOpen] = useState(false)
   const { settings, update } = useNotificationSettings()
   const permission = notificationPermission()
@@ -120,6 +130,9 @@ export function FolderRail({ user, folder, unreadChats, onFolder, onCreate, onSi
             }}
           >
             Sound: {settings.sound ? 'on' : 'off'}
+          </MenuItem>
+          <MenuItem icon={<ShieldCheck size={18} />} onClick={() => run(onSecurity)}>
+            Devices and password
           </MenuItem>
           <MenuItem icon={<LogOut size={18} />} danger onClick={() => run(onSignOut)}>
             Sign out

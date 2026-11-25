@@ -9,8 +9,8 @@ class ReadNotificationScheduler(
     private val readService: ReadService,
 ) {
     @Scheduled(
-        fixedDelayString = "\${messenger.read.notification-delay-ms:100}",
-        initialDelayString = "\${messenger.read.notification-initial-delay-ms:100}",
+        fixedDelayString = $$"${messenger.read.notification-delay-ms:100}",
+        initialDelayString = $$"${messenger.read.notification-initial-delay-ms:100}",
     )
     fun runPendingNotifications() = readService.publishPendingNotifications()
 }

@@ -2,7 +2,6 @@ package com.andrewtinyakov.messenger.chat.service
 
 import com.andrewtinyakov.messenger.ApiApplication
 import com.andrewtinyakov.messenger.auth.service.AuthenticationService
-import com.andrewtinyakov.messenger.auth.web.payload.AuthRequest
 import com.andrewtinyakov.messenger.message.model.CommandResult
 import com.andrewtinyakov.messenger.message.service.MessageSendService
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
@@ -28,7 +27,7 @@ import java.time.Duration
 class DirectChatLookupTests
     @Autowired
     constructor(
-        @Value("\${local.server.port}") private val port: Int,
+        @Value($$"${local.server.port}") private val port: Int,
         private val authenticationService: AuthenticationService,
         private val messageSendService: MessageSendService,
         private val mapper: ObjectMapper,
@@ -87,9 +86,9 @@ class DirectChatLookupTests
             val sender = account()
             val before = durableCounts()
             val cases = listOf(
-                Triple(sender.first, 400, "INVALID_MEMBER"),
-                Triple(newId(), 404, "USER_NOT_FOUND"),
-                Triple("invalid", 400, "INVALID_ID"),
+                Triple(sender.first, 400, "VALIDATION_FAILED"),
+                Triple(newId(), 404, "NOT_FOUND"),
+                Triple("invalid", 400, "VALIDATION_FAILED"),
             )
 
             for ((recipient, status, code) in cases) {
@@ -128,8 +127,8 @@ class DirectChatLookupTests
         }
 
         private fun account(): Pair<String, String> {
-            val credentials = authenticationService.register(AuthRequest("lookup_${newId()}", "long-demo-password"))
-            return credentials.user.id.value to "messenger_session=${credentials.token.value}"
+            val credentials = authenticationService.register("lookup_${newId()}", "long-demo-password")
+            return credentials.user.id.value to "__Host-messenger_session=${credentials.token.value}"
         }
 
         private fun get(recipient: String, cookie: String? = null): HttpResponse<String> {

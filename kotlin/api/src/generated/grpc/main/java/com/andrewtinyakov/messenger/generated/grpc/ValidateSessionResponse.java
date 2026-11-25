@@ -162,6 +162,17 @@ private static final long serialVersionUID = 0L;
     }
   }
 
+  public static final int EXPIRES_AT_UNIX_SECONDS_FIELD_NUMBER = 4;
+  private long expiresAtUnixSeconds_ = 0L;
+  /**
+   * <code>int64 expires_at_unix_seconds = 4;</code>
+   * @return The expiresAtUnixSeconds.
+   */
+  @java.lang.Override
+  public long getExpiresAtUnixSeconds() {
+    return expiresAtUnixSeconds_;
+  }
+
   private byte memoizedIsInitialized = -1;
   @java.lang.Override
   public final boolean isInitialized() {
@@ -185,6 +196,9 @@ private static final long serialVersionUID = 0L;
     if (!com.google.protobuf.GeneratedMessage.isStringEmpty(sessionId_)) {
       com.google.protobuf.GeneratedMessage.writeString(output, 3, sessionId_);
     }
+    if (expiresAtUnixSeconds_ != 0L) {
+      output.writeInt64(4, expiresAtUnixSeconds_);
+    }
     getUnknownFields().writeTo(output);
   }
 
@@ -202,6 +216,10 @@ private static final long serialVersionUID = 0L;
     }
     if (!com.google.protobuf.GeneratedMessage.isStringEmpty(sessionId_)) {
       size += com.google.protobuf.GeneratedMessage.computeStringSize(3, sessionId_);
+    }
+    if (expiresAtUnixSeconds_ != 0L) {
+      size += com.google.protobuf.CodedOutputStream
+        .computeInt64Size(4, expiresAtUnixSeconds_);
     }
     size += getUnknownFields().getSerializedSize();
     memoizedSize = size;
@@ -224,6 +242,8 @@ private static final long serialVersionUID = 0L;
         .equals(other.getDeviceId())) return false;
     if (!getSessionId()
         .equals(other.getSessionId())) return false;
+    if (getExpiresAtUnixSeconds()
+        != other.getExpiresAtUnixSeconds()) return false;
     if (!getUnknownFields().equals(other.getUnknownFields())) return false;
     return true;
   }
@@ -241,6 +261,9 @@ private static final long serialVersionUID = 0L;
     hash = (53 * hash) + getDeviceId().hashCode();
     hash = (37 * hash) + SESSION_ID_FIELD_NUMBER;
     hash = (53 * hash) + getSessionId().hashCode();
+    hash = (37 * hash) + EXPIRES_AT_UNIX_SECONDS_FIELD_NUMBER;
+    hash = (53 * hash) + com.google.protobuf.Internal.hashLong(
+        getExpiresAtUnixSeconds());
     hash = (29 * hash) + getUnknownFields().hashCode();
     memoizedHashCode = hash;
     return hash;
@@ -375,6 +398,7 @@ private static final long serialVersionUID = 0L;
       userId_ = "";
       deviceId_ = "";
       sessionId_ = "";
+      expiresAtUnixSeconds_ = 0L;
       return this;
     }
 
@@ -417,6 +441,9 @@ private static final long serialVersionUID = 0L;
       if (((from_bitField0_ & 0x00000004) != 0)) {
         result.sessionId_ = sessionId_;
       }
+      if (((from_bitField0_ & 0x00000008) != 0)) {
+        result.expiresAtUnixSeconds_ = expiresAtUnixSeconds_;
+      }
     }
 
     @java.lang.Override
@@ -445,6 +472,9 @@ private static final long serialVersionUID = 0L;
         sessionId_ = other.sessionId_;
         bitField0_ |= 0x00000004;
         onChanged();
+      }
+      if (other.getExpiresAtUnixSeconds() != 0L) {
+        setExpiresAtUnixSeconds(other.getExpiresAtUnixSeconds());
       }
       this.mergeUnknownFields(other.getUnknownFields());
       onChanged();
@@ -487,6 +517,11 @@ private static final long serialVersionUID = 0L;
               bitField0_ |= 0x00000004;
               break;
             } // case 26
+            case 32: {
+              expiresAtUnixSeconds_ = input.readInt64();
+              bitField0_ |= 0x00000008;
+              break;
+            } // case 32
             default: {
               if (!super.parseUnknownField(input, extensionRegistry, tag)) {
                 done = true; // was an endgroup tag
@@ -716,6 +751,38 @@ private static final long serialVersionUID = 0L;
       checkByteStringIsUtf8(value);
       sessionId_ = value;
       bitField0_ |= 0x00000004;
+      onChanged();
+      return this;
+    }
+
+    private long expiresAtUnixSeconds_ ;
+    /**
+     * <code>int64 expires_at_unix_seconds = 4;</code>
+     * @return The expiresAtUnixSeconds.
+     */
+    @java.lang.Override
+    public long getExpiresAtUnixSeconds() {
+      return expiresAtUnixSeconds_;
+    }
+    /**
+     * <code>int64 expires_at_unix_seconds = 4;</code>
+     * @param value The expiresAtUnixSeconds to set.
+     * @return This builder for chaining.
+     */
+    public Builder setExpiresAtUnixSeconds(long value) {
+
+      expiresAtUnixSeconds_ = value;
+      bitField0_ |= 0x00000008;
+      onChanged();
+      return this;
+    }
+    /**
+     * <code>int64 expires_at_unix_seconds = 4;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearExpiresAtUnixSeconds() {
+      bitField0_ = (bitField0_ & ~0x00000008);
+      expiresAtUnixSeconds_ = 0L;
       onChanged();
       return this;
     }

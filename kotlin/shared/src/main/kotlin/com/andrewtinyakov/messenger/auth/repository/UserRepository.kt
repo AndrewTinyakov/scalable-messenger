@@ -9,9 +9,21 @@ interface UserRepository {
 
     fun findUserByUsername(username: String): User?
 
+    fun findUser(userId: UserId): User?
+
+    fun lockPasswordHash(userId: UserId): String?
+
+    fun replacePasswordHash(userId: UserId, expectedHash: String, newHash: String): Boolean
+
     fun findSummary(userId: UserId): UserSummary?
+
+    fun findSummaries(userIds: Collection<UserId>): List<UserSummary>
 
     fun existsById(userId: UserId): Boolean
 
     fun search(query: String): List<UserSummary>
+
+    fun allocateEventSequences(userIds: Collection<UserId>): Map<UserId, Long>
+
+    fun allocateEventSequences(userId: UserId, count: Int): Long
 }

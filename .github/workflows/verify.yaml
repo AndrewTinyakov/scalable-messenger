@@ -1,6 +1,9 @@
 name: Verify
 
 on:
+  pull_request:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -46,6 +49,18 @@ jobs:
           npm ci
           npm --prefix contracts ci
           npm --prefix client ci
+      - name: Validate deployment configuration
+        run: |
+          node scripts/prepare-dev-env.mjs
+          docker compose config --quiet
+          MESSENGER_CLIENT_ORIGIN=https://example.com MESSENGER_TRUSTED_PROXY_CIDRS=192.0.2.0/24 docker compose -f compose.yaml -f compose.production.yaml config --quiet
+          node --test scripts/deployment.test.mjs
+          docker compose run --rm --no-deps -T api-proxy nginx -t
+          docker compose run --rm --no-deps -T ws-proxy nginx -t
+          MESSENGER_CLIENT_ORIGIN=https://example.com MESSENGER_TRUSTED_PROXY_CIDRS=192.0.2.0/24 docker compose -f compose.yaml -f compose.production.yaml run --rm --no-deps -T api-proxy nginx -t
+          MESSENGER_CLIENT_ORIGIN=https://example.com MESSENGER_TRUSTED_PROXY_CIDRS=192.0.2.0/24 docker compose -f compose.yaml -f compose.production.yaml run --rm --no-deps -T ws-proxy nginx -t
+          docker compose run --rm --no-deps -T monitoring-access nginx -t
+          docker compose run --rm --no-deps -T --entrypoint promtool prometheus check config /etc/prometheus/prometheus.yaml
       - name: Check contracts and generated message models
         run: |
           npm run validate:asyncapi
@@ -54,6 +69,10 @@ jobs:
           npm run generate:asyncapi:go
           git add --intent-to-add kotlin/shared/src/generated/asyncapi/kotlin ws/internal/generated/messaging client/src/shared/api/generated/socket-vocabulary.ts
           git diff --exit-code -- kotlin/shared/src/generated/asyncapi/kotlin ws/internal/generated/messaging client/src/shared/api/generated/socket-vocabulary.ts
+      - name: Check realistic load driver
+        run: |
+          shopt -s failglob
+          node --test tests/realistic-load/*.test.mjs
       - name: Compile and lint Kotlin
         run: ./kotlin/gradlew -p kotlin :api:classes :command-processor:classes :outbox-publisher:classes ktlintCheck --no-daemon
       - name: Run Kotlin transaction and publication tests
@@ -70,8 +89,14 @@ jobs:
           go -C ws test -race -timeout=120s ./...
           go -C tests/load/ws test -short -timeout=60s ./...
       - name: Build and lint the client
+        env:
+          VITE_API_BASE_URL: https://api.example.com/api
+          VITE_WS_URL: wss://ws.example.com/ws
         run: |
           npm --prefix client run build
           npm --prefix client run format:check
       - name: Run client unit tests
         run: npm --prefix client test
+      - name: Remove deployment validation resources
+        if: always()
+        run: docker compose down --volumes

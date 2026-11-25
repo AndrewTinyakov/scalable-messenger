@@ -7,16 +7,6 @@ import org.springframework.stereotype.Component
 import java.time.Duration
 import java.util.concurrent.TimeUnit
 
-enum class HistoryDirection { AFTER, BEFORE }
-
-enum class MessageEditFailure(
-    val metricValue: String,
-) {
-    FORBIDDEN("forbidden"),
-    CONFLICT("conflict"),
-    ERROR("failed"),
-}
-
 @Component
 class MessageMetrics(
     registry: MeterRegistry,

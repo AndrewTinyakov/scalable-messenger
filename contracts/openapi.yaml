@@ -552,7 +552,7 @@ paths:
   /v1/sends/status:
     post:
       tags:
-      - send-status-controller
+      - message-send-status-controller
       operationId: statuses
       parameters:
       - name: X-Messenger-CSRF
@@ -1042,7 +1042,7 @@ paths:
   /v1/auth/ws-ticket:
     post:
       tags:
-      - auth-controller
+      - ws-ticket-controller
       operationId: wsTicket
       parameters:
       - name: X-Messenger-CSRF
@@ -1069,6 +1069,60 @@ paths:
             '*/*':
               schema:
                 $ref: "#/components/schemas/WsTicketResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "401":
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+  /v1/auth/sessions/revoke-others:
+    post:
+      tags:
+      - auth-session-controller
+      operationId: revokeOtherSessions
+      parameters:
+      - name: X-Messenger-CSRF
+        in: header
+        required: true
+        schema:
+          type: string
+          enum:
+          - "1"
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RevokedSessionsResponse"
         "403":
           description: Forbidden
           content:
@@ -1138,6 +1192,66 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiProblem"
       security: []
+  /v1/auth/password:
+    post:
+      tags:
+      - auth-controller
+      operationId: changePassword
+      parameters:
+      - name: X-Messenger-CSRF
+        in: header
+        required: true
+        schema:
+          type: string
+          enum:
+          - "1"
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangePasswordRequest"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/RevokedSessionsResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "401":
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
   /v1/auth/logout:
     post:
       tags:
@@ -1482,7 +1596,7 @@ paths:
   /v1/sends/{requestId}:
     get:
       tags:
-      - send-status-controller
+      - message-send-status-controller
       operationId: status
       parameters:
       - name: requestId
@@ -1724,6 +1838,68 @@ paths:
             '*/*':
               schema:
                 $ref: "#/components/schemas/MessageVisibilityResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+  /v1/chats/{id}/state:
+    get:
+      tags:
+      - chat-controller
+      operationId: state
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: minSeq
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: minMemberSeq
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ChatStateResponse"
         "401":
           description: Unauthorized
           content:
@@ -2015,7 +2191,7 @@ paths:
         required: true
         schema:
           type: string
-      - name: afterRevision
+      - name: afterSeq
         in: query
         required: true
         schema:
@@ -2246,6 +2422,53 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/ApiProblem"
+  /v1/auth/sessions:
+    get:
+      tags:
+      - auth-session-controller
+      operationId: listSessions
+      parameters:
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ActiveSessionsResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
   /v1/auth/session:
     get:
       tags:
@@ -2305,6 +2528,61 @@ paths:
         schema:
           type: string
       - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: X-Messenger-CSRF
+        in: header
+        required: true
+        schema:
+          type: string
+          enum:
+          - "1"
+      - name: X-Messenger-User
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: X-Messenger-Device
+        in: header
+        required: false
+        schema:
+          type: string
+      responses:
+        "204":
+          description: No Content
+        "403":
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "401":
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "400":
+          description: Invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+  /v1/auth/sessions/{sessionId}:
+    delete:
+      tags:
+      - auth-session-controller
+      operationId: revokeSession
+      parameters:
+      - name: sessionId
         in: path
         required: true
         schema:
@@ -2536,9 +2814,9 @@ components:
             $ref: "#/components/schemas/MessageResponse"
         snapshotSequence:
           type: string
-        mutationRevision:
+        mutationSeq:
           type: string
-        visibilityRevision:
+        visibilitySeq:
           type: string
         clearedThroughSequence:
           type: string
@@ -2548,9 +2826,9 @@ components:
       - clearedThroughSequence
       - globalClearedThroughSequence
       - messages
-      - mutationRevision
+      - mutationSeq
       - snapshotSequence
-      - visibilityRevision
+      - visibilitySeq
     MessageResponse:
       type: object
       properties:
@@ -2674,9 +2952,9 @@ components:
           - CHAT
         clearedThroughSequence:
           type: string
-        mutationRevision:
+        seq:
           type: string
-        visibilityRevision:
+        visibilitySeq:
           type: string
         state:
           type: string
@@ -2688,12 +2966,12 @@ components:
       required:
       - clearedThroughSequence
       - deletedRows
-      - mutationRevision
       - operationId
       - scope
+      - seq
       - state
       - target
-      - visibilityRevision
+      - visibilitySeq
     CreateGroupChatRequest:
       type: object
       properties:
@@ -2832,6 +3110,14 @@ components:
       required:
       - expiresAt
       - token
+    RevokedSessionsResponse:
+      type: object
+      properties:
+        revokedSessions:
+          type: integer
+          format: int32
+      required:
+      - revokedSessions
     AuthRequest:
       type: object
       properties:
@@ -2860,6 +3146,20 @@ components:
       required:
       - deviceId
       - user
+    ChangePasswordRequest:
+      type: object
+      properties:
+        currentPassword:
+          type: string
+          maxLength: 100
+          minLength: 0
+        newPassword:
+          type: string
+          maxLength: 100
+          minLength: 8
+      required:
+      - currentPassword
+      - newPassword
     EditMessageRequest:
       type: object
       properties:
@@ -2888,9 +3188,9 @@ components:
       properties:
         snapshotSequence:
           type: string
-        mutationRevision:
+        mutationSeq:
           type: string
-        visibilityRevision:
+        visibilitySeq:
           type: string
         clearedThroughSequence:
           type: string
@@ -2902,9 +3202,60 @@ components:
       - clearedThroughSequence
       - globalClearedThroughSequence
       - hidden
-      - mutationRevision
+      - mutationSeq
       - snapshotSequence
-      - visibilityRevision
+      - visibilitySeq
+    ChatStateResponse:
+      type: object
+      properties:
+        lastSeq:
+          type: string
+          description: Chat sequence of the latest shared event
+        pinsSeq:
+          type: string
+          description: Chat sequence of the latest shared pin change
+        mutationFloor:
+          type: string
+          description: Changes at or below this chat sequence are no longer retained
+        mutationSeq:
+          type: string
+          description: "Chat sequence of the latest shared edit, deletion or clear"
+        memberSeq:
+          type: string
+          description: Counter of the viewer's private changes in this chat
+        visibilitySeq:
+          type: string
+          description: Member sequence of the viewer's latest history visibility change
+        memberPinsSeq:
+          type: string
+          description: Member sequence of the viewer's latest personal pin change
+        clearedThroughSequence:
+          type: string
+        globalClearedThroughSequence:
+          type: string
+        hidden:
+          type: boolean
+        ownReadThrough:
+          type: string
+        otherReadThrough:
+          type: string
+          description: Highest read-through among other active members
+        userSeq:
+          type: string
+      required:
+      - clearedThroughSequence
+      - globalClearedThroughSequence
+      - hidden
+      - lastSeq
+      - memberPinsSeq
+      - memberSeq
+      - mutationFloor
+      - mutationSeq
+      - otherReadThrough
+      - ownReadThrough
+      - pinsSeq
+      - userSeq
+      - visibilitySeq
     ReadSummaryResponse:
       type: object
       properties:
@@ -2972,11 +3323,11 @@ components:
           type: string
         hasMore:
           type: boolean
-        mutationRevision:
-          type: string
         snapshotSequence:
           type: string
-        visibilityRevision:
+        mutationSeq:
+          type: string
+        visibilitySeq:
           type: string
         clearedThroughSequence:
           type: string
@@ -2993,10 +3344,10 @@ components:
       - globalClearedThroughSequence
       - hasMore
       - messages
-      - mutationRevision
+      - mutationSeq
       - nextSequence
       - snapshotSequence
-      - visibilityRevision
+      - visibilitySeq
     MessageReaderResponse:
       type: object
       properties:
@@ -3039,7 +3390,7 @@ components:
     MessageChangeResponse:
       type: object
       properties:
-        revision:
+        seq:
           type: string
         kind:
           type: string
@@ -3068,7 +3419,7 @@ components:
       - kind
       - message
       - messageId
-      - revision
+      - seq
       - sequence
     MessageChangesResponse:
       type: object
@@ -3077,15 +3428,17 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/MessageChangeResponse"
-        lastRevision:
+        lastSeq:
           type: string
-        nextRevision:
+        nextSeq:
           type: string
         resetRequired:
           type: boolean
         snapshotSequence:
           type: string
-        visibilityRevision:
+        mutationSeq:
+          type: string
+        visibilitySeq:
           type: string
         clearedThroughSequence:
           type: string
@@ -3095,11 +3448,12 @@ components:
       - changes
       - clearedThroughSequence
       - globalClearedThroughSequence
-      - lastRevision
-      - nextRevision
+      - lastSeq
+      - mutationSeq
+      - nextSeq
       - resetRequired
       - snapshotSequence
-      - visibilityRevision
+      - visibilitySeq
     MessageAroundResponse:
       type: object
       properties:
@@ -3115,11 +3469,11 @@ components:
           type: boolean
         hasNewer:
           type: boolean
-        mutationRevision:
-          type: string
         snapshotSequence:
           type: string
-        visibilityRevision:
+        mutationSeq:
+          type: string
+        visibilitySeq:
           type: string
         clearedThroughSequence:
           type: string
@@ -3138,9 +3492,9 @@ components:
       - hasNewer
       - hasOlder
       - messages
-      - mutationRevision
+      - mutationSeq
       - snapshotSequence
-      - visibilityRevision
+      - visibilitySeq
     GroupMemberPageResponse:
       type: object
       properties:
@@ -3167,6 +3521,36 @@ components:
       required:
       - chat
       - recipient
+    ActiveSessionResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        deviceLabel:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        lastUsedAt:
+          type: string
+          format: date-time
+        current:
+          type: boolean
+      required:
+      - createdAt
+      - current
+      - deviceLabel
+      - id
+      - lastUsedAt
+    ActiveSessionsResponse:
+      type: object
+      properties:
+        sessions:
+          type: array
+          items:
+            $ref: "#/components/schemas/ActiveSessionResponse"
+      required:
+      - sessions
     SessionResponse:
       type: object
       properties:
@@ -3180,6 +3564,16 @@ components:
       - deviceId
       - userId
       - username
+    ApiFieldError:
+      type: object
+      properties:
+        field:
+          type: string
+        message:
+          type: string
+      required:
+      - field
+      - message
     ApiProblem:
       type: object
       properties:
@@ -3190,8 +3584,31 @@ components:
           type: string
         code:
           type: string
+          enum:
+          - VALIDATION_FAILED
+          - UNAUTHORIZED
+          - INVALID_CREDENTIALS
+          - FORBIDDEN
+          - NOT_FOUND
+          - USERNAME_TAKEN
+          - PASSWORD_CHANGED
+          - VERSION_CHANGED
+          - REQUEST_ID_REUSED
+          - PIN_LIMIT
+          - PIN_ORDER_CHANGED
+          - TOO_MANY_ATTEMPTS
+          - INTERNAL_SERVER_ERROR
+          - SERVICE_UNAVAILABLE
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/ApiFieldError"
+      required:
+      - code
+      - detail
+      - status
   securitySchemes:
     sessionCookie:
       type: apiKey
-      name: messenger_session
+      name: __Host-messenger_session
       in: cookie

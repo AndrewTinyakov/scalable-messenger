@@ -7,6 +7,7 @@ data class MembershipChangedEventV1(
     val eventId: String,
     val room: String,
     val chatId: String,
+    val seq: String,
 ) {
     init {
         require(type == "membership_changed" && version == 1 && room == "group:$chatId")
@@ -17,12 +18,14 @@ data class MembershipChangedEventV1(
             eventId: String,
             room: String,
             chatId: String,
+            seq: String,
         ): MembershipChangedEventV1 = MembershipChangedEventV1(
             type = RoomEventType.MEMBERSHIP_CHANGED.value,
             version = 1,
             eventId = eventId,
             room = room,
             chatId = chatId,
+            seq = seq,
         )
     }
 }

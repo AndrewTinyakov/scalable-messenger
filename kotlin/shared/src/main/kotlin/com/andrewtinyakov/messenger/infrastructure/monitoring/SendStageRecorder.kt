@@ -1,47 +1,6 @@
 package com.andrewtinyakov.messenger.infrastructure.monitoring
 
-import jdk.jfr.Enabled
-import jdk.jfr.Event
 import jdk.jfr.EventType
-import jdk.jfr.Name
-import jdk.jfr.StackTrace
-
-enum class SendStage {
-    LISTENER_RECEIVED,
-    REQUEST_LOCKS_ACQUIRED,
-    RESULTS_LOOKED_UP,
-    CHAT_LOCKED,
-    MEMBERSHIP_CHECKED,
-    SEQUENCES_ALLOCATED,
-    MESSAGES_RESULTS_WRITTEN,
-    OUTBOX_WRITTEN,
-    TRANSACTION_CALLBACK_FINISHED,
-    TRANSACTION_COMMITTED,
-    TRANSACTION_ROLLED_BACK,
-    TRANSACTION_UNKNOWN,
-    EVENT_PREPARED,
-    OUTBOX_CLAIM_COMMITTED,
-    REDIS_PUBLISH_STARTED,
-    REDIS_PUBLISH_CONFIRMED,
-    REDIS_PUBLISH_FAILED,
-    ;
-
-    val value = name.lowercase()
-}
-
-@Name("messenger.SendStage")
-@Enabled(false)
-@StackTrace(false)
-class SendStageEvent : Event() {
-    @JvmField
-    var stage: String = ""
-
-    @JvmField
-    var requestId: String? = null
-
-    @JvmField
-    var eventId: String? = null
-}
 
 object SendStageRecorder {
     private val type = probe<EventType?>(null) { EventType.getEventType(SendStageEvent::class.java) }

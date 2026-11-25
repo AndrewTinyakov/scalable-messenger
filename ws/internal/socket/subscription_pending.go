@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 
+	"messenger/ws/internal/monitoring"
+
 	"messenger/ws/internal/grpcauth"
 	"messenger/ws/internal/protocol"
 	"messenger/ws/internal/roomname"
@@ -26,51 +28,22 @@ func (subscriptions *chatSubscriptions) joinSubscriptionBatch(base context.Conte
 	groupIDs := make([]string, 0, len(grants))
 	for _, item := range items {
 		if item.Kind != protocol.ChatGroup {
-			if subscriptions.room(item.ChatID) == "" {
+			newRoom, err := subscriptions.joinDirect(base, item)
+			if newRoom {
 				attachedDirect = append(attachedDirect, item.ChatID)
 			}
-			ctx, cancel := context.WithTimeout(base, subscriptions.config.APITimeout)
-			err := subscriptions.joinAuthorized(ctx, item.ChatID, item.Kind, item.Epoch, item.StreamID, roomname.User(subscriptions.connection.session.UserID), nil)
-			cancel()
 			if err != nil {
-				if subscriptions.room(item.ChatID) == "" {
-					subscriptions.roomCoordinator.LeaveChat(subscriptions.connection, roomname.User(subscriptions.connection.session.UserID), item.ChatID)
-				}
 				return err
 			}
 			continue
 		}
 		groupIDs = append(groupIDs, item.ChatID)
-		grant := grants[item.ChatID]
-		if !subscriptions.allowGroupJoin(item.ChatID, grant) {
-			return grpcauth.ErrUnauthorized
-		}
-		room := authorization.rooms[item.ChatID]
-		if current := subscriptions.room(item.ChatID); current != "" {
-			if current != room {
-				return errors.New("subscription kind changed")
-			}
-			continue
-		}
-		ctx, cancel, err := subscriptions.groupAuthorizationContext(base)
-		if err != nil {
+		if err := subscriptions.joinGroup(base, item, grants[item.ChatID], authorization.rooms[item.ChatID], attached); err != nil {
 			return err
-		}
-		attached[item.ChatID] = grant
-		err = subscriptions.roomCoordinator.Join(ctx, grant, room, item.ChatID, item.Epoch, item.StreamID)
-		if err == nil {
-			err = subscriptions.groupAuthorizationError(ctx)
-		}
-		cancel()
-		if err != nil {
-			return err
-		}
-		if !subscriptions.allowGroupJoin(item.ChatID, grant) {
-			return grpcauth.ErrUnauthorized
 		}
 	}
 	if len(attached) > 0 {
-		final, err := subscriptions.authorizeSubscriptionBatch(base, groupIDs)
+		final, err := subscriptions.authorizeSubscriptionBatch(base, groupIDs, monitoring.SubscriptionRefusedFinalAuthSlots)
 		defer final.release()
 		for _, chatID := range final.denied {
 			subscriptions.leave(chatID)
@@ -89,6 +62,51 @@ func (subscriptions *chatSubscriptions) joinSubscriptionBatch(base context.Conte
 		return err
 	}
 	committed = true
+	subscriptions.announceJoined(items, attached, authorization)
+	return nil
+}
+
+func (subscriptions *chatSubscriptions) joinDirect(base context.Context, item protocol.Subscription) (bool, error) {
+	newRoom := subscriptions.room(item.ChatID) == ""
+	ctx, cancel := context.WithTimeout(base, subscriptions.config.APITimeout)
+	err := subscriptions.joinAuthorized(ctx, item.ChatID, item.Kind, item.Epoch, item.StreamID, roomname.User(subscriptions.connection.session.UserID), nil)
+	cancel()
+	if err != nil && subscriptions.room(item.ChatID) == "" {
+		subscriptions.roomCoordinator.LeaveChat(subscriptions.connection, roomname.User(subscriptions.connection.session.UserID), item.ChatID)
+	}
+	return newRoom, err
+}
+
+func (subscriptions *chatSubscriptions) joinGroup(base context.Context, item protocol.Subscription, grant *groupGrant, room string, attached map[string]*groupGrant) error {
+	if !subscriptions.allowGroupJoin(item.ChatID, grant) {
+		return grpcauth.ErrUnauthorized
+	}
+	if current := subscriptions.room(item.ChatID); current != "" {
+		if current != room {
+			return errors.New("subscription kind changed")
+		}
+		return nil
+	}
+	ctx, cancel, err := subscriptions.groupAuthorizationContext(base)
+	if err != nil {
+		return err
+	}
+	attached[item.ChatID] = grant
+	err = subscriptions.roomCoordinator.Join(ctx, grant, room, item.ChatID, item.Epoch, item.StreamID)
+	if err == nil {
+		err = subscriptions.groupAuthorizationError(ctx)
+	}
+	cancel()
+	if err != nil {
+		return err
+	}
+	if !subscriptions.allowGroupJoin(item.ChatID, grant) {
+		return grpcauth.ErrUnauthorized
+	}
+	return nil
+}
+
+func (subscriptions *chatSubscriptions) announceJoined(items []protocol.Subscription, attached map[string]*groupGrant, authorization subscriptionAuthorization) {
 	for _, item := range items {
 		grant := attached[item.ChatID]
 		if grant == nil {
@@ -100,7 +118,6 @@ func (subscriptions *chatSubscriptions) joinSubscriptionBatch(base context.Conte
 		}
 		grant.Enqueue(protocol.Event{Type: protocol.EventSubscribed, Version: 1, Room: room, ChatID: item.ChatID})
 	}
-	return nil
 }
 
 func (subscriptions *chatSubscriptions) commitGroupBatch(base context.Context, grants map[string]*groupGrant) error {

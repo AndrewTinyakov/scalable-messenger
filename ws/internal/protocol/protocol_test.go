@@ -126,15 +126,15 @@ func TestDecodeEventAcceptsTerminalProcessingFailure(t *testing.T) {
 }
 
 func TestDecodeEventAcceptsChatCreationAndDirectRejection(t *testing.T) {
-	created := `{"type":"chat_created","version":1,"eventId":"` + testID + `","room":"user:` + testID + `","chatId":"` + testID + `"}`
+	created := `{"type":"chat_created","version":1,"eventId":"` + testID + `","room":"user:` + testID + `","chatId":"` + testID + `","userSeq":"1"}`
 	if _, err := DecodeEvent([]byte(created)); err != nil {
 		t.Fatalf("chat creation: %v", err)
 	}
-	removed := `{"type":"member_removed","version":1,"eventId":"` + testID + `","room":"user:` + testID + `","chatId":"` + testID + `","memberId":"` + testID + `"}`
+	removed := `{"type":"member_removed","version":1,"eventId":"` + testID + `","room":"user:` + testID + `","chatId":"` + testID + `","memberId":"` + testID + `","userSeq":"2"}`
 	if _, err := DecodeEvent([]byte(removed)); err != nil {
 		t.Fatalf("member removal: %v", err)
 	}
-	groupRemoved := `{"type":"member_removed","version":1,"eventId":"` + testID + `","room":"group:` + testID + `","chatId":"` + testID + `","memberId":"` + testID + `"}`
+	groupRemoved := `{"type":"member_removed","version":1,"eventId":"` + testID + `","room":"group:` + testID + `","chatId":"` + testID + `","memberId":"` + testID + `","seq":"5"}`
 	if _, err := DecodeEvent([]byte(groupRemoved)); err != nil {
 		t.Fatalf("group removal: %v", err)
 	}
@@ -226,5 +226,45 @@ func TestDecodeMembershipChanged(t *testing.T) {
 	event.Room = "user:" + event.ChatID
 	if err := ValidateEvent(event); err == nil {
 		t.Fatal("accepted user room")
+	}
+}
+
+func TestDecodeEventRequiresTheCounterOfItsAudience(t *testing.T) {
+	event := func(fields string) string {
+		return `{"version":1,"eventId":"` + testID + `","chatId":"` + testID + `",` + fields + `}`
+	}
+	for name, raw := range map[string]string{
+		"chat creation without account sequence":  event(`"type":"chat_created","room":"user:` + testID + `"`),
+		"chat creation with chat sequence":        event(`"type":"chat_created","room":"user:` + testID + `","userSeq":"1","seq":"1"`),
+		"group removal with account sequence":     event(`"type":"member_removed","room":"group:` + testID + `","memberId":"` + testID + `","userSeq":"1"`),
+		"own removal with chat sequence":          event(`"type":"member_removed","room":"user:` + testID + `","memberId":"` + testID + `","seq":"1"`),
+		"membership change without sequence":      event(`"type":"membership_changed","room":"group:` + testID + `"`),
+		"chat deletion without sequence":          event(`"type":"chat_deleted","room":"group:` + testID + `"`),
+		"shared reads with member sequence":       event(`"type":"reads_changed","room":"group:` + testID + `","memberSeq":"1"`),
+		"history hint with both chat counters":    event(`"type":"history_changed","room":"user:` + testID + `","sequence":"4","seq":"4","memberSeq":"2"`),
+		"history hint with account sequence":      event(`"type":"history_changed","room":"user:` + testID + `","sequence":"4","seq":"4","userSeq":"1"`),
+		"saved message with chat sequence":        `{"type":"message_saved","version":1,"eventId":"` + testID + `","room":"user:` + testID + `","chatId":"` + testID + `","requestId":"` + testID + `","messageId":"` + testID + `","sequence":"3","senderId":"` + testID + `","body":"hi","createdAt":"2026-09-26T09:00:01Z","seq":"3"}`,
+		"zero chat sequence on membership change": event(`"type":"membership_changed","room":"group:` + testID + `","seq":"0"`),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := DecodeEvent([]byte(raw)); err == nil {
+				t.Fatalf("accepted %s", raw)
+			}
+		})
+	}
+	for name, raw := range map[string]string{
+		"own read advance":   event(`"type":"reads_changed","room":"user:` + testID + `","memberSeq":"9"`),
+		"private hint":       event(`"type":"history_changed","room":"user:` + testID + `","sequence":"4","memberSeq":"2"`),
+		"shared hint":        event(`"type":"history_changed","room":"group:` + testID + `","sequence":"4","seq":"4"`),
+		"saved replay hint":  event(`"type":"history_changed","room":"group:` + testID + `","sequence":"4"`),
+		"membership change":  event(`"type":"membership_changed","room":"group:` + testID + `","seq":"6"`),
+		"chat pin ordering":  event(`"type":"chat_preferences_changed","room":"user:` + testID + `","userSeq":"6"`),
+		"group chat deleted": event(`"type":"chat_deleted","room":"group:` + testID + `","seq":"6"`),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := DecodeEvent([]byte(raw)); err != nil {
+				t.Fatalf("rejected %s: %v", raw, err)
+			}
+		})
 	}
 }

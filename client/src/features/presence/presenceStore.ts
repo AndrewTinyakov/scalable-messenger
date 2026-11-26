@@ -121,6 +121,7 @@ export class PresenceStore {
       this.schedule(this.resyncAt)
       return false
     }
+    if (event.type === 'chat_created' || event.type === 'membership_changed') this.retryDenied()
     if (event.type === 'membership_changed' || event.type === 'member_removed') {
       if (this.countWanted?.startsWith(`${event.chatId}:`)) {
         this.countSent = null
@@ -148,6 +149,19 @@ export class PresenceStore {
       this.statuses.set(userId, { userId, unavailable: true })
     this.publish()
     return true
+  }
+
+  /**
+   * A new chat may let this user see someone the gateway refused. The gateway
+   * only rechecks grants it already holds, so ask for the refused users again.
+   */
+  private retryDenied() {
+    const denied = [...this.sent].filter((id) => {
+      const view = this.statuses.get(id)
+      return view && 'unavailable' in view
+    })
+    denied.forEach((id) => this.sent.delete(id))
+    if (denied.length) this.schedule(this.now())
   }
 
   private publish() {

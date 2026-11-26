@@ -214,3 +214,26 @@ it('keeps the latest status, unavailable users, counts and server timing', () =>
   expect(store.config.idleAfterInputMs).toBe(2000)
   expect(listener).toHaveBeenCalledTimes(2)
 })
+
+it('asks again for refused users once a new chat may allow them', async () => {
+  store.watch('header', header, [id(1), id(2)])
+  await vi.advanceTimersByTimeAsync(1000)
+  store.onEvent({
+    version: 1,
+    type: 'presence',
+    statuses: [{ userId: id(2), online: true }],
+    unavailable: [id(1)],
+  })
+  store.onEvent({
+    version: 1,
+    type: 'chat_created',
+    chatId: id(9),
+    userSeq: '1',
+    eventId: 'e',
+    room: 'user:x',
+    epoch: '1',
+    streamId: 's',
+  } as Parameters<PresenceStore['onEvent']>[0])
+  await vi.advanceTimersByTimeAsync(1000)
+  expect(watches().at(-1)).toEqual({ type: 'watch_presence', version: 1, add: [id(1)], remove: [] })
+})

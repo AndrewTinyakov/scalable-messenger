@@ -26,11 +26,15 @@ function actors(bench, users, count) {
   return chosen;
 }
 
-async function start(bench, size, settleMs = 2 * MINUTE) {
+// Connects the first `size` users and waits for them to be ready. A run whose
+// population never settles measured less than its target, so it is marked
+// failed unless the scenario judges that itself.
+async function start(bench, size, settleMs = 2 * MINUTE, { required = true } = {}) {
   const users = population(bench, size);
   await bench.connect(users);
   const settled = await bench.settle(settleMs);
   bench.log(`[${size}] ${bench.open.length} open, settled: ${settled}`);
+  if (!settled && required) bench.failures.push(`${size} sockets did not become ready within ${settleMs / 1000} s`);
   return users;
 }
 
@@ -48,16 +52,13 @@ export async function smoke(bench) {
   const failures = [];
   const probe = await bench.measure('smoke', 90 * SECOND, () => cycles(bench, actors(bench, users, 8), 90 * SECOND, 1));
   if (probe.sockets.ready !== probe.sockets.intended) failures.push(`${probe.sockets.ready}/${probe.sockets.intended} intended sockets ready`);
-  for (const kind of ['online', 'offline']) {
-    const outcome = probe.changes[kind];
-    if (!outcome?.delivered || outcome.missing || outcome.late) failures.push(`${kind} changes: ${JSON.stringify(outcome)}`);
-  }
   // A watch for a stranger, who shares no chat with the watcher, must be
   // refused or denied without revealing their status.
   const watcher = users[0];
   const contacts = new Set([...bench.plan.peers[watcher].map(entry => entry.peer), ...bench.plan.groups[bench.plan.groupOf[watcher]].members]);
   const stranger = bench.plan.order.find(user => !contacts.has(user));
   const strangerId = bench.plan.users[stranger].id;
+  const errorsBefore = bench.client(watcher).errors.length;
   bench.begin('smoke-stranger');
   if (bench.protocol === 'legacy') {
     const foreign = bench.plan.groups[bench.plan.groupOf[stranger]].id;
@@ -68,9 +69,15 @@ export async function smoke(bench) {
   await delay(5 * SECOND);
   const denial = await bench.end();
   const client = bench.client(watcher);
-  const refused = bench.protocol === 'legacy' ? client.errors.includes('UNAUTHORIZED') : client.denied.has(strangerId);
+  const refused = bench.protocol === 'legacy' ? client.errors.slice(errorsBefore).includes('UNAUTHORIZED') : client.denied.has(strangerId);
   if (!refused) failures.push('the stranger watch was neither refused nor denied');
   if (bench.counts['presence.unexpectedSubject']) failures.push('a status arrived for a user outside a watch set');
+  // Outcomes are final only once every probe change has been reported or timed out.
+  await bench.drain();
+  for (const kind of ['online', 'offline']) {
+    const outcome = probe.changes[kind];
+    if (!outcome?.delivered || outcome.missing || outcome.late) failures.push(`${kind} changes: ${JSON.stringify(outcome)}`);
+  }
   return { windows: [probe, denial], failures };
 }
 
@@ -180,7 +187,7 @@ export async function capacity(bench, { stages = [2000, 4000, 8000, 12000, 15000
   for (const size of stages) {
     // The ramp is its own window, so watch refusals during admission count.
     bench.begin(`ramp-${size}`);
-    await start(bench, size, 3 * MINUTE);
+    await start(bench, size, 3 * MINUTE, { required: false });
     const ramp = await bench.end({ target: size });
     const report = await bench.measure(`capacity-${size}`, 2 * MINUTE, undefined, { target: size });
     const refused = errors(ramp) + errors(report);

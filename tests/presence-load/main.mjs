@@ -52,8 +52,9 @@ if (command === 'seed') {
   });
   const startedAt = Date.now();
   try {
-    const { windows, failures = [] } = await scenario(bench, { container: values['fault-container'] });
-    bench.finishAll();
+    const { windows, failures: checks = [] } = await scenario(bench, { container: values['fault-container'] });
+    await bench.drain();
+    const failures = [...bench.failures, ...checks];
     const report = {
       protocol: values.protocol, scenario: values.scenario, project: manifest.project, params: manifest.params,
       startedAt, endedAt: Date.now(), connectRate: bench.connectRate, failures, windows,

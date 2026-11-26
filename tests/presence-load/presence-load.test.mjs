@@ -207,3 +207,22 @@ test('a delivery after the deadline counts as late, not delivered', async t => {
     { armed: 3, delivered: 0, late: 1, missing: 2, superseded: 0, watcherClosed: 0, alreadyShown: 0 });
   created.window = null;
 });
+
+test('a legacy source forgets its states once its polls expire', () => {
+  const plan = buildPlan(small);
+  const hub = fakeHub(plan);
+  const watcher = client('legacy', plan, plan.order[0], hub);
+  const { group, groupMembers, directChats } = watcher.watch;
+  assert.ok(group && directChats.length);
+  const direct = plan.peers[plan.order[0]].map(entry => entry.peer).find(peer => !groupMembers.includes(peer));
+  const shared = groupMembers[0];
+  watcher.receive(poll('sidebar_presence', [direct, shared].map(subject => ({ userId: plan.users[subject].id, state: 'online' }))));
+  watcher.receive(poll('presence', [{ userId: plan.users[shared].id, state: 'offline' }]));
+  assert.equal(watcher.known.get(shared), false);
+  // The sidebar's polls stop: its direct peer is unknown again, while the open
+  // group still vouches for the member both sources reported.
+  watcher.validUntil.sidebar = Date.now() - 1;
+  watcher.prune();
+  assert.equal(watcher.known.has(direct), false);
+  assert.equal(watcher.known.get(shared), false);
+});

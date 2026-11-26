@@ -32,11 +32,27 @@ const adapters = {
         return null;
       }
       client.validUntil[source] = validUntil;
+      client.source = source;
       return frame.statuses.map(status => [status.userId, { online: true, offline: false }[status.state]]);
     },
     fresh(client) {
       const now = Date.now();
       return client.validUntil.sidebar > now && (!client.watch.group || client.validUntil.group > now);
+    },
+    // Forgets the states a source reported once its polls expire, keeping any
+    // state the other source still vouches for.
+    prune(client) {
+      const now = Date.now();
+      for (const [source, states] of Object.entries(client.sources)) {
+        if (!states.size || client.validUntil[source] > now) continue;
+        const other = client.sources[source === 'sidebar' ? 'group' : 'sidebar'];
+        const otherFresh = client.validUntil[source === 'sidebar' ? 'group' : 'sidebar'] > now;
+        for (const subject of states.keys()) {
+          if (otherFresh && other.has(subject)) client.known.set(subject, other.get(subject));
+          else client.known.delete(subject);
+        }
+        states.clear();
+      }
     },
   },
   current: {
@@ -53,6 +69,7 @@ const adapters = {
       ];
     },
     fresh: () => true,
+    prune() {},
   },
 };
 
@@ -65,6 +82,8 @@ export class Client {
   countPending = false;
   countSeen = false;
   validUntil = {};
+  // Legacy only: the states each poll source last reported.
+  sources = { sidebar: new Map(), group: new Map() };
   // Error codes and denied users seen on the current connection.
   errors = [];
   denied = new Set();
@@ -78,7 +97,13 @@ export class Client {
   // Ready while open with a fresh known state for every watched user and, for
   // a current client with its group open, a received online count.
   get ready() {
+    this.prune();
     return this.open && this.known.size === this.expected.size && (!this.countPending || this.countSeen) && this.adapter.fresh(this);
+  }
+
+  // Drops states that are no longer valid; call before reading `known`.
+  prune() {
+    this.adapter.prune(this);
   }
 
   connect() {
@@ -91,6 +116,7 @@ export class Client {
     this.countPending = this.adapter === adapters.current && Boolean(this.watch.group);
     this.countSeen = false;
     this.validUntil = {};
+    this.sources = { sidebar: new Map(), group: new Map() };
     this.errors = [];
     this.denied = new Set();
     this.closing = false;
@@ -168,6 +194,7 @@ export class Client {
     this.hub.frame(this, frame, data.length);
     if (frame.type === 'online_count') this.countSeen = true;
     if (frame.type === 'error') this.errors.push(frame.code);
+    this.source = null;
     for (const [userId, online] of this.adapter.statuses(frame, this) ?? []) {
       const subject = this.hub.userIndex(userId);
       if (subject === undefined || !this.expected.has(subject)) {
@@ -178,10 +205,13 @@ export class Client {
         continue;
       }
       this.hub.count('presence.statuses');
+      const states = this.sources[this.source];
       if (online === undefined) {
+        states?.delete(subject);
         this.known.delete(subject);
         continue;
       }
+      states?.set(subject, online);
       const prior = this.known.get(subject);
       if (prior === online) continue;
       this.known.set(subject, online);

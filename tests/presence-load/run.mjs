@@ -51,6 +51,8 @@ export class Bench {
   pauseReconnects = false;
   stopped = false;
   window = null;
+  // Checks that make the run invalid, such as a population that never settled.
+  failures = [];
 
   constructor({ plan, protocol, url, origin, ticket, prometheus, deadlineMs = 15_000, connectRate = 100, log = console.error }) {
     Object.assign(this, { plan, protocol, url, origin, ticket, prometheus, deadlineMs, connectRate, log });
@@ -206,6 +208,7 @@ export class Bench {
     for (const watcher of this.watchers[actor]) {
       const client = this.clients.get(watcher);
       if (!client?.open) continue;
+      client.prune();
       if (client.known.get(actor) === online) outcomes.alreadyShown++;
       else waiting.add(watcher);
     }
@@ -225,9 +228,10 @@ export class Bench {
     change.outcomes[performance.now() <= change.deadline ? 'superseded' : 'missing'] += change.waiting.size;
   }
 
-  // Ends every tracked change; called once before the report is written.
-  finishAll() {
-    for (const [actor, change] of [...this.pending]) this.finish(actor, change);
+  // Waits until every tracked change has been reported or has ended at its
+  // grace cutoff, so outcomes are final.
+  async drain() {
+    while (this.pending.size) await delay(250);
   }
 
   // Closes the actor, keeps it offline for `offlineMs`, then reconnects it.
@@ -294,7 +298,9 @@ export class Bench {
     const endedAt = Date.now();
     const durationMs = performance.now() - window.started;
     const loop = { eventLoopP99Ms: this.loop.percentile(99) / 1e6, eventLoopMaxMs: this.loop.max / 1e6 };
+    const rssMiB = process.memoryUsage().rss / 2 ** 20;
     const open = this.open;
+    for (const client of open) client.prune();
     const expected = open.reduce((sum, client) => sum + client.expected.size, 0);
     const known = open.reduce((sum, client) => sum + client.known.size, 0);
     const sockets = { intended: this.intended.length, open: open.length, ready: open.filter(client => client.ready).length };
@@ -314,10 +320,10 @@ export class Bench {
       },
       counts,
       schedules: window.schedules,
-      // Late deliveries and finishAll() complete this object before the report is written.
+      // Late deliveries complete this object; drain() waits for them before the report is written.
       changes: window.changes,
       latencyMs: Object.fromEntries([...window.latency].map(([name, histogram]) => [name, histogram.report()])),
-      generator: { ...loop, rssMiB: process.memoryUsage().rss / 2 ** 20, limited: loop.eventLoopP99Ms > 50 },
+      generator: { ...loop, rssMiB, limited: loop.eventLoopP99Ms > 50 },
       ...extra,
     };
     try {

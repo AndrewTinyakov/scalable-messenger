@@ -9,6 +9,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"math/big"
 	"net"
 	"net/url"
@@ -24,6 +25,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	authorization "messenger/ws/internal/generated/grpc"
 	"messenger/ws/internal/grpcauth"
@@ -36,6 +38,7 @@ type authorizationServer struct {
 	t         *testing.T
 	sessionID string
 	revoked   bool
+	batches   []int
 }
 
 func (s *authorizationServer) validate(ctx context.Context, sessionID string) error {
@@ -88,6 +91,50 @@ func (s *authorizationServer) AuthorizeGroups(ctx context.Context, request *auth
 		return nil, err
 	}
 	return &authorization.AuthorizeGroupsResponse{AuthorizedChatIds: request.GetChatIds()}, nil
+}
+
+// maxPresenceRequestBytes is the API's default gRPC inbound message limit.
+const maxPresenceRequestBytes = 8192
+
+func (s *authorizationServer) PresenceVisibility(ctx context.Context, request *authorization.PresenceVisibilityRequest) (*authorization.PresenceVisibilityResponse, error) {
+	if err := s.validate(ctx, request.GetSessionId()); err != nil {
+		return nil, err
+	}
+	if proto.Size(request) > maxPresenceRequestBytes {
+		return nil, status.Error(codes.ResourceExhausted, "request too large")
+	}
+	s.batches = append(s.batches, len(request.GetUserIds()))
+	response := &authorization.PresenceVisibilityResponse{}
+	for _, id := range request.GetUserIds() {
+		response.Subjects = append(response.Subjects, &authorization.SubjectVisibility{UserId: id, Level: authorization.PresenceLevel_PRESENCE_LEVEL_FULL})
+	}
+	return response, nil
+}
+
+func TestPresenceVisibilitySplitsLargeWatchSets(t *testing.T) {
+	service := &authorizationServer{t: t, sessionID: strings.Repeat("a", 64)}
+	address, config := startAuthorizationServer(t, newCA(t), service)
+	client, err := grpcauth.New(address, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	ids := make([]string, 500)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("01ARZ3NDEKTSV4RRFFQ%07d", i)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	visibility, err := client.PresenceVisibility(ctx, service.sessionID, ids)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(visibility) != len(ids) || visibility[ids[499]].Level != grpcauth.PresenceFull {
+		t.Fatalf("visibility for %d of %d users", len(visibility), len(ids))
+	}
+	if !reflect.DeepEqual(service.batches, []int{200, 200, 100}) {
+		t.Fatalf("batches = %v", service.batches)
+	}
 }
 
 type certificateAuthority struct {

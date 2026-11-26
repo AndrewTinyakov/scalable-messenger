@@ -30,22 +30,37 @@ type LastSeen struct {
 	SeenAt time.Time
 }
 
+// presenceBatch keeps one visibility request inside the API's 8 KiB gRPC
+// message limit, which fits about 230 user IDs.
+const presenceBatch = 200
+
+// PresenceVisibility authorizes users in batches small enough for the API.
 func (c *Client) PresenceVisibility(ctx context.Context, sessionID string, userIDs []string) (map[string]Visibility, error) {
+	result := make(map[string]Visibility, len(userIDs))
+	for start := 0; start < len(userIDs); start += presenceBatch {
+		batch := userIDs[start:min(start+presenceBatch, len(userIDs))]
+		if err := c.presenceVisibility(ctx, sessionID, batch, result); err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
+}
+
+func (c *Client) presenceVisibility(ctx context.Context, sessionID string, userIDs []string, result map[string]Visibility) error {
 	response, err := c.service.PresenceVisibility(ctx, &authorization.PresenceVisibilityRequest{SessionId: sessionID, UserIds: userIDs})
 	if err != nil {
 		if code := status.Code(err); code == codes.Unauthenticated || code == codes.InvalidArgument {
-			return nil, ErrUnauthorized
+			return ErrUnauthorized
 		}
-		return nil, fmt.Errorf("presence visibility: %w", err)
+		return fmt.Errorf("presence visibility: %w", err)
 	}
 	requested := make(map[string]bool, len(userIDs))
 	for _, id := range userIDs {
 		requested[id] = true
 	}
-	result := make(map[string]Visibility, len(userIDs))
 	for _, subject := range response.GetSubjects() {
 		if _, seen := result[subject.GetUserId()]; seen || !requested[subject.GetUserId()] {
-			return nil, errors.New("invalid presence visibility response")
+			return errors.New("invalid presence visibility response")
 		}
 		visibility := Visibility{}
 		switch subject.GetLevel() {
@@ -59,7 +74,7 @@ func (c *Client) PresenceVisibility(ctx context.Context, sessionID string, userI
 		}
 		result[subject.GetUserId()] = visibility
 	}
-	return result, nil
+	return nil
 }
 
 func (c *Client) OnlineCountMembers(ctx context.Context, sessionID, chatID string, limit int) (int, []string, error) {

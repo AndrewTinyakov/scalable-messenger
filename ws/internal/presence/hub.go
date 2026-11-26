@@ -166,11 +166,11 @@ func (h *Hub) Revalidate(w Watcher) {
 	if wt.count != nil {
 		wt.count.expires = now
 	}
-	ids, generation, renew := h.startRenewalLocked(wt)
+	held, generation, renew := h.startRenewalLocked(wt)
 	refreshCount := h.startCountRefreshLocked(wt, wt.countChat)
 	h.mu.Unlock()
 	if renew {
-		h.renew(wt, ids, generation)
+		h.renew(wt, held, generation)
 	}
 	refreshCount()
 }
@@ -293,8 +293,8 @@ func (h *Hub) markLocked(s *subject, now time.Time) {
 }
 
 // startRenewalLocked claims the socket's renewal, or asks the running one
-// to check again when it finishes.
-func (h *Hub) startRenewalLocked(wt *watch) ([]string, uint64, bool) {
+// to check again when it finishes. It returns the grants being renewed.
+func (h *Hub) startRenewalLocked(wt *watch) (map[string]*grant, uint64, bool) {
 	if wt.renewing {
 		wt.recheck = true
 		return nil, 0, false
@@ -302,17 +302,22 @@ func (h *Hub) startRenewalLocked(wt *watch) ([]string, uint64, bool) {
 	if len(wt.grants) == 0 {
 		return nil, 0, false
 	}
-	ids := make([]string, 0, len(wt.grants))
-	for id := range wt.grants {
-		ids = append(ids, id)
+	held := make(map[string]*grant, len(wt.grants))
+	for id, g := range wt.grants {
+		held[id] = g
 	}
 	wt.renewing = true
-	return ids, wt.authorized, true
+	return held, wt.authorized, true
 }
 
 // renew authorizes the socket's grants again. Its result is fenced by the
-// generation captured when it started.
-func (h *Hub) renew(wt *watch, ids []string, generation uint64) {
+// generation captured when it started, and applies only to grants that were
+// not replaced meanwhile, so it never overwrites a newer authorization.
+func (h *Hub) renew(wt *watch, held map[string]*grant, generation uint64) {
+	ids := make([]string, 0, len(held))
+	for id := range held {
+		ids = append(ids, id)
+	}
 	h.wg.Add(1)
 	go func() {
 		defer h.wg.Done()
@@ -325,7 +330,7 @@ func (h *Hub) renew(wt *watch, ids []string, generation uint64) {
 			h.mu.Lock()
 			current := make([]string, 0, len(ids))
 			for _, id := range ids {
-				if wt.grants[id] != nil {
+				if wt.grants[id] == held[id] {
 					current = append(current, id)
 				}
 			}
@@ -336,7 +341,7 @@ func (h *Hub) renew(wt *watch, ids []string, generation uint64) {
 		wt.renewing = false
 		recheck := wt.recheck
 		wt.recheck = false
-		var next []string
+		var next map[string]*grant
 		var nextGeneration uint64
 		again := false
 		if recheck {
@@ -367,7 +372,7 @@ func (h *Hub) sweep(now time.Time) {
 	h.metrics.PresenceSubjects.Set(float64(len(h.subjects)))
 	type renewal struct {
 		wt         *watch
-		ids        []string
+		held       map[string]*grant
 		generation uint64
 	}
 	type countRefresh struct {
@@ -386,13 +391,13 @@ func (h *Hub) sweep(now time.Time) {
 			expired = expired || !now.Before(g.expires)
 		}
 		if expired && !wt.renewing {
-			ids, generation, _ := h.startRenewalLocked(wt)
-			renewals = append(renewals, renewal{wt, ids, generation})
+			held, generation, _ := h.startRenewalLocked(wt)
+			renewals = append(renewals, renewal{wt, held, generation})
 		}
 	}
 	h.mu.Unlock()
 	for _, r := range renewals {
-		h.renew(r.wt, r.ids, r.generation)
+		h.renew(r.wt, r.held, r.generation)
 	}
 	for _, c := range counts {
 		h.refreshCount(c.wt, c.chatID)

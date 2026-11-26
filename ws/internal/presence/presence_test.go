@@ -124,11 +124,11 @@ type fakeAuth struct {
 	levels  map[string]grpcauth.PresenceLevel
 	members map[string][]string
 	calls   [][]string
+	hold    chan struct{}
 }
 
 func (a *fakeAuth) PresenceVisibility(_ context.Context, _ string, ids []string) (map[string]grpcauth.Visibility, error) {
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	a.calls = append(a.calls, append([]string(nil), ids...))
 	result := make(map[string]grpcauth.Visibility, len(ids))
 	for _, id := range ids {
@@ -137,6 +137,13 @@ func (a *fakeAuth) PresenceVisibility(_ context.Context, _ string, ids []string)
 			level = grpcauth.PresenceFull
 		}
 		result[id] = grpcauth.Visibility{Level: level}
+	}
+	// A held call answers with the levels it read, once released.
+	hold := a.hold
+	a.hold = nil
+	a.mu.Unlock()
+	if hold != nil {
+		<-hold
 	}
 	return result, nil
 }
@@ -432,6 +439,44 @@ func TestHubSuspendsRevokedGrantsUntilRenewal(t *testing.T) {
 	bob.quiet(t)
 }
 
+func TestHubKeepsAGrantNewerThanAnOldRenewal(t *testing.T) {
+	store, auth := newFakeStore(), &fakeAuth{}
+	alice := user(1)
+	hub := startHub(t, store, auth, testConfig())
+	bob := newFakeWatcher()
+	if err := hub.Watch(context.Background(), bob, []string{alice}, nil, false); err != nil {
+		t.Fatal(err)
+	}
+	bob.next(t)
+	// A renewal reads that access is gone, then stalls.
+	release := make(chan struct{})
+	auth.mu.Lock()
+	auth.levels = map[string]grpcauth.PresenceLevel{alice: grpcauth.PresenceNone}
+	auth.hold = release
+	auth.mu.Unlock()
+	hub.Revalidate(bob)
+	for held := true; held; time.Sleep(time.Millisecond) {
+		auth.mu.Lock()
+		held = auth.hold != nil
+		auth.mu.Unlock()
+	}
+	// Access returns and the socket watches again before the renewal answers.
+	auth.mu.Lock()
+	auth.levels = nil
+	auth.mu.Unlock()
+	if err := hub.Watch(context.Background(), bob, []string{alice}, nil, true); err != nil {
+		t.Fatal(err)
+	}
+	bob.next(t)
+	close(release)
+	time.Sleep(50 * time.Millisecond)
+	store.publish(alice, true, 1)
+	event := bob.next(t)
+	if len(event.Unavailable) != 0 || len(event.Statuses) != 1 || !event.Statuses[0].Online {
+		t.Fatalf("after the stale renewal = %+v", event)
+	}
+}
+
 func TestHubResyncAcceptsRolledBackState(t *testing.T) {
 	store, auth := newFakeStore(), &fakeAuth{}
 	alice := user(1)
@@ -553,5 +598,26 @@ func TestLastSeenSendsBatchesWithinTheAPIMessageLimit(t *testing.T) {
 		if size > 8192 {
 			t.Fatalf("batch of %d bytes exceeds the API limit", size)
 		}
+	}
+}
+
+func TestHubSendsTheCountAgainWhenOnlyTheGroupSizeChanges(t *testing.T) {
+	store := newFakeStore()
+	auth := &fakeAuth{members: map[string][]string{"group": {user(1), user(2)}}}
+	hub := startHub(t, store, auth, testConfig())
+	bob := newFakeWatcher()
+	if err := hub.WatchOnlineCount(context.Background(), bob, "group"); err != nil {
+		t.Fatal(err)
+	}
+	if event := bob.next(t); event.Online != 0 || event.Members != 2 {
+		t.Fatalf("count = %+v", event)
+	}
+	// An offline member joins: the online number stays, the size does not.
+	auth.mu.Lock()
+	auth.members["group"] = []string{user(1), user(2), user(3)}
+	auth.mu.Unlock()
+	hub.Revalidate(bob)
+	if event := bob.next(t); event.Online != 0 || event.Members != 3 {
+		t.Fatalf("count after a member joined = %+v", event)
 	}
 }

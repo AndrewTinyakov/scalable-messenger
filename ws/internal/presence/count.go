@@ -16,10 +16,17 @@ type onlineCount struct {
 	chatID  string
 	members []string
 	total   int
-	sent    int
+	sent    countValue
 	dirty   bool
 	expires time.Time
 }
+
+// countValue is what an online_count frame reports; a change in either
+// field is sent.
+type countValue struct{ online, members int }
+
+// unsent never equals a real count.
+var unsent = countValue{-1, -1}
 
 // WatchOnlineCount replaces the socket's online count. An empty chat ID
 // stops it. Groups above the limit get no count.
@@ -37,7 +44,7 @@ func (h *Hub) WatchOnlineCount(ctx context.Context, w Watcher, chatID string) er
 	if wt == nil || chatID == "" {
 		return nil
 	}
-	return h.resolveCount(ctx, wt, chatID, -1, generation)
+	return h.resolveCount(ctx, wt, chatID, unsent, generation)
 }
 
 func (h *Hub) refreshCount(wt *watch, chatID string) {
@@ -55,7 +62,7 @@ func (h *Hub) startCountRefreshLocked(wt *watch, chatID string) func() {
 		return func() {}
 	}
 	wt.counted++
-	generation, sent := wt.counted, -1
+	generation, sent := wt.counted, unsent
 	if wt.count != nil {
 		wt.count.expires = time.Now()
 		sent = wt.count.sent
@@ -82,7 +89,7 @@ func (h *Hub) startCountRefreshLocked(wt *watch, chatID string) func() {
 // resolveCount authorizes the roster and installs it if no newer count
 // watch or invalidation started meanwhile, keeping the last count the
 // socket received so an unchanged count is not sent again.
-func (h *Hub) resolveCount(ctx context.Context, wt *watch, chatID string, sent int, generation uint64) error {
+func (h *Hub) resolveCount(ctx context.Context, wt *watch, chatID string, sent countValue, generation uint64) error {
 	h.mu.Lock()
 	wt.resolving = generation
 	h.mu.Unlock()
@@ -155,9 +162,10 @@ func (h *Hub) countEventLocked(wt *watch, now time.Time) (protocol.Event, bool) 
 		}
 	}
 	count.dirty = false
-	if online == count.sent {
+	value := countValue{online, count.total}
+	if value == count.sent {
 		return protocol.Event{}, false
 	}
-	count.sent = online
+	count.sent = value
 	return protocol.Event{Type: protocol.EventOnlineCount, Version: 1, ChatID: count.chatID, Online: online, Members: count.total}, true
 }

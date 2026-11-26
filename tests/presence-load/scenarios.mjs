@@ -137,6 +137,12 @@ export async function churn(bench, { size = 1600, rates = [2, 10, 25], activityR
   return windows;
 }
 
+// A short check for routine runs: one idle plateau and one churn rate.
+export async function quick(bench) {
+  const size = 2000;
+  return [...await idle(bench, { plateaus: [size] }), ...await churn(bench, { size, rates: [10], activityRates: [25] })];
+}
+
 // Kills one gateway. Its sockets stay offline for the hold, so the surviving
 // gateway's watchers must learn they went offline; then they reconnect while
 // the failed gateway is still down, and finally it restarts.
@@ -223,6 +229,7 @@ export const SCENARIOS = {
   smoke: { run: smoke, users: 64 },
   idle: { run: idle, users: 3500 },
   churn: { run: churn, users: 1600 },
+  quick: { run: quick, users: 2000 },
   'gateway-kill': { run: gatewayKill, users: 1600 },
   'redis-kill': { run: redisKill, users: 1600 },
   capacity: { run: capacity, users: 15000 },

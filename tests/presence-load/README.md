@@ -52,9 +52,12 @@ Each `run` fetches WebSocket tickets for its users before any timed window. A cl
 | `smoke` | 64 sockets. Fails unless every intended socket is ready, probe changes are delivered both ways in time, and a watch for a stranger is denied without revealing their status | Both |
 | `idle` | 1,000, 2,000 and 3,500 sockets. At each plateau: 60 s with no changes (`quiet-N`), then 3 min while 32 actors and the four hot subjects disconnect for 20 s and reconnect (`idle-N`; hot-subject changes are labelled `hot`) | Both |
 | `churn` | 1,600 sockets. Disconnect-and-reconnect cycles at 2, 10 and 25 per second, 2 min each. Then activity changes at 5, 25 and 100 per second (current only): a user stops interacting for 20 s with its tab still visible, then resumes | Both |
+| `quick` | 2,000 sockets: `quiet-2000` and `idle-2000` as in `idle`, then `churn-10` and `activity-25` (current only) as in `churn` | Both |
 | `gateway-kill` | 1,600 sockets. `docker kill --fault-container` (a gateway). The sockets it closed are the victims; they stay offline for 150 s while the surviving gateway's watchers must see them go offline. Then they reconnect to the surviving gateway; each victim's online change is timed from its own reconnect attempt, with a 30 s deadline. Finally the failed gateway restarts | Both |
 | `redis-kill` | 1,600 sockets. 64 actors cycle once per second while `--fault-container` (a Redis primary) is down for 2 min, then while it recovers | Both |
 | `capacity` | 2,000, 4,000, 8,000, 12,000 and 15,000 sockets. A stage passes when at least 99% of its sockets are open and ready at the end and error frames during ramp and measurement stay within 1%; the run stops at the first failure | Both |
+
+The full suite (every scenario on both builds) takes about 2.5 hours. For a routine check, run `smoke`, `quick` and `gateway-kill` on both builds, about 30 minutes in all.
 
 A probe actor stays offline for 20 s, longer than the 15 s delivery deadline, and online at least 40 s between cycles, so the legacy 5 s poll has several chances to see each online period. Requested and achieved action rates are recorded in each window's `schedules`. Use one fault container per run, and name a Redis primary, not a replica (`redis-cli role`). A run whose population never becomes ready, or that fails a scenario check, lists the failures in its report and exits with status 1.
 

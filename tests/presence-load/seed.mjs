@@ -13,7 +13,7 @@ const COOKIE_NAMES = ['__Host-messenger_session', 'messenger_session'];
 
 const csv = values => values.map(value => value === null ? '' : `"${String(value).replaceAll('"', '""')}"`).join(',') + '\n';
 
-async function* rows(plan, tokens) {
+function* rows(plan, tokens) {
   yield 'BEGIN;\n';
   yield 'COPY users (id, username, password_hash) FROM STDIN WITH (FORMAT csv);\n';
   // An unusable hash: these accounts only sign in through seeded sessions.
@@ -51,7 +51,7 @@ export async function seedDatabase(plan, project) {
     { stdio: ['pipe', 'inherit', 'inherit'] });
   const exited = once(psql, 'exit');
   let batch = '';
-  for await (const row of rows(plan, tokens)) {
+  for (const row of rows(plan, tokens)) {
     batch += row;
     if (batch.length < 1 << 16) continue;
     if (!psql.stdin.write(batch)) await once(psql.stdin, 'drain');

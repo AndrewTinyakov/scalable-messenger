@@ -50,7 +50,7 @@ function id(kind, index, rand) {
 export function buildPlan(options = {}) {
   const p = { ...DEFAULTS, ...options };
   if (p.degree % 2 || p.degree < 2) throw new Error('degree must be an even number of at least 2');
-  if (p.users < p.groupSize * 2 || p.users % p.groupSize) throw new Error('users must be a multiple of groupSize');
+  if (p.users < p.groupSize * 2 || p.users % p.groupSize) throw new Error('users must be a multiple of groupSize, with at least two groups');
   const rand = random(p.seed);
   const users = Array.from({ length: p.users }, (_, i) => ({ id: id('S', i, rand), username: 'pl' + i }));
   // order[k] is the user that connects k-th; a plateau of S sockets is order[0..S).

@@ -1,15 +1,12 @@
 // Scenario runner: holds the clients, keeps the intended sockets connected,
 // injects changes and measures each window from both sides.
-import { execFile } from 'node:child_process';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { setTimeout as delay } from 'node:timers/promises';
-import { promisify } from 'node:util';
 import { Histogram } from '../features-load/metrics.mjs';
 import { Client } from './client.mjs';
 import { watchSet } from './plan.mjs';
 import { collect } from './prometheus.mjs';
 
-const run = promisify(execFile);
 // A change that misses its deadline stays tracked this much longer, so a late
 // delivery is counted as late rather than missing.
 const LATE_GRACE_MS = 45_000;
@@ -146,7 +143,7 @@ export class Bench {
     if (this.reconnecting.has(client)) return;
     this.reconnecting.add(client);
     try {
-      for (let attempt = 0, wait = firstDelayMs; ; attempt++, wait = Math.min(MAX_BACKOFF_MS, 1000 * 2 ** attempt)) {
+      for (let wait = firstDelayMs; ; wait = Math.min(MAX_BACKOFF_MS, Math.max(wait, 1000) * 2)) {
         await delay(wait * (0.5 + Math.random()));
         while (this.pauseReconnects && !this.stopped) await delay(500);
         if (!this.wanted(client)) return;
@@ -335,9 +332,10 @@ export class Bench {
     return report;
   }
 
-  async measure(name, ms, during = () => delay(ms), extra) {
+  // Measures one window that lasts `during` ms, or until `during()` resolves.
+  async measure(name, during, extra) {
     this.begin(name);
-    await during();
+    await (typeof during === 'number' ? delay(during) : during());
     return this.end(extra);
   }
 
@@ -360,19 +358,4 @@ function summary(report) {
     : '';
   return `[${report.name}] sockets ${report.sockets.ready}/${report.sockets.intended} ready, coverage ${(report.watchEdges.coverage ?? 0).toFixed(4)}, ` +
     `${report.perSecond.frames.toFixed(1)} frames/s${changes ? `, ${changes}` : ''}${server}`;
-}
-
-export async function docker(...args) {
-  const { stdout } = await run('docker', args);
-  return stdout.trim();
-}
-
-export async function waitHealthy(container, timeoutMs = 120_000) {
-  const until = Date.now() + timeoutMs;
-  while (Date.now() < until) {
-    const status = await docker('inspect', '-f', '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}', container);
-    if (status === 'healthy') return;
-    await delay(1000);
-  }
-  throw new Error(`${container} did not become healthy`);
 }

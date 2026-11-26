@@ -2,6 +2,8 @@
 // browser client does, and reports every status it learns.
 import WebSocket from 'ws';
 
+const otherSource = { sidebar: 'group', group: 'sidebar' };
+
 // How the browser clients watch. Legacy renews its sidebar watch every 20-23 s
 // and its open-chat watch every 12-15 s. Current sends its watch set once per
 // connection and, like its client, spaces watch commands one second apart.
@@ -35,8 +37,7 @@ const adapters = {
       // carries only changes, so it must not revive them.
       adapters.legacy.prune(client);
       client.validUntil[source] = validUntil;
-      client.source = source;
-      return frame.statuses.map(status => [status.userId, { online: true, offline: false }[status.state]]);
+      return { source, entries: frame.statuses.map(status => [status.userId, { online: true, offline: false }[status.state]]) };
     },
     fresh(client) {
       const now = Date.now();
@@ -48,10 +49,10 @@ const adapters = {
       const now = Date.now();
       for (const [source, states] of Object.entries(client.sources)) {
         if (!states.size || client.validUntil[source] > now) continue;
-        const other = client.sources[source === 'sidebar' ? 'group' : 'sidebar'];
-        const otherFresh = client.validUntil[source === 'sidebar' ? 'group' : 'sidebar'] > now;
+        const other = otherSource[source];
+        const vouching = client.validUntil[other] > now ? client.sources[other] : new Map();
         for (const subject of states.keys()) {
-          if (otherFresh && other.has(subject)) client.known.set(subject, other.get(subject));
+          if (vouching.has(subject)) client.known.set(subject, vouching.get(subject));
           else client.known.delete(subject);
         }
         states.clear();
@@ -66,10 +67,13 @@ const adapters = {
     },
     statuses(frame) {
       if (frame.type !== 'presence') return null;
-      return [
-        ...frame.statuses.map(status => [status.userId, status.online]),
-        ...(frame.unavailable ?? []).map(id => [id, undefined]),
-      ];
+      return {
+        source: null,
+        entries: [
+          ...frame.statuses.map(status => [status.userId, status.online]),
+          ...(frame.unavailable ?? []).map(id => [id, undefined]),
+        ],
+      };
     },
     fresh: () => true,
     prune() {},
@@ -79,29 +83,35 @@ const adapters = {
 export class Client {
   socket = null;
   open = false;
-  // subject index -> last known online state.
-  known = new Map();
-  readyAt = null;
-  countPending = false;
-  countSeen = false;
-  validUntil = {};
-  // Legacy only: the states each poll source last reported.
-  sources = { sidebar: new Map(), group: new Map() };
-  // Error codes and denied users seen on the current connection.
-  errors = [];
-  denied = new Set();
   timers = new Set();
 
   constructor({ index, plan, watch, protocol, url, origin, ticket, hub }) {
     Object.assign(this, { index, plan, watch, url, origin, ticket, hub, adapter: adapters[protocol] });
     this.expected = new Set(watch.subjects);
+    this.reset();
+  }
+
+  // State that belongs to one connection.
+  reset() {
+    // subject index -> last known online state.
+    this.known = new Map();
+    this.readyAt = null;
+    // A current client with its group open is not ready until the online count arrives.
+    this.awaitingCount = this.adapter === adapters.current && Boolean(this.watch.group);
+    this.validUntil = {};
+    // Legacy only: the states each poll source last reported.
+    this.sources = { sidebar: new Map(), group: new Map() };
+    // Error codes and denied user IDs seen on this connection.
+    this.errors = [];
+    this.denied = new Set();
+    this.closing = false;
   }
 
   // Ready while open with a fresh known state for every watched user and, for
   // a current client with its group open, a received online count.
   get ready() {
     this.prune();
-    return this.open && this.known.size === this.expected.size && (!this.countPending || this.countSeen) && this.adapter.fresh(this);
+    return this.open && this.known.size === this.expected.size && !this.awaitingCount && this.adapter.fresh(this);
   }
 
   // Drops states that are no longer valid; call before reading `known`.
@@ -114,15 +124,7 @@ export class Client {
       headers: { Origin: this.origin }, perMessageDeflate: false, maxPayload: 1 << 20, handshakeTimeout: 15_000,
     });
     this.socket = socket;
-    this.known.clear();
-    this.readyAt = null;
-    this.countPending = this.adapter === adapters.current && Boolean(this.watch.group);
-    this.countSeen = false;
-    this.validUntil = {};
-    this.sources = { sidebar: new Map(), group: new Map() };
-    this.errors = [];
-    this.denied = new Set();
-    this.closing = false;
+    this.reset();
     const started = performance.now();
     return new Promise(resolve => {
       socket.once('open', () => {
@@ -195,10 +197,11 @@ export class Client {
       return;
     }
     this.hub.frame(this, frame, data.length);
-    if (frame.type === 'online_count') this.countSeen = true;
+    if (frame.type === 'online_count') this.awaitingCount = false;
     if (frame.type === 'error') this.errors.push(frame.code);
-    this.source = null;
-    for (const [userId, online] of this.adapter.statuses(frame, this) ?? []) {
+    const { source, entries } = this.adapter.statuses(frame, this) ?? { entries: [] };
+    const states = this.sources[source];
+    for (const [userId, online] of entries) {
       const subject = this.hub.userIndex(userId);
       if (subject === undefined || !this.expected.has(subject)) {
         // A state for a user outside the watch set would leak presence; an
@@ -208,7 +211,6 @@ export class Client {
         continue;
       }
       this.hub.count('presence.statuses');
-      const states = this.sources[this.source];
       if (online === undefined) {
         states?.delete(subject);
         this.known.delete(subject);

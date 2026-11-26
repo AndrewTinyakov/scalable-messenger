@@ -60,7 +60,7 @@ export async function collect(base, startMs, endMs) {
   if (endMs - startMs >= 2 * RATE_MS) samples.intervals.counterPeak = [startMs + RATE_MS, endMs];
   for (const [name, expression] of Object.entries(COUNTERS)) {
     const [mean] = await query(base, '/api/v1/query', { query: expression(`${Math.round(endMs - startMs)}ms`), time: endMs / 1000 });
-    const peaks = samples.intervals.counterPeak ? await range(base, expression('30s'), startMs + RATE_MS, endMs) : [];
+    const peaks = samples.intervals.counterPeak ? await range(base, expression(`${RATE_MS / 1000}s`), startMs + RATE_MS, endMs) : [];
     samples[name] = mean ? { mean: Number(mean.value[1]), peak: peaks.length ? Math.max(...peaks) : null } : null;
   }
   return samples;

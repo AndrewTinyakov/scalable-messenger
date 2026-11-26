@@ -27,6 +27,7 @@ test('the plan is deterministic and stays within both builds\' watch limits', ()
     if (!plan.hot.includes(user)) assert.ok(peers.length <= LEGACY_SIDEBAR_LIMIT);
     const watch = watchSet(plan, user);
     assert.ok(watch.directChats.length <= LEGACY_SIDEBAR_LIMIT);
+    // The current API's 8 KiB request limit fits about 232 IDs in one visibility RPC.
     assert.ok(watch.subjects.length <= 232);
     assert.ok(!watch.subjects.includes(user));
   }
@@ -122,7 +123,6 @@ test('the current adapter is ready only once its group count arrives', () => {
   const plan = buildPlan(small);
   const hub = fakeHub(plan);
   const watcher = client('current', plan, plan.order[0], hub);
-  watcher.countPending = true;
   watcher.receive(frame({ type: 'presence', version: 1,
     statuses: watcher.watch.subjects.map(subject => ({ userId: plan.users[subject].id, online: false })) }));
   assert.equal(watcher.ready, false);

@@ -42,9 +42,8 @@ if (command === 'seed') {
   const plan = buildPlan(manifest.params);
   const http = ticketClient({ api: manifest.api, origin: manifest.origin, ticketRate: number('ticket-rate') });
   // Tickets for everyone the scenario may connect, fetched before any timed window.
-  const size = values.scenario === 'capacity' ? plan.users.length : values.scenario === 'smoke' ? 64 : 3500;
-  console.error(`Fetching ${size} tickets`);
-  const tickets = await fetchTickets(http, manifest, plan, plan.order.slice(0, size));
+  console.error(`Fetching ${scenario.users} tickets`);
+  const tickets = await fetchTickets(http, manifest, plan, plan.order.slice(0, scenario.users));
   const stopRefresh = refreshTickets(http, manifest, plan, tickets, console.error);
   const bench = new Bench({
     plan, protocol: values.protocol, url: values.ws, origin: manifest.origin, prometheus: values.prometheus,
@@ -52,9 +51,9 @@ if (command === 'seed') {
   });
   const startedAt = Date.now();
   try {
-    const { windows, failures: checks = [] } = await scenario(bench, { container: values['fault-container'] });
+    const windows = await scenario.run(bench, { container: values['fault-container'] });
     await bench.drain();
-    const failures = [...bench.failures, ...checks];
+    const { failures } = bench;
     const report = {
       protocol: values.protocol, scenario: values.scenario, project: manifest.project, params: manifest.params,
       startedAt, endedAt: Date.now(), connectRate: bench.connectRate, failures, windows,

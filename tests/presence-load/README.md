@@ -12,7 +12,7 @@ This driver measures presence alone, without messages or HTTP traffic once ticke
 
 A plateau of N sockets connects the first N users in a fixed shuffled order. Each user has one device.
 
-Each client watches its seeded contacts with its build's protocol and cadence. The browser watches only the rows it has rendered, so these watch sets are a fixed, comparable workload rather than a copy of one session.
+Each client watches its seeded contacts with its build's protocol and cadence. The browser watches only rendered rows; these seeded watch sets are a fixed workload for comparing builds, not a replay of a session.
 
 | | Legacy | Current |
 |---|---|---|
@@ -49,14 +49,14 @@ Each `run` fetches WebSocket tickets for its users before any timed window. A cl
 
 | Scenario | What it does | Builds |
 |---|---|---|
-| `smoke` | 64 sockets. Fails unless every live socket is ready, probe changes are delivered both ways in time, and a watch for a stranger is denied without revealing their status | Both |
+| `smoke` | 64 sockets. Fails unless every intended socket is ready, probe changes are delivered both ways in time, and a watch for a stranger is denied without revealing their status | Both |
 | `idle` | 1,000, 2,000 and 3,500 sockets. At each plateau: 60 s with no changes (`quiet-N`), then 3 min while 32 actors and the four hot subjects disconnect for 20 s and reconnect (`idle-N`; hot-subject changes are labelled `hot`) | Both |
 | `churn` | 1,600 sockets. Disconnect-and-reconnect cycles at 2, 10 and 25 per second, 2 min each. Then activity changes at 5, 25 and 100 per second (current only): a user stops interacting for 20 s with its tab still visible, then resumes | Both |
-| `gateway-kill` | 1,600 sockets. `docker kill --fault-container` (a gateway). The sockets it closed are the victims; they stay offline for 150 s while the surviving gateway's watchers must see them go offline. Then they reconnect to the surviving gateway, each timed from its own attempt, and finally the failed gateway restarts | Both |
+| `gateway-kill` | 1,600 sockets. `docker kill --fault-container` (a gateway). The sockets it closed are the victims; they stay offline for 150 s while the surviving gateway's watchers must see them go offline. Then they reconnect to the surviving gateway; each victim's online change is timed from its own reconnect attempt, with a 30 s deadline. Finally the failed gateway restarts | Both |
 | `redis-kill` | 1,600 sockets. 64 actors cycle once per second while `--fault-container` (a Redis primary) is down for 2 min, then while it recovers | Both |
-| `capacity` | 2,000, 4,000, 8,000, 12,000 and 15,000 sockets. A stage passes when at least 99% of its sockets are open and ready at the end and watch refusals during ramp and measurement stay within 1%; the run stops at the first failure | Both |
+| `capacity` | 2,000, 4,000, 8,000, 12,000 and 15,000 sockets. A stage passes when at least 99% of its sockets are open and ready at the end and error frames during ramp and measurement stay within 1%; the run stops at the first failure | Both |
 
-A probe actor stays offline for 20 s, longer than the 15 s delivery deadline, and online at least 40 s between cycles, so the legacy 5 s poll has several chances to see each online period. Requested and achieved action rates are recorded in each window's `schedules`. Use one fault container per run, and name a Redis primary, not a replica (`redis-cli role`).
+A probe actor stays offline for 20 s, longer than the 15 s delivery deadline, and online at least 40 s between cycles, so the legacy 5 s poll has several chances to see each online period. Requested and achieved action rates are recorded in each window's `schedules`. Use one fault container per run, and name a Redis primary, not a replica (`redis-cli role`). A run whose population never becomes ready, or that fails a scenario check, lists the failures in its report and exits with status 1.
 
 The capacity ramp stops at 15,000 because macOS has 16,384 ephemeral ports for one destination address and port.
 
@@ -64,20 +64,20 @@ The capacity ramp stops at 15,000 because macOS has 16,384 ephemeral ports for o
 
 Each window reports:
 
-- **Sockets.** Live (meant to be open), open and ready sockets at the end of the window. A socket is ready while it knows a state for every user it watches and, for a current client with its group open, has received the online count.
+- **Sockets.** Intended (meant to be open), open and ready sockets at the end of the window. A socket is ready while it knows a state for every user it watches and, for a current client with its group open, has received the online count. A legacy state counts only while the poll that reported it is within its `validForMs`.
 - **Watch edges.** Expected and known edges, and the coverage between them.
 - **Traffic.** Frames, bytes and status entries per second, and counts by frame type, error code and close code.
-- **Deliveries.** Measured as described below, with delivery latency histograms.
+- **Deliveries.** Per-watcher outcomes and latency histograms (see below).
 - **Generator.** Event-loop delay and RSS. A window whose p99 event-loop delay exceeds 50 ms is marked `generator.limited`, because the load generator, not the server, may have been the bottleneck.
-- **Server.** From Prometheus: gateway CPU and RSS, Redis CPU, commands and memory, API CPU, gRPC and SQL rates, and each build's presence RPCs. A gauge's mean and peak cover the whole window. A counter's mean is its increase over exactly the window; its peak is the highest 30 s rate lying inside the window, so windows under 60 s have none. The sampled intervals are in `server.intervals`.
+- **Server.** From Prometheus: gateway CPU and RSS, Redis CPU, commands and memory, API CPU, gRPC and SQL rates, and each build's presence RPCs. A gauge's mean and peak cover the whole window. A counter's mean is its average rate over exactly the window; its peak is the highest 30 s rate lying inside the window, so windows under 60 s have none. The sampled intervals are in `server.intervals`.
 
 A delivery is measured per watcher. When an actor goes offline or online, every open watcher of that actor is counted. One that already shows the new state counts as **already shown**; every other one, including one with no known state, is armed and ends in exactly one outcome:
 
 - **Delivered.** It reports the new state within 15 s, or within the hold time after a gateway kill.
 - **Late.** It reports the new state within 45 s after the deadline.
-- **Missing.** It never reports the new state.
-- **Superseded.** The actor changed again while the deadline was still running.
-- **Watcher closed.** The watcher's own socket closed first.
+- **Missing.** It does not report the new state within that grace, its socket closes after the deadline, or the actor changes again after the deadline.
+- **Superseded.** The actor changed again before the deadline.
+- **Watcher closed.** The watcher's own socket closed before the deadline.
 
 Online latency includes the actor's WebSocket handshake.
 
@@ -87,6 +87,8 @@ Online latency includes the actor's WebSocket handshake.
 - **One generator process.** The driver runs as a single process; check `generator.limited` before reading a window's server numbers as a ceiling.
 - **Activity.** Legacy has no activity reporting, so the activity rows are current-only.
 - **Shared Redis.** Gateway registration, sessions and rooms share the Redis cluster with presence, so Redis commands are totals, not presence alone.
+
+## Tests
 
 ```sh
 node --test tests/presence-load/*.test.mjs

@@ -38,7 +38,7 @@ async function start(bench, size, settleMs = 2 * MINUTE) {
 // between cycles. Returns once scheduling stops.
 function cycles(bench, users, ms, perSecond, label) {
   const rate = Math.min(perSecond, users.length * 1000 / CYCLE_MS);
-  return bench.pace(ms, rate, users, actor => bench.cycle(actor, OFFLINE_MS, label));
+  return bench.pace(ms, rate, users, (actor, window) => bench.cycle(actor, OFFLINE_MS, { label, window }));
 }
 
 const errors = report => Object.entries(report.counts).filter(([name]) => name.startsWith('errors.')).reduce((sum, [, value]) => sum + value, 0);
@@ -47,12 +47,13 @@ export async function smoke(bench) {
   const users = await start(bench, 64, MINUTE);
   const failures = [];
   const probe = await bench.measure('smoke', 90 * SECOND, () => cycles(bench, actors(bench, users, 8), 90 * SECOND, 1));
-  if (probe.sockets.ready !== probe.sockets.live) failures.push(`${probe.sockets.ready}/${probe.sockets.live} live sockets ready`);
+  if (probe.sockets.ready !== probe.sockets.intended) failures.push(`${probe.sockets.ready}/${probe.sockets.intended} intended sockets ready`);
   for (const kind of ['online', 'offline']) {
     const outcome = probe.changes[kind];
     if (!outcome?.delivered || outcome.missing || outcome.late) failures.push(`${kind} changes: ${JSON.stringify(outcome)}`);
   }
-  // A watch for a stranger, who shares no chat with the watcher, must not reveal their status.
+  // A watch for a stranger, who shares no chat with the watcher, must be
+  // refused or denied without revealing their status.
   const watcher = users[0];
   const contacts = new Set([...bench.plan.peers[watcher].map(entry => entry.peer), ...bench.plan.groups[bench.plan.groupOf[watcher]].members]);
   const stranger = bench.plan.order.find(user => !contacts.has(user));
@@ -66,10 +67,10 @@ export async function smoke(bench) {
   }
   await delay(5 * SECOND);
   const denial = await bench.end();
-  for (const report of [probe, denial]) {
-    if (report.counts['presence.unexpectedSubject']) failures.push(`${report.name}: status for a user outside the watch set`);
-  }
-  if (!denial.counts['presence.denied'] && !denial.counts['errors.UNAUTHORIZED']) failures.push('stranger watch was neither denied nor refused');
+  const client = bench.client(watcher);
+  const refused = bench.protocol === 'legacy' ? client.errors.includes('UNAUTHORIZED') : client.denied.has(strangerId);
+  if (!refused) failures.push('the stranger watch was neither refused nor denied');
+  if (bench.counts['presence.unexpectedSubject']) failures.push('a status arrived for a user outside a watch set');
   return { windows: [probe, denial], failures };
 }
 
@@ -99,10 +100,10 @@ export async function churn(bench, { size = 1600, rates = [2, 10, 25], activityR
   }
   if (bench.protocol !== 'current') return { windows };
   // An actor stops interacting for 20 s, then resumes; its tab stays visible.
-  const toggle = async actor => {
-    if (!bench.toggleActivity(actor, false)) return false;
+  const toggle = async (actor, window) => {
+    if (!bench.toggleActivity(actor, false, window)) return false;
     await delay(OFFLINE_MS);
-    bench.toggleActivity(actor, true);
+    bench.toggleActivity(actor, true, window);
   };
   for (const rate of activityRates) {
     windows.push(await bench.measure(`activity-${rate}`, 2 * MINUTE, () => bench.pace(2 * MINUTE, rate / 2, ordinary, toggle)));
@@ -135,13 +136,15 @@ export async function gatewayKill(bench, { size = 1600, container, holdMs = 150 
   const started = performance.now();
   for (const victim of victims) bench.held.delete(victim);
   await bench.connect(victims, 50, victim => bench.expect(victim, true, { deadlineMs: 30 * SECOND }));
-  const settled = await bench.settle(2 * MINUTE);
+  const settled = await bench.settle(2 * MINUTE, victims);
+  const restoreMs = Math.round(performance.now() - started);
   const restored = victims.filter(victim => bench.client(victim).ready).length;
-  windows.push(await bench.end({ victims: victims.length, restored, settled, restoreMs: Math.round(performance.now() - started) }));
+  windows.push(await bench.end({ victims: victims.length, restored, settled, restoreMs }));
   await docker('start', container);
   await waitHealthy(container);
   windows.push(await bench.measure('after-gateway-kill', MINUTE));
-  return { windows };
+  const failures = victims.length ? [] : ['the gateway kill closed no sockets'];
+  return { windows, failures };
 }
 
 // Kills one Redis primary while probe actors keep changing, then restarts it.
@@ -150,15 +153,25 @@ export async function redisKill(bench, { size = 1600, container, outageMs = 2 * 
   const users = await start(bench, size);
   const probes = actors(bench, users, 64);
   const phases = [['before-redis-kill', 30 * SECOND], ['redis-outage', outageMs], ['redis-recovery', MINUTE], ['after-redis-kill', MINUTE]];
+  const total = phases.reduce((sum, [, ms]) => sum + ms, 0);
+  // One schedule runs through every phase, so each actor keeps its full
+  // online time across phase boundaries; each cycle belongs to the phase it
+  // started in.
+  bench.begin(phases[0][0]);
+  const probing = cycles(bench, probes, total, 1);
   const reports = [];
-  for (const [name, ms] of phases) {
-    bench.begin(name);
+  for (const [index, [name, ms]] of phases.entries()) {
+    if (index) {
+      // Not awaited, so the next phase starts on time while this one resolves.
+      reports.push(bench.end());
+      bench.begin(name);
+    }
     if (name === 'redis-outage') await docker('kill', container);
     if (name === 'redis-recovery') await docker('start', container);
-    await cycles(bench, probes, ms, 1);
-    // Not awaited, so the next phase starts on time while this one resolves.
-    reports.push(bench.end());
+    await delay(ms);
   }
+  await probing;
+  reports.push(bench.end());
   return { windows: await Promise.all(reports) };
 }
 

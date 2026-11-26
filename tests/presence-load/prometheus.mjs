@@ -1,9 +1,10 @@
 // Server-side measurements for one window, from the stack's own Prometheus.
 // Every query exists in both builds unless it names a build-specific RPC.
 //
-// A gauge is sampled every 5 s across the window. A counter's mean rate is its
-// increase over exactly the window; its peak comes from 30 s rates that lie
-// entirely inside the window, so a window shorter than 60 s has no peak.
+// A gauge is sampled every 5 s across the window. A counter's mean is
+// Prometheus's extrapolated rate over exactly the window; its peak comes from
+// 30 s rates that lie entirely inside the window, so a window shorter than
+// 60 s has no peak.
 
 const RATE_MS = 30_000;
 const rate = selector => range => `sum(rate(${selector}[${range}]))`;
@@ -51,15 +52,14 @@ async function range(base, expression, startMs, endMs) {
 
 export async function collect(base, startMs, endMs) {
   if (!base) return null;
-  const seconds = Math.floor((endMs - startMs) / 1000);
-  const samples = { intervals: { gauges: [startMs, endMs], counterMean: [endMs - seconds * 1000, endMs], counterPeak: null } };
+  const samples = { intervals: { gauges: [startMs, endMs], counterMean: [startMs, endMs], counterPeak: null } };
   for (const [name, expression] of Object.entries(GAUGES)) {
     const values = await range(base, expression, startMs, endMs);
     samples[name] = values.length ? { mean: values.reduce((sum, value) => sum + value, 0) / values.length, peak: Math.max(...values) } : null;
   }
   if (endMs - startMs >= 2 * RATE_MS) samples.intervals.counterPeak = [startMs + RATE_MS, endMs];
   for (const [name, expression] of Object.entries(COUNTERS)) {
-    const [mean] = await query(base, '/api/v1/query', { query: expression(`${seconds}s`), time: endMs / 1000 });
+    const [mean] = await query(base, '/api/v1/query', { query: expression(`${Math.round(endMs - startMs)}ms`), time: endMs / 1000 });
     const peaks = samples.intervals.counterPeak ? await range(base, expression('30s'), startMs + RATE_MS, endMs) : [];
     samples[name] = mean ? { mean: Number(mean.value[1]), peak: peaks.length ? Math.max(...peaks) : null } : null;
   }

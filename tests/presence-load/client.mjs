@@ -21,9 +21,22 @@ const adapters = {
         client.every(12_000, 3_000, open);
       }
     },
-    statuses(frame) {
-      if (frame.type !== 'sidebar_presence' && frame.type !== 'presence') return null;
+    // Each poll is valid for `validForMs` after `observedAt`; the browser drops
+    // a stale one and stops trusting a source whose polls stop arriving.
+    statuses(frame, client) {
+      const source = { sidebar_presence: 'sidebar', presence: 'group' }[frame.type];
+      if (!source) return null;
+      const validUntil = Date.parse(frame.observedAt) + frame.validForMs;
+      if (!(validUntil > Date.now())) {
+        client.hub.count('presence.staleFrame');
+        return null;
+      }
+      client.validUntil[source] = validUntil;
       return frame.statuses.map(status => [status.userId, { online: true, offline: false }[status.state]]);
+    },
+    fresh(client) {
+      const now = Date.now();
+      return client.validUntil.sidebar > now && (!client.watch.group || client.validUntil.group > now);
     },
   },
   current: {
@@ -39,6 +52,7 @@ const adapters = {
         ...(frame.unavailable ?? []).map(id => [id, undefined]),
       ];
     },
+    fresh: () => true,
   },
 };
 
@@ -50,6 +64,10 @@ export class Client {
   readyAt = null;
   countPending = false;
   countSeen = false;
+  validUntil = {};
+  // Error codes and denied users seen on the current connection.
+  errors = [];
+  denied = new Set();
   timers = new Set();
 
   constructor({ index, plan, watch, protocol, url, origin, ticket, hub }) {
@@ -57,10 +75,10 @@ export class Client {
     this.expected = new Set(watch.subjects);
   }
 
-  // Ready while open with a known state for every watched user and, for a
-  // current client with its group open, a received online count.
+  // Ready while open with a fresh known state for every watched user and, for
+  // a current client with its group open, a received online count.
   get ready() {
-    return this.open && this.known.size === this.expected.size && (!this.countPending || this.countSeen);
+    return this.open && this.known.size === this.expected.size && (!this.countPending || this.countSeen) && this.adapter.fresh(this);
   }
 
   connect() {
@@ -72,6 +90,9 @@ export class Client {
     this.readyAt = null;
     this.countPending = this.adapter === adapters.current && Boolean(this.watch.group);
     this.countSeen = false;
+    this.validUntil = {};
+    this.errors = [];
+    this.denied = new Set();
     this.closing = false;
     const started = performance.now();
     return new Promise(resolve => {
@@ -111,7 +132,7 @@ export class Client {
   }
 
   setActive(active) {
-    this.send({ type: 'activity', version: 1, active, visible: active });
+    this.send({ type: 'activity', version: 1, active, visible: true });
   }
 
   send(frame) {
@@ -146,11 +167,13 @@ export class Client {
     }
     this.hub.frame(this, frame, data.length);
     if (frame.type === 'online_count') this.countSeen = true;
-    for (const [userId, online] of this.adapter.statuses(frame) ?? []) {
+    if (frame.type === 'error') this.errors.push(frame.code);
+    for (const [userId, online] of this.adapter.statuses(frame, this) ?? []) {
       const subject = this.hub.userIndex(userId);
       if (subject === undefined || !this.expected.has(subject)) {
         // A state for a user outside the watch set would leak presence; an
         // "unavailable" answer for one is the expected denial.
+        if (online === undefined) this.denied.add(userId);
         this.hub.count(online === undefined ? 'presence.denied' : 'presence.unexpectedSubject');
         continue;
       }

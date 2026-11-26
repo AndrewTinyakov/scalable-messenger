@@ -68,6 +68,7 @@ function client(protocol, plan, user, hub) {
 }
 
 const frame = value => Buffer.from(JSON.stringify(value));
+const poll = (type, statuses, observedAt = new Date()) => frame({ type, version: 1, observedAt: observedAt.toISOString(), validForMs: 15000, statuses });
 
 test('the legacy adapter reads sidebar and open-chat polls', () => {
   const plan = buildPlan(small);
@@ -76,23 +77,30 @@ test('the legacy adapter reads sidebar and open-chat polls', () => {
   const watcher = client('legacy', plan, user, hub);
   const [first, ...rest] = watcher.watch.subjects;
   const stranger = plan.users.findIndex((_, index) => index !== user && !watcher.expected.has(index));
-  watcher.receive(frame({ type: 'sidebar_presence', version: 1, statuses: [
+  watcher.receive(poll('sidebar_presence', [
     { userId: plan.users[first].id, state: 'online' },
     { userId: plan.users[stranger].id, state: 'offline' },
-  ] }));
+  ]));
   assert.deepEqual(hub.statuses, [[first, true, undefined]]);
   assert.equal(hub.counts['presence.unexpectedSubject'], 1);
   // A repeated poll is not a change; unknown says nothing.
-  watcher.receive(frame({ type: 'presence', version: 1, statuses: [
+  watcher.receive(poll('presence', [
     { userId: plan.users[first].id, state: 'online' },
     { userId: plan.users[rest[0]].id, state: 'unknown' },
-  ] }));
+  ]));
   assert.equal(hub.statuses.length, 1);
   assert.equal(hub.readies, 0);
-  watcher.receive(frame({ type: 'sidebar_presence', version: 1,
-    statuses: watcher.watch.subjects.map(subject => ({ userId: plan.users[subject].id, state: subject === first ? 'offline' : 'online' })) }));
+  const all = state => watcher.watch.subjects.map(subject => ({ userId: plan.users[subject].id, state: subject === first ? 'offline' : state }));
+  // An expired poll is dropped.
+  watcher.receive(poll('sidebar_presence', all('online'), new Date(Date.now() - 20_000)));
+  assert.equal(hub.statuses.length, 1);
+  assert.equal(hub.counts['presence.staleFrame'], 1);
+  watcher.receive(poll('sidebar_presence', all('online')));
   assert.deepEqual(hub.statuses[1], [first, false, true]);
   assert.equal(hub.readies, 1);
+  // Its sidebar poll runs out after validForMs.
+  watcher.validUntil.sidebar = Date.now() - 1;
+  assert.equal(watcher.ready, false);
 });
 
 test('the current adapter reads statuses and treats a denial as no state', () => {
@@ -181,17 +189,21 @@ test('a delivery after the deadline counts as late, not delivered', async t => {
   const created = bench(t, 20);
   const { actor, watchers: [w1, w2], client: get } = watched(created);
   const window = created.begin('test');
-  // Backdated beyond its deadline, so it expires at once.
+  // Backdated beyond its deadline: a report arriving now is late.
   created.expect(actor, false, { at: performance.now() - 50 });
   await tick(5);
-  assert.equal(window.changes.offline.missing, 3);
   created.status(get(w1), actor, false, true, performance.now());
   assert.equal(window.changes.offline.late, 1);
-  assert.equal(window.changes.offline.missing, 2);
   assert.equal(window.changes.offline.delivered, 0);
-  // A later change ends the expired one without counting it again.
+  // A watcher closing after the deadline never reported in time.
+  get(w2).open = false;
+  created.closed(get(w2), 1006, false, false);
+  assert.equal(window.changes.offline.missing, 1);
+  // A later change ends the expired one; its last watcher is missing, not superseded.
   created.expect(actor, true);
   assert.equal(window.changes.offline.superseded, 0);
   assert.equal(window.changes.offline.missing, 2);
+  assert.deepEqual({ ...window.changes.offline, alreadyShown: 0 },
+    { armed: 3, delivered: 0, late: 1, missing: 2, superseded: 0, watcherClosed: 0, alreadyShown: 0 });
   created.window = null;
 });

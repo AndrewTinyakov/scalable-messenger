@@ -96,13 +96,19 @@ export async function fetchTickets(http, manifest, plan, users, tickets = new Ma
 
 // Replaces tickets that expire within ten minutes, once a minute, until stopped.
 export function refreshTickets(http, manifest, plan, tickets, log) {
+  let running = false;
   const timer = setInterval(async () => {
+    if (running) return;
     const due = [...tickets].filter(([, ticket]) => ticket.expiresAt - Date.now() < 10 * 60_000).map(([index]) => index);
     if (!due.length) return;
+    running = true;
+    log(`refreshing ${due.length} tickets`);
     try {
       await fetchTickets(http, manifest, plan, due, tickets);
     } catch (error) {
       log(`ticket refresh failed: ${error.message}`);
+    } finally {
+      running = false;
     }
   }, 60_000);
   timer.unref();

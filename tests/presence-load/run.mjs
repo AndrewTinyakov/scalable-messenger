@@ -10,8 +10,8 @@ import { watchSet } from './plan.mjs';
 import { collect } from './prometheus.mjs';
 
 const run = promisify(execFile);
-// A change that misses its deadline stays tracked this long, so a late
-// delivery is counted as late rather than lost.
+// A change that misses its deadline stays tracked this much longer, so a late
+// delivery is counted as late rather than missing.
 const LATE_GRACE_MS = 45_000;
 const MAX_BACKOFF_MS = 30_000;
 
@@ -92,9 +92,10 @@ export class Bench {
 
   closed(client, code, expected, wasOpen) {
     this.count(expected ? 'socket.closed' : wasOpen ? 'socket.unexpectedClose.' + code : 'socket.connectFailed');
+    const now = performance.now();
     for (const [actor, change] of this.pending) {
       if (!change.waiting.delete(client.index)) continue;
-      change.outcomes.watcherClosed++;
+      change.outcomes[now <= change.deadline ? 'watcherClosed' : 'missing']++;
       if (!change.waiting.size) this.pending.delete(actor);
     }
     // Browsers reconnect after a short random backoff.
@@ -105,12 +106,11 @@ export class Bench {
     if (prior !== undefined) this.count('presence.transitions');
     const change = this.pending.get(subject);
     if (!change || change.online !== online || !change.waiting.delete(client.index)) return;
-    if (change.expired) {
-      change.outcomes.missing--;
-      change.outcomes.late++;
-    } else {
+    if (now <= change.deadline) {
       change.outcomes.delivered++;
       change.window.observe('delivery.' + change.kind, now - change.at);
+    } else {
+      change.outcomes.late++;
     }
     if (!change.waiting.size) this.pending.delete(subject);
   }
@@ -130,6 +130,9 @@ export class Bench {
   }
 
   get open() { return [...this.clients.values()].filter(client => client.open); }
+
+  // Users meant to be connected right now.
+  get intended() { return [...this.live].filter(user => !this.held.has(user)); }
 
   wanted(client) {
     return !this.stopped && this.live.has(client.index) && !this.held.has(client.index) && !client.socket;
@@ -162,11 +165,12 @@ export class Bench {
     const inflight = new Set();
     for (const user of users) {
       this.live.add(user);
-      const client = this.client(user);
-      if (client.socket) continue;
       while (inflight.size >= 64) await Promise.race(inflight);
       const wait = next - performance.now();
       if (wait > 0) await delay(wait);
+      // A background retry may have connected the socket while this one waited.
+      const client = this.client(user);
+      if (client.socket) continue;
       next = Math.max(next + interval, performance.now());
       beforeAttempt?.(user);
       const attempt = client.connect().then(opened => { if (!opened) this.keep(client); })
@@ -176,11 +180,12 @@ export class Bench {
     await Promise.all(inflight);
   }
 
-  // Waits until every open socket is watch-ready, or the timeout passes.
-  async settle(ms) {
+  // Waits until every given user (by default every intended one) has a ready
+  // socket, or the timeout passes.
+  async settle(ms, users) {
     const until = performance.now() + ms;
     while (performance.now() < until) {
-      if (this.open.every(client => client.ready)) return true;
+      if ((users ?? this.intended).every(user => this.clients.get(user)?.ready)) return true;
       await delay(500);
     }
     return false;
@@ -189,11 +194,11 @@ export class Bench {
   // Changes whose delivery is measured.
 
   // `actor` became online/offline at `at`. Every open watcher must report the
-  // new state within the deadline; one already showing it is counted apart.
-  expect(actor, online, { at = performance.now(), deadlineMs = this.deadlineMs, label } = {}) {
-    const window = this.window;
+  // new state by the deadline; one already showing it is counted apart. Each
+  // armed watcher ends in exactly one outcome.
+  expect(actor, online, { at = performance.now(), deadlineMs = this.deadlineMs, label, window = this.window } = {}) {
     const previous = this.pending.get(actor);
-    if (previous) this.finish(actor, previous, previous.expired ? null : 'superseded');
+    if (previous) this.finish(actor, previous);
     if (!window) return;
     const kind = (label ? label + '.' : '') + (online ? 'online' : 'offline');
     const outcomes = window.outcomes(kind);
@@ -206,62 +211,71 @@ export class Bench {
     }
     if (!waiting.size) return;
     outcomes.armed += waiting.size;
-    const change = { online, at, kind, window, outcomes, waiting, expired: false };
+    const deadline = at + deadlineMs;
+    const change = { online, at, deadline, kind, window, outcomes, waiting };
     this.pending.set(actor, change);
-    setTimeout(() => {
-      if (this.pending.get(actor) !== change) return;
-      change.expired = true;
-      outcomes.missing += waiting.size;
-      setTimeout(() => this.finish(actor, change, null), LATE_GRACE_MS).unref();
-    }, Math.max(0, at + deadlineMs - performance.now())).unref();
+    setTimeout(() => this.finish(actor, change), Math.max(0, deadline + LATE_GRACE_MS - performance.now())).unref();
   }
 
-  // Stops tracking a change; still-waiting watchers count as `outcome`.
-  finish(actor, change, outcome) {
+  // Stops tracking a change. Watchers still waiting were superseded if the
+  // deadline had not passed yet, and are missing otherwise.
+  finish(actor, change) {
     if (this.pending.get(actor) !== change) return;
     this.pending.delete(actor);
-    if (outcome) change.outcomes[outcome] += change.waiting.size;
+    change.outcomes[performance.now() <= change.deadline ? 'superseded' : 'missing'] += change.waiting.size;
+  }
+
+  // Ends every tracked change; called once before the report is written.
+  finishAll() {
+    for (const [actor, change] of [...this.pending]) this.finish(actor, change);
   }
 
   // Closes the actor, keeps it offline for `offlineMs`, then reconnects it.
-  async cycle(actor, offlineMs, label) {
+  // Both changes belong to `window`, the window the cycle started in.
+  async cycle(actor, offlineMs, { label, window } = {}) {
     const client = this.client(actor);
     if (!client.open) return false;
     this.held.add(actor);
-    this.expect(actor, false, { label });
+    this.expect(actor, false, { label, window });
     await client.close();
     await delay(offlineMs);
     this.held.delete(actor);
-    this.expect(actor, true, { label });
-    if (!await client.connect()) this.keep(client);
+    this.expect(actor, true, { label, window });
+    if (!client.socket && !await client.connect()) this.keep(client);
     return true;
   }
 
   // The tab stays visible: the user stops or resumes interacting.
-  toggleActivity(actor, active) {
+  toggleActivity(actor, active, window) {
     const client = this.client(actor);
     if (!client.open) return false;
-    this.expect(actor, active);
+    this.expect(actor, active, { window });
     client.setActive(active);
     return true;
   }
 
-  // Starts `action` for actors spread evenly over `ms` at `perSecond`, and
-  // returns once scheduling stops. Each action finishes in the background; the
-  // window open when it started waits for it before reporting. An action that
-  // returns false found its actor unavailable and is counted as skipped.
+  // Starts `action(actor, window)` for actors spread evenly over `ms` at
+  // `perSecond`, and returns once scheduling stops. Each action belongs to the
+  // window open when it started, which waits for it before reporting; an
+  // action that returns false found its actor unavailable.
   async pace(ms, perSecond, actors, action) {
-    const window = this.window;
     const started = performance.now();
-    let scheduled = 0;
-    for (; performance.now() - started < ms; scheduled++) {
-      const task = Promise.resolve(action(actors[scheduled % actors.length]))
-        .then(ran => { if (ran === false) this.count('action.skipped'); })
+    const schedules = new Map();
+    for (let i = 0; performance.now() - started < ms; i++) {
+      const window = this.window;
+      if (window && !schedules.has(window)) {
+        const schedule = { requestedPerSecond: perSecond, scheduled: 0, skipped: 0 };
+        schedules.set(window, schedule);
+        window.schedules.push(schedule);
+      }
+      const schedule = schedules.get(window);
+      if (schedule) schedule.scheduled++;
+      const task = Promise.resolve(action(actors[i % actors.length], window))
+        .then(ran => { if (ran === false && schedule) schedule.skipped++; })
         .catch(error => this.count('action.failed.' + (error.code ?? 'other')));
-      this.window?.tasks.add(task);
-      await delay(Math.max(0, started + (scheduled + 1) * 1000 / perSecond - performance.now()));
+      window?.tasks.add(task);
+      await delay(Math.max(0, started + (i + 1) * 1000 / perSecond - performance.now()));
     }
-    window?.schedules.push({ requestedPerSecond: perSecond, scheduled, offeredPerSecond: scheduled * 1000 / (performance.now() - started) });
   }
 
   // Windows.
@@ -273,7 +287,7 @@ export class Bench {
   }
 
   // Ends the window: everything is measured now, then the report waits for the
-  // window's actions and deliveries before it is returned.
+  // window's actions to finish and its changes to pass their deadlines.
   async end(extra = {}) {
     const window = this.window;
     this.window = null;
@@ -283,11 +297,13 @@ export class Bench {
     const open = this.open;
     const expected = open.reduce((sum, client) => sum + client.expected.size, 0);
     const known = open.reduce((sum, client) => sum + client.known.size, 0);
-    const sockets = { live: this.live.size - this.held.size, open: open.length, ready: open.filter(client => client.ready).length };
+    const sockets = { intended: this.intended.length, open: open.length, ready: open.filter(client => client.ready).length };
     const counts = Object.fromEntries(Object.entries(this.counts)
       .map(([name, value]) => [name, value - (window.baseline[name] ?? 0)]).filter(([, value]) => value));
+    for (const schedule of window.schedules) schedule.offeredPerSecond = schedule.scheduled * 1000 / durationMs;
     await Promise.all(window.tasks);
-    while ([...this.pending.values()].some(change => change.window === window && !change.expired)) await delay(250);
+    const due = () => [...this.pending.values()].some(change => change.window === window && performance.now() <= change.deadline);
+    while (due()) await delay(250);
     const report = {
       name: window.name, startedAt: window.startedAt, endedAt, durationMs: Math.round(durationMs),
       sockets, watchEdges: { expected, known, coverage: expected ? known / expected : null },
@@ -298,7 +314,7 @@ export class Bench {
       },
       counts,
       schedules: window.schedules,
-      // Late deliveries keep updating this object until the report is written.
+      // Late deliveries and finishAll() complete this object before the report is written.
       changes: window.changes,
       latencyMs: Object.fromEntries([...window.latency].map(([name, histogram]) => [name, histogram.report()])),
       generator: { ...loop, rssMiB: process.memoryUsage().rss / 2 ** 20, limited: loop.eventLoopP99Ms > 50 },
@@ -336,7 +352,7 @@ function summary(report) {
   const server = report.server && !report.server.error
     ? ` | gw ${mean('gatewayCpuCores', 3)} cores, redis ${mean('redisCommandsPerSec', 0)} cmd/s, api ${mean('apiGrpcPerSec', 1)} rpc/s`
     : '';
-  return `[${report.name}] sockets ${report.sockets.ready}/${report.sockets.open} ready, coverage ${(report.watchEdges.coverage ?? 0).toFixed(4)}, ` +
+  return `[${report.name}] sockets ${report.sockets.ready}/${report.sockets.intended} ready, coverage ${(report.watchEdges.coverage ?? 0).toFixed(4)}, ` +
     `${report.perSecond.frames.toFixed(1)} frames/s${changes ? `, ${changes}` : ''}${server}`;
 }
 

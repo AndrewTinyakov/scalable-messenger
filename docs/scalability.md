@@ -218,3 +218,5 @@ Pub/Sub remains one feed per Redis primary. More feed shards are a later profili
 ## Realistic multi-group workloads
 
 The load tool also supports seeded `mixed` scenarios with overlapping small and large groups, an explicit active-user fraction, varied payload sizes and independently scheduled sends. It verifies each socket's chat sequences and membership-specific notification counts. Existing idle, hot-group fanout, slow-reader, reconnect and drain modes remain available. See [the workload guide](../tests/load/ws/README.md) for scenario files, bounds and reuse commands. The 1000-user example is a test configuration, not a capacity claim.
+
+The [realistic Node workload](../tests/realistic-load/README.md) exercises the presence watch alongside message sends, reads, reconnects and other chat activity. The [gateway-owned presence benchmark](benchmarks/2026-11-26.md) records its workload results and a separate quiet-watch probe against the polling build. The [November 21 campaign](benchmarks/2026-11-21.md) records the earlier workload results.

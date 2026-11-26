@@ -85,7 +85,17 @@ HTTP paths below are relative to `/api/v1`. Chat paths are relative to `/chats/{
 
 The timed actions approximate browser viewports and human dwell. The sidebar has 14 visible rows, and the history window retains at most 150 messages. The fixture gives the latest seeded message a reply to an early row, so a quote jump can reach beyond the first page. A forward chooses the latest visible seeded message below the fixture sequence boundary. Anchor restoration fetches the initial around page. A first subscription can receive `recovery_failed` if there is no Redis cursor or no retained history. The driver uses SQL catch-up in that case.
 
-The presence watch combines loaded direct peers with the selected chat's member preview and caps the set at 500 users. Group directory rows need a detail request for the preview. The driver batches changes into `add` and `remove` and sends watch frames at most once per second per account across its devices. The gateway sends a snapshot for newly watched users, followed by transitions. The driver checks `presence`, `online_count`, and `presence_config` frames, including whether all status and unavailable IDs belong to the watch set.
+The presence watch combines loaded direct peers with the selected chat's member preview and caps the set at 500 users. Group directory rows need a detail request for the preview. The driver batches changes into `add` and `remove` and sends watch frames at most once per second per account across its devices. A socket's first nonempty watch, including after a reconnect, must receive fresh statuses for up to three watched users within five foreground seconds. Closing a visible socket with a pending sample also fails the run. The report counts deferred checks when the sample is no longer watched or the socket closes while hidden. Frames for recently removed users are accepted for one second to allow for frames already in flight.
+
+Reports count validated presence and online-count frames, observed changes to a watched user's online flag, and watch commands by type. They also count `RATE_LIMITED` errors with and without a request ID. Errors without a request ID can come from presence or other socket commands.
+
+Use the two-account probe to measure a quiet 60-second watch and three clean closes. Both fresh accounts stay connected and active through the quiet window. The reported latency starts when the subject initiates a normal WebSocket close and ends when the watcher receives the offline status.
+
+```sh
+node tests/realistic-load/presence-probe.mjs "$api" "$ws" "$origin" current
+```
+
+Use `legacy` as the final argument on a polling build. The probe leaves its two accounts and group in the benchmark database.
 
 The profiles cover the flows in the table. Deep links, password changes, session revocation, unpinning, pin reorder, unmute, full history clearing, chat deletion, and notification permissions are outside this workload.
 

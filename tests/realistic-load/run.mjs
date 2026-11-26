@@ -454,6 +454,7 @@ export class Run {
     this.trafficCutoff = performance.now();
     this.measurementCutoff = new Map(this.devices.flat().map(device => [device, { connection: device.connection, selection: device.selection }]));
     this.acceptingEvents = false;
+    for (const device of this.devices.flat()) device.socket?.presence?.finish();
     this.metrics.freeze();
     await join(this.devices.flat().map(device => device.close()));
     while (this.background.size) await join([...this.background]);

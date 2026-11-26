@@ -9,7 +9,9 @@ import (
 	"messenger/ws/internal/grpcauth"
 )
 
-const lastSeenBatch = 1000
+// lastSeenBatch keeps each RecordLastSeen request under the API's 8 KiB
+// inbound gRPC message limit.
+const lastSeenBatch = 150
 
 // lastSeen sends durable "seen at" times in batches, at most once per user
 // per minimum gap.
@@ -52,15 +54,12 @@ func (l *lastSeen) run(ctx context.Context) {
 
 func (l *lastSeen) flush(ctx context.Context, now time.Time) {
 	l.mu.Lock()
-	batch := make([]grpcauth.LastSeen, 0, min(len(l.pending), lastSeenBatch))
+	due := make([]grpcauth.LastSeen, 0, len(l.pending))
 	for userID, at := range l.pending {
-		if len(batch) == lastSeenBatch {
-			break
-		}
 		if now.Sub(l.sent[userID]) < l.config.LastSeenMinGap {
 			continue
 		}
-		batch = append(batch, grpcauth.LastSeen{UserID: userID, SeenAt: at})
+		due = append(due, grpcauth.LastSeen{UserID: userID, SeenAt: at})
 		delete(l.pending, userID)
 		l.sent[userID] = now
 	}
@@ -70,9 +69,12 @@ func (l *lastSeen) flush(ctx context.Context, now time.Time) {
 		}
 	}
 	l.mu.Unlock()
-	if len(batch) == 0 {
-		return
+	for start := 0; start < len(due); start += lastSeenBatch {
+		l.send(ctx, due[start:min(start+lastSeenBatch, len(due))])
 	}
+}
+
+func (l *lastSeen) send(ctx context.Context, batch []grpcauth.LastSeen) {
 	callCtx, cancel := context.WithTimeout(ctx, l.config.Timeout)
 	defer cancel()
 	if err := l.recorder.RecordLastSeen(callCtx, batch); err != nil {

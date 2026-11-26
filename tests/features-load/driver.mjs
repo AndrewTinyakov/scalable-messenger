@@ -3,7 +3,7 @@ import { performance } from 'node:perf_hooks';
 import { setTimeout as delay } from 'node:timers/promises';
 import { ulid } from '../support/fixtures.mjs';
 import { bounded, random } from './plan.mjs';
-import { validOnlineCount, validPresence, validPresenceConfig } from './presence.mjs';
+import { validOnlineCount, validPresenceConfig } from './presence.mjs';
 import { SendSchedule } from './sends.mjs';
 
 const decimal = value => typeof value === 'string' && /^(0|[1-9][0-9]*)$/.test(value);
@@ -44,7 +44,7 @@ export class Driver {
       if (record && socket.index === record.sender) record.queued = true;
     }
     if (event.type === 'chat_deleted' && this.chats.some(chat => chat.id === event.chatId)) this.check(false, 'Unexpected benchmark chat deletion');
-    if (event.type === 'presence') this.check(validPresence(event, this.foreground.get(socket.index)?.watchIds), 'Invalid presence response');
+    if (!recovered && socket.presence) this.check(socket.presence.receive(event, at), 'Invalid presence response');
     if (event.type === 'online_count') this.check(validOnlineCount(event), 'Invalid online count response');
     if (event.type === 'presence_config') this.check(validPresenceConfig(event), 'Invalid presence config response');
     if (event.type === 'message_changed') {

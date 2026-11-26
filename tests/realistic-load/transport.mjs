@@ -2,7 +2,7 @@ import WebSocket from 'ws';
 import { setTimeout as delay } from 'node:timers/promises';
 import { TicketAdmission } from '../features-load/tickets.mjs';
 import { Histogram } from '../features-load/metrics.mjs';
-import { isId, validOnlineCount, validPresence, validPresenceConfig } from '../features-load/presence.mjs';
+import { isId, PresenceWatch, validOnlineCount, validPresenceConfig } from '../features-load/presence.mjs';
 
 export { isId };
 
@@ -227,12 +227,17 @@ const knownEvents = new Set([...chatEvents, 'queued', 'send_rejected', 'error', 
 
 export class Socket {
   closed = false;
-  presenceTargets = null;
   onlineCountChat = null;
 
   constructor(http, credentials, receive) {
     Object.assign(this, { http, credentials, receive });
+    this.presence = new PresenceWatch(
+      (name, count) => http.metrics.count(name, count),
+      () => http.metrics.failure('presence.snapshot', new Fault('missing')),
+    );
   }
+
+  get presenceTargets() { return this.presence.initialized ? this.presence.targets : null; }
 
   async open() {
     const ticket = await this.http.request(this.credentials, '/auth/ws-ticket', 'POST');
@@ -249,13 +254,13 @@ export class Socket {
         const frame = JSON.parse(data);
         check(frame.version === 1 && knownEvents.has(frame.type), 'frameType');
         if (chatEvents.has(frame.type)) check(isId(frame.chatId), 'frameChat');
-        if (frame.type === 'presence') check(validPresence(frame, this.presenceTargets), 'framePresence');
         if (frame.type === 'online_count') check(validOnlineCount(frame), 'frameOnlineCount');
         if (frame.type === 'presence_config') check(validPresenceConfig(frame), 'framePresenceConfig');
         if (frame.type === 'message_saved' || frame.type === 'message_changed') {
           check(isId(frame.messageId) && isId(frame.senderId) && isSeq(frame.sequence) && isSeq(frame.messageVersion), 'frameMessage');
         }
         if (frame.requestId !== undefined && frame.requestId !== null) check(isId(frame.requestId), 'frameRequest');
+        check(this.presence.receive(frame), 'framePresence');
         this.receive(frame);
       } catch (error) {
         this.http.metrics.failure('socket.decode', error);
@@ -289,15 +294,12 @@ export class Socket {
     const payload = JSON.stringify({ version: 1, ...frame });
     check(this.ws.bufferedAmount + Buffer.byteLength(payload) <= 65536, 'writerCapacity');
     this.ws.send(payload);
-    if (frame.type === 'watch_presence') {
-      if (frame.reset || !this.presenceTargets) this.presenceTargets = new Set();
-      for (const id of frame.remove ?? []) this.presenceTargets.delete(id);
-      for (const id of frame.add ?? []) this.presenceTargets.add(id);
-    }
+    this.presence.sent(frame);
     if (frame.type === 'watch_online_count') this.onlineCountChat = frame.chatId ?? null;
   }
 
   async close() {
+    this.presence.finish();
     this.closed = true;
     const ws = this.ws;
     if (!ws || ws.readyState === WebSocket.CLOSED) return;

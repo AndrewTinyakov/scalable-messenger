@@ -76,7 +76,7 @@ test('retired socket frames cannot acknowledge the replacement subscription', { 
   });
 });
 
-test('presence keeps direct peers on selection changes and resets on a replacement socket', { timeout: 8000 }, async t => {
+test('presence checks fresh snapshots on reconnect and allows in-flight updates after unwatch', { timeout: 8000 }, async t => {
   const signal = AbortSignal.timeout(7000);
   const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
   await once(server, 'listening', { signal });
@@ -103,11 +103,20 @@ test('presence keeps direct peers on selection changes and resets on a replaceme
     action?.();
     return JSON.parse((await incoming)[0]);
   };
+  const status = async (peer, userId, online) => {
+    const incoming = once(device.socket.ws, 'message', { signal });
+    peer.send(JSON.stringify({ type: 'presence', version: 1, statuses: [{ userId, online }] }));
+    await incoming;
+  };
 
   let peer = await connect();
   const refreshPresence = () => device.refreshPresence();
   const reset = { type: 'watch_presence', version: 1, reset: true, add: [directPeer] };
   assert.deepEqual(await nextFrame(peer, refreshPresence), reset);
+  await status(peer, directPeer, true);
+  await status(peer, directPeer, false);
+  assert.equal(metrics.counts['presence.snapshotPassed'], 1);
+  assert.equal(metrics.counts['presence.transitions'], 1);
 
   device.selected = { id: chatId, kind: 'GROUP', memberCount: 3, members: [{ id: directPeer }, { id: groupMember }] };
   assert.deepEqual(await nextFrame(peer, refreshPresence), { type: 'watch_presence', version: 1, add: [groupMember], remove: [] });
@@ -115,16 +124,21 @@ test('presence keeps direct peers on selection changes and resets on a replaceme
 
   device.selected = null;
   assert.deepEqual(await nextFrame(peer, refreshPresence), { type: 'watch_presence', version: 1, add: [], remove: [groupMember] });
-  assert.deepEqual(await nextFrame(peer), { type: 'watch_online_count', version: 1 });
-
-  for (const id of [directPeer, groupMember]) {
-    const incoming = once(device.socket.ws, 'message', { signal });
-    peer.send(JSON.stringify({ type: 'presence', version: 1, statuses: [{ userId: id, online: true }] }));
-    await incoming;
-  }
-  assert.equal(metrics.counts['frame.presence'], 1);
+  const stopCount = nextFrame(peer);
+  await status(peer, groupMember, true);
+  assert.equal(metrics.counts['frame.presence'], 3);
+  assert.equal(metrics.failures['socket.decode/framePresence'], undefined);
+  assert.equal(device.socket.presence.receive({
+    type: 'presence', version: 1, statuses: [{ userId: groupMember, online: true }],
+  }, performance.now() + 1000), false);
+  assert.deepEqual(await stopCount, { type: 'watch_online_count', version: 1 });
+  await status(peer, chatId, true);
   assert.equal(metrics.failures['socket.decode/framePresence'], 1);
 
   peer = await connect();
   assert.deepEqual(await nextFrame(peer, refreshPresence), reset);
+  await device.close();
+  assert.equal(metrics.counts['presence.snapshotChecks'], 2);
+  assert.equal(metrics.counts['presence.snapshotPassed'], 1);
+  assert.equal(metrics.failures['presence.snapshot/missing'], 1);
 });

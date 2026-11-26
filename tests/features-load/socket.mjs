@@ -1,4 +1,5 @@
 import { performance } from 'node:perf_hooks';
+import { PresenceWatch } from './presence.mjs';
 
 export class Socket {
   constructor(index, session, http, options, metrics, receive) {
@@ -15,7 +16,12 @@ export class Socket {
     const ticket = await this.http.request(this.session, '/auth/ws-ticket', { method: 'POST', operation: 'ticket' });
     this.expectedClose = false;
     const connection = new WebSocket(this.options.ws, ['messenger', `messenger-ticket.${ticket.token}`]);
+    const presence = new PresenceWatch(
+      (name, count) => this.metrics.count(name, count),
+      () => this.metrics.failure('correctness.failed', 'Missing presence snapshot'),
+    );
     this.connection = connection;
+    this.presence = presence;
     connection.addEventListener('message', ({ data }) => {
       try {
         if (typeof data !== 'string' || data.length > 65536) throw new Error('Socket frame exceeds 64 KiB or is binary');
@@ -35,6 +41,7 @@ export class Socket {
       } catch (error) { this.metrics.failure('transport.decode', error); }
     });
     connection.addEventListener('close', () => {
+      presence.finish();
       if (!this.expectedClose) this.metrics.count('transport.unexpectedClose');
       for (const waiter of this.waiters) { clearTimeout(waiter.timer); waiter.reject(new Error('Socket closed')); }
       this.waiters.clear();
@@ -60,6 +67,7 @@ export class Socket {
     const data = JSON.stringify({ version: 1, ...frame });
     if (this.connection.bufferedAmount + data.length > 65536) { this.metrics.count('driver.writerBackpressure'); return false; }
     this.connection.send(data);
+    this.presence.sent(frame);
     return true;
   }
   flush() {
@@ -75,6 +83,7 @@ export class Socket {
     await ready;
   }
   async disconnect() {
+    this.presence?.finish();
     this.expectedClose = true;
     this.acks.clear();
     const connection = this.connection;

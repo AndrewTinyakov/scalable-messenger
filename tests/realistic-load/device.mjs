@@ -239,7 +239,7 @@ export class Device {
     const targets = new Set([...new Set(memberIds)].slice(0, MAX_PRESENCE_TARGETS));
     const watched = this.socket.presenceTargets;
     const add = [...targets].filter(id => !watched?.has(id));
-    const remove = [...(watched ?? [])].filter(id => !targets.has(id));
+    const remove = [...(watched?.keys() ?? [])].filter(id => !targets.has(id));
     if (!watched) this.offerWatch({ type: 'watch_presence', reset: true, add });
     else if (add.length || remove.length) this.offerWatch({ type: 'watch_presence', add, remove });
     else this.watch.delete('watch_presence');

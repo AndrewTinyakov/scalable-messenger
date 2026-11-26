@@ -13,7 +13,9 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"google.golang.org/protobuf/proto"
 
+	authorization "messenger/ws/internal/generated/grpc"
 	"messenger/ws/internal/grpcauth"
 	"messenger/ws/internal/monitoring"
 	"messenger/ws/internal/protocol"
@@ -525,5 +527,31 @@ func TestHubStopsCountingAfterRevocation(t *testing.T) {
 	defer hub.mu.Unlock()
 	if wt := hub.watches[bob]; wt.count != nil || wt.countChat != "" {
 		t.Fatal("revoked count kept its roster")
+	}
+}
+
+func TestLastSeenSendsBatchesWithinTheAPIMessageLimit(t *testing.T) {
+	var sizes []int
+	recorder := recorderFunc(func(_ context.Context, entries []grpcauth.LastSeen) error {
+		request := &authorization.RecordLastSeenRequest{}
+		for _, entry := range entries {
+			request.Entries = append(request.Entries, &authorization.LastSeen{UserId: entry.UserID, SeenUnixMs: entry.SeenAt.UnixMilli()})
+		}
+		sizes = append(sizes, proto.Size(request))
+		return nil
+	})
+	l := newLastSeen(recorder, testConfig(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	now := time.Now()
+	for i := range 1000 {
+		l.record(user(i), now)
+	}
+	l.flush(context.Background(), now)
+	if len(sizes) != 7 {
+		t.Fatalf("batches = %d, want 7", len(sizes))
+	}
+	for _, size := range sizes {
+		if size > 8192 {
+			t.Fatalf("batch of %d bytes exceeds the API limit", size)
+		}
 	}
 }

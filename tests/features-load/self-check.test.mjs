@@ -7,6 +7,7 @@ import { Histogram, Metrics } from './metrics.mjs';
 import { plan, offeredAt, bounded } from './plan.mjs';
 import { Driver } from './driver.mjs';
 import { assess } from './assessment.mjs';
+import { PresenceWatch } from './presence.mjs';
 
 test('a long observation stream keeps a fixed histogram and correct tails', () => {
   const histogram = new Histogram();
@@ -72,8 +73,9 @@ test('presence snapshots and handshake events are checked before measurement', (
   const metrics = new Metrics();
   const driver = new Driver({ seed: 1 }, metrics, {});
   const watched = [...presence.statuses.map(status => status.userId), ...presence.unavailable];
-  driver.foreground.set(0, { watchIds: new Set(watched) });
-  const receive = event => driver.receive({ index: 0 }, event, 0);
+  const watcher = new PresenceWatch((name, count) => metrics.count(name, count), () => assert.fail('Missing snapshot'));
+  watcher.sent({ type: 'watch_presence', add: watched });
+  const receive = event => driver.receive({ index: 0, presence: watcher }, event, 0);
   for (const event of [presence, onlineCount, presenceConfig, { ...onlineCount, online: 0 }, { ...presenceConfig, idleAfterHiddenMs: 0 }]) receive(event);
   assert.equal(metrics.counts['correctness.failed'] ?? 0, 0);
 

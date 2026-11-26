@@ -19,10 +19,6 @@ for i=1,#fields,2 do total=total+tonumber(fields[i+1]) end
 if total>=tonumber(ARGV[2]) then return 0 end
 redis.call('HINCRBY',KEYS[1],ARGV[1],1)
 return 1`)
-	setConnectionsScript = redis.NewScript(`
-local count=tonumber(ARGV[2])
-if count>0 then redis.call('HSET',KEYS[1],ARGV[1],count) else redis.call('HDEL',KEYS[1],ARGV[1]) end
-return 1`)
 )
 
 func connectionCountKey(userID string) string { return connectionUserKey(userID, "count") }
@@ -65,7 +61,13 @@ func (c *Client) SetConnections(ctx context.Context, userID, gateway string, cou
 			return err
 		}
 	}
-	if err := setConnectionsScript.Run(ctx, c.redis, []string{connectionCountKey(userID)}, gateway, count).Err(); err != nil {
+	var err error
+	if count > 0 {
+		err = c.redis.HSet(ctx, connectionCountKey(userID), gateway, count).Err()
+	} else {
+		err = c.redis.HDel(ctx, connectionCountKey(userID), gateway).Err()
+	}
+	if err != nil {
 		return fmt.Errorf("set connections: %w", err)
 	}
 	return nil

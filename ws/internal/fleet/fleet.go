@@ -23,9 +23,12 @@ type Store interface {
 	ForgetGateway(context.Context, string) error
 }
 
-// Cleaner removes the state a dead gateway left behind, using its own index.
-type Cleaner interface {
+// GatewayState is the per-gateway state kept outside connection counts.
+// RemoveGateway clears what a dead gateway identity left behind, using its
+// own index; Renew writes local state again after Redis lost it.
+type GatewayState interface {
 	RemoveGateway(context.Context, string) error
+	Renew()
 }
 
 type Config struct {
@@ -41,11 +44,11 @@ type Config struct {
 // change for one user runs under that user's lock, so the absolute count
 // it writes is never older than one already written.
 type Fleet struct {
-	store    Store
-	cleaners []Cleaner
-	config   Config
-	logger   *slog.Logger
-	wake     chan struct{}
+	store  Store
+	state  GatewayState
+	config Config
+	logger *slog.Logger
+	wake   chan struct{}
 	// admitting is held shared by each admission's Redis check and
 	// exclusively while the heartbeat detects and starts a renewal, so no
 	// admission can count against state that a renewal replaces.
@@ -57,7 +60,6 @@ type Fleet struct {
 	dirty     map[string]bool
 	locks     map[string]*userLock
 	retired   []string
-	renewed   []func(string)
 }
 
 // renewalPhase blocks admission while Redis may undercount this gateway's
@@ -77,9 +79,9 @@ type userLock struct {
 	holders int
 }
 
-func New(store Store, config Config, logger *slog.Logger) *Fleet {
+func New(store Store, state GatewayState, config Config, logger *slog.Logger) *Fleet {
 	return &Fleet{
-		store: store, config: config, logger: logger, wake: make(chan struct{}, 1), id: newID(),
+		store: store, state: state, config: config, logger: logger, wake: make(chan struct{}, 1), id: newID(),
 		counts: make(map[string]int), dirty: make(map[string]bool), locks: make(map[string]*userLock),
 	}
 }
@@ -94,21 +96,6 @@ func (f *Fleet) ID() string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.id
-}
-
-// AddCleaner registers state to remove when a gateway identity dies.
-func (f *Fleet) AddCleaner(cleaner Cleaner) {
-	f.mu.Lock()
-	f.cleaners = append(f.cleaners, cleaner)
-	f.mu.Unlock()
-}
-
-// OnRenewed registers a callback for when this gateway must write its state
-// again under its current identity.
-func (f *Fleet) OnRenewed(callback func(string)) {
-	f.mu.Lock()
-	f.renewed = append(f.renewed, callback)
-	f.mu.Unlock()
 }
 
 func (f *Fleet) lockUser(ctx context.Context, userID string) (func(), error) {
@@ -157,15 +144,13 @@ func (f *Fleet) Admit(ctx context.Context, userID string) (bool, error) {
 	f.mu.Unlock()
 	admitted, err := f.store.AdmitConnection(ctx, userID, id, f.config.ConnectionLimit)
 	if err != nil || !admitted {
-		f.forget(userID)
+		f.Release(userID)
 	}
 	return admitted, err
 }
 
 // Release forgets one local connection; the writer stores the new count.
-func (f *Fleet) Release(userID string) { f.forget(userID) }
-
-func (f *Fleet) forget(userID string) {
+func (f *Fleet) Release(userID string) {
 	f.mu.Lock()
 	if f.counts[userID]--; f.counts[userID] <= 0 {
 		delete(f.counts, userID)
@@ -262,25 +247,14 @@ func (f *Fleet) write(ctx context.Context, operation func(context.Context) error
 	return operation(writeCtx)
 }
 
-// heartbeat extends this gateway's registration. If Redis lost it, all
-// state is written again. If another gateway declared this one dead, a new
-// identity is registered before any writer uses it, and the old identity is
-// cleaned up like any dead gateway.
 func (f *Fleet) heartbeat(ctx context.Context) {
 	f.admitting.Lock()
 	renewed := f.renew(ctx)
 	f.admitting.Unlock()
-	if !renewed {
-		return
+	if renewed {
+		f.state.Renew()
+		f.signal()
 	}
-	f.mu.Lock()
-	callbacks := append([]func(string){}, f.renewed...)
-	current := f.id
-	f.mu.Unlock()
-	for _, callback := range callbacks {
-		callback(current)
-	}
-	f.signal()
 }
 
 // renew extends the registration and reports whether state must be written
@@ -391,13 +365,8 @@ func (f *Fleet) localUsers() []string {
 // takes that user's lock, so a write still running under the retired
 // identity finishes first.
 func (f *Fleet) clean(ctx context.Context, gateway string, users []string) error {
-	f.mu.Lock()
-	cleaners := append([]Cleaner(nil), f.cleaners...)
-	f.mu.Unlock()
-	for _, cleaner := range cleaners {
-		if err := cleaner.RemoveGateway(ctx, gateway); err != nil {
-			return err
-		}
+	if err := f.state.RemoveGateway(ctx, gateway); err != nil {
+		return err
 	}
 	clearUsers := func(users []string) error {
 		for _, userID := range users {

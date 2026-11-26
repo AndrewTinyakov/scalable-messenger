@@ -53,7 +53,7 @@ func TestConnectionReportsActivityTransitionsOnce(t *testing.T) {
 	c := newConnection(s, nil, ticket.Identity{UserID: sessionTestUser, SessionID: strings.Repeat("a", 64)})
 	c.setActivity(false, false)
 	c.startPresence()
-	if event := (<-c.out).frame.Event(); event.Type != protocol.EventPresenceConfig || event.IdleAfterHiddenMS != 5000 || event.IdleAfterInputMS != 30000 || event.ReleaseAfterHidden != 300000 {
+	if event := (<-c.out).frame.Event(); event.Type != protocol.EventPresenceConfig || event.IdleAfterHiddenMS != 5000 || event.IdleAfterInputMS != 30000 || event.ReleaseAfterHiddenMS != 300000 {
 		t.Fatalf("config = %+v", event)
 	}
 	c.setActivity(true, true)

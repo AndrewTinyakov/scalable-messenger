@@ -41,7 +41,7 @@ type sidebarCoordinator struct {
 
 func newSidebarCoordinator(s *Server) *sidebarCoordinator {
 	auth, ok := s.groupAuth.(sidebarAuthorizer)
-	if !ok || s.sidebarActivity == nil {
+	if !ok {
 		return nil
 	}
 	return &sidebarCoordinator{server: s, authorizer: auth, source: s.sidebarActivity, watches: make(map[*Connection]*sidebarWatch), feeds: make(map[string]*sidebarFeed)}

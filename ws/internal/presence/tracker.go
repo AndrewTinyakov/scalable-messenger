@@ -88,15 +88,12 @@ func (t *Tracker) queueLocked(userID string, user *localUser, online bool) {
 	t.lastSeen.record(userID, now)
 	user.seen = now
 	t.pending[userID] = online
-	select {
-	case t.wake <- struct{}{}:
-	default:
-	}
+	t.signal()
 }
 
 // Renew writes every locally online user again under the gateway's current
 // identity, after Redis lost the registration or the identity changed.
-func (t *Tracker) Renew(string) {
+func (t *Tracker) Renew() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	for userID, user := range t.users {

@@ -194,7 +194,7 @@ func startHub(t *testing.T, store *fakeStore, auth *fakeAuth, config Config) *Hu
 	ctx, cancel := context.WithCancel(context.Background())
 	hub := NewHub(ctx, store, auth, config, slog.New(slog.NewTextHandler(io.Discard, nil)), monitoring.New(prometheus.NewRegistry()).PresenceMetrics)
 	done := make(chan struct{})
-	go func() { hub.Run(ctx); close(done) }()
+	go func() { hub.Run(); close(done) }()
 	t.Cleanup(func() { cancel(); <-done })
 	time.Sleep(5 * time.Millisecond)
 	return hub

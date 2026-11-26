@@ -28,14 +28,6 @@ func connectionUserKey(userID, suffix string) string {
 	return "messenger:connection:{" + hex.EncodeToString(digest[:]) + "}:" + suffix
 }
 
-func subscribeLimitKey(userID string) string {
-	return connectionUserKey(userID, "subscribe")
-}
-
-func handshakeLimitKey(userID string) string {
-	return connectionUserKey(userID, "handshake")
-}
-
 func validConnectionUserID(userID string) bool {
 	return userID != "" && len(userID) <= 256
 }

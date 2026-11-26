@@ -72,14 +72,13 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	presenceConfig := presence.DefaultConfig()
 	presenceConfig.Grace = cfg.PresenceGrace
 	presenceConfig.Timeout = cfg.APITimeout
-	gateways := fleet.New(redis, fleet.Config{ConnectionLimit: 10, Heartbeat: cfg.GatewayHeartbeat, TTL: cfg.GatewayTTL, Timeout: cfg.APITimeout}, logger)
-	tracker := presence.NewTracker(presenceStore, groupAuth, gateways.ID, presenceConfig, logger)
-	gateways.AddCleaner(tracker)
-	gateways.OnRenewed(tracker.Renew)
+	var gateways *fleet.Fleet
+	tracker := presence.NewTracker(presenceStore, groupAuth, func() string { return gateways.ID() }, presenceConfig, logger)
+	gateways = fleet.New(redis, tracker, fleet.Config{ConnectionLimit: 10, Heartbeat: cfg.GatewayHeartbeat, TTL: cfg.GatewayTTL, Timeout: cfg.APITimeout}, logger)
 	background, stopBackground := context.WithCancel(context.WithoutCancel(ctx))
 	watchers := presence.NewHub(background, presenceStore, groupAuth, presenceConfig, logger, metrics.PresenceMetrics)
 	var backgroundWG sync.WaitGroup
-	for _, run := range []func(context.Context){gateways.Run, tracker.Run, watchers.Run} {
+	for _, run := range []func(context.Context){gateways.Run, tracker.Run, func(context.Context) { watchers.Run() }} {
 		backgroundWG.Add(1)
 		go func() { defer backgroundWG.Done(); run(background) }()
 	}

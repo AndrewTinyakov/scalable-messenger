@@ -47,7 +47,7 @@ func validatePresenceTargets(lists ...[]string) error {
 }
 
 func validateFeatureEvent(e Event) error {
-	if e.Statuses != nil || e.Unavailable != nil || e.Online != 0 || e.Members != 0 || e.IdleAfterHiddenMS != 0 || e.IdleAfterInputMS != 0 || e.ReleaseAfterHidden != 0 {
+	if e.Statuses != nil || e.Unavailable != nil || e.Online != 0 || e.Members != 0 || e.IdleAfterHiddenMS != 0 || e.IdleAfterInputMS != 0 || e.ReleaseAfterHiddenMS != 0 {
 		return errors.New("unexpected presence metadata")
 	}
 	if e.ForwardedFromUserID != "" && (e.Type != EventMessageSaved || !ValidULID(e.ForwardedFromUserID)) {

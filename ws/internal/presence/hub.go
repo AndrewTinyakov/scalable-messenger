@@ -73,7 +73,9 @@ func NewHub(ctx context.Context, store Store, auth Authorizer, config Config, lo
 	}
 }
 
-func (h *Hub) Run(ctx context.Context) {
+// Run delivers and maintains presence until the hub's context ends.
+func (h *Hub) Run() {
+	ctx := h.ctx
 	flush := time.NewTicker(h.config.FlushInterval)
 	defer flush.Stop()
 	sweep := time.NewTicker(5 * time.Second)
@@ -114,7 +116,7 @@ func (h *Hub) Watch(ctx context.Context, w Watcher, add, remove []string, reset 
 			continue
 		}
 		if len(wt.grants)+len(requested) >= h.config.MaxWatched {
-			h.rejectLocked(wt, id)
+			h.markUnavailableLocked(wt, id)
 			continue
 		}
 		requested = append(requested, id)
@@ -201,7 +203,7 @@ func (h *Hub) watchLocked(w Watcher) *watch {
 	return wt
 }
 
-func (h *Hub) rejectLocked(wt *watch, id string) {
+func (h *Hub) markUnavailableLocked(wt *watch, id string) {
 	if len(wt.unavailable) < h.config.MaxWatched {
 		wt.unavailable[id] = struct{}{}
 	}
@@ -224,7 +226,7 @@ func (h *Hub) grant(wt *watch, ids []string, visibility map[string]grpcauth.Visi
 		v := visibility[id]
 		if v.Level == grpcauth.PresenceNone {
 			h.dropLocked(wt, id)
-			h.rejectLocked(wt, id)
+			h.markUnavailableLocked(wt, id)
 			continue
 		}
 		if wt.grants[id] == nil {

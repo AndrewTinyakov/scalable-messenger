@@ -108,18 +108,16 @@ type SubscriptionLimiter interface {
 }
 
 type Dependencies struct {
-	GroupAuthorizer   GroupAuthorizer
-	SessionAuthorizer SessionAuthorizer
-	Publisher         CommandPublisher
-	SendLimiter       SendLimiter
-	HandshakeLimiter  HandshakeLimiter
-	Admission         ConnectionAdmission
-	Presence          PresenceTracker
-	Watchers          PresenceWatchers
-	WatchLimiter      WatchLimiter
-	SidebarActivity   interface {
-		RunActivity(context.Context, string, func(protocol.Event)) error
-	}
+	GroupAuthorizer     GroupAuthorizer
+	SessionAuthorizer   SessionAuthorizer
+	Publisher           CommandPublisher
+	SendLimiter         SendLimiter
+	HandshakeLimiter    HandshakeLimiter
+	Admission           ConnectionAdmission
+	Presence            PresenceTracker
+	Watchers            PresenceWatchers
+	WatchLimiter        WatchLimiter
+	SidebarActivity     sidebarActivitySource
 	SubscriptionLimiter SubscriptionLimiter
 	Rooms               RoomCoordinator
 }

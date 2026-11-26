@@ -27,7 +27,7 @@ func (c *Connection) startPresence() {
 	c.server.tracker.SetActive(c.session.UserID, true)
 	c.mu.Unlock()
 	cfg := c.server.config
-	c.Enqueue(protocol.Event{Type: protocol.EventPresenceConfig, Version: 1, IdleAfterHiddenMS: int(cfg.IdleAfterHidden.Milliseconds()), IdleAfterInputMS: int(cfg.IdleAfterInput.Milliseconds()), ReleaseAfterHidden: int(cfg.ReleaseAfterHidden.Milliseconds())})
+	c.Enqueue(protocol.Event{Type: protocol.EventPresenceConfig, Version: 1, IdleAfterHiddenMS: int(cfg.IdleAfterHidden.Milliseconds()), IdleAfterInputMS: int(cfg.IdleAfterInput.Milliseconds()), ReleaseAfterHiddenMS: int(cfg.ReleaseAfterHidden.Milliseconds())})
 }
 
 func (c *Connection) stopPresence() {

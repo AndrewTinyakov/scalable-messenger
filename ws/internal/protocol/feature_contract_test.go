@@ -379,7 +379,7 @@ func TestFeatureSharedPresenceFixturesMatchGatewayWire(t *testing.T) {
 			t.Fatalf("gateway-only %s was accepted as a durable room event", name)
 		}
 	}
-	config, err := NewEventFrame(Event{Type: EventPresenceConfig, Version: 1, IdleAfterInputMS: 30000, ReleaseAfterHidden: 300000})
+	config, err := NewEventFrame(Event{Type: EventPresenceConfig, Version: 1, IdleAfterInputMS: 30000, ReleaseAfterHiddenMS: 300000})
 	if err != nil || !strings.Contains(string(config.Payload()), `"idleAfterHiddenMs":0`) {
 		t.Fatalf("zero hidden timeout = %s, %v", config.Payload(), err)
 	}

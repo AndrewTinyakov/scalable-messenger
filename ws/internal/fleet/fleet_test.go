@@ -157,14 +157,34 @@ func (s *fakeStore) ForgetGateway(_ context.Context, gateway string) error {
 	return nil
 }
 
-type cleanerFunc func(context.Context, string) error
-
-func (f cleanerFunc) RemoveGateway(ctx context.Context, gateway string) error {
-	return f(ctx, gateway)
+type fakeState struct {
+	removed chan string
+	renewed chan struct{}
 }
 
-func testFleet(store *fakeStore) *Fleet {
-	return New(store, Config{ConnectionLimit: 2, Heartbeat: 20 * time.Millisecond, TTL: 60 * time.Millisecond, Timeout: time.Second}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+func newFakeState() *fakeState {
+	return &fakeState{removed: make(chan string, 4), renewed: make(chan struct{}, 4)}
+}
+
+func (s *fakeState) RemoveGateway(_ context.Context, gateway string) error {
+	select {
+	case s.removed <- gateway:
+	default:
+	}
+	return nil
+}
+
+func (s *fakeState) Renew() {
+	select {
+	case s.renewed <- struct{}{}:
+	default:
+	}
+}
+
+func testFleet(store *fakeStore) *Fleet { return testFleetWith(store, newFakeState()) }
+
+func testFleetWith(store *fakeStore, state GatewayState) *Fleet {
+	return New(store, state, Config{ConnectionLimit: 2, Heartbeat: 20 * time.Millisecond, TTL: 60 * time.Millisecond, Timeout: time.Second}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 }
 
 func eventually(t *testing.T, condition func() bool) {
@@ -208,12 +228,8 @@ func TestFleetAdmitsWithinLimitAndWritesReleases(t *testing.T) {
 
 func TestFleetRemovesDeadGatewaysAndRenewsItsOwnIdentity(t *testing.T) {
 	store := newFakeStore()
-	survivor, crashed := testFleet(store), testFleet(store)
-	cleaned := make(chan string, 1)
-	survivor.AddCleaner(cleanerFunc(func(_ context.Context, gateway string) error {
-		cleaned <- gateway
-		return nil
-	}))
+	survivorState, crashedState := newFakeState(), newFakeState()
+	survivor, crashed := testFleetWith(store, survivorState), testFleetWith(store, crashedState)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	if _, err := crashed.Admit(ctx, "bob"); err != nil {
@@ -230,7 +246,7 @@ func TestFleetRemovesDeadGatewaysAndRenewsItsOwnIdentity(t *testing.T) {
 	crash()
 	go survivor.Run(ctx)
 	select {
-	case gateway := <-cleaned:
+	case gateway := <-survivorState.removed:
 		if gateway != crashed.ID() {
 			t.Fatalf("cleaned = %s, want %s", gateway, crashed.ID())
 		}
@@ -239,17 +255,12 @@ func TestFleetRemovesDeadGatewaysAndRenewsItsOwnIdentity(t *testing.T) {
 	}
 	eventually(t, func() bool { return store.total("bob") == 0 })
 	old := crashed.ID()
-	renewed := make(chan string, 1)
-	crashed.OnRenewed(func(previous string) { renewed <- previous })
 	crashed.heartbeat(ctx)
 	if crashed.ID() == old {
 		t.Fatal("removed gateway kept its identity")
 	}
 	select {
-	case current := <-renewed:
-		if current != crashed.ID() {
-			t.Fatalf("renewed as %s, want %s", current, crashed.ID())
-		}
+	case <-crashedState.renewed:
 	case <-time.After(time.Second):
 		t.Fatal("state was not rewritten under the new identity")
 	}

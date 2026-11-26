@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { OutgoingSocketFrame } from '../../shared/api/socket'
-import { MAX_WATCHED, PresenceStore, UNWATCH_DELAY_MS } from './presenceStore'
+import { DENIED_RETRY_MS, MAX_WATCHED, PresenceStore, UNWATCH_DELAY_MS } from './presenceStore'
 
 const id = (n: number) => `01ARZ3NDEKTSV4RRFFQ${String(n).padStart(7, '0')}`
 const range = (from: number, count: number) => Array.from({ length: count }, (_, n) => id(from + n))
@@ -250,4 +250,34 @@ it('sends a watch right after connecting and paces a steady stream to one a seco
   expect(burst).toBeLessThanOrEqual(5)
   await vi.advanceTimersByTimeAsync(3000)
   expect(watches().length - burst).toBeLessThanOrEqual(3)
+})
+
+it('asks again for refused users every minute, even without an event', async () => {
+  store.watch('header', header, [id(1)])
+  await vi.advanceTimersByTimeAsync(0)
+  store.onEvent({ version: 1, type: 'presence', statuses: [], unavailable: [id(1)] })
+  await vi.advanceTimersByTimeAsync(DENIED_RETRY_MS - 1000)
+  expect(added()).toEqual([id(1)])
+  await vi.advanceTimersByTimeAsync(1000)
+  expect(added()).toEqual([id(1), id(1)])
+})
+
+it('sends the whole watch again after a failed watch', async () => {
+  store.watch('header', header, [id(1)])
+  await vi.advanceTimersByTimeAsync(0)
+  store.onEvent({ version: 1, type: 'error', code: 'DEPENDENCY_UNAVAILABLE' } as Parameters<
+    PresenceStore['onEvent']
+  >[0])
+  await vi.advanceTimersByTimeAsync(5000)
+  expect(watches().at(-1)).toMatchObject({ reset: true, add: [id(1)] })
+})
+
+it('forgets a status once its user is no longer watched', async () => {
+  store.watch('header', header, [id(1)])
+  await vi.advanceTimersByTimeAsync(0)
+  store.onEvent({ version: 1, type: 'presence', statuses: [{ userId: id(1), online: true }] })
+  expect(store.getSnapshot().statuses.has(id(1))).toBe(true)
+  store.watch('header', header, [])
+  await vi.advanceTimersByTimeAsync(UNWATCH_DELAY_MS + 1000)
+  expect(store.getSnapshot().statuses.has(id(1))).toBe(false)
 })

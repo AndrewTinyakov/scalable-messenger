@@ -27,6 +27,8 @@ export const UNWATCH_DELAY_MS = 10_000
 const SEND_BURST = 4
 const SEND_INTERVAL_MS = 1000
 const RATE_LIMIT_RETRY_MS = 3000
+/** How often to ask again for users the gateway refused. */
+export const DENIED_RETRY_MS = 60_000
 
 /** A status the UI can render. `unavailable` means the viewer may not see it. */
 export type PresenceView = PresenceStatus | { userId: string; unavailable: true }
@@ -54,6 +56,7 @@ export class PresenceStore {
   private send: ((frame: OutgoingSocketFrame) => void) | null = null
   private released = false
   private resyncAt: number | undefined
+  private deniedRetryAt: number | undefined
   private timer?: ReturnType<typeof setTimeout>
   private timerAt = Infinity
   private sendTokens = SEND_BURST
@@ -97,9 +100,11 @@ export class PresenceStore {
     this.sent.clear()
     this.removals.clear()
     this.resyncAt = undefined
+    this.deniedRetryAt = undefined
     this.clearTimer()
     if (!send) return
     const add = this.released ? [] : [...this.desired()]
+    this.forget([...this.statuses.keys()].filter((id) => !add.includes(id)))
     send({ type: 'watch_presence', version: 1, reset: true, add })
     if (this.released) {
       send({ type: 'watch_online_count', version: 1 })
@@ -121,8 +126,10 @@ export class PresenceStore {
   }
 
   onEvent = (event: SocketEvent): boolean => {
-    if (event.type === 'error' && event.code === 'RATE_LIMITED' && !event.requestId) {
-      // The gateway may have refused a watch; send the whole set again later.
+    const retryable =
+      event.type === 'error' && ['RATE_LIMITED', 'DEPENDENCY_UNAVAILABLE'].includes(event.code)
+    if (retryable && !event.requestId) {
+      // The gateway may have refused or failed a watch; send the whole set again later.
       this.resyncAt ??= this.now() + RATE_LIMIT_RETRY_MS
       this.schedule(this.resyncAt)
       return false
@@ -153,6 +160,11 @@ export class PresenceStore {
     for (const status of event.statuses) this.statuses.set(status.userId, status)
     for (const userId of event.unavailable ?? [])
       this.statuses.set(userId, { userId, unavailable: true })
+    // Access can arrive without an event this socket sees, so check refusals again later.
+    if (event.unavailable?.length && this.deniedRetryAt === undefined) {
+      this.deniedRetryAt = this.now() + DENIED_RETRY_MS
+      this.schedule(this.deniedRetryAt)
+    }
     this.publish()
     return true
   }
@@ -168,6 +180,14 @@ export class PresenceStore {
     })
     denied.forEach((id) => this.sent.delete(id))
     if (denied.length) this.schedule(this.now())
+  }
+
+  /** Drops statuses that are no longer watched, so they never render stale. */
+  private forget(ids: string[]) {
+    if (!ids.length) return
+    this.statuses = new Map(this.statuses)
+    ids.forEach((id) => this.statuses.delete(id))
+    this.publish()
   }
 
   private publish() {
@@ -245,6 +265,10 @@ export class PresenceStore {
       return this.schedule(this.now())
     }
     if (this.released) return
+    if (this.deniedRetryAt !== undefined && now >= this.deniedRetryAt) {
+      this.deniedRetryAt = undefined
+      this.retryDenied()
+    }
     const desired = this.desired()
     const add = [...desired].filter((id) => !this.sent.has(id))
     for (const id of desired) this.removals.delete(id)
@@ -261,6 +285,12 @@ export class PresenceStore {
     // Count changes are rare and go first so presence churn cannot starve them.
     if (this.countWanted !== this.countSent) {
       const chatId = this.countWanted?.split(':')[0]
+      const previous = this.countSent?.split(':')[0]
+      if (previous && previous !== chatId) {
+        this.onlineCounts = new Map(this.onlineCounts)
+        this.onlineCounts.delete(previous)
+        this.publish()
+      }
       send({ type: 'watch_online_count', version: 1, ...(chatId ? { chatId } : {}) })
       this.countSent = this.countWanted
       this.spend(now)
@@ -271,11 +301,13 @@ export class PresenceStore {
       this.sent.delete(id)
       this.removals.delete(id)
     })
+    this.forget(remove)
     add.forEach((id) => this.sent.add(id))
     if (add.length || remove.length) {
       send({ type: 'watch_presence', version: 1, add, remove })
       this.spend(now)
     }
     if (this.removals.size) this.schedule(Math.min(...this.removals.values()) + UNWATCH_DELAY_MS)
+    if (this.deniedRetryAt !== undefined) this.schedule(this.deniedRetryAt)
   }
 }

@@ -237,3 +237,17 @@ it('asks again for refused users once a new chat may allow them', async () => {
   await vi.advanceTimersByTimeAsync(1000)
   expect(watches().at(-1)).toEqual({ type: 'watch_presence', version: 1, add: [id(1)], remove: [] })
 })
+
+it('sends a watch right after connecting and paces a steady stream to one a second', async () => {
+  store.watch('header', header, [id(1)])
+  await vi.advanceTimersByTimeAsync(0)
+  expect(added()).toEqual([id(1)])
+  for (let n = 2; n < 12; n++) {
+    store.watch('header', header, [id(n)])
+    await vi.advanceTimersByTimeAsync(0)
+  }
+  const burst = watches().length
+  expect(burst).toBeLessThanOrEqual(5)
+  await vi.advanceTimersByTimeAsync(3000)
+  expect(watches().length - burst).toBeLessThanOrEqual(3)
+})

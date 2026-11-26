@@ -20,7 +20,12 @@ const FILL_ORDER: PresenceSource[] = ['members', 'sidebar']
 
 export const MAX_WATCHED = 500
 export const UNWATCH_DELAY_MS = 10_000
-const MIN_SEND_GAP_MS = 1000
+/**
+ * Watch frames go out in a short burst, then one per second. The gateway
+ * allows each user a burst of 30 and 3 per second across all their tabs.
+ */
+const SEND_BURST = 4
+const SEND_INTERVAL_MS = 1000
 const RATE_LIMIT_RETRY_MS = 3000
 
 /** A status the UI can render. `unavailable` means the viewer may not see it. */
@@ -51,7 +56,8 @@ export class PresenceStore {
   private resyncAt: number | undefined
   private timer?: ReturnType<typeof setTimeout>
   private timerAt = Infinity
-  private lastSentAt = -Infinity
+  private sendTokens = SEND_BURST
+  private refilledAt = -Infinity
   config: PresenceConfig = {
     idleAfterHiddenMs: 5000,
     idleAfterInputMs: 30000,
@@ -100,7 +106,7 @@ export class PresenceStore {
       this.countSent = undefined
     }
     add.forEach((id) => this.sent.add(id))
-    this.lastSentAt = this.now()
+    this.spend(this.now())
     this.schedule(this.now())
   }
 
@@ -192,10 +198,28 @@ export class PresenceStore {
     this.timerAt = Infinity
   }
 
+  private refill(now: number) {
+    const earned = (now - this.refilledAt) / SEND_INTERVAL_MS
+    this.sendTokens = Math.min(SEND_BURST, this.sendTokens + earned)
+    this.refilledAt = now
+  }
+
+  private spend(now: number) {
+    this.refill(now)
+    this.sendTokens -= 1
+  }
+
+  /** When the pacing next allows a frame. */
+  private nextSendAt() {
+    const now = this.now()
+    this.refill(now)
+    return this.sendTokens >= 1 ? now : now + (1 - this.sendTokens) * SEND_INTERVAL_MS
+  }
+
   /** Flushes no earlier than `at` and the send pacing allow. */
   private schedule(at: number) {
     if (!this.send) return
-    const due = Math.max(at, this.lastSentAt + MIN_SEND_GAP_MS)
+    const due = Math.max(at, this.nextSendAt())
     if (due >= this.timerAt) return
     clearTimeout(this.timer)
     this.timerAt = due
@@ -239,7 +263,7 @@ export class PresenceStore {
       const chatId = this.countWanted?.split(':')[0]
       send({ type: 'watch_online_count', version: 1, ...(chatId ? { chatId } : {}) })
       this.countSent = this.countWanted
-      this.lastSentAt = now
+      this.spend(now)
       this.schedule(now)
       return
     }
@@ -250,7 +274,7 @@ export class PresenceStore {
     add.forEach((id) => this.sent.add(id))
     if (add.length || remove.length) {
       send({ type: 'watch_presence', version: 1, add, remove })
-      this.lastSentAt = now
+      this.spend(now)
     }
     if (this.removals.size) this.schedule(Math.min(...this.removals.values()) + UNWATCH_DELAY_MS)
   }

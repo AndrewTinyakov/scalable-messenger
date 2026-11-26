@@ -31,6 +31,9 @@ const adapters = {
         client.hub.count('presence.staleFrame');
         return null;
       }
+      // Expired states go before this poll renews its source; a group poll
+      // carries only changes, so it must not revive them.
+      adapters.legacy.prune(client);
       client.validUntil[source] = validUntil;
       client.source = source;
       return frame.statuses.map(status => [status.userId, { online: true, offline: false }[status.state]]);

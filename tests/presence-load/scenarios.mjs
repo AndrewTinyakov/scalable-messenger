@@ -31,6 +31,7 @@ function actors(bench, users, count) {
 // failed unless the scenario judges that itself.
 async function start(bench, size, settleMs = 2 * MINUTE, { required = true } = {}) {
   const users = population(bench, size);
+  if (users.length < size) throw new Error(`the plan has ${users.length} users, fewer than the ${size} this stage needs`);
   await bench.connect(users);
   const settled = await bench.settle(settleMs);
   bench.log(`[${size}] ${bench.open.length} open, settled: ${settled}`);

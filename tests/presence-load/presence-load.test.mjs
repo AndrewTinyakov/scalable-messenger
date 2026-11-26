@@ -226,3 +226,13 @@ test('a legacy source forgets its states once its polls expire', () => {
   assert.equal(watcher.known.has(direct), false);
   assert.equal(watcher.known.get(shared), false);
 });
+
+test('an empty group poll after a gap does not revive expired states', () => {
+  const plan = buildPlan(small);
+  const watcher = client('legacy', plan, plan.order[0], fakeHub(plan));
+  const shared = watcher.watch.groupMembers[0];
+  watcher.receive(poll('presence', [{ userId: plan.users[shared].id, state: 'online' }]));
+  watcher.validUntil.group = Date.now() - 1;
+  watcher.receive(poll('presence', []));
+  assert.equal(watcher.known.has(shared), false);
+});

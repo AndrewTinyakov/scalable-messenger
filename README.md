@@ -1,6 +1,6 @@
-# Messenger
+# Scalable Messenger
 
-A chat prototype with React, Kotlin HTTP and workers, and Go WebSocket nodes.
+A full-stack chat showcase with scalable WebSocket delivery, multi-device presence, durable message history, and reconnect recovery. The stack uses React, Kotlin HTTP services and workers, and Go WebSocket gateways.
 
 Start the local Docker Compose stack with the HTTPS browser defaults. In an existing `.env`, remove any old `MESSENGER_SESSION_COOKIE_SECURE=false` or `MESSENGER_PUBLIC_SCHEME=http` entries, or change them to `true` and `https`. Set any existing `MESSENGER_CLIENT_ORIGIN` to `https://messenger.localhost` for this setup. The launcher preserves existing settings and credentials.
 

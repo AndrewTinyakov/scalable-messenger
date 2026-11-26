@@ -239,7 +239,7 @@ export function GroupMembersDialog({ chat, session, onClose, onUpdated }: Props)
         )}
         <ul className="members-list" aria-label="Group members">
           {members.map((member) => (
-            <li key={member.id} data-member-id={member.id} className="group-member-row">
+            <li key={member.id} className="group-member-row">
               <div className="group-member-main">
                 <Avatar
                   seed={member.id}

@@ -114,7 +114,7 @@ export class PresenceStore {
     this.connect(this.send)
   }
 
-  onEvent(event: SocketEvent): boolean {
+  onEvent = (event: SocketEvent): boolean => {
     if (event.type === 'error' && event.code === 'RATE_LIMITED' && !event.requestId) {
       // The gateway may have refused a watch; send the whole set again later.
       this.resyncAt ??= this.now() + RATE_LIMIT_RETRY_MS

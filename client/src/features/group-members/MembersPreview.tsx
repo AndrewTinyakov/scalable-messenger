@@ -51,7 +51,7 @@ export function MembersPreview({ chatId, ownerId, load }: Props) {
           return (
             <li key={member.id}>
               <Avatar seed={member.id} name={member.username} size={36} online={isOnline(status)} />
-              <span>
+              <span className="members-preview-text">
                 <strong>{member.username}</strong>
                 <small className={isOnline(status) ? 'online' : undefined}>
                   {presenceLabel(status)}

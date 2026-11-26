@@ -634,7 +634,7 @@
 .members-preview li:hover {
   background: var(--bg-hover);
 }
-.members-preview li > span {
+.members-preview-text {
   display: flex;
   min-width: 0;
   flex: 1;

@@ -134,10 +134,6 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
     const { active, visible } = activity.current
     if (!active || !visible) sendNow({ type: 'activity', version: 1, active, visible })
   }, [presence, sendNow, connection, connectionGeneration])
-  const onPresenceEvent = useCallback(
-    (event: Parameters<PresenceStore['onEvent']>[0]) => presence.onEvent(event),
-    [presence],
-  )
   useEffect(
     () =>
       watchActivity(
@@ -500,7 +496,7 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
 
   useMessengerSocket({
     onFeatureEvent,
-    onSidebarEvent: onPresenceEvent,
+    onPresenceEvent: presence.onEvent,
     sessionApi,
     userId: session.user.id,
     recovery,

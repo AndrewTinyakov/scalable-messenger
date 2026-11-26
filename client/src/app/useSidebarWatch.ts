@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Chat } from '../entities/chat/model'
 import type { PresenceStore } from '../features/presence/presenceStore'
+import { useWatch } from '../features/presence/usePresence'
 import { ChatKind } from '../shared/api/generated/socket-vocabulary'
 import type { OutgoingSocketFrame } from '../shared/api/socket'
 import { isId } from '../shared/lib/validation'
@@ -53,14 +54,6 @@ export function useSidebarWatch(options: Options) {
     .filter((chat) => chat.kind === ChatKind.DIRECT)
     .flatMap((chat) => chat.members.map((member) => member.id))
     .filter((id) => id !== options.userId && isId(id))
-  const peerKey = [...new Set(peers)].join(',')
-  const consumer = useRef({}).current
-  useEffect(() => {
-    options.presence.watch('sidebar', consumer, peerKey ? peerKey.split(',') : [])
-  }, [options.presence, consumer, peerKey])
-  useEffect(
-    () => () => options.presence.watch('sidebar', consumer, []),
-    [options.presence, consumer],
-  )
+  useWatch(options.presence, 'sidebar', [...new Set(peers)])
   return { watchSidebarPeers }
 }

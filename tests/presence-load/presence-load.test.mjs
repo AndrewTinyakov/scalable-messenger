@@ -62,6 +62,7 @@ function fakeHub(plan) {
 function client(protocol, plan, user, hub) {
   const watch = watchSet(plan, user);
   const created = new Client({ index: user, plan, watch, protocol, hub });
+  created.open = true;
   created.openedAt = 0;
   return created;
 }
@@ -109,40 +110,88 @@ test('the current adapter reads statuses and treats a denial as no state', () =>
   assert.equal(watcher.known.has(first), false);
 });
 
-test('a change counts as delivered, missing, superseded or closed per watcher', async t => {
+test('the current adapter is ready only once its group count arrives', () => {
   const plan = buildPlan(small);
-  const bench = new Bench({ plan, protocol: 'current', url: 'ws://unused', origin: 'https://unused', tickets: new Map(), log: () => {}, deadlineMs: 40 });
-  t.after(() => bench.close());
-  const actor = plan.order[5];
-  const [w1, w2, w3] = bench.watchers[actor];
-  for (const watcher of [w1, w2, w3]) {
-    const fake = bench.client(watcher);
+  const hub = fakeHub(plan);
+  const watcher = client('current', plan, plan.order[0], hub);
+  watcher.countPending = true;
+  watcher.receive(frame({ type: 'presence', version: 1,
+    statuses: watcher.watch.subjects.map(subject => ({ userId: plan.users[subject].id, online: false })) }));
+  assert.equal(watcher.ready, false);
+  watcher.receive(frame({ type: 'online_count', version: 1, chatId: watcher.watch.group.id, online: 0, members: 64 }));
+  assert.equal(watcher.ready, true);
+  assert.equal(hub.readies, 1);
+  // Losing a state makes the socket not ready again.
+  watcher.receive(frame({ type: 'presence', version: 1, statuses: [], unavailable: [plan.users[watcher.watch.subjects[0]].id] }));
+  assert.equal(watcher.ready, false);
+});
+
+function bench(t, deadlineMs) {
+  const plan = buildPlan(small);
+  const created = new Bench({ plan, protocol: 'current', url: 'ws://unused', origin: 'https://unused', ticket: () => '', log: () => {}, deadlineMs });
+  t.after(() => created.close());
+  return created;
+}
+
+// Three open watchers of one actor that all show it online.
+function watched(created) {
+  const actor = created.plan.order[5];
+  const watchers = created.watchers[actor].slice(0, 3);
+  for (const watcher of watchers) {
+    const fake = created.client(watcher);
     fake.open = true;
     fake.known.set(actor, true);
   }
-  // A watcher that already shows the new state is not armed.
-  bench.client(w3).known.set(actor, false);
-  const window = bench.begin('test');
-  bench.expect(actor, false);
-  assert.equal(window.changes.offline.armed, 2);
-  bench.status(bench.client(w1), actor, false, true, performance.now());
-  bench.client(w2).open = false;
-  bench.closed(bench.client(w2), 1006, false, false);
+  return { actor, watchers, client: watcher => created.client(watcher) };
+}
+
+const tick = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+test('each watcher of a change ends delivered, closed or already showing it', t => {
+  const created = bench(t, 1000);
+  const { actor, watchers: [w1, w2, w3], client: get } = watched(created);
+  get(w3).known.set(actor, false);
+  // A watcher without a known state still has to learn the new one.
+  get(w2).known.delete(actor);
+  const window = created.begin('test');
+  created.expect(actor, false);
+  assert.deepEqual(window.changes.offline, { armed: 2, delivered: 0, late: 0, missing: 0, superseded: 0, watcherClosed: 0, alreadyShown: 1 });
+  created.status(get(w1), actor, false, true, performance.now());
+  get(w2).open = false;
+  created.closed(get(w2), 1006, false, false);
   assert.equal(window.changes.offline.delivered, 1);
   assert.equal(window.changes.offline.watcherClosed, 1);
+  assert.equal(created.pending.size, 0);
+  created.window = null;
+});
 
-  // Both remaining watchers show offline now, so both wait for online.
-  bench.client(w1).known.set(actor, false);
-  bench.expect(actor, true);
-  assert.equal(window.changes.online.armed, 2);
-  bench.expect(actor, false);
-  assert.equal(window.changes.online.superseded, 2);
-  // Nobody shows online, so the last change armed no one; then one expires.
-  assert.equal(bench.pending.size, 0);
-  bench.client(w1).known.set(actor, true);
-  bench.expect(actor, false);
-  await new Promise(resolve => setTimeout(resolve, 80));
-  assert.equal(window.changes.offline.missing, 1);
-  assert.equal(bench.pending.size, 0);
-  bench.window = null;
+test('a new change supersedes one still in time', t => {
+  const created = bench(t, 1000);
+  const { actor, watchers: [w1] } = watched(created);
+  const window = created.begin('test');
+  created.expect(actor, false);
+  created.expect(actor, true);
+  assert.equal(window.changes.offline.superseded, 3);
+  assert.equal(window.changes.online.alreadyShown, 3);
+  assert.equal(created.pending.size, 0);
+  created.window = null;
+});
+
+test('a delivery after the deadline counts as late, not delivered', async t => {
+  const created = bench(t, 20);
+  const { actor, watchers: [w1, w2], client: get } = watched(created);
+  const window = created.begin('test');
+  // Backdated beyond its deadline, so it expires at once.
+  created.expect(actor, false, { at: performance.now() - 50 });
+  await tick(5);
+  assert.equal(window.changes.offline.missing, 3);
+  created.status(get(w1), actor, false, true, performance.now());
+  assert.equal(window.changes.offline.late, 1);
+  assert.equal(window.changes.offline.missing, 2);
+  assert.equal(window.changes.offline.delivered, 0);
+  // A later change ends the expired one without counting it again.
+  created.expect(actor, true);
+  assert.equal(window.changes.offline.superseded, 0);
+  assert.equal(window.changes.offline.missing, 2);
+  created.window = null;
 });

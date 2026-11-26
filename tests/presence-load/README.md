@@ -12,12 +12,12 @@ This driver measures presence alone, without messages or HTTP traffic once ticke
 
 A plateau of N sockets connects the first N users in a fixed shuffled order. Each user has one device.
 
-Each client watches like its build's browser client:
+Each client watches its seeded contacts with its build's protocol and cadence. The browser watches only the rows it has rendered, so these watch sets are a fixed, comparable workload rather than a copy of one session.
 
 | | Legacy | Current |
 |---|---|---|
 | Direct chats | `watch_sidebar` with the chat IDs, renewed every 20–23 s | Peer IDs in one `watch_presence` per connection |
-| Open group | `watch_presence {chatId, userIds}`, renewed every 12–15 s | Member IDs in the same watch, plus `watch_online_count` |
+| Open group | `watch_presence {chatId, userIds}`, renewed every 12–15 s | Member IDs in the same watch, plus `watch_online_count` one second later |
 | Updates | Full sidebar status every 5 s; open-chat changes every 5 s | Transitions only |
 
 ## Setup
@@ -43,20 +43,20 @@ node tests/presence-load/main.mjs run --manifest /tmp/presence-load/current-mani
   --prometheus http://127.0.0.1:4090 --report /tmp/presence-load/reports/current-idle.json
 ```
 
-Each `run` fetches WebSocket tickets for its users before any timed window. A client reuses its ticket for every reconnect; tickets last an hour.
+Each `run` fetches WebSocket tickets for its users before any timed window. A client reuses its ticket for every reconnect, and tickets that will expire within ten minutes are replaced once a minute. A socket that should be open but closes is reconnected with capped exponential backoff, as the browser does, until it opens or the run ends.
 
 ## Scenarios
 
 | Scenario | What it does | Builds |
 |---|---|---|
-| `smoke` | 64 sockets; probe changes; a watch for a stranger must reveal nothing | Both |
-| `idle` | 1,000, 2,000 and 3,500 sockets. At each plateau: 60 s with no changes (`quiet-N`), then 3 min while 32 actors disconnect for 12 s and reconnect (`idle-N`) | Both |
-| `churn` | 1,600 sockets. Disconnect-and-reconnect cycles at 2, 10 and 40 per second, 2 min each. Then activity toggles at 5, 25 and 100 per second (current only) | Both |
-| `gateway-kill` | 1,600 sockets. `docker kill --fault-container` (a gateway). Its sockets stay offline for 150 s while the other gateway's watchers must see them go offline; then the gateway restarts and they reconnect | Both |
+| `smoke` | 64 sockets. Fails unless every live socket is ready, probe changes are delivered both ways in time, and a watch for a stranger is denied without revealing their status | Both |
+| `idle` | 1,000, 2,000 and 3,500 sockets. At each plateau: 60 s with no changes (`quiet-N`), then 3 min while 32 actors and the four hot subjects disconnect for 20 s and reconnect (`idle-N`; hot-subject changes are labelled `hot`) | Both |
+| `churn` | 1,600 sockets. Disconnect-and-reconnect cycles at 2, 10 and 25 per second, 2 min each. Then activity changes at 5, 25 and 100 per second (current only): a user stops interacting for 20 s with its tab still visible, then resumes | Both |
+| `gateway-kill` | 1,600 sockets. `docker kill --fault-container` (a gateway). The sockets it closed are the victims; they stay offline for 150 s while the surviving gateway's watchers must see them go offline. Then they reconnect to the surviving gateway, each timed from its own attempt, and finally the failed gateway restarts | Both |
 | `redis-kill` | 1,600 sockets. 64 actors cycle once per second while `--fault-container` (a Redis primary) is down for 2 min, then while it recovers | Both |
-| `capacity` | 2,000, 4,000, 8,000, 12,000 and 15,000 sockets, stopping at the first stage where fewer than 99% are open and watch-ready | Both |
+| `capacity` | 2,000, 4,000, 8,000, 12,000 and 15,000 sockets. A stage passes when at least 99% of its sockets are open and ready at the end and watch refusals during ramp and measurement stay within 1%; the run stops at the first failure | Both |
 
-Every probe actor stays online at least 40 s between cycles, so the legacy 5 s poll has several chances to see each online period. Use one fault container per run, and name a Redis primary, not a replica (`redis-cli role`).
+A probe actor stays offline for 20 s, longer than the 15 s delivery deadline, and online at least 40 s between cycles, so the legacy 5 s poll has several chances to see each online period. Requested and achieved action rates are recorded in each window's `schedules`. Use one fault container per run, and name a Redis primary, not a replica (`redis-cli role`).
 
 The capacity ramp stops at 15,000 because macOS has 16,384 ephemeral ports for one destination address and port.
 
@@ -64,18 +64,19 @@ The capacity ramp stops at 15,000 because macOS has 16,384 ephemeral ports for o
 
 Each window reports:
 
-- **Sockets.** Open and watch-ready sockets. A socket is ready once it knows a state for every user it watches.
+- **Sockets.** Live (meant to be open), open and ready sockets at the end of the window. A socket is ready while it knows a state for every user it watches and, for a current client with its group open, has received the online count.
 - **Watch edges.** Expected and known edges, and the coverage between them.
 - **Traffic.** Frames, bytes and status entries per second, and counts by frame type, error code and close code.
 - **Deliveries.** Measured as described below, with delivery latency histograms.
 - **Generator.** Event-loop delay and RSS. A window whose p99 event-loop delay exceeds 50 ms is marked `generator.limited`, because the load generator, not the server, may have been the bottleneck.
-- **Server.** Prometheus mean and peak over the window, skipping its first 30 s because rates look back 30 s. Gateway CPU and RSS, Redis CPU, commands and memory, API CPU, gRPC and SQL rates, and each build's presence RPCs.
+- **Server.** From Prometheus: gateway CPU and RSS, Redis CPU, commands and memory, API CPU, gRPC and SQL rates, and each build's presence RPCs. A gauge's mean and peak cover the whole window. A counter's mean is its increase over exactly the window; its peak is the highest 30 s rate lying inside the window, so windows under 60 s have none. The sampled intervals are in `server.intervals`.
 
-A delivery is measured per watcher. When an actor goes offline or online, every open watcher that currently shows the opposite state is armed. Each armed watcher ends in exactly one outcome:
+A delivery is measured per watcher. When an actor goes offline or online, every open watcher of that actor is counted. One that already shows the new state counts as **already shown**; every other one, including one with no known state, is armed and ends in exactly one outcome:
 
 - **Delivered.** It reports the new state within 15 s, or within the hold time after a gateway kill.
-- **Missing.** It does not report the new state in time.
-- **Superseded.** The actor changed again before the watcher reported.
+- **Late.** It reports the new state within 45 s after the deadline.
+- **Missing.** It never reports the new state.
+- **Superseded.** The actor changed again while the deadline was still running.
 - **Watcher closed.** The watcher's own socket closed first.
 
 Online latency includes the actor's WebSocket handshake.

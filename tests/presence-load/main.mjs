@@ -4,7 +4,7 @@ import { parseArgs } from 'node:util';
 import { buildPlan, DEFAULTS } from './plan.mjs';
 import { Bench } from './run.mjs';
 import { SCENARIOS } from './scenarios.mjs';
-import { detectCookieName, fetchTickets, readManifest, seedDatabase, ticketClient, writeManifest } from './seed.mjs';
+import { detectCookieName, fetchTickets, readManifest, refreshTickets, seedDatabase, ticketClient, writeManifest } from './seed.mjs';
 
 const { positionals: [command], values } = parseArgs({
   allowPositionals: true,
@@ -45,20 +45,26 @@ if (command === 'seed') {
   const size = values.scenario === 'capacity' ? plan.users.length : values.scenario === 'smoke' ? 64 : 3500;
   console.error(`Fetching ${size} tickets`);
   const tickets = await fetchTickets(http, manifest, plan, plan.order.slice(0, size));
+  const stopRefresh = refreshTickets(http, manifest, plan, tickets, console.error);
   const bench = new Bench({
-    plan, protocol: values.protocol, url: values.ws, origin: manifest.origin, tickets, prometheus: values.prometheus,
-    connectRate: number('connect-rate'),
+    plan, protocol: values.protocol, url: values.ws, origin: manifest.origin, prometheus: values.prometheus,
+    ticket: user => tickets.get(user).token, connectRate: number('connect-rate'),
   });
   const startedAt = Date.now();
   try {
-    const windows = await scenario(bench, { container: values['fault-container'] });
+    const { windows, failures = [] } = await scenario(bench, { container: values['fault-container'] });
     const report = {
       protocol: values.protocol, scenario: values.scenario, project: manifest.project, params: manifest.params,
-      startedAt, endedAt: Date.now(), connectRate: bench.connectRate, windows,
+      startedAt, endedAt: Date.now(), connectRate: bench.connectRate, failures, windows,
     };
     await writeFile(values.report, JSON.stringify(report, null, 2) + '\n');
     console.error(`Report: ${values.report}`);
+    if (failures.length) {
+      console.error(`Failed checks:\n- ${failures.join('\n- ')}`);
+      process.exitCode = 1;
+    }
   } finally {
+    stopRefresh();
     bench.close();
     http.controller.abort();
   }

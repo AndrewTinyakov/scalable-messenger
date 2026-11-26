@@ -85,14 +85,28 @@ export function ticketClient({ api, origin, ticketRate }) {
 }
 
 // Tickets last an hour and the gateway does not consume them, so a client
-// reuses one for every reconnect within a scenario.
-export async function fetchTickets(http, manifest, plan, users) {
-  const tickets = new Map();
+// reuses one for every reconnect. `expiresAt` is in Unix seconds.
+export async function fetchTickets(http, manifest, plan, users, tickets = new Map()) {
   await workers(users, 128, async index => {
     const ticket = await http.request(session(manifest, plan, index), '/auth/ws-ticket', 'POST');
-    tickets.set(index, { token: ticket.token, expiresAt: Date.parse(ticket.expiresAt) });
+    tickets.set(index, { token: ticket.token, expiresAt: ticket.expiresAt * 1000 });
   });
   return tickets;
+}
+
+// Replaces tickets that expire within ten minutes, once a minute, until stopped.
+export function refreshTickets(http, manifest, plan, tickets, log) {
+  const timer = setInterval(async () => {
+    const due = [...tickets].filter(([, ticket]) => ticket.expiresAt - Date.now() < 10 * 60_000).map(([index]) => index);
+    if (!due.length) return;
+    try {
+      await fetchTickets(http, manifest, plan, due, tickets);
+    } catch (error) {
+      log(`ticket refresh failed: ${error.message}`);
+    }
+  }, 60_000);
+  timer.unref();
+  return () => clearInterval(timer);
 }
 
 export async function writeManifest(path, manifest) {

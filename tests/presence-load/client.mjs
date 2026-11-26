@@ -3,8 +3,10 @@
 import WebSocket from 'ws';
 
 // How the browser clients watch. Legacy renews its sidebar watch every 20-23 s
-// and its open-chat watch every 12-15 s; current sends its watch set once per
-// connection.
+// and its open-chat watch every 12-15 s. Current sends its watch set once per
+// connection and, like its client, spaces watch commands one second apart.
+// The watch sets themselves are the seeded ones (see plan.mjs), not the
+// browser's rendered rows.
 const adapters = {
   legacy: {
     watch(client) {
@@ -28,7 +30,7 @@ const adapters = {
     watch(client) {
       const { subjects, group } = client.watch;
       client.send({ type: 'watch_presence', version: 1, reset: true, add: subjects.map(subject => client.plan.users[subject].id) });
-      if (group) client.send({ type: 'watch_online_count', version: 1, chatId: group.id });
+      if (group) client.after(1000, () => client.send({ type: 'watch_online_count', version: 1, chatId: group.id }));
     },
     statuses(frame) {
       if (frame.type !== 'presence') return null;
@@ -46,6 +48,8 @@ export class Client {
   // subject index -> last known online state.
   known = new Map();
   readyAt = null;
+  countPending = false;
+  countSeen = false;
   timers = new Set();
 
   constructor({ index, plan, watch, protocol, url, origin, ticket, hub }) {
@@ -53,7 +57,11 @@ export class Client {
     this.expected = new Set(watch.subjects);
   }
 
-  get ready() { return this.readyAt !== null; }
+  // Ready while open with a known state for every watched user and, for a
+  // current client with its group open, a received online count.
+  get ready() {
+    return this.open && this.known.size === this.expected.size && (!this.countPending || this.countSeen);
+  }
 
   connect() {
     const socket = new WebSocket(this.url, ['messenger', `messenger-ticket.${this.ticket()}`], {
@@ -62,6 +70,8 @@ export class Client {
     this.socket = socket;
     this.known.clear();
     this.readyAt = null;
+    this.countPending = this.adapter === adapters.current && Boolean(this.watch.group);
+    this.countSeen = false;
     this.closing = false;
     const started = performance.now();
     return new Promise(resolve => {
@@ -108,6 +118,12 @@ export class Client {
     if (this.open) this.socket.send(JSON.stringify(frame));
   }
 
+  after(ms, action) {
+    const timer = setTimeout(() => { this.timers.delete(timer); action(); }, ms);
+    timer.unref();
+    this.timers.add(timer);
+  }
+
   every(base, jitter, action) {
     const timer = setInterval(action, base + Math.random() * jitter);
     timer.unref();
@@ -115,7 +131,7 @@ export class Client {
   }
 
   clearTimers() {
-    for (const timer of this.timers) clearInterval(timer);
+    for (const timer of this.timers) clearTimeout(timer);
     this.timers.clear();
   }
 
@@ -129,9 +145,8 @@ export class Client {
       return;
     }
     this.hub.frame(this, frame, data.length);
-    const statuses = this.adapter.statuses(frame);
-    if (!statuses) return;
-    for (const [userId, online] of statuses) {
+    if (frame.type === 'online_count') this.countSeen = true;
+    for (const [userId, online] of this.adapter.statuses(frame) ?? []) {
       const subject = this.hub.userIndex(userId);
       if (subject === undefined || !this.expected.has(subject)) {
         // A state for a user outside the watch set would leak presence; an
@@ -149,7 +164,7 @@ export class Client {
       this.known.set(subject, online);
       this.hub.status(this, subject, online, prior, now);
     }
-    if (this.readyAt === null && this.known.size === this.expected.size) {
+    if (this.readyAt === null && this.ready) {
       this.readyAt = now;
       this.hub.ready(this, now - this.openedAt);
     }

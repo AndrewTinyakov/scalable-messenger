@@ -49,6 +49,12 @@ jobs:
           npm ci
           npm --prefix contracts ci
           npm --prefix client ci
+      - name: Check repository rules
+        run: |
+          npm run check:source-comments
+          node --test scripts/check-source-comments.test.mjs
+          go -C ws run ./cmd/check-comments ..
+          go -C ws test ./cmd/check-comments
       - name: Validate deployment configuration
         run: |
           node scripts/prepare-dev-env.mjs
@@ -74,7 +80,7 @@ jobs:
           shopt -s failglob
           node --test tests/realistic-load/*.test.mjs
       - name: Compile and lint Kotlin
-        run: ./kotlin/gradlew -p kotlin :api:classes :command-processor:classes :outbox-publisher:classes ktlintCheck --no-daemon
+        run: ./kotlin/gradlew -p kotlin :api:classes :command-processor:classes :outbox-publisher:classes ktlintCheck checkKotlinComments checkJooqPlainSql architectureTest --no-daemon
       - name: Run Kotlin transaction and publication tests
         run: ./kotlin/gradlew -p kotlin :api:test :outbox-publisher:test --no-daemon
       - name: Compile and lint Go

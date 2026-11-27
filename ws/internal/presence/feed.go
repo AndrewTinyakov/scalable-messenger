@@ -98,11 +98,12 @@ func (h *Hub) apply(ctx context.Context, b *bucket, live redisroom.Live) {
 		return
 	}
 	if message.Revoked != nil {
-		// A revocation carries only its list; any other key, even a zero one, makes it invalid.
+		// A revocation carries only its "r" list; any other key, even a zero one or "R", makes it invalid.
 		var keys map[string]json.RawMessage
 		_ = json.Unmarshal([]byte(live.Raw), &keys)
 		foreign := slices.ContainsFunc(message.Revoked, func(id string) bool { return roomname.PresenceBucketOf(id) != b.id })
-		if len(keys) != 1 || len(message.Revoked) == 0 || foreign {
+		_, exact := keys["r"]
+		if len(keys) != 1 || !exact || len(message.Revoked) == 0 || foreign {
 			h.metrics.PresenceEvents.WithLabelValues("invalid").Inc()
 			return
 		}

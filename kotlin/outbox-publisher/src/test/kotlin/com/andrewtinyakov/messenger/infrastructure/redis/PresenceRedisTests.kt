@@ -45,6 +45,24 @@ class PresenceRedisTests {
     }
 
     @Test
+    fun `a presence URL without credentials does not take the room's`() {
+        val standalone = room.copy(roomClusterNodes = emptyList(), roomUsername = "room-user")
+        val server = PresenceRedis.server(
+            standalone.copy(url = "redis://presence:6379/16?db=3"),
+            emptyList(),
+        ) as RedisStandaloneConfiguration
+        assertEquals(null, server.username)
+        assertEquals(false, server.password.isPresent)
+        assertEquals(3, server.database)
+    }
+
+    @Test
+    fun `presence nodes alone keep the room user`() {
+        val server = PresenceRedis.server(room.copy(roomUsername = "room-user"), listOf("presence-1:6379")) as RedisClusterConfiguration
+        assertEquals("room-user", server.username)
+    }
+
+    @Test
     fun `a blank cluster entry is rejected, as in the gateway`() {
         assertThrows<IllegalArgumentException> {
             PresenceRedis.of(

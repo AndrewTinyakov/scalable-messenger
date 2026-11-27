@@ -140,7 +140,7 @@
     </section>
     <section>
       <h2>Reconnects and gateway loss</h2>
-      <p>Exact p99 over on-time deliveries to watchers that stayed connected until the deadline. Every scored delivery was on time on both builds. Current offline includes the intended 2-second grace.</p>
+      <p>Rerun p99 is exact, over on-time deliveries to watchers that stayed connected until the deadline. The legacy gateway-kill figure is a first-run histogram upper bound. Current offline includes the intended 2-second grace.</p>
       <figure>
         <figcaption>Churn at 25 cycles/s, online p99 (ms)</figcaption>
         <div class="series">
@@ -229,7 +229,7 @@
       </figure>
     </section>
   </div>
-  <footer><p>Each pair of bars starts at zero and uses its own scale. Redis rates include shared services. One sequential run per build on a shared Mac.</p></footer>
+  <footer><p>Each pair of bars starts at zero and uses its own scale. Redis rates include shared services. Runs were sequential on a shared Mac; the current build and legacy churn were run twice, and the latest run is shown.</p></footer>
 </main>
 </body>
 </html>

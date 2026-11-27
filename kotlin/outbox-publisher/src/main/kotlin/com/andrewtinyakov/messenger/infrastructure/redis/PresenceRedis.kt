@@ -35,10 +35,18 @@ class PresenceRedis private constructor(
         // from the room Redis.
         internal fun server(properties: RedisPresenceProperties, presenceNodes: List<String>): RedisConfiguration {
             val uri = properties.url.takeIf { it.isNotBlank() }?.let(::URI)
-            val user = uri?.userInfo?.substringBefore(':', missingDelimiterValue = "")?.ifBlank { null }
+            // A presence URL is used as given, as the gateway does; only without one do the room credentials apply.
+            val user = if (uri != null) {
+                uri.userInfo?.substringBefore(':', missingDelimiterValue = "")?.ifBlank { null }
+            } else {
+                properties.roomUsername.ifBlank { null }
+            }
             val password = RedisPassword.of(
-                uri?.userInfo?.substringAfter(':', missingDelimiterValue = "")?.ifBlank { null }
-                    ?: properties.roomPassword.ifBlank { null },
+                if (uri != null) {
+                    uri.userInfo?.substringAfter(':', missingDelimiterValue = "")?.ifBlank { null }
+                } else {
+                    properties.roomPassword.ifBlank { null }
+                },
             )
             val nodes = presenceNodes.ifEmpty { nodes(properties.roomClusterNodes, "spring.data.redis.cluster.nodes") }
             if (nodes.isNotEmpty() || uri == null) {
@@ -59,10 +67,11 @@ class PresenceRedis private constructor(
             return LettuceClientConfiguration.builder().apply { if (ssl) useSsl() }.build()
         }
 
-        // The database comes from the path, as in redis://host/2, or from ?db=2, as go-redis accepts.
-        private fun database(uri: URI): Int = uri.path.trim('/').toIntOrNull()
-            ?: uri.query?.split('&')?.firstNotNullOfOrNull { it.removePrefix("db=").takeIf { db -> db != it }?.toIntOrNull() }
-            ?: 0
+        // As in go-redis, ?db=2 wins over the path, as in redis://host/2.
+        private fun database(uri: URI): Int =
+            uri.query?.split('&')?.firstNotNullOfOrNull { it.removePrefix("db=").takeIf { db -> db != it }?.toIntOrNull() }
+                ?: uri.path.trim('/').toIntOrNull()
+                ?: 0
 
         // An unset environment variable binds as one blank entry; any other blank entry is a mistake, as in the gateway.
         private fun nodes(values: List<String>, name: String): List<String> {

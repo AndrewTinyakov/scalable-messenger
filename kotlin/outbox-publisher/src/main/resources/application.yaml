@@ -39,6 +39,7 @@ messenger:
       url: ${PRESENCE_REDIS_URL:}
       cluster-nodes: ${PRESENCE_REDIS_CLUSTER_NODES:}
       room-cluster-nodes: ${spring.data.redis.cluster.nodes:}
+      room-username: ${spring.data.redis.username:}
       room-password: ${spring.data.redis.password:}
       room-ssl: ${spring.data.redis.ssl.enabled:false}
     room:

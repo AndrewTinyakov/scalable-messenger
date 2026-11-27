@@ -12,6 +12,12 @@ import { collect } from './prometheus.mjs';
 const LATE_GRACE_MS = 45_000;
 const MAX_BACKOFF_MS = 30_000;
 
+// Runs `fn` once performance.now() has passed `time`. Timers may fire a little
+// early by that clock, so it waits again until the time has really passed.
+function after(time, fn) {
+  setTimeout(() => performance.now() > time ? fn() : after(time, fn), Math.max(0, time - performance.now()) + 1).unref();
+}
+
 class Window {
   constructor(name, counts) {
     this.name = name;
@@ -98,12 +104,13 @@ export class Bench {
   closed(client, code, expected, wasOpen) {
     this.count(expected ? 'socket.closed' : wasOpen ? 'socket.unexpectedClose.' + code : 'socket.connectFailed');
     const now = performance.now();
-    for (const change of this.pending.values()) {
+    for (const [actor, change] of this.pending) {
       this.settleDue(change, now);
       // A watcher that closes before the deadline is not scored, whether or
       // not its frame had already arrived.
       if (change.arrived.delete(client.index)) change.outcomes.watcherClosed++;
       else if (change.waiting.delete(client.index)) change.outcomes[now <= change.deadline ? 'watcherClosed' : 'missing']++;
+      if (!change.waiting.size && now > change.deadline) this.finish(actor, change);
     }
     // Browsers reconnect after a short random backoff.
     if (!expected) this.keep(client, 1000 + Math.random() * 4000);
@@ -112,7 +119,10 @@ export class Bench {
   status(client, subject, online, prior, now) {
     if (prior !== undefined) this.count('presence.transitions');
     const change = this.pending.get(subject);
-    if (!change || change.online !== online || !change.waiting.delete(client.index)) return;
+    if (!change || change.online !== online || !change.waiting.has(client.index)) return;
+    // Past the grace a report is missing, even if the cleanup timer has not run yet.
+    if (now > change.deadline + LATE_GRACE_MS) return this.finish(subject, change, now);
+    change.waiting.delete(client.index);
     this.settleDue(change, now);
     // An in-time delivery counts at the deadline, once the watcher has stayed connected for it.
     if (now <= change.deadline) change.arrived.set(client.index, now - change.at);
@@ -220,9 +230,8 @@ export class Bench {
     const deadline = at + deadlineMs;
     const change = { online, at, deadline, kind, window, outcomes, waiting, arrived: new Map() };
     this.pending.set(actor, change);
-    setTimeout(() => change.waiting.size ? this.settleDeliveries(change) : this.finish(actor, change),
-      Math.max(0, deadline - performance.now())).unref();
-    setTimeout(() => this.finish(actor, change), Math.max(0, deadline + LATE_GRACE_MS - performance.now())).unref();
+    after(deadline, () => change.waiting.size ? this.settleDue(change) : this.finish(actor, change));
+    after(deadline + LATE_GRACE_MS, () => this.finish(actor, change));
   }
 
   // Counts the in-time deliveries of watchers still connected. Outcomes depend
@@ -242,11 +251,11 @@ export class Bench {
 
   // Stops tracking a change. Watchers still waiting were superseded if the
   // deadline had not passed yet, and are missing otherwise.
-  finish(actor, change) {
+  finish(actor, change, now = performance.now()) {
     if (this.pending.get(actor) !== change) return;
     this.pending.delete(actor);
     this.settleDeliveries(change);
-    change.outcomes[performance.now() <= change.deadline ? 'superseded' : 'missing'] += change.waiting.size;
+    change.outcomes[now <= change.deadline ? 'superseded' : 'missing'] += change.waiting.size;
   }
 
   // Waits until every tracked change has been reported or has ended at its

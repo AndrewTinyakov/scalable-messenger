@@ -194,6 +194,27 @@ test('a delivery past the deadline settles earlier ones before the change ends',
   created.window = null;
 });
 
+test('a report after the grace is missing, and the last close after the deadline ends the change', t => {
+  const created = bench(t, 20);
+  const { actor, watchers: [w1, w2, w3], client: get } = watched(created);
+  const window = created.begin('test');
+  const at = performance.now() - 100_000;
+  created.expect(actor, false, { at });
+  created.status(get(w1), actor, false, true, performance.now());
+  assert.equal(window.changes.offline.late, 0);
+  assert.equal(window.changes.offline.missing, 3);
+  assert.equal(created.pending.size, 0);
+  created.expect(actor, false, { at: performance.now() - 50 });
+  created.status(get(w1), actor, false, true, performance.now());
+  get(w2).open = false;
+  created.closed(get(w2), 1006, false, false);
+  assert.equal(created.pending.size, 1);
+  get(w3).open = false;
+  created.closed(get(w3), 1006, false, false);
+  assert.equal(created.pending.size, 0);
+  created.window = null;
+});
+
 test('readiness settling still works alongside delivery settling', async t => {
   const created = bench(t, 20);
   assert.equal(await created.settle(10, []), true);

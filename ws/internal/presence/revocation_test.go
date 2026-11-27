@@ -315,7 +315,9 @@ func TestHubRejectsARevocationMixedWithATransition(t *testing.T) {
 	hub.mu.Lock()
 	generation := hub.watches[bob].authorized
 	hub.mu.Unlock()
-	store.send(roomname.PresenceBucketOf(alice), `{"r":["`+alice+`"],"v":"9","s":1,"o":true}`)
+	for _, raw := range []string{`{"r":["` + alice + `"],"v":"9","s":1,"o":true}`, `{"r":["` + alice + `"],"o":false}`, `{"r":["` + alice + `"],"s":0}`} {
+		store.send(roomname.PresenceBucketOf(alice), raw)
+	}
 	time.Sleep(20 * time.Millisecond)
 	hub.mu.Lock()
 	defer hub.mu.Unlock()

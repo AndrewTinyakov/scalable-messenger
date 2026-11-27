@@ -38,7 +38,9 @@ messenger:
       # The gateways' presence Redis settings; both empty means the room Redis.
       url: ${PRESENCE_REDIS_URL:}
       cluster-nodes: ${PRESENCE_REDIS_CLUSTER_NODES:}
-      password: ${REDIS_PASSWORD:}
+      room-cluster-nodes: ${spring.data.redis.cluster.nodes:}
+      room-password: ${spring.data.redis.password:}
+      room-ssl: ${spring.data.redis.ssl.enabled:false}
     room:
       history-max-length: 1000
       idle-ttl-seconds: 3600

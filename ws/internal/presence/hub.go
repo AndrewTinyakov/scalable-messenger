@@ -143,12 +143,12 @@ func (h *Hub) Watch(ctx context.Context, w Watcher, add, remove []string, reset 
 		h.abandon(wt, requested)
 		return err
 	}
+	// The add stops being tracked in the same step that installs its result,
+	// so a revocation always sees one or the other.
 	h.mu.Lock()
 	h.finishAddsLocked(wt, requested)
-	h.mu.Unlock()
-	unknown := h.grant(wt, requested, visibility, generation, nil)
+	unknown := h.grantLocked(wt, requested, visibility, generation, nil)
 	// A revocation during the check installed the result suspended; check again now.
-	h.mu.Lock()
 	r, renew := renewal{}, false
 	if generation != wt.authorized {
 		r, renew = h.startRenewalLocked(wt, maps.Clone(wt.grants))
@@ -259,6 +259,10 @@ func (h *Hub) markUnavailableLocked(wt *watch, id string) {
 func (h *Hub) grant(wt *watch, ids []string, visibility map[string]grpcauth.Visibility, generation uint64, held map[string]*grant) []string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	return h.grantLocked(wt, ids, visibility, generation, held)
+}
+
+func (h *Hub) grantLocked(wt *watch, ids []string, visibility map[string]grpcauth.Visibility, generation uint64, held map[string]*grant) []string {
 	if h.watches[wt.watcher] != wt {
 		return nil
 	}

@@ -221,13 +221,38 @@ func f() {}
 			want: []string{"2:1", "3:1"},
 		},
 		{
+			name: "line directives at the start of a line or inline as block comments",
+			source: `//line C:\source files\input.go:10:2
+package demo
+//line :12
+var x = /*line :30:20*/ 0
+/*line another.go:50*/ var y = 0
+`,
+		},
+		{
+			name:   "line directive with CRLF",
+			source: "package demo\r\n//line input.go:20\r\nvar x = 0\r\n",
+		},
+		{
+			name: "line directive lookalikes and misplaced line directives",
+			source: `package demo
+ //line input.go:10
+var x = 0 //line input.go:20
+// line input.go:30
+//line missing-colon
+/*line missing-colon*/
+/*line	input.go:40*/
+`,
+			want: []string{"2:2", "3:11", "4:1", "5:1", "6:1", "7:1"},
+		},
+		{
 			name: "physical source positions",
 			source: `package demo
 //line fake.go:50
 // text
 var x = 0
 `,
-			want: []string{"2:1", "3:1"},
+			want: []string{"3:1"},
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -246,6 +271,21 @@ var x = 0
 				t.Errorf("findings = %v, want %v", got, test.want)
 			}
 		})
+	}
+}
+
+func TestMalformedLineDirectiveFails(t *testing.T) {
+	for _, directive := range []string{
+		"//line input.go:0",
+		"//line input.go:1073741825",
+		"/*line input.go:10:0*/",
+		"/*line input.go: 10*/",
+		"/*line input.go:18446744073709551615*/",
+	} {
+		findings, err := findComments("ws/example.go", []byte("package demo\n"+directive+"\nvar x = 0\n"))
+		if err == nil && len(findings) != 1 {
+			t.Errorf("accepted malformed line directive %q", directive)
+		}
 	}
 }
 

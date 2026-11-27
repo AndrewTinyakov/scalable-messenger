@@ -52,8 +52,17 @@ function blockEnd(source, start) {
   throw new SqlTokenError(start, 'unterminated SQL block comment')
 }
 
+function stringContinuation(source, previous, start) {
+  if (!previous || !quotedStringTypes.has(previous.type)) return false
+  const gap = source.slice(previous.end, start)
+  return /[\r\n]/.test(gap) && /^(?:\s|--[^\r\n]*)*$/.test(gap)
+}
+
+const quotedStringTypes = new Set(['string', 'escape-string', 'unicode-string'])
+
 function* tokenize(source) {
   let start = 0
+  let previous
   while (start < source.length) {
     const char = source[start]
     const next = source[start + 1]
@@ -73,9 +82,13 @@ function* tokenize(source) {
     } else if ((char === 'e' || char === 'E') && next === "'") {
       type = 'escape-string'
       end = quotedEnd(source, start + 1, true)
+    } else if ((char === 'u' || char === 'U') && next === '&' && source[start + 2] === "'") {
+      type = 'unicode-string'
+      end = quotedEnd(source, start + 2, false)
     } else if (char === "'" || char === '"') {
-      type = char === "'" ? 'string' : 'quoted-identifier'
-      end = quotedEnd(source, start, false)
+      type = char === '"' ? 'quoted-identifier' :
+        stringContinuation(source, previous, start) ? previous.type : 'string'
+      end = quotedEnd(source, start, type === 'escape-string')
     } else if (char === '$' && (delimiter = dollarDelimiter(source, start))) {
       type = 'dollar-string'
       const closing = source.indexOf(delimiter, start + delimiter.length)
@@ -85,7 +98,9 @@ function* tokenize(source) {
       type = 'word'
       while (identifierPart(source[end]) || source[end] === '$') end++
     }
-    yield { type, start, end, delimiter }
+    const token = { type, start, end, delimiter }
+    if (type !== 'comment') previous = token
+    yield token
     start = end
   }
 }
@@ -95,10 +110,10 @@ function word(source, token) {
   return source.slice(token.start, token.end).toLowerCase()
 }
 
-function languageName(source, token) {
-  if (token?.type === 'quoted-identifier' || token?.type === 'string') {
-    return source.slice(token.start + 1, token.end - 1)
-  }
+function languageName(source, statement, index) {
+  const token = statement[index]
+  if (token?.type === 'quoted-identifier') return source.slice(token.start + 1, token.end - 1)
+  if (quotedStringTypes.has(token?.type)) return routineSource(source, routineLiteral(source, statement, index)).content
   return word(source, token)
 }
 
@@ -124,17 +139,96 @@ function routineBody(source, statement) {
 
     const keyword = word(source, token)
     const next = statement[index + 1]
-    const declaredLanguage = keyword === 'language' ? languageName(source, next) : undefined
+    const declaredLanguage = keyword === 'language' ? languageName(source, statement, index + 1) : undefined
     if (declaredLanguage) {
       language = declaredLanguage
       index++
-    } else if (keyword === 'as' && !anonymous && next?.delimiter) {
-      body = next
-    } else if (anonymous && token.delimiter) {
-      body = token
+    } else if (keyword === 'as' && !anonymous && isBodyString(next)) {
+      body = routineLiteral(source, statement, index + 1)
+    } else if (anonymous && !body && isBodyString(token)) {
+      body = routineLiteral(source, statement, index)
     }
   }
-  if (body?.type === 'dollar-string' && (language === 'sql' || language === 'plpgsql')) return body
+  if (language === 'sql' || language === 'plpgsql') return body
+}
+
+function isBodyString(token) {
+  return token?.type === 'dollar-string' || quotedStringTypes.has(token?.type)
+}
+
+function routineLiteral(source, statement, index) {
+  const first = statement[index]
+  const parts = [first]
+  while (++index < statement.length) {
+    const next = statement[index]
+    if (source[next.start] !== "'" || !stringContinuation(source, parts.at(-1), next.start)) break
+    parts.push(next)
+  }
+  let unicodeEscape = '\\'
+  const escape = statement[index + 1]
+  if (first.type === 'unicode-string' && word(source, statement[index]) === 'uescape' &&
+      escape?.type === 'string' && escape.end - escape.start === 3) {
+    unicodeEscape = source[escape.start + 1]
+  }
+  return { parts, unicodeEscape }
+}
+
+const escapeCharacters = { b: '\b', f: '\f', n: '\n', r: '\r', t: '\t' }
+
+function decodeCodePoint(digits, offset) {
+  const point = Number.parseInt(digits, 16)
+  if (point > 0x10ffff) throw new SqlTokenError(offset, 'invalid SQL Unicode escape')
+  return String.fromCodePoint(point)
+}
+
+function decodeEscape(sequence, offset) {
+  const escape = sequence[1]
+  const digits = sequence.slice(2)
+  if (digits && (escape === 'u' || escape === 'U')) return decodeCodePoint(digits, offset)
+  if (digits && escape === 'x') return String.fromCharCode(Number.parseInt(digits, 16))
+  if (/[0-7]/.test(escape)) return String.fromCharCode(Number.parseInt(sequence.slice(1), 8) & 255)
+  return escapeCharacters[escape] ?? escape
+}
+
+function routineSource(source, { parts, unicodeEscape }) {
+  const first = parts[0]
+  if (first.delimiter) {
+    const start = first.start + first.delimiter.length
+    return { content: source.slice(start, first.end - first.delimiter.length), original: (index) => start + index }
+  }
+
+  let content = ''
+  const offsets = []
+  const append = (value, original) => {
+    content += value
+    for (let index = 0; index < value.length; index++) offsets.push(original)
+  }
+  const unicodeMarker = RegExp.escape(unicodeEscape)
+  const unicodePattern = new RegExp("''|" + unicodeMarker + '(?:' + unicodeMarker +
+    '|\\+[0-9a-fA-F]{6}|[0-9a-fA-F]{4})', 'g')
+  for (const part of parts) {
+    const start = source.indexOf("'", part.start) + 1
+    const end = part.end - 1
+    let pattern = /''/g
+    if (part.type === 'escape-string') {
+      pattern = /''|\\(?:x[0-9a-fA-F]{1,2}|[0-7]{1,3}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|[\s\S])/g
+    } else if (part.type === 'unicode-string') {
+      pattern = unicodePattern
+    }
+    let index = start
+    for (const { 0: sequence, index: relative } of source.slice(start, end).matchAll(pattern)) {
+      const original = start + relative
+      while (index < original) append(source[index], index++)
+      if (sequence === "''") append("'", original)
+      else if (part.type === 'escape-string') append(decodeEscape(sequence, original), original)
+      else if (sequence === unicodeEscape.repeat(2)) append(unicodeEscape, original)
+      else append(decodeCodePoint(sequence.slice(sequence[1] === '+' ? 2 : 1), original), original)
+      index += sequence.length
+    }
+    while (index < end) append(source[index], index++)
+  }
+  offsets.push(parts.at(-1).end - 1)
+  return { content, original: (index) => offsets[index] }
 }
 
 export function postgresComments(source) {
@@ -143,14 +237,13 @@ export function postgresComments(source) {
   function scanRoutineBody() {
     const body = routineBody(source, statement)
     if (!body) return
-    const start = body.start + body.delimiter.length
-    const content = source.slice(start, body.end - body.delimiter.length)
+    const { content, original } = routineSource(source, body)
     try {
       for (const token of postgresComments(content)) {
-        comments.push({ start: start + token.start, end: start + token.end })
+        comments.push({ start: original(token.start), end: original(token.end) })
       }
     } catch (error) {
-      if (error instanceof SqlTokenError) error.pos += start
+      if (error instanceof SqlTokenError) error.pos = original(error.pos)
       throw error
     }
   }

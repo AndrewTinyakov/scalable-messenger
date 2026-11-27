@@ -23,12 +23,15 @@ type directivePolicy struct {
 }
 
 func (p *directivePolicy) allows(group *ast.CommentGroup, comment *ast.Comment) bool {
+	offset := p.positions.Offset(comment.Pos())
+	lineStart := bytes.LastIndexByte(p.source[:offset], '\n') + 1
+	if allowsLineDirective(p.source[offset:], offset == lineStart) {
+		return true
+	}
 	directive, ok := ast.ParseDirective(comment.Pos(), comment.Text)
 	if !ok || directive.Tool != "go" {
 		return false
 	}
-	offset := p.positions.Offset(comment.Pos())
-	lineStart := bytes.LastIndexByte(p.source[:offset], '\n') + 1
 	indent := p.source[lineStart:offset]
 	if len(bytes.Trim(indent, " \t")) != 0 {
 		return false
@@ -75,6 +78,36 @@ func (p *directivePolicy) allows(group *ast.CommentGroup, comment *ast.Comment) 
 		}
 	}
 	return false
+}
+
+func allowsLineDirective(raw []byte, atLineStart bool) bool {
+	var text []byte
+	switch {
+	case atLineStart && bytes.HasPrefix(raw, []byte("//line ")):
+		text, _, _ = bytes.Cut(raw[len("//line "):], []byte("\n"))
+		text = bytes.TrimSuffix(text, []byte("\r"))
+	case bytes.HasPrefix(raw, []byte("/*line ")):
+		text, _, _ = bytes.Cut(raw[len("/*line "):], []byte("*/"))
+	default:
+		return false
+	}
+
+	prefix, tail, ok := lineDirectiveNumber(text)
+	const maxLineColumn = 1 << 30
+	if !ok || tail == 0 || tail > maxLineColumn {
+		return false
+	}
+	_, line, hasColumn := lineDirectiveNumber(prefix)
+	return !hasColumn || (line > 0 && line <= maxLineColumn)
+}
+
+func lineDirectiveNumber(text []byte) ([]byte, uint64, bool) {
+	colon := bytes.LastIndexByte(text, ':')
+	if colon < 0 {
+		return nil, 0, false
+	}
+	value, err := strconv.ParseUint(string(text[colon+1:]), 10, 0)
+	return text[:colon], value, err == nil
 }
 
 func validGenerate(args string) bool {

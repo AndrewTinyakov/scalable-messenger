@@ -42,7 +42,7 @@ class ApiHttpSecurityTests
         private val db: JdbcTemplate,
     ) {
         companion object {
-            private val postgres = PostgreSQLContainer<Nothing>("postgres:17-alpine").apply {
+            private val postgres = PostgreSQLContainer<Nothing>("postgres:19-alpine").apply {
                 withDatabaseName("messenger")
                 withUsername("messenger")
                 withPassword("messenger")

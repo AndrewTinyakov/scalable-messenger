@@ -1,7 +1,7 @@
 name: messenger-sidebar-evidence
 services:
   postgres:
-    image: postgres:17-alpine
+    image: postgres:19-alpine
     mem_limit: 768m
     cpus: 2
     environment:

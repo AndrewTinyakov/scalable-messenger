@@ -1,11 +1,12 @@
 messenger_postgres_wal:
   query: |
-    SELECT wal_bytes::double precision AS bytes_total,
-           wal_write AS writes_total,
-           wal_sync AS syncs_total,
-           wal_write_time / 1000.0 AS write_seconds_total,
-           wal_sync_time / 1000.0 AS sync_seconds_total
-    FROM pg_stat_wal
+    SELECT (SELECT wal_bytes FROM pg_stat_wal)::double precision AS bytes_total,
+           COALESCE(sum(writes), 0) AS writes_total,
+           COALESCE(sum(fsyncs), 0) AS syncs_total,
+           COALESCE(sum(write_time), 0) / 1000.0 AS write_seconds_total,
+           COALESCE(sum(fsync_time), 0) / 1000.0 AS sync_seconds_total
+    FROM pg_stat_io
+    WHERE object = 'wal' AND context = 'normal'
   metrics:
     - bytes_total:
         usage: COUNTER

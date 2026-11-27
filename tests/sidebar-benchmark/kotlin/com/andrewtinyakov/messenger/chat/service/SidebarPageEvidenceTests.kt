@@ -40,6 +40,7 @@ class SidebarPageEvidenceTests {
                     }
                 }
             val db = DSL.using(connection, SQLDialect.POSTGRES)
+            val serverVersion = connection.metaData.databaseProductVersion
             val repository = JooqChatDirectoryRepository(DSL.using(db.configuration().derive(listener)))
             val viewer = UserId("00000000000000000000000001")
 
@@ -119,7 +120,7 @@ class SidebarPageEvidenceTests {
             Files.writeString(
                 directory.resolve("sidebar-page-measurements.txt"),
                 listOf(
-                    "PostgreSQL 17, isolated compose database, 2 CPU quota, 768 MiB limit.",
+                    "PostgreSQL $serverVersion, isolated compose database, 2 CPU quota, 768 MiB limit.",
                     "Dataset: $counts",
                     "Warmup: 5 pages. Samples: 60 each, serial, warm cache. Page size: 100 plus one lookahead.",
                     "Repository page plus direct member preview wall clock:",

@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit
 class ChatActivityMigrationTests {
     @Test
     fun `backfill commits batches and preserves a concurrent send activity`() {
-        PostgreSQLContainer<Nothing>("postgres:17-alpine").apply { start() }.use { postgres ->
+        PostgreSQLContainer<Nothing>("postgres:19-alpine").apply { start() }.use { postgres ->
             fun migration(target: String? = null) = Flyway.configure()
                 .dataSource(postgres.jdbcUrl, postgres.username, postgres.password)
                 .apply { if (target != null) target(target) }.load()

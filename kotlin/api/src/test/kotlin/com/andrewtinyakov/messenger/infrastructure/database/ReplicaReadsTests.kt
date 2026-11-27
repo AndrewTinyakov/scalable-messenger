@@ -115,7 +115,7 @@ class ReplicaReadsTests {
     companion object {
         private const val USER = "messenger"
         private const val PASSWORD = "messenger"
-        private val primary = PostgreSQLContainer<Nothing>("postgres:17-alpine").apply {
+        private val primary = PostgreSQLContainer<Nothing>("postgres:19-alpine").apply {
             withDatabaseName("messenger")
             withUsername(USER)
             withPassword(PASSWORD)
@@ -127,7 +127,7 @@ class ReplicaReadsTests {
             start()
         }
 
-        private val replica = GenericContainer<Nothing>("postgres:17-alpine").apply {
+        private val replica = GenericContainer<Nothing>("postgres:19-alpine").apply {
             withExposedPorts(5432)
             withEnv("PGPASSWORD", PASSWORD)
             val script =

@@ -187,7 +187,7 @@ public class MessageChanges extends TableImpl<MessageChangesRecord> {
     @Override
     public List<Check<MessageChangesRecord>> getChecks() {
         return Arrays.asList(
-            Internal.createCheck(this, DSL.name("message_changes_kind_check"), "(((kind)::text = ANY ((ARRAY['UPSERT'::character varying, 'REMOVED'::character varying, 'CLEARED'::character varying])::text[])))", true),
+            Internal.createCheck(this, DSL.name("message_changes_kind_check"), "(((kind)::text = ANY (ARRAY[('UPSERT'::character varying)::text, ('REMOVED'::character varying)::text, ('CLEARED'::character varying)::text])))", true),
             Internal.createCheck(this, DSL.name("message_changes_revision_check"), "((seq > 0))", true)
         );
     }

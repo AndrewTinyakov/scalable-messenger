@@ -22,7 +22,7 @@ The API uses Spring MVC and JDBC. [The API build](../../kotlin/api/build.gradle.
 | Spring JDBC and Spring TX | 7.0.9 |
 | HikariCP | 7.0.2 |
 | Java toolchain | 25 |
-| Development and integration-test database | `postgres:17-alpine` |
+| Development and integration-test database | `postgres:19-alpine` |
 
 [compose.yaml](../../compose.yaml) and [the integration-test base](../../kotlin/api/src/test/kotlin/com/andrewtinyakov/messenger/shared/MessengerIntegrationTest.kt) specify that database image. The minor database version is not pinned. [API configuration](../../kotlin/api/src/main/resources/application.yaml) sets no explicit Hikari pool limit or `reWriteBatchedInserts` property, and the checked compose JDBC URL has no driver options. Deployment overrides can change those settings.
 

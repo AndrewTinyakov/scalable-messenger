@@ -109,7 +109,7 @@ x-ws: &ws
 services:
   postgres:
     networks: [data]
-    image: postgres:17-alpine
+    image: postgres:19-alpine
     command:
       - postgres
       - -c
@@ -138,7 +138,7 @@ services:
       POSTGRES_MIGRATOR_PASSWORD: ${POSTGRES_MIGRATOR_PASSWORD:?Run scripts/dev-up.sh}
       POSTGRES_EXPORTER_PASSWORD: ${POSTGRES_EXPORTER_PASSWORD:?Run scripts/dev-up.sh}
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - postgres19-data:/var/lib/postgresql
       - ./deploy/postgres/init-roles.sh:/docker-entrypoint-initdb.d/10-roles.sh:ro
     healthcheck:
       test: [CMD-SHELL, "pg_isready -h 127.0.0.1 -U postgres -d messenger"]
@@ -535,7 +535,7 @@ services:
 
   postgres-observability-init:
     networks: [data]
-    image: postgres:17-alpine
+    image: postgres:19-alpine
     command: [psql, --host=postgres, --username=postgres, --dbname=messenger, --set=ON_ERROR_STOP=1, --file=/observability.sql]
     environment:
       PGPASSWORD: ${POSTGRES_ADMIN_PASSWORD:?Run scripts/dev-up.sh}
@@ -660,7 +660,7 @@ services:
     restart: unless-stopped
 
 volumes:
-  postgres-data:
+  postgres19-data:
   rabbitmq-1-data:
   rabbitmq-2-data:
   rabbitmq-3-data:

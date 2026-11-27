@@ -211,7 +211,7 @@ class OutboxClaimRepositoryTests {
 
     companion object {
         @Container @JvmField
-        val postgres = PostgreSQLContainer("postgres:17-alpine")
+        val postgres = PostgreSQLContainer("postgres:19-alpine")
 
         @Container @JvmField
         val redis = GenericContainer("redis:7.4-alpine").withExposedPorts(6379)

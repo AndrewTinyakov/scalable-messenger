@@ -15,6 +15,7 @@ import com.andrewtinyakov.messenger.shared.id.newId
 import com.andrewtinyakov.messenger.shared.web.ApiException
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.jooq.DSLContext
+import org.jooq.impl.DSL
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
@@ -209,6 +210,19 @@ class ReadServiceTests
                         f.chat.value,
                     ),
                 )
+            }
+        }
+
+        @Test
+        fun `creation days follow UTC even when the database session is in the previous day`() {
+            val f = fixture(messages = 1, createdAt = "2026-11-02T00:05:00Z")
+            val clock = MutableClock("2026-11-02T00:06:00Z")
+            val reads = service(clock)
+            val reader = f.members.first()
+            tx.execute {
+                jooq.setLocal(DSL.name("TimeZone"), DSL.inline("America/Los_Angeles")).execute()
+                reads.advance(f.chat, reader, 1L)
+                assertEquals(reader.value, reads.readers(f.chat, f.owner, f.messages.single(), null, 50).readers.single().userId)
             }
         }
 

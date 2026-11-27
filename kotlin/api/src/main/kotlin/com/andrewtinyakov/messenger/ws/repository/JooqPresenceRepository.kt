@@ -68,8 +68,8 @@ class JooqPresenceRepository(
         val latest = entries.groupBy { it.userId }.map { (userId, seen) -> userId to seen.maxOf { it.seenAt } }
         val values = DSL.values(*latest.map { (userId, seenAt) -> DSL.row(userId.value, seenAt) }.toTypedArray())
             .`as`("seen", "user_id", "seen_at")
-        val seenUser = values.field("user_id", String::class.java)!!
-        val seenAt = values.field("seen_at", OffsetDateTime::class.java)!!
+        val seenUser = values.field(0, USERS.ID.dataType)!!
+        val seenAt = values.field(1, USERS.LAST_SEEN_AT.dataType)!!
         db.update(USERS)
             .set(USERS.LAST_SEEN_AT, DSL.greatest(USERS.LAST_SEEN_AT, seenAt))
             .from(values)

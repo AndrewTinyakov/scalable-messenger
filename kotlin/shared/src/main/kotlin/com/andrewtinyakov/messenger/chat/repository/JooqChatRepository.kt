@@ -10,14 +10,15 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHA
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHAT_MEMBERS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSENGER_OUTBOX_EVENTS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.ChatsRecord
+import com.andrewtinyakov.messenger.infrastructure.database.postgresFunction
 import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxMessage
 import com.andrewtinyakov.messenger.message.model.SendBatch
 import org.jooq.DSLContext
 import org.jooq.JSONB
 import org.jooq.Query
 import org.jooq.impl.DSL
+import org.jooq.impl.SQLDataType.OFFSETDATETIME
 import org.springframework.stereotype.Repository
-import java.time.OffsetDateTime
 import com.andrewtinyakov.messenger.infrastructure.database.generated.enums.ChatKind as DbChatKind
 
 private const val INSERT_CHUNK_SIZE = 500
@@ -197,7 +198,7 @@ class JooqChatRepository(
     override fun allocateSequencesForMembers(chatId: ChatId, userIds: List<UserId>, recordActivity: Boolean): Long? {
         require(userIds.size in 1..SendBatch.MAX_SIZE) { "Sequence allocation must contain 1 to ${SendBatch.MAX_SIZE} senders" }
         val distinctUsers = userIds.distinct()
-        val activityNow = DSL.field("clock_timestamp()", OffsetDateTime::class.java)
+        val activityNow = postgresFunction("clock_timestamp", OFFSETDATETIME)
         return db.update(CHATS)
             .set(
                 CHATS.NEXT_SEQUENCE,

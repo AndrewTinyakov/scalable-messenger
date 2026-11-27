@@ -4,8 +4,14 @@ import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.model.ChatKind
 import com.andrewtinyakov.messenger.chat.repository.directory.JooqChatDirectoryRepository
+import com.andrewtinyakov.messenger.infrastructure.database.PostgresExplain
+import com.andrewtinyakov.messenger.infrastructure.database.PostgresExplainFormat
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHAT_MEMBERS
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.HIDDEN_MESSAGE_RANGES
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSAGES
 import org.jooq.ExecuteContext
 import org.jooq.ExecuteListener
+import org.jooq.Query
 import org.jooq.SQLDialect
 import org.jooq.conf.ParamType
 import org.jooq.impl.DSL
@@ -26,11 +32,11 @@ class SidebarPageEvidenceTests {
         val url = System.getenv("SIDEBAR_BENCH_DB_URL")
         require(url.startsWith("jdbc:postgresql://localhost:25457/"))
         DriverManager.getConnection(url, "messenger", "messenger").use { connection ->
-            val statements = mutableListOf<String>()
+            val statements = mutableListOf<Pair<Query, String>>()
             val listener =
                 object : ExecuteListener {
                     override fun executeStart(ctx: ExecuteContext) {
-                        ctx.query()?.let { statements.add(it.getSQL(ParamType.INLINED)) }
+                        ctx.query()?.let { statements.add(it to it.getSQL(ParamType.INLINED)) }
                     }
                 }
             val db = DSL.using(connection, SQLDialect.POSTGRES)
@@ -43,19 +49,15 @@ class SidebarPageEvidenceTests {
                 repository.findMembersByChatIds(chats.take(100).filter { it.chat.kind == ChatKind.DIRECT }.map { it.chat.id })
             }
             page()
-            val sql = statements.first { it.contains("summary_candidates") }
+            val (query, sql) = statements.first { (_, rendered) -> rendered.contains("summary_candidates") }
+            val explain = PostgresExplain(connection)
             statements.clear()
             repeat(5) { page() }
             val wall = List(60) { measureNanoTime { page() } / 1_000_000.0 }.sorted()
             val mapper = JsonMapper.builder().build()
             val execution =
                 List(60) {
-                    val json =
-                        db
-                            .fetch("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) $sql")
-                            .single()
-                            .get(0)
-                            .toString()
+                    val json = explain.analyze(query, PostgresExplainFormat.JSON).single()
                     mapper
                         .readTree(json)
                         .get(0)
@@ -70,31 +72,41 @@ class SidebarPageEvidenceTests {
             val directory = Path.of("../../docs/evidence")
             Files.createDirectories(directory)
             Files.writeString(Path.of("../../tests/sidebar-benchmark/sidebar-page.sql"), sql + ";\n")
-            val plan = db.fetch("EXPLAIN (ANALYZE, BUFFERS) $sql").joinToString("\n") { it.get(0).toString() }
+            val plan = explain.analyze(query, PostgresExplainFormat.TEXT).joinToString("\n")
             Files.writeString(directory.resolve("sidebar-page-plan.txt"), plan + "\n")
             statements.clear()
-            val large = repository.findMemberDetails(ChatId("00000000000000000010000000"), viewer)!!
-            val largeSql = statements.last { it.contains("summary_candidates") }
-            val largePlan = db.fetch("EXPLAIN (ANALYZE, BUFFERS) $largeSql").joinToString("\n") { it.get(0).toString() }
+            val largeChat = ChatId("00000000000000000010000000")
+            val large = repository.findMemberDetails(largeChat, viewer)!!
+            val (largeQuery) = statements.last { (_, rendered) -> rendered.contains("summary_candidates") }
+            val largePlan = explain.analyze(largeQuery, PostgresExplainFormat.TEXT).joinToString("\n")
             Files.writeString(directory.resolve("sidebar-large-chat-plan.txt"), largePlan + "\n")
             val counts =
                 db
-                    .fetch(
-                        """
-                        SELECT
-                          (SELECT count(*) FROM messages WHERE chat_id='00000000000000000010000000') AS large_chat_messages,
-                          (SELECT count(*) FROM chat_members WHERE user_id='00000000000000000000000001') AS viewer_chats,
-                          (SELECT count(*) FROM hidden_message_ranges) AS exclusions
-                        """.trimIndent(),
-                    ).single()
+                    .select(
+                        DSL
+                            .select(
+                                DSL.countLarge(),
+                            ).from(MESSAGES)
+                            .where(MESSAGES.CHAT_ID.eq(largeChat.value))
+                            .asField<Long>("large_chat_messages"),
+                        DSL
+                            .select(DSL.countLarge())
+                            .from(CHAT_MEMBERS)
+                            .where(CHAT_MEMBERS.USER_ID.eq(viewer.value))
+                            .asField<Long>("viewer_chats"),
+                        DSL.select(DSL.countLarge()).from(HIDDEN_MESSAGE_RANGES).asField<Long>("exclusions"),
+                    ).fetchSingle()
             val exactUnread =
-                db.fetchValue(
-                    """
-                    SELECT count(*) FROM messages
-                    WHERE chat_id='00000000000000000010000000' AND sequence>1000000
-                      AND sender_id<>'00000000000000000000000001' AND sequence%10 NOT BETWEEN 1 AND 5
-                    """.trimIndent(),
-                )
+                db
+                    .select(DSL.countLarge())
+                    .from(MESSAGES)
+                    .where(
+                        MESSAGES.CHAT_ID.eq(largeChat.value),
+                        MESSAGES.SEQUENCE.gt(1_000_000L),
+                        MESSAGES.SENDER_ID.ne(viewer.value),
+                        MESSAGES.SEQUENCE.mod(10L).notBetween(1L, 5L),
+                    ).fetchSingle()
+                    .value1()
             Files.writeString(
                 directory.resolve("sidebar-window-result.txt"),
                 listOf(

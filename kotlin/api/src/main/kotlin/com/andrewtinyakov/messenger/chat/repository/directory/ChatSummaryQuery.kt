@@ -26,9 +26,9 @@ internal fun Chat.withSummary(summary: ChatSummary, activityAt: OffsetDateTime?)
     )
 
 internal fun chatSummary(userId: UserId, member: ChatMembers): Field<ChatSummary> {
-    val frontier = DSL.field(DSL.name("frontier"), Long::class.java)
-    val hasRanges = DSL.field(DSL.name("has_ranges"), Boolean::class.java)
-    val viewer = DSL.select(readThrough(userId).`as`(frontier), anyHiddenRange(userId).`as`(hasRanges))
+    val frontier = readThrough(userId).`as`("frontier")
+    val hasRanges = anyHiddenRange(userId).`as`("has_ranges")
+    val viewer = DSL.select(frontier, hasRanges)
         .offset(0)
         .asTable("summary_viewer")
 
@@ -38,25 +38,21 @@ internal fun chatSummary(userId: UserId, member: ChatMembers): Field<ChatSummary
         .orderBy(MESSAGES.SEQUENCE.desc())
         .limit(Chat.SUMMARY_WINDOW)
         .asTable("summary_window")
-    val visible = DSL.field(DSL.name("visible"), Boolean::class.java)
+    val visible = DSL.field(visibleCandidate(window, member, viewer.field(hasRanges)!!, userId)).`as`("visible")
     val candidates = DSL.select(
         window.field(MESSAGES.SEQUENCE),
         window.field(MESSAGES.SENDER_ID),
-        DSL.field(visibleCandidate(window, member, viewer.field(hasRanges)!!, userId)).`as`(visible),
+        visible,
     ).from(window).offset(0).asTable("summary_candidates")
 
     val sequence = candidates.field(MESSAGES.SEQUENCE)!!
     val sender = candidates.field(MESSAGES.SENDER_ID)!!
     val isVisible = candidates.field(visible)!!
     val readThrough = viewer.field(frontier)!!
-    val unread = DSL.field(DSL.name("unread"), Int::class.java)
-    val capped = DSL.field(DSL.name("capped"), Boolean::class.java)
-    val latest = DSL.field(DSL.name("latest"), Long::class.java)
-    val counts = DSL.select(
-        DSL.count().filterWhere(isVisible.isTrue.and(sender.ne(userId.value)).and(sequence.gt(readThrough))).`as`(unread),
-        DSL.field(DSL.count().filterWhere(sequence.gt(readThrough)).eq(Chat.SUMMARY_WINDOW)).`as`(capped),
-        DSL.max(sequence).filterWhere(isVisible.isTrue).`as`(latest),
-    ).from(candidates).asTable("summary_counts")
+    val unread = DSL.count().filterWhere(isVisible.isTrue.and(sender.ne(userId.value)).and(sequence.gt(readThrough))).`as`("unread")
+    val capped = DSL.field(DSL.count().filterWhere(sequence.gt(readThrough)).eq(Chat.SUMMARY_WINDOW)).`as`("capped")
+    val latest = DSL.max(sequence).filterWhere(isVisible.isTrue).`as`("latest")
+    val counts = DSL.select(unread, capped, latest).from(candidates).asTable("summary_counts")
 
     val last = MESSAGES.`as`("summary_last")
     return DSL.multiset(

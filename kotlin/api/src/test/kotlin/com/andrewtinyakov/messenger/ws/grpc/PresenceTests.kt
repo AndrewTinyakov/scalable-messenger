@@ -116,7 +116,7 @@ class PresenceTests
         private fun credentials() = authentication.register("presence_${newId().lowercase()}", "test-password")
 
         private fun visibility(session: String, users: List<String>) =
-            Reply<PresenceVisibilityResponse>().also { visibilityCall(session, users, it) }
+            RecordingObserver<PresenceVisibilityResponse>().also { visibilityCall(session, users, it) }
                 .require().subjectsList
 
         private fun visibilityCall(
@@ -129,7 +129,7 @@ class PresenceTests
         )
 
         private fun onlineCount(session: String, chat: String, limit: Int) =
-            Reply<OnlineCountMembersResponse>().also {
+            RecordingObserver<OnlineCountMembersResponse>().also {
                 onlineCountCall(session, chat, limit, it)
             }.require()
 
@@ -144,7 +144,7 @@ class PresenceTests
         )
 
         private fun record(vararg entries: Pair<String, Instant>) {
-            Reply<RecordLastSeenResponse>().also {
+            RecordingObserver<RecordLastSeenResponse>().also {
                 authorization.recordLastSeen(lastSeenRequest(*entries), it)
             }.require()
         }
@@ -155,25 +155,8 @@ class PresenceTests
             ).build()
 
         private fun <T> assertStatus(code: Status.Code, call: (StreamObserver<T>) -> Unit) {
-            val reply = Reply<T>()
+            val reply = RecordingObserver<T>()
             call(reply)
             assertEquals(code, Status.fromThrowable(reply.error).code)
-        }
-
-        private class Reply<T> : StreamObserver<T> {
-            var value: T? = null
-            var error: Throwable? = null
-
-            override fun onNext(response: T) {
-                value = response
-            }
-
-            override fun onError(error: Throwable) {
-                this.error = error
-            }
-
-            override fun onCompleted() = Unit
-
-            fun require(): T = value ?: throw AssertionError("gRPC call failed", error)
         }
     }

@@ -1,7 +1,6 @@
 package com.andrewtinyakov.messenger.infrastructure.outbox.publication
 
 import com.andrewtinyakov.messenger.infrastructure.outbox.EventId
-import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.locks.ReentrantLock
@@ -11,16 +10,10 @@ internal class GroupCompletion(
     private val commit: (Collection<EventId>) -> Unit,
 ) {
     private val lock = ReentrantLock()
-    private val waiting = ConcurrentLinkedQueue<Request>()
-
-    private class Request(
-        val ids: List<EventId>,
-    ) {
-        val done = CompletableFuture<Unit>()
-    }
+    private val waiting = ConcurrentLinkedQueue<GroupCompletionRequest>()
 
     fun complete(ids: List<EventId>) {
-        val request = Request(ids)
+        val request = GroupCompletionRequest(ids)
         waiting.add(request)
         while (!request.done.isDone) {
             lock.withLock { if (!request.done.isDone) completeWaiting() }

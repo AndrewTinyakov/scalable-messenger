@@ -85,7 +85,7 @@ class KotlinArchitectureTests {
     private fun nestedTypeViolations(files: List<KoFileDeclaration>): List<String> = files.filterNot { it.inWebPayload }.flatMap { file ->
         file.classesAndInterfacesAndObjects(includeNested = true).filterNot { type ->
             type.isTopLevel || (type is KoObjectDeclaration && type.hasCompanionModifier) ||
-                type.fullyQualifiedName in existingNestedTypes || type.isSealedCase()
+                type.isSealedCase()
         }.map { it.fullyQualifiedName ?: it.name }
     }
 
@@ -136,9 +136,5 @@ class KotlinArchitectureTests {
 
     private companion object {
         val FEATURE_LAYERS = setOf("config", "model", "repository", "service", "scheduling", "monitoring", "messaging", "grpc")
-        val existingNestedTypes = setOf(
-            "$MESSENGER_PACKAGE.infrastructure.outbox.publication.GroupCompletion.Request",
-            "$MESSENGER_PACKAGE.ws.grpc.PresenceTests.Reply",
-        )
     }
 }

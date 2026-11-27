@@ -53,8 +53,10 @@ class ReadTransactions(
 
     private fun <T> read(snapshot: Boolean, block: () -> T): T = readOnly.execute {
         if (snapshot) {
-            db.setLocal(DSL.name("transaction_isolation"), DSL.inline("repeatable read")).execute()
-            db.setLocal(DSL.name("transaction_read_only"), DSL.inline("on")).execute()
+            db.batch(
+                db.setLocal(DSL.name("transaction_isolation"), DSL.inline("repeatable read")),
+                db.setLocal(DSL.name("transaction_read_only"), DSL.inline("on")),
+            ).execute()
         }
         block()
     }

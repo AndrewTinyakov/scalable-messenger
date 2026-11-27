@@ -59,6 +59,7 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     add(plainSqlFixture.implementationConfigurationName, "org.jooq:jooq:3.21.7")
     add(plainSqlFixture.implementationConfigurationName, "org.springframework:spring-jdbc:7.0.9")
+    add(plainSqlFixture.implementationConfigurationName, "org.postgresql:postgresql:42.7.13")
     add(architectureTestSources.implementationConfigurationName, "com.lemonappdev:konsist:0.18.1")
     add(architectureTestSources.implementationConfigurationName, "com.tngtech.archunit:archunit:1.5.1")
     add(architectureTestSources.implementationConfigurationName, "org.jetbrains.kotlin:kotlin-compiler-embeddable:2.3.21")

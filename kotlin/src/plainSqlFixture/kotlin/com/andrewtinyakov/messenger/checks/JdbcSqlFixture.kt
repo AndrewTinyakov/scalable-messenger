@@ -1,5 +1,6 @@
 package com.andrewtinyakov.messenger.checks
 
+import org.postgresql.jdbc.PgConnection
 import org.springframework.jdbc.core.JdbcTemplate
 import java.sql.Connection
 import java.sql.Statement
@@ -10,6 +11,8 @@ class JdbcSqlFixture {
     fun statementQuery(statement: Statement) = statement.executeQuery("select 1")
 
     fun prepare(connection: Connection) = connection.prepareStatement("select 1")
+
+    fun driverPrepare(connection: PgConnection) = connection.prepareStatement("select 1")
 
     fun template(template: JdbcTemplate) = template.update("delete from users")
 

@@ -25,6 +25,12 @@ object PostgresStatements {
         }
     }
 
+    fun dropDatabase(database: Name): QueryPart = object : CustomQueryPart() {
+        override fun accept(ctx: Context<*>) {
+            ctx.sql("drop database if exists ").visit(database).sql(" with (force)")
+        }
+    }
+
     fun explainAnalyze(query: Query, format: PostgresExplainFormat): QueryPart = object : CustomQueryPart() {
         override fun accept(ctx: Context<*>) {
             ctx.sql("explain (analyze, buffers, format ").sql(format.name.lowercase()).sql(") ").visit(query)

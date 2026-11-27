@@ -15,6 +15,7 @@ import com.andrewtinyakov.messenger.deletion.model.DeletionTarget
 import com.andrewtinyakov.messenger.deletion.monitoring.DeletionMetrics
 import com.andrewtinyakov.messenger.deletion.repository.JooqDeletionRepository
 import com.andrewtinyakov.messenger.deletion.repository.JooqHistoryPurgeRepository
+import com.andrewtinyakov.messenger.infrastructure.database.PostgresStatements
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHATS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHAT_MEMBERS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.DELETION_OPERATIONS
@@ -68,6 +69,7 @@ class LegacyChatDeletionUpgradeTests
         fun `V6 closed chats upgrade to durable bounded purge without changing active history or send dedup`() {
             val database = "upgrade_${newId().lowercase()}"
             db.createDatabase(DSL.name(database)).execute()
+            var wakeup: OutboxWakeup? = null
             try {
                 val originalUrl = source.connection.use { it.metaData.url }
                 val upgradedSource = PGSimpleDataSource().apply {
@@ -217,7 +219,7 @@ class LegacyChatDeletionUpgradeTests
                 val clock = Clock.systemUTC()
                 val messages = JooqMessageRepository(upgradedDb)
                 val chats = JooqChatRepository(upgradedDb)
-                val outbox = JooqOutboxRepository(upgradedDb, OutboxWakeup(upgradedSource))
+                val outbox = JooqOutboxRepository(upgradedDb, OutboxWakeup(upgradedSource).also { wakeup = it })
                 val sends =
                     MessageSendService(
                         messages,
@@ -278,14 +280,8 @@ class LegacyChatDeletionUpgradeTests
                 assertNotNull(closedChat.value1())
                 assertNull(closedChat.value2())
             } finally {
-                val activity = DSL.table(DSL.name("pg_catalog", "pg_stat_activity"))
-                val datname = DSL.field(DSL.name("datname"), SQLDataType.VARCHAR)
-                val pid = DSL.field(DSL.name("pid"), SQLDataType.INTEGER)
-                db.select(postgresFunction("pg_terminate_backend", SQLDataType.BOOLEAN, pid, DSL.inline(5000L)))
-                    .from(activity)
-                    .where(datname.eq(database), pid.ne(postgresFunction("pg_backend_pid", SQLDataType.INTEGER)))
-                    .fetch()
-                db.dropDatabase(DSL.name(database)).execute()
+                wakeup?.close()
+                source.connection.use { PostgresStatements.execute(it, PostgresStatements.dropDatabase(DSL.name(database))) }
             }
         }
     }

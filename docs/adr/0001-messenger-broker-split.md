@@ -13,3 +13,11 @@ A single script appends a bodyless recovery hint to bounded Stream history and p
 Message content no longer persists in outbox or Stream history. A publisher can hydrate before deletion and publish that snapshot afterward; this is an in-flight response, subject to client revision and visibility reconciliation. This decision does not promise retroactive erasure of network packets, browser memory, unacknowledged Rabbit commands, WAL or backups. Existing plaintext replay must be retired during the deployment procedure before claiming application-store purge completion.
 
 RabbitMQ was chosen because Redis replication can lose an acknowledged command during failover. Redis history is expendable after SQL commit. This adds a broker and processing hop; it does not prove any device applied a message. Queue partitioning spreads chats, while a hot chat or room still has one ordering or fanout bottleneck.
+
+## Publisher wakeups and completion
+
+The writer schedules a PostgreSQL `NOTIFY` after commit. This keeps the notification's commit lock outside the transaction that enqueues durable events. Each process coalesces signals into one running notification and at most one pending notification. Notifications carry no data and use a separate transaction with `synchronous_commit=off`. Publishers poll for committed outbox rows if a notification is lost.
+
+When a room finishes, the publisher commits its completion with any others already waiting. Rooms still publishing can finish independently. If a shared completion commit fails, the publisher retries each room individually so a lost lease only retains that room's outbox rows.
+
+The publisher looks up sender names once per batch to build live sidebar activity. It publishes activity previews over Redis Pub/Sub and keeps them out of the replay stream.

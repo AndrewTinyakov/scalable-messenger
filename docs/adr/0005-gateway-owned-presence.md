@@ -67,6 +67,10 @@ The sidebar watches the peers of every loaded direct chat, ranked visible first,
 
 The client asks again for refused users after a new chat arrives and retries every minute even without an event. The gateway rechecks grants it already holds, so the client must ask again to learn about newly permitted users.
 
+### Publishing revocations
+
+The publisher triggers revocation from the removed user's room event or the deleted group's room event. For a group deletion it reads the roster on a blocking worker and sends up to 64 bucket publications concurrently. A 100,000-member group can span all 4,096 buckets.
+
 ## Group online count
 
 A group of up to 200 members shows "N members, M online" while the chat is open. Kotlin authorizes the viewer and returns the member IDs the viewer may see. The gateway keeps the roster private and sends a frame when either the online count or the total membership changes. An empty chat ID stops the watch. A roster refresh advances its generation to fence a response already in flight and retains the last sent count to suppress duplicates. Larger groups show only their member count. Hovering the count shows a paginated member preview, and clicking it opens the members dialog. Both show live status for their loaded rows through ordinary watches.

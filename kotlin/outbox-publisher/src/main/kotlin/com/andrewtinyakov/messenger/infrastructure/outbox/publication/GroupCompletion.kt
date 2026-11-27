@@ -7,12 +7,6 @@ import java.util.concurrent.ExecutionException
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
-/**
- * Completes the rooms of one publication batch with as few commits as possible, without making a finished room wait
- * for a slow one. Whichever room finishes while no completion is running commits everything finished so far; rooms
- * that finish meanwhile join the next commit. If a shared commit fails, each room retries alone, so one room's lost
- * lease never retains another room's events.
- */
 internal class GroupCompletion(
     private val commit: (Collection<EventId>) -> Unit,
 ) {
@@ -45,7 +39,6 @@ internal class GroupCompletion(
             commit(requests.flatMap { it.ids })
             requests.forEach { it.done.complete(Unit) }
         } catch (error: Throwable) {
-            // Every polled request must settle here, or its caller would wait forever.
             if (requests.size == 1) {
                 requests.single().done.completeExceptionally(error)
                 return

@@ -11,7 +11,6 @@ import java.net.URI
 
 private const val DEFAULT_PORT = 6379
 
-/** Where presence revocations are published: the Redis whose presence channels the gateways subscribe to. */
 class PresenceRedis private constructor(
     val template: ReactiveStringRedisTemplate,
     private val connections: LettuceConnectionFactory?,
@@ -26,16 +25,12 @@ class PresenceRedis private constructor(
             if (properties.url.isBlank() && presenceNodes.isEmpty()) return PresenceRedis(rooms, null)
             val connections = LettuceConnectionFactory(server(properties, presenceNodes), client(properties))
             connections.afterPropertiesSet()
-            // Connect now, not on the first revocation inside a publication.
             connections.initConnection()
             return PresenceRedis(ReactiveStringRedisTemplate(connections), connections)
         }
 
-        // Like the gateway, an unset node list falls back to the room's, and unset credentials and TLS come
-        // from the room Redis.
         internal fun server(properties: RedisPresenceProperties, presenceNodes: List<String>): RedisConfiguration {
             val uri = properties.url.takeIf { it.isNotBlank() }?.let(::URI)
-            // A presence URL is used as given, as the gateway does; only without one do the room credentials apply.
             val user = if (uri != null) {
                 uri.userInfo?.substringBefore(':', missingDelimiterValue = "")?.ifBlank { null }
             } else {
@@ -56,7 +51,7 @@ class PresenceRedis private constructor(
                 }
             }
             return RedisStandaloneConfiguration(uri.host, uri.port.takeIf { it > 0 } ?: DEFAULT_PORT).apply {
-                database = database(uri)
+                database = standaloneDatabase(uri)
                 username = user
                 setPassword(password)
             }
@@ -67,13 +62,11 @@ class PresenceRedis private constructor(
             return LettuceClientConfiguration.builder().apply { if (ssl) useSsl() }.build()
         }
 
-        // As in go-redis, ?db=2 wins over the path, as in redis://host/2.
-        private fun database(uri: URI): Int =
+        private fun standaloneDatabase(uri: URI): Int =
             uri.query?.split('&')?.firstNotNullOfOrNull { it.removePrefix("db=").takeIf { db -> db != it }?.toIntOrNull() }
                 ?: uri.path.trim('/').toIntOrNull()
                 ?: 0
 
-        // An unset environment variable binds as one blank entry; any other blank entry is a mistake, as in the gateway.
         private fun nodes(values: List<String>, name: String): List<String> {
             if (values.all(String::isBlank)) return emptyList()
             require(values.none(String::isBlank)) { "$name contains an empty address" }

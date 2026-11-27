@@ -51,7 +51,6 @@ class PublicationHydration(
             messageRepository.findMessagesForPublication(ids)
         }.associateBy { it.id }
 
-    // Chat-list rows show the sender's name, so group activity needs usernames. One lookup covers the batch.
     private fun findGroupSenderUsernames(
         rows: List<OutboxMessage>,
         references: Map<EventId, PublicationReference>,

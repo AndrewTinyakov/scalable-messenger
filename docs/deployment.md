@@ -108,7 +108,7 @@ Existing Postgres/RabbitMQ/Redis volumes do not automatically rotate credentials
 
 ## Presence Redis
 
-Set `PRESENCE_REDIS_URL` and `PRESENCE_REDIS_CLUSTER_NODES` consistently on the gateway and outbox publisher so that presence revocations reach the gateway's subscriptions. When both settings are empty, the publisher uses its room Redis connection. An empty presence node list inherits the room cluster nodes. An empty presence URL inherits the room credentials and TLS settings. An explicit URL supplies its own credentials and TLS scheme. For a standalone URL, `?db=` takes precedence over the path's database number.
+Set `PRESENCE_REDIS_URL` and `PRESENCE_REDIS_CLUSTER_NODES` consistently on the gateway and outbox publisher so that presence revocations reach the gateway's subscriptions. When both settings are empty, the publisher uses its room Redis connection. An empty presence node list inherits the room cluster nodes. An empty presence URL inherits the room credentials and TLS settings. An explicit URL supplies its own credentials and TLS scheme. For a standalone URL, `?db=` takes precedence over the path's database number. The publisher opens its dedicated presence connection at startup.
 
 ## Network and host isolation
 

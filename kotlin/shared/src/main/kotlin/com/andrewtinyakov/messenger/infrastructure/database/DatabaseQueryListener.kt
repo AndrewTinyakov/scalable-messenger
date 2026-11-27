@@ -18,7 +18,6 @@ class DatabaseQueryListener(
         val sql = ctx.sql() ?: return
         val tagged = comment.prepend(sql, state.entryPoint)
         ctx.sql(tagged)
-        // A multi-query batch has already stored this statement in its slot before calling renderEnd.
         if (ctx.batchMode() == ExecuteContext.BatchMode.MULTIPLE) ctx.batchSQL()[state.rendered++] = tagged
     }
 

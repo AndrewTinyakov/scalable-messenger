@@ -28,3 +28,4 @@ dependencies {
 kotlin { compilerOptions { freeCompilerArgs.addAll("-Xjsr305=strict", "-Xannotation-default-target=param-property") } }
 ktlint { version.set("1.8.0") }
 tasks.withType<Test> { useJUnitPlatform() }
+tasks.test { outputs.upToDateWhen { false } }

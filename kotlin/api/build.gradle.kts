@@ -67,6 +67,8 @@ tasks.withType<Test> {
     environment("WS_TICKET_SECRET", "test-ws-ticket-secret-long-enough-for-hmac-2026")
 }
 
+tasks.test { outputs.upToDateWhen { false } }
+
 tasks.named("forkedSpringBootRun") {
     dependsOn(":shared:jar", ":command-processor:jar", ":outbox-publisher:jar")
 }

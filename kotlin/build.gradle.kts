@@ -15,6 +15,14 @@ repositories { mavenCentral() }
 
 ktlint { version.set("1.8.0") }
 
+tasks.register("verifyKotlin") {
+    group = "verification"
+    description = "Compile, lint, and test the Kotlin applications"
+    dependsOn(tasks.named("ktlintCheck"))
+    dependsOn(subprojects.map { "${it.path}:ktlintCheck" })
+    dependsOn(":command-processor:classes", ":api:test", ":outbox-publisher:test")
+}
+
 tasks.cyclonedxDirectBom { enabled = false }
 
 osvScanner {

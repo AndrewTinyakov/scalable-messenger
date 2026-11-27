@@ -7,13 +7,15 @@ import org.objectweb.asm.Handle
 import org.objectweb.asm.Label
 import org.objectweb.asm.MethodVisitor
 import org.objectweb.asm.Opcodes.ASM9
+import org.objectweb.asm.tree.MethodInsnNode
+import org.objectweb.asm.tree.MethodNode
 
 internal class JooqPlainSqlScanner(
     private val jooqApi: JooqPlainSqlApi,
 ) {
-    fun scan(classes: List<ClassReader>, includeCaller: (String) -> Boolean = { true }): List<JooqPlainSqlViolation> {
+    fun scan(classes: List<ClassReader>, includeCaller: (ClassReader) -> Boolean = { true }): List<JooqPlainSqlViolation> {
         val applicationParents = classes.associate { it.className to (listOfNotNull(it.superName) + it.interfaces) }
-        return classes.filter { includeCaller(it.className) }.flatMap { scan(it, applicationParents) }
+        return classes.filter(includeCaller).flatMap { scan(it, applicationParents) }
     }
 
     private fun scan(reader: ClassReader, parents: Map<String, List<String>>): List<JooqPlainSqlViolation> = buildList {
@@ -33,42 +35,77 @@ internal class JooqPlainSqlScanner(
                     descriptor: String,
                     signature: String?,
                     exceptions: Array<out String>?,
-                ): MethodVisitor = object : MethodVisitor(ASM9) {
-                    private val caller = JooqMethod(reader.className, name, descriptor)
-                    private var line = 0
+                ): MethodVisitor {
+                    val caller = JooqMethod(reader.className, name, descriptor)
+                    val method = MethodNode(ASM9, access, name, descriptor, signature, exceptions)
+                    return object : MethodVisitor(ASM9, method) {
+                        private var line = 0
+                        private val batchReads = mutableMapOf<MethodInsnNode, JooqPlainSqlViolation>()
+                        private val customAccept = name == "accept" && descriptor == "(Lorg/jooq/Context;)V" &&
+                            customQueryParts.any { jooqApi.inherits(caller.owner, it, parents) }
 
-                    override fun visitLineNumber(number: Int, start: Label) {
-                        line = inlineLines[number] ?: number
-                    }
+                        override fun visitLineNumber(number: Int, start: Label) {
+                            super.visitLineNumber(number, start)
+                            line = inlineLines[number] ?: number
+                        }
 
-                    override fun visitMethodInsn(opcode: Int, owner: String, name: String, descriptor: String, isInterface: Boolean) {
-                        checkCall(JooqMethod(owner, name, descriptor))
-                    }
+                        override fun visitMethodInsn(opcode: Int, owner: String, name: String, descriptor: String, isInterface: Boolean) {
+                            super.visitMethodInsn(opcode, owner, name, descriptor, isInterface)
+                            val target = JooqMethod(owner, name, descriptor)
+                            when {
+                                caller == sqlTaggingHook && (isSqlSetter(target) || isBatchRead(target)) -> Unit
 
-                    override fun visitInvokeDynamicInsn(name: String, descriptor: String, bootstrap: Handle, vararg arguments: Any) {
-                        checkConstant(bootstrap)
-                        arguments.forEach(::checkConstant)
-                    }
+                                customAccept && target.name == "sql" && target.descriptor in customRenderSignatures &&
+                                    jooqApi.inherits(target.owner, "org/jooq/Context", parents) -> Unit
 
-                    override fun visitLdcInsn(value: Any) = checkConstant(value)
+                                isBatchRead(target) -> batchReads[method.instructions.last as MethodInsnNode] = violation(target)
 
-                    private fun checkConstant(value: Any) {
-                        when (value) {
-                            is Handle -> {
-                                checkCall(JooqMethod(value.owner, value.name, value.desc))
-                            }
-
-                            is ConstantDynamic -> {
-                                checkConstant(value.bootstrapMethod)
-                                repeat(value.bootstrapMethodArgumentCount) { checkConstant(value.getBootstrapMethodArgument(it)) }
+                                else -> checkCall(target)
                             }
                         }
-                    }
 
-                    private fun checkCall(target: JooqMethod) {
-                        if (jooqApi.forbids(target, parents) && (caller != sqlTaggingHook || !target.isSqlTaggingMethod())) {
-                            add(JooqPlainSqlViolation(caller, sourceFile, line, target))
+                        override fun visitEnd() {
+                            super.visitEnd()
+                            if (batchReads.isNotEmpty()) addAll(batchSqlMutations(caller.owner, method, batchReads))
                         }
+
+                        override fun visitInvokeDynamicInsn(name: String, descriptor: String, bootstrap: Handle, vararg arguments: Any) {
+                            super.visitInvokeDynamicInsn(name, descriptor, bootstrap, *arguments)
+                            checkConstant(bootstrap)
+                            arguments.forEach(::checkConstant)
+                        }
+
+                        override fun visitLdcInsn(value: Any) {
+                            super.visitLdcInsn(value)
+                            checkConstant(value)
+                        }
+
+                        private fun checkConstant(value: Any) {
+                            when (value) {
+                                is Handle -> {
+                                    checkCall(JooqMethod(value.owner, value.name, value.desc))
+                                }
+
+                                is ConstantDynamic -> {
+                                    checkConstant(value.bootstrapMethod)
+                                    repeat(value.bootstrapMethodArgumentCount) { checkConstant(value.getBootstrapMethodArgument(it)) }
+                                }
+                            }
+                        }
+
+                        private fun checkCall(target: JooqMethod) {
+                            if (isBatchRead(target) || jooqApi.forbids(target, parents)) add(violation(target))
+                        }
+
+                        private fun violation(target: JooqMethod) = JooqPlainSqlViolation(caller, sourceFile, line, target)
+
+                        private fun isBatchRead(target: JooqMethod) = target.name == "batchSQL" &&
+                            target.descriptor == "()[Ljava/lang/String;" &&
+                            jooqApi.inherits(target.owner, "org/jooq/ExecuteContext", parents)
+
+                        private fun isSqlSetter(target: JooqMethod) =
+                            target.name == "sql" && target.descriptor == "(Ljava/lang/String;)V" &&
+                                jooqApi.inherits(target.owner, "org/jooq/ExecuteContext", parents)
                     }
                 }
             },
@@ -77,6 +114,8 @@ internal class JooqPlainSqlScanner(
     }
 
     private companion object {
+        val customQueryParts = setOf("CustomField", "CustomCondition", "CustomQueryPart").map { "org/jooq/impl/$it" }
+        val customRenderSignatures = setOf("(C)Lorg/jooq/Context;", "(Ljava/lang/String;)Lorg/jooq/Context;")
         val sqlTaggingHook = JooqMethod(
             "com/andrewtinyakov/messenger/infrastructure/database/DatabaseQueryListener",
             "renderEnd",

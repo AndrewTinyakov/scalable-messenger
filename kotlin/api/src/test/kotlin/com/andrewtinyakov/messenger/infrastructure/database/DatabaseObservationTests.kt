@@ -14,6 +14,7 @@ import io.micrometer.core.instrument.config.MeterFilterReply
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.jooq.DSLContext
 import org.jooq.SQLDialect
+import org.jooq.exception.DataAccessException
 import org.jooq.impl.DSL
 import org.jooq.impl.DefaultConfiguration
 import org.jooq.impl.SQLDataType.CLOB
@@ -29,6 +30,7 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.jdbc.support.JdbcTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
+import java.sql.SQLException
 import javax.sql.DataSource
 
 class DatabaseObservationTests : MessengerIntegrationTest() {
@@ -157,7 +159,10 @@ class DatabaseObservationTests : MessengerIntegrationTest() {
             observedSql.insertInto(USERS, USERS.ID, USERS.USERNAME, USERS.PASSWORD_HASH).values(newId(), name, "hash").execute()
         }
         assertNotNull(users.findUserByUsername(name))
-        assertThrows(org.jooq.exception.DataAccessException::class.java) { observedSql.select(DSL.inline(1).div(0)).from(USERS).fetch() }
+        val missingTable = DSL.table(DSL.name("missing_observation_table"))
+        val failure = assertThrows(DataAccessException::class.java) { observedSql.selectOne().from(missingTable).fetch() }
+        val sqlFailure = generateSequence<Throwable>(failure) { it.cause }.filterIsInstance<SQLException>().first()
+        assertEquals("42P01", sqlFailure.sqlState)
         assertTrue(broken.get("messenger.database.instrumentation.failures").gauge().value() > 0)
     }
 

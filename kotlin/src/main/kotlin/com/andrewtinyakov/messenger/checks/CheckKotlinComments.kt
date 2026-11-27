@@ -17,7 +17,10 @@ internal fun kotlinComments(path: String, source: String): List<String> = buildL
     var lineStart = 0
     var offset = 0
     while (lexer.tokenType != null) {
-        if (KtTokens.COMMENTS.contains(lexer.tokenType)) {
+        val shebang = lexer.tokenType == KtTokens.SHEBANG_COMMENT ||
+            (lexer.tokenType == KtTokens.HASH && source.startsWith("#!", lexer.tokenStart))
+        val scriptShebang = shebang && lexer.tokenStart == 0 && path.endsWith(".kts")
+        if ((shebang || KtTokens.COMMENTS.contains(lexer.tokenType)) && !scriptShebang) {
             while (offset < lexer.tokenStart) {
                 if (source[offset] == '\n' || (source[offset] == '\r' && source.getOrNull(offset + 1) != '\n')) {
                     line++
@@ -25,7 +28,8 @@ internal fun kotlinComments(path: String, source: String): List<String> = buildL
                 }
                 offset++
             }
-            add("$path:$line:${lexer.tokenStart - lineStart + 1}: ${lexer.tokenType}")
+            val token = if (shebang) KtTokens.SHEBANG_COMMENT else lexer.tokenType
+            add("$path:$line:${lexer.tokenStart - lineStart + 1}: $token")
         }
         lexer.advance()
     }

@@ -5,8 +5,5 @@ internal data class JooqMethod(
     val name: String,
     val descriptor: String,
 ) {
-    fun isSqlTaggingMethod(): Boolean = owner == "org/jooq/ExecuteContext" &&
-        ((name == "sql" && descriptor == "(Ljava/lang/String;)V") || (name == "batchSQL" && descriptor == "()[Ljava/lang/String;"))
-
     override fun toString(): String = "${owner.replace('/', '.')}.$name$descriptor"
 }

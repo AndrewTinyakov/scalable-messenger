@@ -48,13 +48,21 @@ subprojects {
 }
 
 val plainSqlFixture = sourceSets.create("plainSqlFixture")
+val architectureFixture = sourceSets.create("architectureFixture")
+val architectureTestSources = sourceSets.create("architectureTest")
 
 dependencies {
     implementation("org.ow2.asm:asm:9.11.1")
+    implementation("org.ow2.asm:asm-analysis:9.11.1")
     implementation("org.jetbrains.kotlin:kotlin-compiler-embeddable:2.3.21")
     testImplementation("org.junit.jupiter:junit-jupiter:6.0.3")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     add(plainSqlFixture.implementationConfigurationName, "org.jooq:jooq:3.21.7")
+    add(architectureTestSources.implementationConfigurationName, "com.lemonappdev:konsist:0.18.1")
+    add(architectureTestSources.implementationConfigurationName, "com.tngtech.archunit:archunit:1.5.1")
+    add(architectureTestSources.implementationConfigurationName, "org.jetbrains.kotlin:kotlin-compiler-embeddable:2.3.21")
+    add(architectureTestSources.implementationConfigurationName, "org.junit.jupiter:junit-jupiter:6.0.3")
+    add(architectureTestSources.runtimeOnlyConfigurationName, "org.junit.platform:junit-platform-launcher")
 }
 
 java { toolchain { languageVersion = JavaLanguageVersion.of(25) } }
@@ -98,11 +106,24 @@ gradle.projectsEvaluated {
         },
     )
     val firstPartyClasses = files((applicationSourceSets + sourceSets.main.get() + sourceSets.test.get()).map { it.output.classesDirs })
+    val productionClasses = files(applicationSourceSets.filter { it.name == "main" }.map { it.output.classesDirs })
+    val testClasses = files(applicationSourceSets.filter { it.name != "main" }.map { it.output.classesDirs })
     checkJooqPlainSql.configure {
-        inputs.files(jooqArtifacts, firstPartyClasses)
+        inputs.files(jooqArtifacts, firstPartyClasses, fileTree("shared/src/generated/java") { include("**/*.java") })
         doFirst {
             args = listOf(jooqArtifacts.singleFile.absolutePath, rootDir.parentFile.absolutePath) +
                 firstPartyClasses.files.filter { it.isDirectory }.map { it.absolutePath }
+        }
+    }
+
+    val apiMain = project(":api").extensions.getByType<SourceSetContainer>().named("main").get()
+    architectureFixture.compileClasspath += apiMain.compileClasspath
+    tasks.named<Test>("architectureTest") {
+        inputs.files(productionClasses, testClasses, architectureFixture.output.classesDirs)
+        doFirst {
+            systemProperty("messenger.productionClasses", productionClasses.asPath)
+            systemProperty("messenger.testClasses", testClasses.asPath)
+            systemProperty("messenger.architectureFixtureClasses", architectureFixture.output.classesDirs.asPath)
         }
     }
 }
@@ -129,14 +150,6 @@ tasks.register<JavaExec>("checkKotlinComments") {
     )
 }
 
-val architectureTestSources = sourceSets.create("architectureTest")
-
-dependencies {
-    add(architectureTestSources.implementationConfigurationName, "com.lemonappdev:konsist:0.18.1")
-    add(architectureTestSources.implementationConfigurationName, "org.junit.jupiter:junit-jupiter:6.0.3")
-    add(architectureTestSources.runtimeOnlyConfigurationName, "org.junit.platform:junit-platform-launcher")
-}
-
 val applicationKotlin = handwrittenKotlin.matching {
     include("kotlin/*/src/main/**/*.kt", "kotlin/*/src/test/**/*.kt", "tests/sidebar-benchmark/**/*.kt")
 }
@@ -147,7 +160,9 @@ tasks.register<Test>("architectureTest") {
     useJUnitPlatform()
     testClassesDirs = architectureTestSources.output.classesDirs
     classpath = architectureTestSources.runtimeClasspath
-    inputs.files(applicationKotlin)
+    val fixtureKotlin = layout.projectDirectory.dir("src/architectureFixture/kotlin")
+    inputs.files(applicationKotlin, fixtureKotlin)
     systemProperty("messenger.repository", repositoryDirectory.asFile)
+    systemProperty("messenger.architectureFixtureSources", fixtureKotlin.asFile)
     doFirst { systemProperty("messenger.architectureFiles", applicationKotlin.asPath) }
 }

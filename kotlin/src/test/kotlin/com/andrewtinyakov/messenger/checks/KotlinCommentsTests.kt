@@ -15,11 +15,17 @@ class KotlinCommentsTests {
     }
 
     @Test
-    fun `reports KDoc and shebangs`() {
+    fun `permits file-start shebangs in scripts and still reports KDoc`() {
         assertEquals(
-            listOf("build.gradle.kts:1:1: SHEBANG_COMMENT", "build.gradle.kts:2:1: KDoc"),
+            listOf("build.gradle.kts:2:1: KDoc"),
             comments("#!/usr/bin/env kotlin\n/** type documentation */\nclass Type"),
         )
+    }
+
+    @Test
+    fun `reports shebangs in source files and after the first line of scripts`() {
+        assertEquals(listOf("Type.kt:1:1: SHEBANG_COMMENT"), kotlinComments("Type.kt", "#!/usr/bin/env kotlin\nclass Type"))
+        assertEquals(listOf("build.gradle.kts:2:1: SHEBANG_COMMENT"), comments("\n#!/usr/bin/env kotlin\nval a = 1"))
     }
 
     @Test

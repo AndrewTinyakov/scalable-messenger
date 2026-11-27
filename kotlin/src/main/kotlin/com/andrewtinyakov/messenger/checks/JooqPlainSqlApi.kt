@@ -35,12 +35,35 @@ internal class JooqPlainSqlApi(
             }
         }
 
+    fun inherits(owner: String, ancestor: String, applicationParents: Map<String, List<String>>): Boolean =
+        owner == ancestor || (types[owner]?.parents ?: applicationParents[owner].orEmpty()).any {
+            inherits(it, ancestor, applicationParents)
+        }
+
     private fun isForbiddenLibraryMethod(method: JooqMethod): Boolean {
         val type = types[method.owner] ?: return false
-        return type.plainSql || method in type.plainMethods || method.isSqlTaggingMethod() ||
+        return type.plainSql || method in type.plainMethods || isRawFragmentApi(method) ||
             (method.owner == "org/jooq/Parser" && method.name.startsWith("parse") && method.descriptor.startsWith("(Ljava/lang/String;")) ||
-            (method.owner == "org/jooq/Context" && method.name == "sql") ||
             (method.name != "<init>" && type.parents.any { forbids(method.copy(owner = it), emptyMap()) })
+    }
+
+    private fun isRawFragmentApi(method: JooqMethod): Boolean = when (method.owner) {
+        "org/jooq/impl/DSL" -> {
+            method.name in rawFragmentFactories
+        }
+
+        "org/jooq/ExecuteContext" -> {
+            method.name == "sql" && method.descriptor == "(Ljava/lang/String;)V"
+        }
+
+        "org/jooq/Context" -> {
+            method.name == "sql" ||
+                (method.name in sqlIndentMethods && !method.descriptor.startsWith("()"))
+        }
+
+        else -> {
+            false
+        }
     }
 
     private fun readType(reader: ClassReader): JooqType {
@@ -73,5 +96,7 @@ internal class JooqPlainSqlApi(
 
     private companion object {
         const val annotation = "Lorg/jooq/PlainSQL;"
+        val rawFragmentFactories = setOf("unquotedName", "systemName", "keyword")
+        val sqlIndentMethods = setOf("sqlIndentStart", "sqlIndentEnd")
     }
 }

@@ -1,8 +1,10 @@
 package com.andrewtinyakov.messenger.checks
 
 import com.lemonappdev.konsist.api.Konsist
-import com.lemonappdev.konsist.api.declaration.KoClassDeclaration
 import com.lemonappdev.konsist.api.declaration.KoFileDeclaration
+import com.lemonappdev.konsist.api.declaration.KoObjectDeclaration
+import com.lemonappdev.konsist.api.declaration.combined.KoClassAndInterfaceAndObjectDeclaration
+import com.lemonappdev.konsist.api.declaration.combined.KoClassAndInterfaceDeclaration
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
@@ -55,48 +57,49 @@ class KotlinArchitectureTests {
     }
 
     @Test
-    fun `service classes end in Service and do not import jOOQ query types`() {
-        val invalid = production.files.filter { it.featureLayer == "service" }.flatMap { file ->
-            val invalidNames = file.classes(includeNested = false).filterNot { it.name.endsWith("Service") }.map { it.name }
-            val invalidImports = file.imports.filter {
-                it.name == "org.jooq" ||
-                    (it.name.startsWith("org.jooq.") && !it.name.startsWith("org.jooq.exception.")) ||
-                    it.name.startsWith("$ROOT_PACKAGE.infrastructure.database.generated.")
-            }.map { it.name }
-            (invalidNames + invalidImports).map { "${file.relativePath()} $it" }
-        }
-        assertNone(invalid)
+    fun `only sealed cases and companion objects may be nested outside web payloads`() {
+        assertNone(nestedTypeViolations(scope.files))
     }
 
     @Test
-    fun `scheduled methods belong to Scheduler classes in scheduling`() {
-        val invalid = production.functions().filter { function ->
-            function.annotations.any { it.fullyQualifiedName in SCHEDULED_ANNOTATIONS } &&
-                (
-                    !function.containingFile.inLayer("scheduling") ||
-                        (function.containingDeclaration as? KoClassDeclaration)?.name?.endsWith("Scheduler") != true
-                )
-        }
-        assertNone(invalid.map { "${it.containingFile.relativePath()}:${it.name}" })
+    fun `imports and fully qualified source references respect layer boundaries`() {
+        assertNone(sourceDependencyViolations(production.files))
     }
 
     @Test
-    fun `transactions use explicit TransactionTemplate boundaries`() {
-        val forbidden = scope.annotations.filter { it.fullyQualifiedName in TRANSACTIONAL_ANNOTATIONS }
-        assertNone(forbidden.map { "${it.containingFile.relativePath()}:${it.name}" })
+    fun `source rules reject ordinary nested types and forbidden qualified names in fixtures`() {
+        val fixtureScope = Konsist.scopeFromExternalDirectories(listOf(System.getProperty("messenger.architectureFixtureSources")))
+        assertEquals(listOf("$MESSENGER_PACKAGE.rulefixture.service.ProbeService.OrdinaryNested"), nestedTypeViolations(fixtureScope.files))
+        assertEquals(
+            listOf(
+                "ErasedModel.kt $MESSENGER_PACKAGE.rulefixture.web.payload.ProbePayload",
+                "ErasedService.kt org.jooq.DSLContext",
+                "ProbeModel.kt $MESSENGER_PACKAGE.rulefixture.web.payload.ProbePayload",
+                "ProbeRepository.kt $MESSENGER_PACKAGE.rulefixture.web.payload.ProbePayload",
+                "ProbeService.kt org.jooq.impl.DSL.selectOne",
+            ),
+            sourceDependencyViolations(fixtureScope.files).map { it.substringAfterLast('/') }.sorted(),
+        )
     }
 
-    @Test
-    fun `models and repositories do not import HTTP payloads`() {
-        val invalid = production.files.filter { it.featureLayer in setOf("model", "repository") }.flatMap { file ->
-            file.imports.filter {
-                it.name.startsWith("$ROOT_PACKAGE.") && it.name.split('.').windowed(2).any { path ->
-                    path == WEB_PAYLOAD
-                }
-            }
-                .map { "${file.relativePath()} ${it.name}" }
-        }
-        assertNone(invalid)
+    private fun nestedTypeViolations(files: List<KoFileDeclaration>): List<String> = files.filterNot { it.inWebPayload }.flatMap { file ->
+        file.classesAndInterfacesAndObjects(includeNested = true).filterNot { type ->
+            type.isTopLevel || (type is KoObjectDeclaration && type.hasCompanionModifier) ||
+                type.fullyQualifiedName in existingNestedTypes || type.isSealedCase()
+        }.map { it.fullyQualifiedName ?: it.name }
+    }
+
+    private fun KoClassAndInterfaceAndObjectDeclaration.isSealedCase(): Boolean {
+        val enclosing = containingDeclaration as? KoClassAndInterfaceDeclaration ?: return false
+        return enclosing.hasSealedModifier && parents().any { it.name in setOf(enclosing.name, enclosing.fullyQualifiedName) }
+    }
+
+    private fun sourceDependencyViolations(files: List<KoFileDeclaration>): List<String> = files.flatMap { file ->
+        val parts = file.packageParts.orEmpty()
+        if (listOf("service", "model", "repository").none { inLayer(parts, it) }) return@flatMap emptyList()
+        qualifiedReferences(file.text)
+            .filter { isForbiddenDependency(parts, it) }
+            .map { "${file.relativePath()} $it" }
     }
 
     @Test
@@ -118,26 +121,9 @@ class KotlinArchitectureTests {
     }
 
     private val KoFileDeclaration.packageParts: List<String>?
-        get() {
-            val name = packagee?.name ?: return null
-            return when {
-                name == ROOT_PACKAGE -> emptyList()
-                name.startsWith("$ROOT_PACKAGE.") -> name.removePrefix("$ROOT_PACKAGE.").split('.')
-                else -> null
-            }
-        }
+        get() = packagee?.name?.let(::messengerPackageParts)
 
-    private val KoFileDeclaration.featureLayer: String?
-        get() = packageParts?.takeUnless { it.firstOrNull() in setOf("infrastructure", "shared") }?.getOrNull(1)
-
-    private fun KoFileDeclaration.inLayer(layer: String): Boolean {
-        val parts = packageParts.orEmpty()
-        return if (parts.firstOrNull() in setOf("infrastructure", "shared")) {
-            layer in parts.drop(1)
-        } else {
-            featureLayer == layer
-        }
-    }
+    private fun KoFileDeclaration.inLayer(layer: String): Boolean = inLayer(packageParts.orEmpty(), layer)
 
     private val KoFileDeclaration.inWebPayload: Boolean
         get() = packageParts?.windowed(2)?.any { it == WEB_PAYLOAD } == true
@@ -149,17 +135,10 @@ class KotlinArchitectureTests {
     }
 
     private companion object {
-        const val ROOT_PACKAGE = "com.andrewtinyakov.messenger"
         val FEATURE_LAYERS = setOf("config", "model", "repository", "service", "scheduling", "monitoring", "messaging", "grpc")
-        val WEB_PAYLOAD = listOf("web", "payload")
-        val SCHEDULED_ANNOTATIONS = setOf(
-            "org.springframework.scheduling.annotation.Scheduled",
-            "org.springframework.scheduling.annotation.Schedules",
-        )
-        val TRANSACTIONAL_ANNOTATIONS = setOf(
-            "org.springframework.transaction.annotation.Transactional",
-            "jakarta.transaction.Transactional",
-            "javax.transaction.Transactional",
+        val existingNestedTypes = setOf(
+            "$MESSENGER_PACKAGE.infrastructure.outbox.publication.GroupCompletion.Request",
+            "$MESSENGER_PACKAGE.ws.grpc.PresenceTests.Reply",
         )
     }
 }

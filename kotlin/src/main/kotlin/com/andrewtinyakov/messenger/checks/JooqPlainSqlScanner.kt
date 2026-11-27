@@ -97,11 +97,14 @@ internal class JooqPlainSqlScanner(
                             if (isBatchRead(target) || jooqApi.forbids(target, parents) || isRawJdbc(target)) add(violation(target))
                         }
 
-                        private fun isRawJdbc(target: JooqMethod) = caller.owner != postgresStatements && (
-                            (target.owner in jdbcStatements && target.name in statementSqlMethods && target.descriptor.startsWith("(Ljava/lang/String;")) ||
+                        private fun isRawJdbc(target: JooqMethod) = caller.owner != POSTGRES_STATEMENTS && (
+                            (
+                                target.owner in jdbcStatements && target.name in statementSqlMethods &&
+                                    target.descriptor.startsWith("(Ljava/lang/String;")
+                            ) ||
                                 (target.owner == "java/sql/Connection" && target.name in connectionSqlMethods) ||
                                 target.owner.startsWith("org/springframework/jdbc/core/")
-                            )
+                        )
 
                         private fun violation(target: JooqMethod) = JooqPlainSqlViolation(caller, sourceFile, line, target)
 
@@ -120,7 +123,7 @@ internal class JooqPlainSqlScanner(
     }
 
     private companion object {
-        const val postgresStatements = "com/andrewtinyakov/messenger/infrastructure/database/PostgresStatements"
+        const val POSTGRES_STATEMENTS = "com/andrewtinyakov/messenger/infrastructure/database/PostgresStatements"
         val jdbcStatements = setOf("java/sql/Statement", "java/sql/PreparedStatement", "java/sql/CallableStatement")
         val statementSqlMethods = setOf("execute", "executeQuery", "executeUpdate", "executeLargeUpdate", "addBatch")
         val connectionSqlMethods = setOf("prepareStatement", "prepareCall", "nativeSQL")

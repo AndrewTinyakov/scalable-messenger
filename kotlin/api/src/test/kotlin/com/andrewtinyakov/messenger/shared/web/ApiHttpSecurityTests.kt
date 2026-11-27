@@ -3,7 +3,12 @@ package com.andrewtinyakov.messenger.shared.web
 import com.andrewtinyakov.messenger.ApiApplication
 import com.andrewtinyakov.messenger.auth.model.SessionToken
 import com.andrewtinyakov.messenger.auth.service.AuthenticationService
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSENGER_OUTBOX_EVENTS
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.SESSIONS
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.USERS
 import com.andrewtinyakov.messenger.shared.id.newId
+import org.jooq.DSLContext
+import org.jooq.impl.DSL
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -11,7 +16,6 @@ import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import org.testcontainers.containers.PostgreSQLContainer
@@ -39,7 +43,7 @@ class ApiHttpSecurityTests
         @Value($$"${local.server.port}") private val port: Int,
         private val mapper: ObjectMapper,
         private val authenticationService: AuthenticationService,
-        private val db: JdbcTemplate,
+        private val db: DSLContext,
     ) {
         companion object {
             private val postgres = PostgreSQLContainer<Nothing>("postgres:19-alpine").apply {
@@ -77,8 +81,8 @@ class ApiHttpSecurityTests
                 assertFalse(response.headers().firstValue("Set-Cookie").isPresent)
             }
 
-            assertEquals(1, db.queryForObject("SELECT count(*) FROM users WHERE username=?", Int::class.java, username))
-            assertEquals(1, db.queryForObject("SELECT count(*) FROM sessions WHERE user_id=?", Int::class.java, userId))
+            assertEquals(1, db.fetchCount(USERS, USERS.USERNAME.eq(username)))
+            assertEquals(1, db.fetchCount(SESSIONS, SESSIONS.USER_ID.eq(userId)))
             assertEquals(200, request("/api/v1/auth/session", cookie).statusCode())
             assertEquals(200, mutate("/api/v1/auth/login", """{"username":"$username","password":"original-password"}""").statusCode())
             assertEquals(401, mutate("/api/v1/auth/login", """{"username":"$username","password":"different-password"}""").statusCode())
@@ -338,7 +342,7 @@ class ApiHttpSecurityTests
             val cookie = bearer()
             val before = mapper.readTree(request("/api/v1/auth/session", cookie).body())
             val username = "renamed_${newId().lowercase()}"
-            db.update("UPDATE users SET username=? WHERE id=?", username, before.path("userId").stringValue())
+            db.update(USERS).set(USERS.USERNAME, username).where(USERS.ID.eq(before.path("userId").stringValue())).execute()
 
             val response = request("/api/v1/auth/session", cookie)
             val session = mapper.readTree(response.body())
@@ -352,11 +356,8 @@ class ApiHttpSecurityTests
         fun `expired cookie logout ignores stale identity and clears the cookie`() {
             val cookie = bearer()
             val session = authenticationService.authenticatedSession(token = SessionToken(cookie.substringAfter('=')))
-            db.update(
-                "UPDATE sessions SET expires_at=? WHERE token_hash=?",
-                java.time.OffsetDateTime.now().minusSeconds(1),
-                session.sessionId.value,
-            )
+            db.update(SESSIONS).set(SESSIONS.EXPIRES_AT, java.time.OffsetDateTime.now().minusSeconds(1))
+                .where(SESSIONS.TOKEN_HASH.eq(session.sessionId.value)).execute()
 
             val response = logout(cookie = cookie, headers = listOf("X-Messenger-User" to "stale-user"))
 
@@ -365,10 +366,10 @@ class ApiHttpSecurityTests
             assertEquals(401, request("/api/v1/auth/session", cookie).statusCode())
             assertEquals(
                 1,
-                db.queryForObject(
-                    "SELECT count(*) FROM messenger_outbox_events WHERE payload->>'type'='session_revoked' AND payload->>'sessionId'=?",
-                    Int::class.java,
-                    session.sessionId.value,
+                db.fetchCount(
+                    MESSENGER_OUTBOX_EVENTS,
+                    DSL.jsonbGetAttributeAsText(MESSENGER_OUTBOX_EVENTS.PAYLOAD, "type").eq("session_revoked"),
+                    DSL.jsonbGetAttributeAsText(MESSENGER_OUTBOX_EVENTS.PAYLOAD, "sessionId").eq(session.sessionId.value),
                 ),
             )
         }

@@ -9,6 +9,12 @@ import com.andrewtinyakov.messenger.chat.service.ChatService
 import com.andrewtinyakov.messenger.deletion.model.DeletionScope
 import com.andrewtinyakov.messenger.deletion.service.DeletionService
 import com.andrewtinyakov.messenger.generated.messaging.event.SendRejectionReason
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHAT_MEMBERS
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSAGES
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSAGE_CHANGES
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSENGER_OUTBOX_EVENTS
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.SESSIONS
+import com.andrewtinyakov.messenger.infrastructure.database.postgresFunction
 import com.andrewtinyakov.messenger.message.model.CommandResult
 import com.andrewtinyakov.messenger.message.model.MessageId
 import com.andrewtinyakov.messenger.message.model.RequestId
@@ -19,6 +25,9 @@ import com.andrewtinyakov.messenger.shared.crypto.sha256
 import com.andrewtinyakov.messenger.shared.id.newId
 import com.andrewtinyakov.messenger.shared.web.ApiException
 import com.andrewtinyakov.messenger.ws.repository.GroupAuthorizationRepository
+import org.jooq.impl.DSL
+import org.jooq.impl.SQLDataType
+import org.jooq.types.DayToSecond
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertInstanceOf
@@ -46,6 +55,9 @@ class MessageFeatureTests
         private val retention: MessageChangeRetentionService,
         private val authorizations: GroupAuthorizationRepository,
     ) : MessengerIntegrationTest() {
+        private val outboxEventType = DSL.jsonbGetAttributeAsText(MESSENGER_OUTBOX_EVENTS.PAYLOAD, "type")
+        private val outboxChatId = DSL.jsonbGetAttributeAsText(MESSENGER_OUTBOX_EVENTS.PAYLOAD, "chatId")
+
         @Test
         fun `old edits recover independently from creation sequence with versioned paging`() {
             val owner = user("mutation-owner")
@@ -70,11 +82,11 @@ class MessageFeatureTests
             assertEquals("4", rest.nextSeq)
             assertEquals(listOf("4"), rest.changes.map { it.seq })
             assertEquals("4", history.messages(ChatId(chat), UserId(member), null, null, 10).snapshotSequence)
-            val events = legacyJdbc.queryForList(
-                "SELECT payload->>'seq' FROM messenger_outbox_events WHERE payload->>'type'='history_changed' AND payload->>'chatId'=? ORDER BY payload->>'seq'",
-                String::class.java,
-                chat,
-            )
+            val sequence = DSL.jsonbGetAttributeAsText(MESSENGER_OUTBOX_EVENTS.PAYLOAD, "seq")
+            val events = db.select(sequence).from(MESSENGER_OUTBOX_EVENTS)
+                .where(outboxEventType.eq("history_changed").and(outboxChatId.eq(chat)))
+                .orderBy(sequence)
+                .fetch(sequence)
             assertEquals(listOf("3", "4"), events)
         }
 
@@ -146,7 +158,7 @@ class MessageFeatureTests
             assertEquals("", deleted.body)
             assertEquals("3", deleted.messageVersion)
             assertNotNull(deleted.deletedAt)
-            assertEquals(0, legacyJdbc.queryForObject("SELECT count(*) FROM messages WHERE id=?", Int::class.java, target.id))
+            assertEquals(0, db.fetchCount(MESSAGES, MESSAGES.ID.eq(target.id)))
             val current = history.messages(ChatId(chat), UserId(member), null, null, 10).messages
             assertEquals(null, current.last().replyBody)
             assertEquals(null, current.last().replyDeleted)
@@ -188,13 +200,20 @@ class MessageFeatureTests
             assertEquals(com.andrewtinyakov.messenger.message.web.payload.MessageChangeKind.REMOVED, removed.kind)
             assertEquals(reply.id, removed.messageId)
             assertEquals(null, removed.message)
-            assertEquals(0, legacyJdbc.queryForObject("SELECT count(*) FROM messages WHERE id=?", Int::class.java, reply.id))
+            assertEquals(0, db.fetchCount(MESSAGES, MESSAGES.ID.eq(reply.id)))
+            val hasBody = postgresFunction("jsonb_exists", SQLDataType.BOOLEAN, MESSENGER_OUTBOX_EVENTS.PAYLOAD, DSL.inline("body"))
+            val hasReplyBody = postgresFunction(
+                "jsonb_exists",
+                SQLDataType.BOOLEAN,
+                MESSENGER_OUTBOX_EVENTS.PAYLOAD,
+                DSL.inline("replyBody"),
+            )
             assertEquals(
                 0,
-                legacyJdbc.queryForObject(
-                    "SELECT count(*) FROM messenger_outbox_events WHERE payload->>'type'='history_changed' AND payload->>'chatId'=? AND (jsonb_exists(payload,'body') OR jsonb_exists(payload,'replyBody'))",
-                    Int::class.java,
-                    chat,
+                db.fetchCount(
+                    MESSENGER_OUTBOX_EVENTS,
+                    outboxEventType.eq("history_changed").and(outboxChatId.eq(chat))
+                        .and(DSL.condition(hasBody).or(DSL.condition(hasReplyBody))),
                 ),
             )
         }
@@ -221,7 +240,7 @@ class MessageFeatureTests
             )
             assertEquals(listOf("1", "2", "3"), history.messages(ChatId(chat), UserId(member), null, null, 10).messages.map { it.sequence })
             assertEquals(target.id, history.messages(ChatId(chat), UserId(member), null, null, 10).messages.last().replyToMessageId)
-            legacyJdbc.update("UPDATE messages SET reply_to_message_id=? WHERE id=?", foreign.id, target.id)
+            db.update(MESSAGES).set(MESSAGES.REPLY_TO_MESSAGE_ID, foreign.id).where(MESSAGES.ID.eq(target.id)).execute()
             assertEquals(null, history.resolve(ChatId(chat), UserId(member), listOf(MessageId(target.id))).messages.single().replyBody)
         }
 
@@ -235,7 +254,7 @@ class MessageFeatureTests
                 SendRejectionReason.INVALID_REPLY_TARGET,
                 messageSendStatusService.status(UserId(sender), RequestId(request.requestId)).reason,
             )
-            assertEquals(0, legacyJdbc.queryForObject("SELECT count(*) FROM chat_members WHERE user_id=?", Int::class.java, sender))
+            assertEquals(0, db.fetchCount(CHAT_MEMBERS, CHAT_MEMBERS.USER_ID.eq(sender)))
         }
 
         @Test
@@ -274,7 +293,10 @@ class MessageFeatureTests
             val target = send(owner, chat, "original")
             mutations.edit(ChatId(chat), UserId(owner), MessageId(target.id), "old edit", 1L)
             mutations.edit(ChatId(chat), UserId(owner), MessageId(target.id), "recent edit", 2L)
-            legacyJdbc.update("UPDATE message_changes SET changed_at=now()-interval '8 days' WHERE chat_id=? AND seq=2", chat)
+            db.update(MESSAGE_CHANGES)
+                .set(MESSAGE_CHANGES.CHANGED_AT, DSL.currentOffsetDateTime().sub(DSL.inline(DayToSecond(8))))
+                .where(MESSAGE_CHANGES.CHAT_ID.eq(chat).and(MESSAGE_CHANGES.SEQ.eq(2L)))
+                .execute()
             retention.pruneExpiredChanges()
             val reset = history.changes(ChatId(chat), UserId(member), 0L, 100)
             assertEquals(true, reset.resetRequired)
@@ -294,9 +316,9 @@ class MessageFeatureTests
             val chat = group(owner, member)
             val target = send(owner, chat, "original")
             val constraint = "reject_${newId()}"
-            legacyJdbc.execute(
-                "ALTER TABLE messenger_outbox_events ADD CONSTRAINT \"$constraint\" CHECK (payload->>'type' <> 'history_changed' OR payload->>'chatId' <> '$chat')",
-            )
+            db.alterTable(MESSENGER_OUTBOX_EVENTS)
+                .add(DSL.constraint(DSL.name(constraint)).check(outboxEventType.ne("history_changed").or(outboxChatId.ne(chat))))
+                .execute()
             try {
                 assertThrows(RuntimeException::class.java) {
                     mutations.edit(ChatId(chat), UserId(owner), MessageId(target.id), "lost", 1L)
@@ -304,7 +326,7 @@ class MessageFeatureTests
                 assertEquals(target, history.messages(ChatId(chat), UserId(member), null, null, 10).messages.single())
                 assertEquals("1", history.changes(ChatId(chat), UserId(member), 0L, 10).lastSeq)
             } finally {
-                legacyJdbc.execute("ALTER TABLE messenger_outbox_events DROP CONSTRAINT \"$constraint\"")
+                db.alterTable(MESSENGER_OUTBOX_EVENTS).dropConstraint(DSL.name(constraint)).execute()
             }
             assertEquals("2", mutations.edit(ChatId(chat), UserId(owner), MessageId(target.id), "saved", 1L).messageVersion)
         }
@@ -343,10 +365,9 @@ class MessageFeatureTests
             val chat = group(owner, member)
             send(owner, chat, "kept")
             val constraint = "reject_${newId()}"
-            legacyJdbc.execute(
-                "ALTER TABLE messenger_outbox_events ADD CONSTRAINT \"$constraint\" " +
-                    "CHECK (payload->>'type' <> 'chat_deleted' OR payload->>'chatId' <> '$chat')",
-            )
+            db.alterTable(MESSENGER_OUTBOX_EVENTS)
+                .add(DSL.constraint(DSL.name(constraint)).check(outboxEventType.ne("chat_deleted").or(outboxChatId.ne(chat))))
+                .execute()
             try {
                 assertThrows(RuntimeException::class.java) {
                     deletion.deleteChat(ChatId(chat), UserId(owner), RequestId(chat), DeletionScope.EVERYONE)
@@ -354,7 +375,7 @@ class MessageFeatureTests
                 assertEquals("kept", history.messages(ChatId(chat), UserId(member), null, null, 10).messages.single().body)
                 assertEquals(chat, chats.get(ChatId(chat), UserId(member)).id)
             } finally {
-                legacyJdbc.execute("ALTER TABLE messenger_outbox_events DROP CONSTRAINT \"$constraint\"")
+                db.alterTable(MESSENGER_OUTBOX_EVENTS).dropConstraint(DSL.name(constraint)).execute()
             }
             deletion.deleteChat(ChatId(chat), UserId(owner), RequestId(chat), DeletionScope.EVERYONE)
             assertThrows(ApiException::class.java) { chats.get(ChatId(chat), UserId(member)) }
@@ -382,11 +403,7 @@ class MessageFeatureTests
             assertEquals(SendLookupStatus.REJECTED, messageSendStatusService.status(UserId(sender), RequestId(rejected.requestId)).status)
             assertEquals(
                 2,
-                legacyJdbc.queryForObject(
-                    "SELECT count(*) FROM messenger_outbox_events WHERE payload->>'type'='chat_deleted' AND payload->>'chatId'=?",
-                    Int::class.java,
-                    old,
-                ),
+                db.fetchCount(MESSENGER_OUTBOX_EVENTS, outboxEventType.eq("chat_deleted").and(outboxChatId.eq(old))),
             )
         }
 
@@ -403,12 +420,12 @@ class MessageFeatureTests
                 }.status,
             )
             val session = sha256(owner)
-            legacyJdbc.update(
-                "INSERT INTO sessions(token_hash,user_id,device_id,expires_at) VALUES (?,?,?,now()+interval '1 hour')",
-                session,
-                owner,
-                "delete-group-device",
-            )
+            db.insertInto(SESSIONS)
+                .set(SESSIONS.TOKEN_HASH, session)
+                .set(SESSIONS.USER_ID, owner)
+                .set(SESSIONS.DEVICE_ID, "delete-group-device")
+                .set(SESSIONS.EXPIRES_AT, DSL.currentOffsetDateTime().add(DSL.inline(DayToSecond(0, 1))))
+                .execute()
             assertEquals(
                 setOf(ChatId(chat)),
                 authorizations.findAuthorization(SessionId(session), OffsetDateTime.now(), listOf(ChatId(chat)))!!.authorizedChatIds,
@@ -424,11 +441,7 @@ class MessageFeatureTests
             assertThrows(ApiException::class.java) { chats.get(ChatId(chat), UserId(member)) }
             assertEquals(
                 1,
-                legacyJdbc.queryForObject(
-                    "SELECT count(*) FROM messenger_outbox_events WHERE payload->>'type'='chat_deleted' AND payload->>'chatId'=?",
-                    Int::class.java,
-                    chat,
-                ),
+                db.fetchCount(MESSENGER_OUTBOX_EVENTS, outboxEventType.eq("chat_deleted").and(outboxChatId.eq(chat))),
             )
         }
 

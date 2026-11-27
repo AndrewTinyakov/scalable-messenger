@@ -12,7 +12,6 @@ import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.config.MeterFilter
 import io.micrometer.core.instrument.config.MeterFilterReply
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
-import org.jooq.DSLContext
 import org.jooq.SQLDialect
 import org.jooq.exception.DataAccessException
 import org.jooq.impl.DSL
@@ -42,13 +41,14 @@ class DatabaseObservationTests : MessengerIntegrationTest() {
 
     @Autowired private lateinit var entryPoints: EntryPointResolver
 
-    @Autowired private lateinit var sql: DSLContext
-
     @Autowired private lateinit var dataSource: DataSource
 
     @Test
     fun `every statement starts with a sqlcommenter tag for the current entry point`() {
-        val tag = "/*application='messenger-api',thread='sessions-cleanup'*/ "
+        val blockCommentStart = '/' + "*"
+        val blockCommentEnd = '*' + "/"
+        val applicationTag = "${blockCommentStart}application="
+        val tag = "$applicationTag'messenger-api',thread='sessions-cleanup'$blockCommentEnd "
         val padding = "x".repeat(1100)
         val activityView = DSL.table(DSL.name("pg_catalog", "pg_stat_activity")).`as`("activity")
         val query = DSL.field(DSL.name("activity", "query"), VARCHAR)
@@ -60,17 +60,17 @@ class DatabaseObservationTests : MessengerIntegrationTest() {
         var activity: String? = null
         var batched: List<String> = emptyList()
         Thread({
-            activity = sql.select(query).from(activityView)
+            activity = db.select(query).from(activityView)
                 .where(pid.eq(backendPid), DSL.inline(padding).ne(DSL.inline("")))
                 .fetchOne(query)
             batched = tx.execute {
-                sql.createTemporaryTable(seenStatements).column(statement).onCommitDrop().execute()
-                val inserts = listOf("-- not a comment", "/* not a comment */").map { marker ->
-                    sql.insertInto(seenStatements, statement)
-                        .select(sql.select(currentQuery).where(DSL.inline(marker).ne(DSL.inline(""))))
+                db.createTemporaryTable(seenStatements).column(statement).onCommitDrop().execute()
+                val inserts = listOf("-- not a comment", "$blockCommentStart not a comment $blockCommentEnd").map { marker ->
+                    db.insertInto(seenStatements, statement)
+                        .select(db.select(currentQuery).where(DSL.inline(marker).ne(DSL.inline(""))))
                 }
-                sql.batch(inserts).execute()
-                sql.select(statement).from(seenStatements).fetch(statement)
+                db.batch(inserts).execute()
+                db.select(statement).from(seenStatements).fetch(statement)
             }
         }, "sessions-cleanup-3").apply {
             start()
@@ -80,7 +80,7 @@ class DatabaseObservationTests : MessengerIntegrationTest() {
         assertEquals(2, batched.size)
         assertTrue(
             batched.all {
-                it.startsWith(tag) && it.indexOf("/*application=") == it.lastIndexOf("/*application=")
+                it.startsWith(tag) && it.indexOf(applicationTag) == it.lastIndexOf(applicationTag)
             },
             batched.toString(),
         )

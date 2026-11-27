@@ -35,9 +35,6 @@ abstract class MessengerIntegrationTest {
     @Autowired
     protected lateinit var db: DSLContext
 
-    @Autowired
-    protected lateinit var legacyJdbc: org.springframework.jdbc.core.JdbcTemplate
-
     @BeforeEach
     fun startConcurrentTasks() {
         testExecutor = Executors.newVirtualThreadPerTaskExecutor()

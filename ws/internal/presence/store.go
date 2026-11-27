@@ -68,5 +68,9 @@ type redisStore struct{ *redisroom.Client }
 func RedisStore(client *redisroom.Client) Store { return redisStore{client} }
 
 func (s redisStore) SubscribePresence(ctx context.Context, bucket int) (Feed, error) {
-	return s.Client.SubscribePresence(ctx, bucket)
+	feed, err := s.Client.SubscribePresence(ctx, bucket)
+	if err != nil {
+		return nil, err
+	}
+	return feed, nil
 }

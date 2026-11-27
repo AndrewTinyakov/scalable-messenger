@@ -76,7 +76,12 @@ type roomFeed interface {
 type redisRoomStore struct{ client *redisroom.Client }
 
 func (store redisRoomStore) Subscribe(ctx context.Context, room string) (roomFeed, error) {
-	return store.client.Subscribe(ctx, room)
+	listener, err := store.client.Subscribe(ctx, room)
+	if err != nil {
+		// A nil *Listener in the interface would not compare equal to nil.
+		return nil, err
+	}
+	return listener, nil
 }
 
 func (store redisRoomStore) Tail(ctx context.Context, room string) (string, string, error) {

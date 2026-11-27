@@ -1,7 +1,7 @@
 package com.andrewtinyakov.messenger.infrastructure.config
 
 import com.andrewtinyakov.messenger.auth.model.AuthenticatedSession
-import com.andrewtinyakov.messenger.auth.web.SessionCookie
+import com.andrewtinyakov.messenger.auth.web.controller.SessionCookie
 import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
 import io.swagger.v3.oas.models.Components
 import io.swagger.v3.oas.models.OpenAPI

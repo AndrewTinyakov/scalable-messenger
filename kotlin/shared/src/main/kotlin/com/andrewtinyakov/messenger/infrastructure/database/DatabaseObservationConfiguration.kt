@@ -1,5 +1,6 @@
 package com.andrewtinyakov.messenger.infrastructure.database
 
+import com.andrewtinyakov.messenger.infrastructure.database.monitoring.DatabaseMetrics
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.observation.ObservationRegistry
 import org.jooq.ExecuteListenerProvider

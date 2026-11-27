@@ -1,5 +1,6 @@
 package com.andrewtinyakov.messenger.infrastructure.database
 
+import com.andrewtinyakov.messenger.infrastructure.database.monitoring.DatabaseMetrics
 import org.jooq.DSLContext
 import org.springframework.beans.factory.ObjectProvider
 import org.springframework.dao.DataAccessResourceFailureException

@@ -1,7 +1,6 @@
 package com.andrewtinyakov.messenger.infrastructure.database
 
 import org.slf4j.LoggerFactory
-import org.springframework.scheduling.annotation.Scheduled
 import java.sql.SQLException
 import javax.sql.DataSource
 
@@ -16,7 +15,6 @@ class ReplicaLagMonitor(
     var healthy: Boolean = false
         private set
 
-    @Scheduled(fixedDelayString = "\${messenger.database.replica.check-interval:1s}")
     fun check() {
         healthy = try {
             val replayed = lsn(replica, "select pg_last_wal_replay_lsn()::text")

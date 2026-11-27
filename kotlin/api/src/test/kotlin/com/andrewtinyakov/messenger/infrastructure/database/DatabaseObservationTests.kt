@@ -3,6 +3,7 @@ package com.andrewtinyakov.messenger.infrastructure.database
 import com.andrewtinyakov.messenger.auth.model.User
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.auth.repository.UserRepository
+import com.andrewtinyakov.messenger.infrastructure.database.monitoring.DatabaseMetrics
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
 import com.andrewtinyakov.messenger.shared.id.newId
 import io.micrometer.core.instrument.Meter

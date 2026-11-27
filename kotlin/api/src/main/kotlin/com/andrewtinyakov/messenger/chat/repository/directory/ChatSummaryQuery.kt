@@ -17,12 +17,6 @@ import org.jooq.Table
 import org.jooq.impl.DSL
 import java.time.OffsetDateTime
 
-internal data class ChatSummary(
-    val unreadCount: Int,
-    val unreadCountCapped: Boolean,
-    val lastMessage: ChatLastMessage?,
-)
-
 internal fun Chat.withSummary(summary: ChatSummary, activityAt: OffsetDateTime?): Chat =
     copy(
         activityAt = activityAt,

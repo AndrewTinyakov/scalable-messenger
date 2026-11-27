@@ -1,11 +1,11 @@
 package com.andrewtinyakov.messenger.infrastructure.outbox
 
-import com.andrewtinyakov.messenger.infrastructure.outbox.metrics.OutboxBatchOutcome
-import com.andrewtinyakov.messenger.infrastructure.outbox.metrics.OutboxMetrics
-import com.andrewtinyakov.messenger.infrastructure.outbox.metrics.OutboxPublicationOutcome
-import com.andrewtinyakov.messenger.infrastructure.outbox.metrics.OutboxRetentionReason
-import com.andrewtinyakov.messenger.infrastructure.outbox.metrics.OutboxStage
-import com.andrewtinyakov.messenger.infrastructure.outbox.metrics.OutboxStageOutcome
+import com.andrewtinyakov.messenger.infrastructure.outbox.monitoring.OutboxBatchOutcome
+import com.andrewtinyakov.messenger.infrastructure.outbox.monitoring.OutboxMetrics
+import com.andrewtinyakov.messenger.infrastructure.outbox.monitoring.OutboxPublicationOutcome
+import com.andrewtinyakov.messenger.infrastructure.outbox.monitoring.OutboxRetentionReason
+import com.andrewtinyakov.messenger.infrastructure.outbox.monitoring.OutboxStage
+import com.andrewtinyakov.messenger.infrastructure.outbox.monitoring.OutboxStageOutcome
 import io.micrometer.prometheusmetrics.PrometheusConfig
 import io.micrometer.prometheusmetrics.PrometheusMeterRegistry
 import org.junit.jupiter.api.Assertions.assertEquals

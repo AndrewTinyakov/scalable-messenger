@@ -1,5 +1,6 @@
 package com.andrewtinyakov.messenger.infrastructure.database
 
+import com.andrewtinyakov.messenger.infrastructure.database.monitoring.DatabaseMetrics
 import org.springframework.transaction.TransactionExecution
 import org.springframework.transaction.TransactionExecutionListener
 import java.util.IdentityHashMap

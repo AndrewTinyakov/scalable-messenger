@@ -3,7 +3,7 @@ package com.andrewtinyakov.messenger.chat.service
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.model.ChatKind
-import com.andrewtinyakov.messenger.chat.repository.JooqChatDirectoryRepository
+import com.andrewtinyakov.messenger.chat.repository.directory.JooqChatDirectoryRepository
 import org.jooq.ExecuteContext
 import org.jooq.ExecuteListener
 import org.jooq.SQLDialect

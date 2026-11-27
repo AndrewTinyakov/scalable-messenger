@@ -1,5 +1,6 @@
 package com.andrewtinyakov.messenger.infrastructure.messaging.consumption
 
+import com.andrewtinyakov.messenger.infrastructure.messaging.monitoring.CommandMetrics
 import io.micrometer.core.instrument.Meter
 import io.micrometer.core.instrument.config.MeterFilter
 import io.micrometer.core.instrument.distribution.DistributionStatisticConfig

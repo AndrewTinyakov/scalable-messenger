@@ -1,7 +1,7 @@
 package com.andrewtinyakov.messenger.infrastructure.outbox.backlog
 
 import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxClaimRepository
-import com.andrewtinyakov.messenger.infrastructure.outbox.metrics.OutboxMetrics
+import com.andrewtinyakov.messenger.infrastructure.outbox.monitoring.OutboxMetrics
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 

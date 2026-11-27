@@ -1,5 +1,6 @@
 package com.andrewtinyakov.messenger.infrastructure.database
 
+import com.andrewtinyakov.messenger.infrastructure.database.monitoring.DatabaseMetrics
 import org.jooq.ExecuteContext
 import org.jooq.ExecuteListener
 

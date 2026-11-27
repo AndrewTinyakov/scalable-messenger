@@ -1,5 +1,6 @@
 package com.andrewtinyakov.messenger.infrastructure.database
 
+import com.andrewtinyakov.messenger.infrastructure.database.scheduling.ReplicaLagScheduler
 import com.zaxxer.hikari.HikariDataSource
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
@@ -38,6 +39,9 @@ class ReplicaRoutingConfiguration {
         @Qualifier("replicaPool") replica: HikariDataSource,
         properties: ReplicaProperties,
     ) = ReplicaLagMonitor(primary, replica, properties)
+
+    @Bean
+    fun replicaLagScheduler(lag: ReplicaLagMonitor) = ReplicaLagScheduler(lag)
 
     @Bean
     fun replicaRoute(routing: ReplicaRoutingDataSource, lag: ReplicaLagMonitor): ReplicaRoute = object : ReplicaRoute {

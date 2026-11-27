@@ -33,7 +33,21 @@ jobs:
         with:
           cache-read-only: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
       - name: Compile, lint and test Kotlin
-        run: ./kotlin/gradlew -p kotlin --build-cache --parallel verifyKotlin
+        run: ./kotlin/gradlew -p kotlin --build-cache --parallel verifyKotlin -PapiTestShard=remaining
+
+  kotlin-api-auth-and-infrastructure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 25
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+      - name: Test API authentication and infrastructure
+        run: ./kotlin/gradlew -p kotlin --build-cache --parallel :api:test -PapiTestShard=auth-and-infrastructure
 
   go:
     runs-on: ubuntu-latest
@@ -148,7 +162,7 @@ jobs:
         run: docker compose down --volumes
 
   verify:
-    needs: [kotlin, go, client, contracts, deployment]
+    needs: [kotlin, kotlin-api-auth-and-infrastructure, go, client, contracts, deployment]
     if: always()
     runs-on: ubuntu-latest
     steps:

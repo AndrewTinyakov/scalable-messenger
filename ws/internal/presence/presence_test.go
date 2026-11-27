@@ -127,6 +127,8 @@ type fakeAuth struct {
 	members map[string][]string
 	calls   [][]string
 	hold    chan struct{}
+	// countHold stalls the next roster read the same way.
+	countHold chan struct{}
 }
 
 func (a *fakeAuth) PresenceVisibility(_ context.Context, _ string, ids []string) (map[string]grpcauth.Visibility, error) {
@@ -152,8 +154,13 @@ func (a *fakeAuth) PresenceVisibility(_ context.Context, _ string, ids []string)
 
 func (a *fakeAuth) OnlineCountMembers(_ context.Context, _, chatID string, limit int) (int, []string, error) {
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	members, ok := a.members[chatID]
+	hold := a.countHold
+	a.countHold = nil
+	a.mu.Unlock()
+	if hold != nil {
+		<-hold
+	}
 	if !ok {
 		return 0, nil, grpcauth.ErrUnauthorized
 	}

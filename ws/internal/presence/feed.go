@@ -97,8 +97,13 @@ func (h *Hub) apply(ctx context.Context, b *bucket, live redisroom.Live) {
 		h.metrics.PresenceEvents.WithLabelValues("invalid").Inc()
 		return
 	}
-	if len(message.Revoked) > 0 {
-		h.revoke(slices.DeleteFunc(message.Revoked, func(id string) bool { return roomname.PresenceBucketOf(id) != b.id }))
+	if message.Revoked != nil {
+		foreign := slices.ContainsFunc(message.Revoked, func(id string) bool { return roomname.PresenceBucketOf(id) != b.id })
+		if message.UserID != "" || len(message.Revoked) == 0 || foreign {
+			h.metrics.PresenceEvents.WithLabelValues("invalid").Inc()
+			return
+		}
+		h.revoke(message.Revoked)
 		return
 	}
 	event := message.transition
@@ -152,12 +157,8 @@ func (h *Hub) resync(ctx context.Context, b *bucket) {
 	}
 }
 
-// load subscribes to the subjects' buckets, then reads their state, so no
-// transition between the two is missed.
-func (h *Hub) load(ctx context.Context, ids []string) error {
-	if len(ids) == 0 {
-		return nil
-	}
+// subscribed waits until the attached subjects' buckets are subscribed.
+func (h *Hub) subscribed(ctx context.Context, ids []string) error {
 	h.mu.Lock()
 	waits := make(map[int]*bucket)
 	for _, id := range ids {
@@ -175,6 +176,18 @@ func (h *Hub) load(ctx context.Context, ids []string) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		}
+	}
+	return nil
+}
+
+// load subscribes to the subjects' buckets, then reads their state, so no
+// transition between the two is missed.
+func (h *Hub) load(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	if err := h.subscribed(ctx, ids); err != nil {
+		return err
 	}
 	for start := 0; start < len(ids); start += h.config.MaxWatched {
 		chunk := ids[start:min(start+h.config.MaxWatched, len(ids))]

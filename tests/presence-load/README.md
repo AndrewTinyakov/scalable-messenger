@@ -76,11 +76,11 @@ Each window reports:
 
 A delivery is measured per watcher. When an actor goes offline or online, every open watcher of that actor is counted. One that already shows the new state counts as **already shown**; every other one, including one with no known state, is armed and ends in exactly one outcome:
 
-- **Delivered.** It reports the new state within 15 s, or within the hold time after a gateway kill.
+- **Delivered.** It reports the new state within 15 s, or within the hold time after a gateway kill, and stays connected until then.
 - **Late.** It reports the new state within 45 s after the deadline.
 - **Missing.** It does not report the new state within that grace, its socket closes after the deadline, or the actor changes again after the deadline.
 - **Superseded.** The actor changed again before the deadline.
-- **Watcher closed.** The watcher's own socket closed before the deadline.
+- **Watcher closed.** The watcher's own socket closed before the deadline, whether or not the new state had already arrived.
 
 Each outcome set also reports `scored` (delivered, late and missing) and `onTime`, delivered divided by scored. Watchers that closed and changes superseded before the deadline are left out, because they say nothing about the server. In connection order, a group's members leave within moments of each other, so many watchers close before an offline change is due; compare `onTime`, not delivered over armed. Delivery latency reports exact `p50Ms`, `p90Ms` and `p99Ms` from raw samples next to the histogram bounds.
 

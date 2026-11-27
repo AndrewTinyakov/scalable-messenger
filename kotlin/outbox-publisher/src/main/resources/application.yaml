@@ -34,6 +34,9 @@ spring:
             dynamic-refresh-sources: false
 messenger:
   redis:
+    presence:
+      # The gateways' PRESENCE_REDIS_URL; empty means the room Redis.
+      url: ${PRESENCE_REDIS_URL:}
     room:
       history-max-length: 1000
       idle-ttl-seconds: 3600

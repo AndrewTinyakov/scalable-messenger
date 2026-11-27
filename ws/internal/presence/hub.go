@@ -15,12 +15,14 @@ import (
 
 // subject is one watched user, shared by every local socket that watches it.
 type subject struct {
-	id        string
-	bucket    int
-	state     redisroom.PresenceState
-	known     bool
-	watchers  map[*watch]struct{}
-	counters  map[*watch]struct{}
+	id       string
+	bucket   int
+	state    redisroom.PresenceState
+	known    bool
+	watchers map[*watch]struct{}
+	counters map[*watch]struct{}
+	// adding holds sockets whose authorization for this user is in flight.
+	adding    map[*watch]struct{}
 	idleSince time.Time
 	pushedAt  time.Time
 }
@@ -120,6 +122,7 @@ func (h *Hub) Watch(ctx context.Context, w Watcher, add, remove []string, reset 
 			continue
 		}
 		requested = append(requested, id)
+		h.attachLocked(id).adding[wt] = struct{}{}
 	}
 	generation := wt.authorized
 	h.mu.Unlock()
@@ -127,11 +130,30 @@ func (h *Hub) Watch(ctx context.Context, w Watcher, add, remove []string, reset 
 	if len(requested) == 0 {
 		return nil
 	}
-	visibility, err := h.auth.PresenceVisibility(ctx, w.PresenceSession(), requested)
-	if err != nil {
+	// The users' buckets are subscribed before access is read, so a
+	// revocation published after the answer reaches this gateway and fences it.
+	if err := h.subscribed(ctx, requested); err != nil {
+		h.abandon(wt, requested)
 		return err
 	}
-	return h.load(ctx, h.grant(wt, requested, visibility, generation))
+	visibility, err := h.auth.PresenceVisibility(ctx, w.PresenceSession(), requested)
+	if err != nil {
+		h.abandon(wt, requested)
+		return err
+	}
+	return h.load(ctx, h.grant(wt, requested, visibility, generation, nil))
+}
+
+// abandon forgets adds whose authorization failed.
+func (h *Hub) abandon(wt *watch, ids []string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, id := range ids {
+		if s := h.subjects[id]; s != nil {
+			delete(s.adding, wt)
+			h.releaseLocked(s)
+		}
+	}
 }
 
 // SetVisible pauses status delivery while the socket's page is hidden.
@@ -211,9 +233,16 @@ func (h *Hub) markUnavailableLocked(wt *watch, id string) {
 
 // grant installs an authorization result. A result read before a later
 // revocation event is installed suspended, so it renews before any delivery.
-func (h *Hub) grant(wt *watch, ids []string, visibility map[string]grpcauth.Visibility, generation uint64) []string {
+// A renewal passes the grants it read, and applies only to those still held.
+func (h *Hub) grant(wt *watch, ids []string, visibility map[string]grpcauth.Visibility, generation uint64, held map[string]*grant) []string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	for _, id := range ids {
+		if s := h.subjects[id]; s != nil {
+			delete(s.adding, wt)
+			h.releaseLocked(s)
+		}
+	}
 	if h.watches[wt.watcher] != wt {
 		return nil
 	}
@@ -223,6 +252,9 @@ func (h *Hub) grant(wt *watch, ids []string, visibility map[string]grpcauth.Visi
 	}
 	var unknown []string
 	for _, id := range ids {
+		if held != nil && wt.grants[id] != held[id] {
+			continue
+		}
 		v := visibility[id]
 		if v.Level == grpcauth.PresenceNone {
 			h.dropLocked(wt, id)
@@ -247,7 +279,7 @@ func (h *Hub) grant(wt *watch, ids []string, visibility map[string]grpcauth.Visi
 func (h *Hub) attachLocked(id string) *subject {
 	s := h.subjects[id]
 	if s == nil {
-		s = &subject{id: id, bucket: roomname.PresenceBucketOf(id), watchers: make(map[*watch]struct{}), counters: make(map[*watch]struct{})}
+		s = &subject{id: id, bucket: roomname.PresenceBucketOf(id), watchers: make(map[*watch]struct{}), counters: make(map[*watch]struct{}), adding: make(map[*watch]struct{})}
 		h.subjects[id] = s
 		h.bucketLocked(s.bucket).subjects[id] = s
 		h.metrics.PresenceSubjects.Set(float64(len(h.subjects)))
@@ -269,7 +301,7 @@ func (h *Hub) dropLocked(wt *watch, id string) {
 }
 
 func (h *Hub) releaseLocked(s *subject) {
-	if len(s.watchers) == 0 && len(s.counters) == 0 {
+	if len(s.watchers) == 0 && len(s.counters) == 0 && len(s.adding) == 0 {
 		s.idleSince = time.Now()
 	}
 }
@@ -327,15 +359,7 @@ func (h *Hub) renew(wt *watch, held map[string]*grant, generation uint64) {
 		if err != nil {
 			h.logger.Warn("renew presence grants", "error", err)
 		} else {
-			h.mu.Lock()
-			current := make([]string, 0, len(ids))
-			for _, id := range ids {
-				if wt.grants[id] == held[id] {
-					current = append(current, id)
-				}
-			}
-			h.mu.Unlock()
-			h.grant(wt, current, visibility, generation)
+			h.grant(wt, ids, visibility, generation, held)
 		}
 		h.mu.Lock()
 		wt.renewing = false

@@ -22,6 +22,7 @@ class RoomEventPublisher(
     mapper: ObjectMapper,
     private val publicationHydration: PublicationHydration,
     chatRepository: ChatRepository,
+    presenceRedis: PresenceRedis,
 ) : OutboxEventPublisher,
     AutoCloseable {
     private val scheduler = Schedulers.newBoundedElastic(
@@ -29,7 +30,7 @@ class RoomEventPublisher(
         outboxPublisherProperties.roomPublicationQueueCapacity,
         "room-publication",
     )
-    private val publication = RoomPublicationScript(redis, mapper, properties) { chatId ->
+    private val publication = RoomPublicationScript(redis, presenceRedis.template, mapper, properties) { chatId ->
         chatRepository.findMemberIds(ChatId(chatId)).map(UserId::value)
     }
 

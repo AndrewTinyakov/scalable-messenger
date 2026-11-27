@@ -587,6 +587,7 @@ class RoomEventPublisherIntegrationTests {
                 PublicationHydrationMetrics(SimpleMeterRegistry()),
             ),
             chatRepository = chatRepository,
+            presenceRedis = PresenceRedis.of(RedisPresenceProperties(), redis),
         ).also { publishers.add(it) }
 
     private fun withLiveMessages(factory: LettuceConnectionFactory, vararg rooms: String, action: (LinkedBlockingQueue<String>) -> Unit) {

@@ -126,14 +126,9 @@ func TestHubSuspendsAnAddAuthorizedBeforeARevocation(t *testing.T) {
 	store, auth := newFakeStore(), &fakeAuth{}
 	alice := user(1)
 	hub := startHub(t, store, auth, testConfig())
-	// Another socket on this gateway already watches Alice, so her bucket is subscribed.
-	dave := newFakeWatcher()
-	if err := hub.Watch(context.Background(), dave, []string{alice}, nil, false); err != nil {
-		t.Fatal(err)
-	}
-	dave.next(t)
 	bob := newFakeWatcher()
-	// Bob's add reads that he may see Alice, then stalls while she is removed.
+	// Bob's first watch of Alice reads that he may see her, then stalls while
+	// she is removed. No other socket here watches her.
 	release := make(chan struct{})
 	auth.mu.Lock()
 	auth.hold = release
@@ -178,5 +173,110 @@ func TestHubRefreshesCountsThatIncludeARevokedMember(t *testing.T) {
 	store.revoke(alice)
 	if event := bob.next(t); event.Members != 1 {
 		t.Fatalf("count after revocation = %+v", event)
+	}
+}
+
+func waitHeld(auth *fakeAuth, held func() bool) {
+	for {
+		auth.mu.Lock()
+		done := !held()
+		auth.mu.Unlock()
+		if done {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestHubFencesARosterReadBeforeARevocation(t *testing.T) {
+	store := newFakeStore()
+	alice, carol := user(1), user(3)
+	auth := &fakeAuth{members: map[string][]string{"group": {alice, carol}}}
+	hub := startHub(t, store, auth, testConfig())
+	// Another socket watches Alice, so her bucket is subscribed here.
+	dave := newFakeWatcher()
+	if err := hub.Watch(context.Background(), dave, []string{alice}, nil, false); err != nil {
+		t.Fatal(err)
+	}
+	dave.next(t)
+	bob := newFakeWatcher()
+	release := make(chan struct{})
+	auth.mu.Lock()
+	auth.countHold = release
+	auth.mu.Unlock()
+	go func() { _ = hub.WatchOnlineCount(context.Background(), bob, "group") }()
+	waitHeld(auth, func() bool { return auth.countHold != nil })
+	auth.mu.Lock()
+	auth.members["group"] = []string{carol}
+	auth.mu.Unlock()
+	store.revoke(alice)
+	time.Sleep(20 * time.Millisecond)
+	close(release)
+	if event := bob.next(t); event.Members != 1 {
+		t.Fatalf("count from a roster read before the revocation = %+v", event)
+	}
+	bob.quiet(t)
+}
+
+func TestHubRenewalDoesNotRestoreARemovedWatch(t *testing.T) {
+	store, auth := newFakeStore(), &fakeAuth{}
+	alice := user(1)
+	hub := startHub(t, store, auth, testConfig())
+	bob := newFakeWatcher()
+	if err := hub.Watch(context.Background(), bob, []string{alice}, nil, false); err != nil {
+		t.Fatal(err)
+	}
+	bob.next(t)
+	release := make(chan struct{})
+	auth.mu.Lock()
+	auth.hold = release
+	auth.mu.Unlock()
+	hub.Revalidate(bob)
+	waitHeld(auth, func() bool { return auth.hold != nil })
+	if err := hub.Watch(context.Background(), bob, nil, []string{alice}, false); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	time.Sleep(50 * time.Millisecond)
+	hub.mu.Lock()
+	restored := hub.watches[bob].grants[alice] != nil
+	hub.mu.Unlock()
+	if restored {
+		t.Fatal("a renewal restored a removed watch")
+	}
+	store.publish(alice, true, 1)
+	bob.quiet(t)
+}
+
+func TestHubIgnoresMalformedRevocations(t *testing.T) {
+	store, auth := newFakeStore(), &fakeAuth{}
+	alice := user(1)
+	hub := startHub(t, store, auth, testConfig())
+	bob := newFakeWatcher()
+	if err := hub.Watch(context.Background(), bob, []string{alice}, nil, false); err != nil {
+		t.Fatal(err)
+	}
+	bob.next(t)
+	bucket := roomname.PresenceBucketOf(alice)
+	foreign := user(2)
+	for roomname.PresenceBucketOf(foreign) == bucket {
+		foreign += "x"
+	}
+	hub.mu.Lock()
+	generation := hub.watches[bob].authorized
+	hub.mu.Unlock()
+	for _, raw := range []string{`{"r":[]}`, `{"r":["` + foreign + `"]}`, `{"u":"` + alice + `","r":["` + alice + `"]}`} {
+		store.mu.Lock()
+		feeds := append([]chan redisroom.Live(nil), store.feeds[bucket]...)
+		store.mu.Unlock()
+		for _, feed := range feeds {
+			feed <- redisroom.Live{Raw: raw}
+		}
+	}
+	time.Sleep(20 * time.Millisecond)
+	hub.mu.Lock()
+	defer hub.mu.Unlock()
+	if hub.watches[bob].authorized != generation || !hub.watches[bob].grants[alice].expires.After(time.Now()) {
+		t.Fatal("a malformed revocation changed the watch")
 	}
 }

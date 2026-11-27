@@ -155,8 +155,8 @@ function watched(created) {
 
 const tick = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-test('each watcher of a change ends delivered, closed or already showing it', t => {
-  const created = bench(t, 1000);
+test('each watcher of a change ends delivered, closed or already showing it', async t => {
+  const created = bench(t, 30);
   const { actor, watchers: [w1, w2, w3], client: get } = watched(created);
   get(w3).known.set(actor, false);
   // A watcher without a known state still has to learn the new one.
@@ -167,9 +167,31 @@ test('each watcher of a change ends delivered, closed or already showing it', t 
   created.status(get(w1), actor, false, true, performance.now());
   get(w2).open = false;
   created.closed(get(w2), 1006, false, false);
+  // A delivery counts once its watcher has stayed connected until the deadline.
+  assert.equal(window.changes.offline.delivered, 0);
+  await tick(40);
   assert.equal(window.changes.offline.delivered, 1);
   assert.equal(window.changes.offline.watcherClosed, 1);
   assert.equal(created.pending.size, 0);
+  created.window = null;
+});
+
+test('a watcher that closes before the deadline is not scored, even after its frame arrived', async t => {
+  const created = bench(t, 30);
+  const { actor, watchers: [w1, w2], client: get } = watched(created);
+  const window = created.begin('test');
+  created.expect(actor, false);
+  created.status(get(w1), actor, false, true, performance.now());
+  get(w1).open = false;
+  created.closed(get(w1), 1006, false, false);
+  get(w2).open = false;
+  created.closed(get(w2), 1006, false, false);
+  await tick(40);
+  const [{ changes: { offline } }] = score([window]);
+  assert.equal(offline.delivered, 0);
+  assert.equal(offline.watcherClosed, 2);
+  assert.equal(offline.scored, 0);
+  assert.equal(window.samples.get('delivery.offline'), undefined);
   created.window = null;
 });
 

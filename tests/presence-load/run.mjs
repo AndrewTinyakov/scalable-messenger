@@ -98,10 +98,11 @@ export class Bench {
   closed(client, code, expected, wasOpen) {
     this.count(expected ? 'socket.closed' : wasOpen ? 'socket.unexpectedClose.' + code : 'socket.connectFailed');
     const now = performance.now();
-    for (const [actor, change] of this.pending) {
-      if (!change.waiting.delete(client.index)) continue;
-      change.outcomes[now <= change.deadline ? 'watcherClosed' : 'missing']++;
-      if (!change.waiting.size) this.pending.delete(actor);
+    for (const change of this.pending.values()) {
+      // A watcher that closes before the deadline is not scored, whether or
+      // not its frame had already arrived.
+      if (change.arrived.delete(client.index)) change.outcomes.watcherClosed++;
+      else if (change.waiting.delete(client.index)) change.outcomes[now <= change.deadline ? 'watcherClosed' : 'missing']++;
     }
     // Browsers reconnect after a short random backoff.
     if (!expected) this.keep(client, 1000 + Math.random() * 4000);
@@ -111,13 +112,10 @@ export class Bench {
     if (prior !== undefined) this.count('presence.transitions');
     const change = this.pending.get(subject);
     if (!change || change.online !== online || !change.waiting.delete(client.index)) return;
-    if (now <= change.deadline) {
-      change.outcomes.delivered++;
-      change.window.observe('delivery.' + change.kind, now - change.at);
-    } else {
-      change.outcomes.late++;
-    }
-    if (!change.waiting.size) this.pending.delete(subject);
+    // An in-time delivery is settled at the deadline, once the watcher has stayed connected for it.
+    if (now <= change.deadline) change.arrived.set(client.index, now - change.at);
+    else change.outcomes.late++;
+    if (!change.waiting.size && now > change.deadline) this.pending.delete(subject);
   }
 
   // Connections.
@@ -218,9 +216,22 @@ export class Bench {
     if (!waiting.size) return;
     outcomes.armed += waiting.size;
     const deadline = at + deadlineMs;
-    const change = { online, at, deadline, kind, window, outcomes, waiting };
+    const change = { online, at, deadline, kind, window, outcomes, waiting, arrived: new Map() };
     this.pending.set(actor, change);
+    setTimeout(() => {
+      this.settle(change);
+      if (!change.waiting.size && this.pending.get(actor) === change) this.pending.delete(actor);
+    }, Math.max(0, deadline - performance.now())).unref();
     setTimeout(() => this.finish(actor, change), Math.max(0, deadline + LATE_GRACE_MS - performance.now())).unref();
+  }
+
+  // Counts the in-time deliveries of watchers still connected.
+  settle(change) {
+    for (const ms of change.arrived.values()) {
+      change.outcomes.delivered++;
+      change.window.observe('delivery.' + change.kind, ms);
+    }
+    change.arrived.clear();
   }
 
   // Stops tracking a change. Watchers still waiting were superseded if the
@@ -228,6 +239,7 @@ export class Bench {
   finish(actor, change) {
     if (this.pending.get(actor) !== change) return;
     this.pending.delete(actor);
+    this.settle(change);
     change.outcomes[performance.now() <= change.deadline ? 'superseded' : 'missing'] += change.waiting.size;
   }
 
@@ -376,9 +388,10 @@ export function score(windows) {
 }
 
 function summary(report) {
-  const changes = Object.entries(report.changes).map(([kind, { delivered, armed, late, missing, watcherClosed }]) => {
+  const changes = Object.entries(report.changes).map(([kind, { delivered, late, missing, watcherClosed }]) => {
     const latency = report.latencyMs['delivery.' + kind];
-    return `${kind} ${delivered}/${armed}${late ? ` (${late} late)` : ''}${missing ? ` (${missing} missing)` : ''}` +
+    // The same denominator as `scored` in the report, though late outcomes may still be pending here.
+    return `${kind} ${delivered}/${delivered + late + missing} on time${late ? ` (${late} late)` : ''}${missing ? ` (${missing} missing)` : ''}` +
       `${watcherClosed ? ` (${watcherClosed} watchers closed)` : ''}` +
       (latency ? ` p50/p90/p99 ${latency.p50Ms.toFixed(0)}/${latency.p90Ms.toFixed(0)}/${latency.p99Ms.toFixed(0)} ms` : '');
   }).join(', ');

@@ -11,33 +11,40 @@ type revocation struct {
 }
 
 // revoke suspends every local grant on the users and checks them again,
-// along with online counts that include them. Pairs that still share a chat
-// keep access once the check answers.
+// along with online counts that may include them. Pairs that still share a
+// chat keep access once the check answers.
 func (h *Hub) revoke(ids []string) {
 	h.mu.Lock()
 	now := time.Now()
-	// An authorization already in flight may have read access that is now
-	// gone, so none installs a live grant.
-	for _, wt := range h.watches {
-		wt.authorized++
-	}
 	affected := make(map[*watch]map[string]*grant)
-	var counts []func()
+	counts := make(map[*watch]struct{})
 	for _, id := range ids {
 		s := h.subjects[id]
 		if s == nil {
 			continue
 		}
 		for wt := range s.watchers {
-			g := wt.grants[id]
-			g.expires = now
 			if affected[wt] == nil {
 				affected[wt] = make(map[string]*grant)
 			}
+			g := wt.grants[id]
+			g.expires = now
 			affected[wt][id] = g
 		}
+		// An add already in flight may have read access that is now gone.
+		for wt := range s.adding {
+			if affected[wt] == nil {
+				affected[wt] = make(map[string]*grant)
+			}
+		}
 		for wt := range s.counters {
-			counts = append(counts, h.startCountRefreshLocked(wt, wt.countChat))
+			counts[wt] = struct{}{}
+		}
+	}
+	// A roster still being read may include a revoked user.
+	for _, wt := range h.watches {
+		if wt.countChat != "" && wt.count == nil {
+			counts[wt] = struct{}{}
 		}
 	}
 	type renewal struct {
@@ -47,6 +54,11 @@ func (h *Hub) revoke(ids []string) {
 	}
 	var renewals []renewal
 	for wt, held := range affected {
+		// Results read before now install suspended.
+		wt.authorized++
+		if len(held) == 0 {
+			continue
+		}
 		if wt.renewing {
 			wt.recheck = true
 			continue
@@ -54,12 +66,16 @@ func (h *Hub) revoke(ids []string) {
 		wt.renewing = true
 		renewals = append(renewals, renewal{wt, held, wt.authorized})
 	}
+	refreshes := make([]func(), 0, len(counts))
+	for wt := range counts {
+		refreshes = append(refreshes, h.startCountRefreshLocked(wt, wt.countChat))
+	}
 	h.mu.Unlock()
 	h.metrics.PresenceEvents.WithLabelValues("revoked").Add(float64(len(ids)))
 	for _, r := range renewals {
 		h.renew(r.wt, r.held, r.generation)
 	}
-	for _, refresh := range counts {
+	for _, refresh := range refreshes {
 		refresh()
 	}
 }

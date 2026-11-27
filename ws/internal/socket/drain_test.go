@@ -14,7 +14,7 @@ func TestDrainStopsAdmissionAndSpreadsExistingCloses(t *testing.T) {
 	server, _ := newSessionServer(t, &sessionRooms{}, nil)
 	server.config.DrainTimeout = 100 * time.Millisecond
 	for range 4 {
-		connection := newConnection(server, nil, ticket.Identity{}, "")
+		connection := newConnection(server, nil, ticket.Identity{})
 		server.connections[connection] = struct{}{}
 		server.metrics.Connections.Inc()
 	}
@@ -62,21 +62,5 @@ func TestDrainStopsAdmissionAndSpreadsExistingCloses(t *testing.T) {
 	server.mu.Unlock()
 	if remaining != 0 {
 		t.Fatalf("remaining=%d", remaining)
-	}
-}
-
-func TestShutdownCleanupUsesRemainingDrainBudget(t *testing.T) {
-	server, _ := newSessionServer(t, &sessionRooms{}, nil)
-	leases := &blockingReleaseLeases{entered: make(chan struct{}, 1), release: make(chan struct{})}
-	server.connectionLeases = leases
-	connection := newConnection(server, nil, ticket.Identity{UserID: sessionTestUser}, "lease")
-	server.connections[connection] = struct{}{}
-	server.metrics.Connections.Inc()
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
-	defer cancel()
-	started := time.Now()
-	server.CloseContext(ctx)
-	if elapsed := time.Since(started); elapsed > 200*time.Millisecond {
-		t.Fatalf("cleanup exceeded remaining shutdown budget: %s", elapsed)
 	}
 }

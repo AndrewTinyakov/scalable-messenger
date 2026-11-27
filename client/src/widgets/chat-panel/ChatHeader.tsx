@@ -2,17 +2,19 @@ import { ArrowLeft, Bell, BellOff, Eraser, MoreVertical, Trash2, UsersRound } fr
 import { useEffect, useRef, useState } from 'react'
 import { chatTitle, type Chat } from '../../entities/chat/model'
 import type { User } from '../../entities/session/model'
+import { MembersPreview, type MemberPage } from '../../features/group-members/MembersPreview'
+import { isOnline, presenceLabel } from '../../features/presence/presenceLabel'
+import { useOnlineCount, usePresence } from '../../features/presence/usePresence'
 import { ChatKind } from '../../shared/api/generated/socket-vocabulary'
-import type { PresenceStatus } from '../../shared/api/socket'
 import { Avatar } from '../../shared/ui/Avatar'
 import { Menu, MenuItem } from '../../shared/ui/Menu'
 
 interface Props {
   chat: Chat
   currentUser: User
-  presence?: Record<string, PresenceStatus['state']>
   onBack(): void
   onMembers?: () => void
+  loadMembers?: (chatId: string, after?: string) => Promise<MemberPage>
   onDelete?: () => void
   onClear?: () => void
   muted?: boolean
@@ -20,28 +22,29 @@ interface Props {
   onUnmute?: () => void
 }
 
-function subtitle(
-  chat: Chat,
-  recipient: string | undefined,
-  presence: Props['presence'],
-): { text: string; online: boolean } {
-  if (chat.kind === ChatKind.GROUP) {
+/** Groups up to this size show a live online count; larger ones only their size. */
+export const LIVE_ONLINE_COUNT_MAX_MEMBERS = 200
+
+function useSubtitle(chat: Chat, recipient: string | undefined): { text: string; online: boolean } {
+  const group = chat.kind === ChatKind.GROUP
+  const statuses = usePresence('header', recipient ? [recipient] : [])
+  const counted =
+    group && !chat.id.startsWith('draft:') && chat.memberCount <= LIVE_ONLINE_COUNT_MAX_MEMBERS
+  const count = useOnlineCount(counted ? chat.id : undefined, chat.memberCount)
+  if (group) {
     const members = `${chat.memberCount} ${chat.memberCount === 1 ? 'member' : 'members'}`
-    const online = Object.values(presence ?? {}).filter((state) => state === 'online').length
-    return { text: online ? `${members}, ${online} online` : members, online: false }
+    return { text: count ? `${members}, ${count.online} online` : members, online: false }
   }
-  const state = recipient ? presence?.[recipient] : undefined
-  if (state === 'online') return { text: 'online', online: true }
-  if (state === 'offline') return { text: 'offline', online: false }
-  return { text: '', online: false }
+  const status = recipient ? statuses.get(recipient) : undefined
+  return { text: presenceLabel(status), online: isOnline(status) }
 }
 
 export function ChatHeader({
   chat,
   currentUser,
-  presence,
   onBack,
   onMembers,
+  loadMembers,
   onDelete,
   onClear,
   muted = false,
@@ -49,14 +52,25 @@ export function ChatHeader({
   onUnmute,
 }: Props) {
   const [menuOpen, setMenuOpen] = useState(false)
+  const [preview, setPreview] = useState(false)
+  const previewTimer = useRef<ReturnType<typeof setTimeout>>()
+  const showPreview = (open: boolean) => {
+    clearTimeout(previewTimer.current)
+    previewTimer.current = setTimeout(() => setPreview(open), open ? 300 : 200)
+  }
+  useEffect(() => () => clearTimeout(previewTimer.current), [])
   const actionsRef = useRef<HTMLButtonElement>(null)
   const group = chat.kind === ChatKind.GROUP
   const recipient = group
     ? undefined
     : chat.members.find((member) => member.id !== currentUser.id)?.id
   const title = chatTitle(chat, currentUser.id)
-  const status = subtitle(chat, recipient, presence)
-  useEffect(() => setMenuOpen(false), [chat.id])
+  const status = useSubtitle(chat, recipient)
+  useEffect(() => {
+    clearTimeout(previewTimer.current)
+    setMenuOpen(false)
+    setPreview(false)
+  }, [chat.id])
 
   function run(action: () => void) {
     setMenuOpen(false)
@@ -81,9 +95,24 @@ export function ChatHeader({
           {title}
           {muted && <BellOff className="chat-muted-icon" size={15} aria-label="Muted" />}
         </h2>
-        <p key={status.text} className={status.online ? 'online' : undefined}>
-          {status.text}
-        </p>
+        {group && onMembers ? (
+          <div
+            className="chat-header-members"
+            onMouseEnter={() => loadMembers && showPreview(true)}
+            onMouseLeave={() => showPreview(false)}
+          >
+            <button onClick={onMembers} aria-label="Show members">
+              {status.text}
+            </button>
+            {preview && loadMembers && (
+              <MembersPreview chatId={chat.id} ownerId={chat.ownerId} load={loadMembers} />
+            )}
+          </div>
+        ) : (
+          <p key={status.text} className={status.online ? 'online' : undefined}>
+            {status.text}
+          </p>
+        )}
       </div>
       {group && onMembers && (
         <button className="icon-button" onClick={onMembers} aria-label="Group members">

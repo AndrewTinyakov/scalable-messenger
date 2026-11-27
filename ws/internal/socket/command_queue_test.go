@@ -77,6 +77,9 @@ func TestReaderProcessesReceiptWhilePublishWaits(t *testing.T) {
 	close(release)
 	socket.SetReadDeadline(time.Now().Add(time.Second))
 	_, payload, err := socket.ReadMessage()
+	if strings.Contains(string(payload), `"type":"presence_config"`) {
+		_, payload, err = socket.ReadMessage()
+	}
 	if err != nil || !strings.Contains(string(payload), `"type":"queued"`) {
 		t.Fatalf("confirmed outcome=%s,%v", payload, err)
 	}
@@ -124,25 +127,6 @@ func TestCommandQueueBoundsAndCloseCancelsWorker(t *testing.T) {
 	defer connection.server.commands.mu.Unlock()
 	if connection.server.commands.items != 0 || connection.server.commands.bytes != 0 {
 		t.Fatal("closed commands kept admission capacity")
-	}
-}
-
-func TestSocketCloseDoesNotWaitForRedisLeaseRelease(t *testing.T) {
-	leases := &blockingReleaseLeases{entered: make(chan struct{}, 1), release: make(chan struct{})}
-	defer close(leases.release)
-	connection := newRaceConnection(t, &raceRooms{}, nil, func(server *Server) { server.connectionLeases = leases })
-	connection.connectionLeaseID = "lease"
-	closed := make(chan struct{})
-	go func() { connection.Close(); close(closed) }()
-	select {
-	case <-closed:
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("socket close waited for Redis")
-	}
-	select {
-	case <-leases.entered:
-	case <-time.After(time.Second):
-		t.Fatal("cleanup worker did not release lease")
 	}
 }
 

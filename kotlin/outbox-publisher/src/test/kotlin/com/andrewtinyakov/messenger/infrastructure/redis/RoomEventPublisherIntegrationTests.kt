@@ -1,6 +1,11 @@
 package com.andrewtinyakov.messenger.infrastructure.redis
 
+import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.auth.repository.UserRepository
+import com.andrewtinyakov.messenger.chat.model.ChatId
+import com.andrewtinyakov.messenger.chat.repository.ChatRepository
+import com.andrewtinyakov.messenger.generated.messaging.event.ChatDeletedEventV1
+import com.andrewtinyakov.messenger.generated.messaging.event.MemberRemovedEventV1
 import com.andrewtinyakov.messenger.infrastructure.outbox.EventId
 import com.andrewtinyakov.messenger.infrastructure.outbox.MemoryOutbox
 import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxMessage
@@ -21,6 +26,7 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.mock
+import org.mockito.Mockito.`when`
 import org.springframework.data.domain.Range
 import org.springframework.data.redis.connection.ReactiveRedisConnection
 import org.springframework.data.redis.connection.ReactiveRedisConnectionFactory
@@ -42,6 +48,59 @@ import kotlin.io.path.readText
 
 class RoomEventPublisherIntegrationTests {
     private val publishers = mutableListOf<RoomEventPublisher>()
+
+    @Test
+    fun `a member removal asks the removed user's presence bucket to recheck once`() {
+        withRedis { factory ->
+            val mapper = JsonMapper.builder().build()
+            val chatId = newId()
+            val memberId = newId()
+            val removal = { room: String ->
+                val eventId = newId()
+                OutboxMessage(
+                    EventId(eventId),
+                    room,
+                    mapper.writeValueAsString(
+                        MemberRemovedEventV1.create(eventId = eventId, room = room, chatId = chatId, memberId = memberId, seq = "2"),
+                    ),
+                )
+            }
+            withLiveMessages(factory, "presence:${PresenceBuckets.of(memberId)}") { received ->
+                val publisher = roomPublisher(ReactiveStringRedisTemplate(factory))
+                publisher.publish(removal("user:$memberId"))
+                publisher.publish(removal("group:$chatId"))
+                assertEquals(mapOf("r" to listOf(memberId)), mapper.readValue(received.poll(1, TimeUnit.SECONDS), Map::class.java))
+                assertEquals(null, received.poll(200, TimeUnit.MILLISECONDS))
+            }
+        }
+    }
+
+    @Test
+    fun `a group deletion asks every member's presence bucket to recheck`() {
+        withRedis { factory ->
+            val mapper = JsonMapper.builder().build()
+            val chatId = newId()
+            val members = List(3) { newId() }
+            val chats = mock(ChatRepository::class.java)
+            `when`(chats.findMemberIds(ChatId(chatId))).thenReturn(members.map(::UserId))
+            val room = "group:$chatId"
+            val eventId = newId()
+            val deletion = OutboxMessage(
+                EventId(eventId),
+                room,
+                mapper.writeValueAsString(ChatDeletedEventV1.create(eventId = eventId, room = room, chatId = chatId, seq = "3")),
+            )
+            val revoked = mutableListOf<Any?>()
+            withLiveMessages(factory, *members.map { "presence:${PresenceBuckets.of(it)}" }.distinct().toTypedArray()) { received ->
+                roomPublisher(ReactiveStringRedisTemplate(factory), chatRepository = chats).publish(deletion)
+                while (true) {
+                    val message = received.poll(500, TimeUnit.MILLISECONDS) ?: break
+                    revoked.addAll(mapper.readValue(message, Map::class.java)["r"] as List<*>)
+                }
+            }
+            assertEquals(members.sorted(), revoked.map { it as String }.sorted())
+        }
+    }
 
     @Test
     fun `group publication emits the shared bodyless sidebar activity fixture without retained content`() {
@@ -513,6 +572,7 @@ class RoomEventPublisherIntegrationTests {
         redis: ReactiveStringRedisTemplate,
         timeout: Duration = Duration.ofSeconds(1),
         properties: RedisRoomProperties = RedisRoomProperties(),
+        chatRepository: ChatRepository = mock(ChatRepository::class.java),
     ): RoomEventPublisher =
         RoomEventPublisher(
             redis = redis,
@@ -526,9 +586,11 @@ class RoomEventPublisherIntegrationTests {
                 JsonMapper.builder().build(),
                 PublicationHydrationMetrics(SimpleMeterRegistry()),
             ),
+            chatRepository = chatRepository,
+            presenceRedis = PresenceRedis.of(RedisPresenceProperties(), redis),
         ).also { publishers.add(it) }
 
-    private fun withLiveMessages(factory: LettuceConnectionFactory, room: String, action: (LinkedBlockingQueue<String>) -> Unit) {
+    private fun withLiveMessages(factory: LettuceConnectionFactory, vararg rooms: String, action: (LinkedBlockingQueue<String>) -> Unit) {
         (factory.nativeClient as RedisClient).connectPubSub().use { connection ->
             val messages = LinkedBlockingQueue<String>()
             connection.addListener(
@@ -538,7 +600,7 @@ class RoomEventPublisherIntegrationTests {
                     }
                 },
             )
-            connection.sync().ssubscribe("messenger:{$room}:live")
+            rooms.forEach { connection.sync().ssubscribe("messenger:{$it}:live") }
             action(messages)
         }
     }

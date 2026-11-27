@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Presence load benchmark · 27 November 2026</title>
+  <style>
+    :root {
+      font: 16px/1.5 system-ui, sans-serif;
+      color: var(--foreground, #162330);
+      --edge: var(--border, #d8e0e7);
+      --legacy: var(--chart-1, #536477);
+      --current: var(--chart-2, #006b64);
+    }
+
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    main { max-width: 75rem; margin: 0 auto; padding-block: 1rem; }
+    header { max-width: 49rem; margin-bottom: 1.75rem; }
+    h1, h2, p, figure { margin: 0; }
+    h1 { font-size: clamp(1.75rem, 4vw, 2.5rem); line-height: 1.15; }
+    h2 { font-size: 1.15rem; }
+    p { color: var(--muted-foreground, #40546a); }
+    header p, section p { margin-top: 0.5rem; }
+
+    .charts {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
+      gap: 1rem;
+      align-items: start;
+    }
+
+    section {
+      padding: 1.1rem;
+      border: 1px solid var(--edge);
+      border-radius: var(--radius, 0.75rem);
+      background: var(--card, #fff);
+    }
+
+    figure { padding-top: 0.8rem; margin-top: 0.8rem; border-top: 1px solid var(--edge); }
+    figcaption { margin-bottom: 0.3rem; font-weight: 650; }
+    .series {
+      display: grid;
+      grid-template-columns: 4rem minmax(2rem, 1fr) 5.25rem;
+      align-items: center;
+      gap: 0.55rem;
+      padding-block: 0.15rem;
+      font-size: 0.875rem;
+    }
+
+    .track { height: 0.55rem; background: var(--muted, #edf1f4); border-radius: 0.2rem; overflow: hidden; }
+    .bar { display: block; width: var(--width); height: 100%; border-radius: inherit; }
+    .build-0 { background: var(--legacy); }
+    .build-1 { background: var(--current); }
+    .series strong { justify-self: end; font-variant-numeric: tabular-nums; }
+    footer { max-width: 60ch; margin-top: 1.35rem; }
+    @media print {
+      :root { background: white; }
+      main { padding: 0; }
+      section { break-inside: avoid; }
+      .bar { print-color-adjust: exact; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Presence load benchmark</h1>
+    <p>27 November 2026 · Legacy polling and gateway-owned presence on the same seeded workload. Current build rerun at <code>566e401</code> after the fixes; legacy rows other than churn are from the first run.</p>
+  </header>
+  <div class="charts">
+    <section>
+      <h2>3,500 quiet sockets</h2>
+      <p>All sockets were ready on both builds. The window lasted 60 seconds.</p>
+      <figure>
+        <figcaption>WebSocket application frames/s</figcaption>
+        <div class="series">
+          <span>Legacy</span>
+          <span class="track" aria-hidden="true"><span class="bar build-0" style="--width:100.000%"></span></span>
+          <strong>1,397.1</strong>
+        </div>
+        <div class="series">
+          <span>Current</span>
+          <span class="track" aria-hidden="true"><span class="bar build-1" style="--width:0.000%"></span></span>
+          <strong>0.0</strong>
+        </div>
+      </figure>
+      <figure>
+        <figcaption>Redis commands/s</figcaption>
+        <div class="series">
+          <span>Legacy</span>
+          <span class="track" aria-hidden="true"><span class="bar build-0" style="--width:100.000%"></span></span>
+          <strong>44,260</strong>
+        </div>
+        <div class="series">
+          <span>Current</span>
+          <span class="track" aria-hidden="true"><span class="bar build-1" style="--width:1.003%"></span></span>
+          <strong>444</strong>
+        </div>
+      </figure>
+      <figure>
+        <figcaption>Gateway CPU, cores</figcaption>
+        <div class="series">
+          <span>Legacy</span>
+          <span class="track" aria-hidden="true"><span class="bar build-0" style="--width:100.000%"></span></span>
+          <strong>0.186</strong>
+        </div>
+        <div class="series">
+          <span>Current</span>
+          <span class="track" aria-hidden="true"><span class="bar build-1" style="--width:16.129%"></span></span>
+          <strong>0.030</strong>
+        </div>
+      </figure>
+      <figure>
+        <figcaption>API gRPC calls/s</figcaption>
+        <div class="series">
+          <span>Legacy</span>
+          <span class="track" aria-hidden="true"><span class="bar build-0" style="--width:100.000%"></span></span>
+          <strong>231.1</strong>
+        </div>
+        <div class="series">
+          <span>Current</span>
+          <span class="track" aria-hidden="true"><span class="bar build-1" style="--width:0.865%"></span></span>
+          <strong>2.0</strong>
+        </div>
+      </figure>
+      <figure>
+        <figcaption>Gateway RSS, MiB</figcaption>
+        <div class="series">
+          <span>Legacy</span>
+          <span class="track" aria-hidden="true"><span class="bar build-0" style="--width:78.793%"></span></span>
+          <strong>431</strong>
+        </div>
+        <div class="series">
+          <span>Current</span>
+          <span class="track" aria-hidden="true"><span class="bar build-1" style="--width:100.000%"></span></span>
+          <strong>547</strong>
+        </div>
+      </figure>
+    </section>
+    <section>
+      <h2>Reconnects and gateway loss</h2>
+      <p>Rerun p99 is exact, over on-time deliveries to watchers that stayed connected until the deadline. The legacy gateway-kill figure is a first-run histogram upper bound. Current offline includes the intended 2-second grace.</p>
+      <figure>
+        <figcaption>Churn at 25 cycles/s, online p99 (ms)</figcaption>
+        <div class="series">
+          <span>Legacy</span>
+          <span class="track" aria-hidden="true"><span class="bar build-0" style="--width:100.000%"></span></span>
+          <strong>4,876</strong>
+        </div>
+        <div class="series">
+          <span>Current</span>
+          <span class="track" aria-hidden="true"><span class="bar build-1" style="--width:4.191%"></span></span>
+          <strong>204</strong>
+        </div>
+      </figure>
+      <figure>
+        <figcaption>Churn at 25 cycles/s, offline p99 (ms)</figcaption>
+        <div class="series">
+          <span>Legacy</span>
+          <span class="track" aria-hidden="true"><span class="bar build-0" style="--width:100.000%"></span></span>
+          <strong>4,992</strong>
+        </div>
+        <div class="series">
+          <span>Current</span>
+          <span class="track" aria-hidden="true"><span class="bar build-1" style="--width:43.870%"></span></span>
+          <strong>2,190</strong>
+        </div>
+      </figure>
+      <figure>
+        <figcaption>Gateway kill, offline p99 (seconds)</figcaption>
+        <div class="series">
+          <span>Legacy</span>
+          <span class="track" aria-hidden="true"><span class="bar build-0" style="--width:100.000%"></span></span>
+          <strong>94.94</strong>
+        </div>
+        <div class="series">
+          <span>Current</span>
+          <span class="track" aria-hidden="true"><span class="bar build-1" style="--width:13.155%"></span></span>
+          <strong>12.49</strong>
+        </div>
+      </figure>
+    </section>
+    <section>
+      <h2>Capacity</h2>
+      <p>A stage needed 99% of sockets open and ready, and error frames totaling at most 1% of the socket target.</p>
+      <figure>
+        <figcaption>Largest passing socket stage</figcaption>
+        <div class="series">
+          <span>Legacy</span>
+          <span class="track" aria-hidden="true"><span class="bar build-0" style="--width:13.333%"></span></span>
+          <strong>2,000</strong>
+        </div>
+        <div class="series">
+          <span>Current</span>
+          <span class="track" aria-hidden="true"><span class="bar build-1" style="--width:100.000%"></span></span>
+          <strong>15,000</strong>
+        </div>
+      </figure>
+    </section>
+    <section>
+      <h2>Redis primary outage</h2>
+      <p>Legacy gateways crashed four times on a nil room listener. The fixed current build had no gateway exits. Both finished the 120-second outage with 1,579 of 1,580 intended sockets ready.</p>
+      <figure>
+        <figcaption>Gateway process exits</figcaption>
+        <div class="series">
+          <span>Legacy</span>
+          <span class="track" aria-hidden="true"><span class="bar build-0" style="--width:100.000%"></span></span>
+          <strong>4</strong>
+        </div>
+        <div class="series">
+          <span>Current</span>
+          <span class="track" aria-hidden="true"><span class="bar build-1" style="--width:0.000%"></span></span>
+          <strong>0</strong>
+        </div>
+      </figure>
+      <figure>
+        <figcaption>Abnormal socket closes during outage</figcaption>
+        <div class="series">
+          <span>Legacy</span>
+          <span class="track" aria-hidden="true"><span class="bar build-0" style="--width:100.000%"></span></span>
+          <strong>1,917</strong>
+        </div>
+        <div class="series">
+          <span>Current</span>
+          <span class="track" aria-hidden="true"><span class="bar build-1" style="--width:27.439%"></span></span>
+          <strong>526</strong>
+        </div>
+      </figure>
+    </section>
+  </div>
+  <footer><p>Each pair of bars starts at zero and uses its own scale. Redis rates include shared services. Runs were sequential on a shared Mac; the current build and legacy churn were run twice, and the latest run is shown.</p></footer>
+</main>
+</body>
+</html>

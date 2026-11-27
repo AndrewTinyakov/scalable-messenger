@@ -88,7 +88,7 @@ func newRaceConnection(t *testing.T, rooms RoomCoordinator, authorize groupAutho
 	for _, apply := range configure {
 		apply(server)
 	}
-	connection := newConnection(server, nil, ticket.Identity{UserID: raceChatID}, "")
+	connection := newConnection(server, nil, ticket.Identity{UserID: raceChatID})
 	t.Cleanup(connection.Close)
 	return connection
 }

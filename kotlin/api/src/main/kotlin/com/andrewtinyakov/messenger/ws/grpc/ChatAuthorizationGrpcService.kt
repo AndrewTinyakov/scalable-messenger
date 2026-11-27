@@ -10,12 +10,17 @@ import com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupRequest
 import com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupResponse
 import com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupsRequest
 import com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupsResponse
-import com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest
-import com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceResponse
 import com.andrewtinyakov.messenger.generated.grpc.AuthorizeSidebarRequest
 import com.andrewtinyakov.messenger.generated.grpc.AuthorizeSidebarResponse
 import com.andrewtinyakov.messenger.generated.grpc.ChatAuthorizationGrpc
+import com.andrewtinyakov.messenger.generated.grpc.OnlineCountMembersRequest
+import com.andrewtinyakov.messenger.generated.grpc.OnlineCountMembersResponse
+import com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest
+import com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityResponse
+import com.andrewtinyakov.messenger.generated.grpc.RecordLastSeenRequest
+import com.andrewtinyakov.messenger.generated.grpc.RecordLastSeenResponse
 import com.andrewtinyakov.messenger.generated.grpc.SidebarChat
+import com.andrewtinyakov.messenger.generated.grpc.SubjectVisibility
 import com.andrewtinyakov.messenger.generated.grpc.ValidateSessionRequest
 import com.andrewtinyakov.messenger.generated.grpc.ValidateSessionResponse
 import com.andrewtinyakov.messenger.generated.grpc.ValidateSessionsRequest
@@ -23,26 +28,33 @@ import com.andrewtinyakov.messenger.generated.grpc.ValidateSessionsResponse
 import com.andrewtinyakov.messenger.infrastructure.redis.RoomAddress
 import com.andrewtinyakov.messenger.shared.web.ApiException
 import com.andrewtinyakov.messenger.ws.model.GroupAuthorization
+import com.andrewtinyakov.messenger.ws.model.LastSeen
+import com.andrewtinyakov.messenger.ws.model.OnlineCountMembers
+import com.andrewtinyakov.messenger.ws.model.PresenceLevel
+import com.andrewtinyakov.messenger.ws.model.PresenceVisibility
 import com.andrewtinyakov.messenger.ws.model.SidebarChatAuthorization
 import com.andrewtinyakov.messenger.ws.repository.GroupAuthorizationRepository
-import com.andrewtinyakov.messenger.ws.repository.PresenceAuthorizationRepository
+import com.andrewtinyakov.messenger.ws.repository.PresenceRepository
 import com.andrewtinyakov.messenger.ws.repository.SidebarAuthorizationRepository
 import io.grpc.Status
 import io.grpc.StatusRuntimeException
 import io.grpc.stub.StreamObserver
 import org.springframework.stereotype.Component
 import java.time.Clock
+import java.time.Instant
 import java.time.OffsetDateTime
+import java.time.ZoneOffset
+import com.andrewtinyakov.messenger.generated.grpc.PresenceLevel as WirePresenceLevel
 
-private const val MAX_PRESENCE_PEERS = 100
 private const val MAX_SESSIONS_PER_REQUEST = 100
+private const val MAX_LAST_SEEN_SKEW_SECONDS = 60L
 
 @Component
 class ChatAuthorizationGrpcService(
     private val sessionRepository: SessionRepository,
     private val clock: Clock,
     private val groupAuthorizationRepository: GroupAuthorizationRepository,
-    private val presenceAuthorizationRepository: PresenceAuthorizationRepository,
+    private val presenceRepository: PresenceRepository,
     private val sidebarAuthorizationRepository: SidebarAuthorizationRepository,
 ) : ChatAuthorizationGrpc.ChatAuthorizationImplBase() {
     override fun authorizeSidebar(
@@ -113,22 +125,66 @@ class ChatAuthorizationGrpcService(
             AuthorizeGroupsResponse.newBuilder().addAllAuthorizedChatIds(chatIds.filter(allowed::contains).map { it.value }).build()
         }
 
-    override fun authorizePresence(request: AuthorizePresenceRequest, responseObserver: StreamObserver<AuthorizePresenceResponse>) =
+    override fun presenceVisibility(request: PresenceVisibilityRequest, responseObserver: StreamObserver<PresenceVisibilityResponse>) =
         respond(responseObserver) {
             val ids = request.userIdsList
-            if (ids.size !in 1..MAX_PRESENCE_PEERS || ids.size != ids.toSet().size) {
-                throw Status.INVALID_ARGUMENT.withDescription("Provide 1 to $MAX_PRESENCE_PEERS distinct peers").asRuntimeException()
+            if (ids.size !in 1..PresenceVisibility.MAX_SUBJECTS || ids.size != ids.toSet().size) {
+                throw Status.INVALID_ARGUMENT.withDescription("Provide 1 to ${PresenceVisibility.MAX_SUBJECTS} distinct users")
+                    .asRuntimeException()
             }
-            val chatId = requireChatId(request.chatId)
-            val peers = ids.map(::requireUserId)
-            val allowed = presenceAuthorizationRepository.authorizedPeers(
+            val subjects = presenceRepository.presenceVisibility(
                 requireSessionId(request.sessionId),
-                chatId,
-                peers,
+                ids.map(::requireUserId),
                 OffsetDateTime.now(clock),
-            ) ?: throw Status.PERMISSION_DENIED.withDescription("Presence access denied").asRuntimeException()
-            AuthorizePresenceResponse.newBuilder().addAllAuthorizedUserIds(peers.filter(allowed::contains).map(UserId::value)).build()
+            ) ?: throw Status.UNAUTHENTICATED.withDescription("Session expired or revoked").asRuntimeException()
+            PresenceVisibilityResponse.newBuilder().addAllSubjects(subjects.map { it.toResponse() }).build()
         }
+
+    override fun onlineCountMembers(request: OnlineCountMembersRequest, responseObserver: StreamObserver<OnlineCountMembersResponse>) =
+        respond(responseObserver) {
+            if (request.limit !in 1..OnlineCountMembers.MAX_MEMBERS) {
+                throw Status.INVALID_ARGUMENT.withDescription("Limit must be 1 to ${OnlineCountMembers.MAX_MEMBERS}").asRuntimeException()
+            }
+            val members = presenceRepository.onlineCountMembers(
+                requireSessionId(request.sessionId),
+                requireChatId(request.chatId),
+                request.limit,
+                OffsetDateTime.now(clock),
+            ) ?: throw Status.PERMISSION_DENIED.withDescription("Online count access denied").asRuntimeException()
+            OnlineCountMembersResponse.newBuilder()
+                .setMemberCount(members.memberCount)
+                .addAllMemberIds(members.memberIds.map(UserId::value))
+                .build()
+        }
+
+    override fun recordLastSeen(request: RecordLastSeenRequest, responseObserver: StreamObserver<RecordLastSeenResponse>) =
+        respond(responseObserver) {
+            if (request.entriesCount > LastSeen.MAX_ENTRIES) {
+                throw Status.INVALID_ARGUMENT.withDescription("Provide at most ${LastSeen.MAX_ENTRIES} entries").asRuntimeException()
+            }
+            val latest = Instant.now(clock).plusSeconds(MAX_LAST_SEEN_SKEW_SECONDS)
+            val entries = request.entriesList.map {
+                val seenAt = Instant.ofEpochMilli(it.seenUnixMs)
+                if (it.seenUnixMs <= 0 || seenAt.isAfter(latest)) {
+                    throw Status.INVALID_ARGUMENT.withDescription("Invalid last seen time").asRuntimeException()
+                }
+                LastSeen(requireUserId(it.userId), seenAt.atOffset(ZoneOffset.UTC))
+            }
+            presenceRepository.recordLastSeen(entries)
+            RecordLastSeenResponse.getDefaultInstance()
+        }
+
+    private fun PresenceVisibility.toResponse(): SubjectVisibility = SubjectVisibility.newBuilder()
+        .setUserId(userId.value)
+        .setLevel(
+            when (level) {
+                PresenceLevel.NONE -> WirePresenceLevel.PRESENCE_LEVEL_NONE
+                PresenceLevel.COARSE -> WirePresenceLevel.PRESENCE_LEVEL_COARSE
+                PresenceLevel.FULL -> WirePresenceLevel.PRESENCE_LEVEL_FULL
+            },
+        )
+        .setLastSeenUnixMs(lastSeenAt?.toInstant()?.toEpochMilli() ?: 0)
+        .build()
 
     private fun AuthenticatedSession.toResponse(): ValidateSessionResponse = ValidateSessionResponse.newBuilder()
         .setUserId(userId.value)

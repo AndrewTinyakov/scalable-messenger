@@ -11,16 +11,14 @@ import (
 )
 
 type frameGrants struct {
-	group    *groupGrant
-	presence *presenceWatch
-	sidebar  *sidebarWatch
+	group   *groupGrant
+	sidebar *sidebarWatch
 }
 
 type outbound struct {
-	frame         *protocol.EventFrame
-	groupGrant    *groupGrant
-	presenceWatch *presenceWatch
-	sidebarWatch  *sidebarWatch
+	frame        *protocol.EventFrame
+	groupGrant   *groupGrant
+	sidebarWatch *sidebarWatch
 }
 
 func (c *Connection) Enqueue(event protocol.Event) bool {
@@ -69,13 +67,13 @@ func (c *Connection) applyControlEvent(event protocol.Event, expected *groupGran
 				return nil, true
 			}
 		}
-		c.clearChatPresence(event.ChatID)
+		c.server.watchers.Revalidate(c)
 		c.subscriptions.revokeGrant(event.ChatID, expected)
 		expected = nil
 	}
 	if event.Type == protocol.EventMemberRemoved {
 		if event.MemberID == c.session.UserID && (event.Room == roomname.User(c.session.UserID) || event.Room == roomname.Group(event.ChatID)) {
-			c.clearChatPresence(event.ChatID)
+			c.server.watchers.Revalidate(c)
 			c.subscriptions.revokeGrant(event.ChatID, expected)
 		}
 		if roomname.IsGroup(event.Room) && event.MemberID == c.session.UserID {
@@ -112,7 +110,7 @@ func (c *Connection) admitFrame(frame *protocol.EventFrame, expected *groupGrant
 		return c.closeSlow()
 	}
 	select {
-	case c.out <- outbound{frame: frame, groupGrant: grant, presenceWatch: grants.presence, sidebarWatch: grants.sidebar}:
+	case c.out <- outbound{frame: frame, groupGrant: grant, sidebarWatch: grants.sidebar}:
 		c.queuedBytes += frame.Size()
 		c.queuedItems++
 		c.server.metrics.QueuedItems.Inc()
@@ -161,9 +159,6 @@ func (c *Connection) writeLoop() {
 			}
 			allowed := c.state == lifecycleActive && (next.groupGrant == nil || next.groupGrant == c.subscriptions.groupGrantLocked(next.frame.Event().ChatID))
 			c.mu.Unlock()
-			if next.presenceWatch != nil && (c.server.presence == nil || !c.server.presence.current(c, next.presenceWatch)) {
-				allowed = false
-			}
 			if next.sidebarWatch != nil && (c.server.sidebar == nil || !c.server.sidebar.current(c, next.sidebarWatch)) {
 				allowed = false
 			}

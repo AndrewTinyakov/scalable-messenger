@@ -504,14 +504,7 @@
           "sort": "desc"
         }
       },
-      "targets": [
-        {
-          "expr": "sum by (instance) (rate(messenger_ws_lease_cleanup_dropped_total[$__rate_interval]))",
-          "legendFormat": "{{instance}}",
-          "refId": "A",
-          "instant": false
-        }
-      ]
+      "targets": []
     },
     {
       "id": 19,

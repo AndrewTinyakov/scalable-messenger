@@ -1,0 +1,29 @@
+$schema: http://json-schema.org/draft-07/schema#
+title: SocketPresenceConfigV1
+x-messenger-direction: server
+type: object
+additionalProperties: false
+required:
+  - type
+  - version
+  - idleAfterHiddenMs
+  - idleAfterInputMs
+  - releaseAfterHiddenMs
+properties:
+  type:
+    const: presence_config
+  version:
+    type: integer
+    const: 1
+  idleAfterHiddenMs:
+    type: integer
+    minimum: 0
+    maximum: 3600000
+  idleAfterInputMs:
+    type: integer
+    minimum: 1000
+    maximum: 3600000
+  releaseAfterHiddenMs:
+    type: integer
+    minimum: 1000
+    maximum: 86400000

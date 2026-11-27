@@ -32,8 +32,8 @@ async function saved(sender, receiver, target, body, replyToMessageId) {
   return event;
 }
 
-async function waitForPresence(socket, userId, state, after = 0) {
-  return socket.waitFor((frame) => frame.type === 'presence' && frame.statuses.some((peer) => peer.userId === userId && peer.state === state), 15000, after);
+async function waitForPresence(socket, userId, online, after = 0) {
+  return socket.waitFor((frame) => frame.type === 'presence' && frame.statuses.some((peer) => peer.userId === userId && peer.online === online), 15000, after);
 }
 
 test('chat features preserve live state, human reads, mutation recovery and global deletion', { timeout: 150000 }, async (t) => {
@@ -58,18 +58,19 @@ test('chat features preserve live state, human reads, mutation recovery and glob
   assert.equal((await api(`${base}/reads`, { cookie: author.cookie })).maxOtherReadSequence, '0');
   assert.equal((await api(`${base}/messages/${first.messageId}/reads`, { cookie: author.cookie })).readers.length, 0);
 
-  authorSocket.send({ type: 'watch_presence', chatId, userIds: [reader.user.id] });
-  await waitForPresence(authorSocket, reader.user.id, 'online');
+  authorSocket.send({ type: 'watch_presence', add: [reader.user.id] });
+  await waitForPresence(authorSocket, reader.user.id, true);
   const secondDeviceAt = authorSocket.frames.length;
   readerSecond.socket.close();
-  await authorSocket.waitFor((frame) => frame.type === 'presence', 15000, secondDeviceAt);
-  assert.equal(authorSocket.frames.slice(secondDeviceAt).some((frame) => frame.type === 'presence' && frame.statuses.some((peer) => peer.userId === reader.user.id && peer.state === 'offline')), false);
+  await new Promise((resolve) => setTimeout(resolve, 4000));
+  assert.equal(authorSocket.frames.slice(secondDeviceAt).some((frame) => frame.type === 'presence' && frame.statuses.some((peer) => peer.userId === reader.user.id && !peer.online)), false);
   const offlineAt = authorSocket.frames.length;
   readerSocket.socket.close();
-  await waitForPresence(authorSocket, reader.user.id, 'offline', offlineAt);
+  const offline = await waitForPresence(authorSocket, reader.user.id, false, offlineAt);
+  assert.ok(Date.parse(offline.statuses.find((peer) => peer.userId === reader.user.id).lastSeenAt) > 0);
   const onlineAt = authorSocket.frames.length;
   readerSocket = await connect(reader.cookie);
-  await waitForPresence(authorSocket, reader.user.id, 'online', onlineAt);
+  await waitForPresence(authorSocket, reader.user.id, true, onlineAt);
 
   const progress = await api(`${base}/reads`, { cookie: reader.cookie, method: 'POST', body: { throughSequence: first.sequence } });
   const details = await api(`${base}/messages/${first.messageId}/reads`, { cookie: author.cookie });
@@ -137,7 +138,7 @@ test('chat features preserve live state, human reads, mutation recovery and glob
   }
   await saved(authorSocket, readerSocket, { chatId: group.id }, 'A group message');
   assert.equal(await status(`/chats/${group.id}`, reader.cookie, 'DELETE'), 403);
-  outsiderSocket.send({ type: 'watch_presence', chatId: group.id, userIds: [author.user.id] });
+  outsiderSocket.send({ type: 'watch_online_count', chatId: group.id });
   await outsiderSocket.waitFor((frame) => frame.type === 'error' && frame.code === 'UNAUTHORIZED');
   await api(`/chats/${group.id}`, { cookie: author.cookie, method: 'DELETE' });
   for (const client of [authorSocket, readerSocket]) await client.waitFor((frame) => frame.type === 'chat_deleted' && frame.chatId === group.id);

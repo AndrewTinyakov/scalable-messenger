@@ -20,6 +20,8 @@ type Config struct {
 	RabbitURLs             []string
 	RedisURL               string
 	RedisClusterNodes      []string
+	PresenceRedisURL       string
+	PresenceRedisNodes     []string
 	AllowedOrigin          string
 	MaxFrameBytes          int64
 	QueueItems             int
@@ -52,6 +54,12 @@ type Config struct {
 	PositionCheckInterval  time.Duration
 	GroupLease             time.Duration
 	ShutdownTimeout        time.Duration
+	PresenceGrace          time.Duration
+	IdleAfterHidden        time.Duration
+	IdleAfterInput         time.Duration
+	ReleaseAfterHidden     time.Duration
+	GatewayHeartbeat       time.Duration
+	GatewayTTL             time.Duration
 }
 
 func Load() (Config, error) {
@@ -79,6 +87,17 @@ func Load() (Config, error) {
 				return c, fmt.Errorf("REDIS_CLUSTER_NODES contains an empty address")
 			}
 			c.RedisClusterNodes = append(c.RedisClusterNodes, node)
+		}
+	}
+	c.PresenceRedisURL = stringEnv("PRESENCE_REDIS_URL", c.RedisURL)
+	c.PresenceRedisNodes = c.RedisClusterNodes
+	if nodes := strings.TrimSpace(stringEnv("PRESENCE_REDIS_CLUSTER_NODES", "")); nodes != "" {
+		c.PresenceRedisNodes = nil
+		for _, node := range strings.Split(nodes, ",") {
+			if node = strings.TrimSpace(node); node == "" {
+				return c, fmt.Errorf("PRESENCE_REDIS_CLUSTER_NODES contains an empty address")
+			}
+			c.PresenceRedisNodes = append(c.PresenceRedisNodes, node)
 		}
 	}
 	c.AllowedOrigin = stringEnv("WS_ALLOWED_ORIGIN", "http://localhost:8080")
@@ -160,10 +179,10 @@ func Load() (Config, error) {
 	if c.ACKTimeout, err = durationEnv("WS_ACK_TIMEOUT", 30*time.Second); err != nil {
 		return c, err
 	}
-	if c.PongTimeout, err = durationEnv("WS_PONG_TIMEOUT", 60*time.Second); err != nil {
+	if c.PongTimeout, err = durationEnv("WS_PONG_TIMEOUT", 40*time.Second); err != nil {
 		return c, err
 	}
-	if c.PingInterval, err = durationEnv("WS_PING_INTERVAL", 25*time.Second); err != nil {
+	if c.PingInterval, err = durationEnv("WS_PING_INTERVAL", 20*time.Second); err != nil {
 		return c, err
 	}
 	if c.PositionCheckInterval, err = durationEnv("WS_POSITION_CHECK_INTERVAL", 30*time.Second); err != nil {
@@ -178,7 +197,23 @@ func Load() (Config, error) {
 	if c.DrainTimeout, err = durationEnv("WS_DRAIN_TIMEOUT", 5*time.Second); err != nil {
 		return c, err
 	}
-	if len(c.WSTicketSecret) < 32 || c.APIGrpcAddress == "" || c.MaxFrameBytes <= 0 || c.QueueItems <= 0 || c.QueueBytes <= 0 || c.PendingACKLimit <= 0 || c.MaxConnections <= 0 || c.MaxPendingUpgrades <= 0 || c.HandshakeRate <= 0 || c.HandshakeWindow < time.Millisecond || c.HandshakeWindow/time.Microsecond < time.Duration(c.HandshakeRate) || c.MaxGroupAuths <= 0 || c.SubscribeRate <= 0 || c.SubscribeWindow < time.Millisecond || c.SubscribeWindow/time.Microsecond < time.Duration(c.SubscribeRate) || c.MaxRoomsPerConnection <= 0 || c.MaxRooms <= 0 || c.MaxMemberships <= 0 || c.CommandWorkers <= 0 || c.CommandQueueItems <= 0 || c.CommandQueueBytes <= 0 || c.ConnectionCommandItems <= 0 || c.ConnectionCommandBytes <= 0 || c.DrainTimeout < 0 || c.DrainTimeout >= c.ShutdownTimeout || c.PublishConcurrency <= 0 || c.ReplayLimit <= 0 || c.ConfirmTimeout <= 0 || c.APITimeout <= 0 || c.WriteTimeout <= 0 || c.ACKTimeout <= 0 || c.PongTimeout <= 0 || c.PingInterval <= 0 || c.PositionCheckInterval <= 0 || c.GroupLease <= 0 || c.ShutdownTimeout <= 0 || c.PingInterval >= c.PongTimeout {
+	for _, setting := range []struct {
+		target   *time.Duration
+		name     string
+		fallback time.Duration
+	}{
+		{&c.PresenceGrace, "PRESENCE_GRACE", 2 * time.Second},
+		{&c.IdleAfterHidden, "PRESENCE_IDLE_AFTER_HIDDEN", 5 * time.Second},
+		{&c.IdleAfterInput, "PRESENCE_IDLE_AFTER_INPUT", 30 * time.Second},
+		{&c.ReleaseAfterHidden, "PRESENCE_RELEASE_AFTER_HIDDEN", 5 * time.Minute},
+		{&c.GatewayHeartbeat, "WS_GATEWAY_HEARTBEAT", 5 * time.Second},
+		{&c.GatewayTTL, "WS_GATEWAY_TTL", 15 * time.Second},
+	} {
+		if *setting.target, err = durationEnv(setting.name, setting.fallback); err != nil {
+			return c, err
+		}
+	}
+	if len(c.WSTicketSecret) < 32 || c.APIGrpcAddress == "" || c.MaxFrameBytes <= 0 || c.QueueItems <= 0 || c.QueueBytes <= 0 || c.PendingACKLimit <= 0 || c.MaxConnections <= 0 || c.MaxPendingUpgrades <= 0 || c.HandshakeRate <= 0 || c.HandshakeWindow < time.Millisecond || c.HandshakeWindow/time.Microsecond < time.Duration(c.HandshakeRate) || c.MaxGroupAuths <= 0 || c.SubscribeRate <= 0 || c.SubscribeWindow < time.Millisecond || c.SubscribeWindow/time.Microsecond < time.Duration(c.SubscribeRate) || c.MaxRoomsPerConnection <= 0 || c.MaxRooms <= 0 || c.MaxMemberships <= 0 || c.CommandWorkers <= 0 || c.CommandQueueItems <= 0 || c.CommandQueueBytes <= 0 || c.ConnectionCommandItems <= 0 || c.ConnectionCommandBytes <= 0 || c.DrainTimeout < 0 || c.DrainTimeout >= c.ShutdownTimeout || c.PublishConcurrency <= 0 || c.ReplayLimit <= 0 || c.ConfirmTimeout <= 0 || c.APITimeout <= 0 || c.WriteTimeout <= 0 || c.ACKTimeout <= 0 || c.PongTimeout <= 0 || c.PingInterval <= 0 || c.PositionCheckInterval <= 0 || c.GroupLease <= 0 || c.ShutdownTimeout <= 0 || c.PingInterval >= c.PongTimeout || c.PresenceGrace < 0 || c.IdleAfterHidden < 0 || c.IdleAfterHidden > time.Hour || c.IdleAfterInput < time.Second || c.IdleAfterInput > time.Hour || c.ReleaseAfterHidden < time.Second || c.ReleaseAfterHidden > 24*time.Hour || c.GatewayHeartbeat <= 0 || c.GatewayTTL <= c.GatewayHeartbeat {
 		return c, fmt.Errorf("invalid WS capacity or timeout")
 	}
 	return c, nil

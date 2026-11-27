@@ -8,11 +8,6 @@ export class WatchPacer {
   constructor(private readonly send: (frame: OutgoingSocketFrame) => void) {}
 
   offer(frame: OutgoingSocketFrame): void {
-    if (frame.type === 'unwatch_presence') {
-      this.pending.delete('watch_presence')
-      this.send(frame)
-      return
-    }
     this.pending.set(frame.type, frame)
     this.flush()
   }

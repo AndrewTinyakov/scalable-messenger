@@ -3,6 +3,7 @@ import { performance } from 'node:perf_hooks';
 import { setTimeout as delay } from 'node:timers/promises';
 import { ulid } from '../support/fixtures.mjs';
 import { bounded, random } from './plan.mjs';
+import { validOnlineCount, validPresenceConfig } from './presence.mjs';
 import { SendSchedule } from './sends.mjs';
 
 const decimal = value => typeof value === 'string' && /^(0|[1-9][0-9]*)$/.test(value);
@@ -43,10 +44,9 @@ export class Driver {
       if (record && socket.index === record.sender) record.queued = true;
     }
     if (event.type === 'chat_deleted' && this.chats.some(chat => chat.id === event.chatId)) this.check(false, 'Unexpected benchmark chat deletion');
-    if (event.type === 'presence' && this.measuring) {
-      const watched = this.foreground.get(socket.index);
-      this.check(event.chatId === watched?.chat.id && Number.isFinite(event.validForMs) && event.validForMs > 0 && timestamp(event.observedAt) && Array.isArray(event.statuses) && event.statuses.length <= 100 && event.statuses.every(status => watched.watchIds.has(status.userId) && ['online', 'offline', 'unknown'].includes(status.state)), 'Invalid presence response');
-    }
+    if (!recovered && socket.presence) this.check(socket.presence.receive(event, at), 'Invalid presence response');
+    if (event.type === 'online_count') this.check(validOnlineCount(event), 'Invalid online count response');
+    if (event.type === 'presence_config') this.check(validPresenceConfig(event), 'Invalid presence config response');
     if (event.type === 'message_changed') {
       const expected = this.expectedMutations.get(event.messageId);
       if (expected) {
@@ -116,7 +116,7 @@ export class Driver {
       if (!chat) return;
       const peers = chat.members.filter(index => index !== socket.index).slice(0, 100).map(index => sockets[index].session.userId);
       this.foreground.set(socket.index, { chat, watchIds: new Set(peers), through: '0', posted: '0', visibleSince: 0, nextAt: 0, busy: false });
-      socket.send({ type: 'watch_presence', chatId: chat.id, userIds: peers });
+      this.watchPresence(socket);
     });
     for (const chat of chats) {
       const socket = sockets[chat.members[0]];
@@ -132,6 +132,14 @@ export class Driver {
     }
     await this.prepareDeletion();
     await delay(1000);
+  }
+  watchPresence(socket) {
+    const selected = this.foreground.get(socket.index);
+    if (!selected) return;
+    assert(socket.send({ type: 'watch_presence', reset: true, add: [...selected.watchIds] }), 'Presence watch send failed');
+    if (selected.chat.kind === 'GROUP' && selected.chat.members.length <= 200) {
+      assert(socket.send({ type: 'watch_online_count', chatId: selected.chat.id }), 'Online count watch send failed');
+    }
   }
   createSend(index, scheduledAt) {
     const chat = this.chats[index % this.chats.length];
@@ -259,8 +267,7 @@ export class Driver {
     await bounded(chosen, 8, async socket => {
       await socket.connect();
       for (const chat of socket.chats.values()) await socket.subscribe(chat);
-      const selected = this.foreground.get(socket.index);
-      if (selected) socket.send({ type: 'watch_presence', chatId: selected.chat.id, userIds: [...selected.watchIds] });
+      this.watchPresence(socket);
       await this.recover(socket);
       this.metrics.count('reconnect.completed');
     });

@@ -32,6 +32,7 @@ type subscriptionGroup struct {
 	mu            sync.Mutex
 	listeners     map[string]*Listener
 	unsubscribing map[string]chan struct{} // per-channel unsubscribe completion, guarded by mu
+	expectedAcks  map[string]int           // our own SUNSUBSCRIBE replies still to arrive, guarded by mu
 	unsubscribe   func(context.Context, string) error
 	state         subscriptionGroupState
 }
@@ -107,13 +108,26 @@ func (group *subscriptionGroup) read() {
 		}
 		switch item := value.(type) {
 		case *redis.Subscription:
-			if item.Kind == "ssubscribe" {
-				group.mu.Lock()
-				if listener := group.listeners[item.Channel]; listener != nil {
+			group.mu.Lock()
+			listener := group.listeners[item.Channel]
+			switch item.Kind {
+			case "ssubscribe":
+				if listener != nil {
 					listener.signalReady(nil)
 				}
-				group.mu.Unlock()
+			case "sunsubscribe":
+				// Redis also unsubscribes on its own when a slot moves; the
+				// listener must then resubscribe on the new owner.
+				if group.expectedAcks[item.Channel] > 0 {
+					if group.expectedAcks[item.Channel]--; group.expectedAcks[item.Channel] == 0 {
+						delete(group.expectedAcks, item.Channel)
+					}
+				} else if listener != nil {
+					group.hub.forgetSlots()
+					go group.remove(listener, errSubscriptionMoved)
+				}
 			}
+			group.mu.Unlock()
 		case *redis.Message:
 			group.deliver(item)
 		}
@@ -170,6 +184,7 @@ func (group *subscriptionGroup) remove(listener *Listener, reason error) {
 		group.state = subscriptionClosed
 	} else {
 		group.unsubscribing[channel] = make(chan struct{})
+		group.expectedAcks[channel]++
 	}
 	group.mu.Unlock()
 	if last {

@@ -167,35 +167,97 @@ public final class ChatAuthorizationGrpc {
     return getAuthorizeGroupsMethod;
   }
 
-  private static volatile io.grpc.MethodDescriptor<com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest,
-      com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceResponse> getAuthorizePresenceMethod;
+  private static volatile io.grpc.MethodDescriptor<com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest,
+      com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityResponse> getPresenceVisibilityMethod;
 
   @io.grpc.stub.annotations.RpcMethod(
-      fullMethodName = SERVICE_NAME + '/' + "AuthorizePresence",
-      requestType = com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest.class,
-      responseType = com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceResponse.class,
+      fullMethodName = SERVICE_NAME + '/' + "PresenceVisibility",
+      requestType = com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest.class,
+      responseType = com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityResponse.class,
       methodType = io.grpc.MethodDescriptor.MethodType.UNARY)
-  public static io.grpc.MethodDescriptor<com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest,
-      com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceResponse> getAuthorizePresenceMethod() {
-    io.grpc.MethodDescriptor<com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest, com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceResponse> getAuthorizePresenceMethod;
-    if ((getAuthorizePresenceMethod = ChatAuthorizationGrpc.getAuthorizePresenceMethod) == null) {
+  public static io.grpc.MethodDescriptor<com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest,
+      com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityResponse> getPresenceVisibilityMethod() {
+    io.grpc.MethodDescriptor<com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest, com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityResponse> getPresenceVisibilityMethod;
+    if ((getPresenceVisibilityMethod = ChatAuthorizationGrpc.getPresenceVisibilityMethod) == null) {
       synchronized (ChatAuthorizationGrpc.class) {
-        if ((getAuthorizePresenceMethod = ChatAuthorizationGrpc.getAuthorizePresenceMethod) == null) {
-          ChatAuthorizationGrpc.getAuthorizePresenceMethod = getAuthorizePresenceMethod =
-              io.grpc.MethodDescriptor.<com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest, com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceResponse>newBuilder()
+        if ((getPresenceVisibilityMethod = ChatAuthorizationGrpc.getPresenceVisibilityMethod) == null) {
+          ChatAuthorizationGrpc.getPresenceVisibilityMethod = getPresenceVisibilityMethod =
+              io.grpc.MethodDescriptor.<com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest, com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityResponse>newBuilder()
               .setType(io.grpc.MethodDescriptor.MethodType.UNARY)
-              .setFullMethodName(generateFullMethodName(SERVICE_NAME, "AuthorizePresence"))
+              .setFullMethodName(generateFullMethodName(SERVICE_NAME, "PresenceVisibility"))
               .setSampledToLocalTracing(true)
               .setRequestMarshaller(io.grpc.protobuf.ProtoUtils.marshaller(
-                  com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest.getDefaultInstance()))
+                  com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest.getDefaultInstance()))
               .setResponseMarshaller(io.grpc.protobuf.ProtoUtils.marshaller(
-                  com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceResponse.getDefaultInstance()))
-              .setSchemaDescriptor(new ChatAuthorizationMethodDescriptorSupplier("AuthorizePresence"))
+                  com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityResponse.getDefaultInstance()))
+              .setSchemaDescriptor(new ChatAuthorizationMethodDescriptorSupplier("PresenceVisibility"))
               .build();
         }
       }
     }
-    return getAuthorizePresenceMethod;
+    return getPresenceVisibilityMethod;
+  }
+
+  private static volatile io.grpc.MethodDescriptor<com.andrewtinyakov.messenger.generated.grpc.OnlineCountMembersRequest,
+      com.andrewtinyakov.messenger.generated.grpc.OnlineCountMembersResponse> getOnlineCountMembersMethod;
+
+  @io.grpc.stub.annotations.RpcMethod(
+      fullMethodName = SERVICE_NAME + '/' + "OnlineCountMembers",
+      requestType = com.andrewtinyakov.messenger.generated.grpc.OnlineCountMembersRequest.class,
+      responseType = com.andrewtinyakov.messenger.generated.grpc.OnlineCountMembersResponse.class,
+      methodType = io.grpc.MethodDescriptor.MethodType.UNARY)
+  public static io.grpc.MethodDescriptor<com.andrewtinyakov.messenger.generated.grpc.OnlineCountMembersRequest,
+      com.andrewtinyakov.messenger.generated.grpc.OnlineCountMembersResponse> getOnlineCountMembersMethod() {
+    io.grpc.MethodDescriptor<com.andrewtinyakov.messenger.generated.grpc.OnlineCountMembersRequest, com.andrewtinyakov.messenger.generated.grpc.OnlineCountMembersResponse> getOnlineCountMembersMethod;
+    if ((getOnlineCountMembersMethod = ChatAuthorizationGrpc.getOnlineCountMembersMethod) == null) {
+      synchronized (ChatAuthorizationGrpc.class) {
+        if ((getOnlineCountMembersMethod = ChatAuthorizationGrpc.getOnlineCountMembersMethod) == null) {
+          ChatAuthorizationGrpc.getOnlineCountMembersMethod = getOnlineCountMembersMethod =
+              io.grpc.MethodDescriptor.<com.andrewtinyakov.messenger.generated.grpc.OnlineCountMembersRequest, com.andrewtinyakov.messenger.generated.grpc.OnlineCountMembersResponse>newBuilder()
+              .setType(io.grpc.MethodDescriptor.MethodType.UNARY)
+              .setFullMethodName(generateFullMethodName(SERVICE_NAME, "OnlineCountMembers"))
+              .setSampledToLocalTracing(true)
+              .setRequestMarshaller(io.grpc.protobuf.ProtoUtils.marshaller(
+                  com.andrewtinyakov.messenger.generated.grpc.OnlineCountMembersRequest.getDefaultInstance()))
+              .setResponseMarshaller(io.grpc.protobuf.ProtoUtils.marshaller(
+                  com.andrewtinyakov.messenger.generated.grpc.OnlineCountMembersResponse.getDefaultInstance()))
+              .setSchemaDescriptor(new ChatAuthorizationMethodDescriptorSupplier("OnlineCountMembers"))
+              .build();
+        }
+      }
+    }
+    return getOnlineCountMembersMethod;
+  }
+
+  private static volatile io.grpc.MethodDescriptor<com.andrewtinyakov.messenger.generated.grpc.RecordLastSeenRequest,
+      com.andrewtinyakov.messenger.generated.grpc.RecordLastSeenResponse> getRecordLastSeenMethod;
+
+  @io.grpc.stub.annotations.RpcMethod(
+      fullMethodName = SERVICE_NAME + '/' + "RecordLastSeen",
+      requestType = com.andrewtinyakov.messenger.generated.grpc.RecordLastSeenRequest.class,
+      responseType = com.andrewtinyakov.messenger.generated.grpc.RecordLastSeenResponse.class,
+      methodType = io.grpc.MethodDescriptor.MethodType.UNARY)
+  public static io.grpc.MethodDescriptor<com.andrewtinyakov.messenger.generated.grpc.RecordLastSeenRequest,
+      com.andrewtinyakov.messenger.generated.grpc.RecordLastSeenResponse> getRecordLastSeenMethod() {
+    io.grpc.MethodDescriptor<com.andrewtinyakov.messenger.generated.grpc.RecordLastSeenRequest, com.andrewtinyakov.messenger.generated.grpc.RecordLastSeenResponse> getRecordLastSeenMethod;
+    if ((getRecordLastSeenMethod = ChatAuthorizationGrpc.getRecordLastSeenMethod) == null) {
+      synchronized (ChatAuthorizationGrpc.class) {
+        if ((getRecordLastSeenMethod = ChatAuthorizationGrpc.getRecordLastSeenMethod) == null) {
+          ChatAuthorizationGrpc.getRecordLastSeenMethod = getRecordLastSeenMethod =
+              io.grpc.MethodDescriptor.<com.andrewtinyakov.messenger.generated.grpc.RecordLastSeenRequest, com.andrewtinyakov.messenger.generated.grpc.RecordLastSeenResponse>newBuilder()
+              .setType(io.grpc.MethodDescriptor.MethodType.UNARY)
+              .setFullMethodName(generateFullMethodName(SERVICE_NAME, "RecordLastSeen"))
+              .setSampledToLocalTracing(true)
+              .setRequestMarshaller(io.grpc.protobuf.ProtoUtils.marshaller(
+                  com.andrewtinyakov.messenger.generated.grpc.RecordLastSeenRequest.getDefaultInstance()))
+              .setResponseMarshaller(io.grpc.protobuf.ProtoUtils.marshaller(
+                  com.andrewtinyakov.messenger.generated.grpc.RecordLastSeenResponse.getDefaultInstance()))
+              .setSchemaDescriptor(new ChatAuthorizationMethodDescriptorSupplier("RecordLastSeen"))
+              .build();
+        }
+      }
+    }
+    return getRecordLastSeenMethod;
   }
 
   /**
@@ -298,9 +360,23 @@ public final class ChatAuthorizationGrpc {
 
     /**
      */
-    default void authorizePresence(com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest request,
-        io.grpc.stub.StreamObserver<com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceResponse> responseObserver) {
-      io.grpc.stub.ServerCalls.asyncUnimplementedUnaryCall(getAuthorizePresenceMethod(), responseObserver);
+    default void presenceVisibility(com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest request,
+        io.grpc.stub.StreamObserver<com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityResponse> responseObserver) {
+      io.grpc.stub.ServerCalls.asyncUnimplementedUnaryCall(getPresenceVisibilityMethod(), responseObserver);
+    }
+
+    /**
+     */
+    default void onlineCountMembers(com.andrewtinyakov.messenger.generated.grpc.OnlineCountMembersRequest request,
+        io.grpc.stub.StreamObserver<com.andrewtinyakov.messenger.generated.grpc.OnlineCountMembersResponse> responseObserver) {
+      io.grpc.stub.ServerCalls.asyncUnimplementedUnaryCall(getOnlineCountMembersMethod(), responseObserver);
+    }
+
+    /**
+     */
+    default void recordLastSeen(com.andrewtinyakov.messenger.generated.grpc.RecordLastSeenRequest request,
+        io.grpc.stub.StreamObserver<com.andrewtinyakov.messenger.generated.grpc.RecordLastSeenResponse> responseObserver) {
+      io.grpc.stub.ServerCalls.asyncUnimplementedUnaryCall(getRecordLastSeenMethod(), responseObserver);
     }
   }
 
@@ -373,10 +449,26 @@ public final class ChatAuthorizationGrpc {
 
     /**
      */
-    public void authorizePresence(com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest request,
-        io.grpc.stub.StreamObserver<com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceResponse> responseObserver) {
+    public void presenceVisibility(com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest request,
+        io.grpc.stub.StreamObserver<com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityResponse> responseObserver) {
       io.grpc.stub.ClientCalls.asyncUnaryCall(
-          getChannel().newCall(getAuthorizePresenceMethod(), getCallOptions()), request, responseObserver);
+          getChannel().newCall(getPresenceVisibilityMethod(), getCallOptions()), request, responseObserver);
+    }
+
+    /**
+     */
+    public void onlineCountMembers(com.andrewtinyakov.messenger.generated.grpc.OnlineCountMembersRequest request,
+        io.grpc.stub.StreamObserver<com.andrewtinyakov.messenger.generated.grpc.OnlineCountMembersResponse> responseObserver) {
+      io.grpc.stub.ClientCalls.asyncUnaryCall(
+          getChannel().newCall(getOnlineCountMembersMethod(), getCallOptions()), request, responseObserver);
+    }
+
+    /**
+     */
+    public void recordLastSeen(com.andrewtinyakov.messenger.generated.grpc.RecordLastSeenRequest request,
+        io.grpc.stub.StreamObserver<com.andrewtinyakov.messenger.generated.grpc.RecordLastSeenResponse> responseObserver) {
+      io.grpc.stub.ClientCalls.asyncUnaryCall(
+          getChannel().newCall(getRecordLastSeenMethod(), getCallOptions()), request, responseObserver);
     }
   }
 
@@ -433,9 +525,23 @@ public final class ChatAuthorizationGrpc {
 
     /**
      */
-    public com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceResponse authorizePresence(com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest request) throws io.grpc.StatusException {
+    public com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityResponse presenceVisibility(com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest request) throws io.grpc.StatusException {
       return io.grpc.stub.ClientCalls.blockingV2UnaryCall(
-          getChannel(), getAuthorizePresenceMethod(), getCallOptions(), request);
+          getChannel(), getPresenceVisibilityMethod(), getCallOptions(), request);
+    }
+
+    /**
+     */
+    public com.andrewtinyakov.messenger.generated.grpc.OnlineCountMembersResponse onlineCountMembers(com.andrewtinyakov.messenger.generated.grpc.OnlineCountMembersRequest request) throws io.grpc.StatusException {
+      return io.grpc.stub.ClientCalls.blockingV2UnaryCall(
+          getChannel(), getOnlineCountMembersMethod(), getCallOptions(), request);
+    }
+
+    /**
+     */
+    public com.andrewtinyakov.messenger.generated.grpc.RecordLastSeenResponse recordLastSeen(com.andrewtinyakov.messenger.generated.grpc.RecordLastSeenRequest request) throws io.grpc.StatusException {
+      return io.grpc.stub.ClientCalls.blockingV2UnaryCall(
+          getChannel(), getRecordLastSeenMethod(), getCallOptions(), request);
     }
   }
 
@@ -492,9 +598,23 @@ public final class ChatAuthorizationGrpc {
 
     /**
      */
-    public com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceResponse authorizePresence(com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest request) {
+    public com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityResponse presenceVisibility(com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest request) {
       return io.grpc.stub.ClientCalls.blockingUnaryCall(
-          getChannel(), getAuthorizePresenceMethod(), getCallOptions(), request);
+          getChannel(), getPresenceVisibilityMethod(), getCallOptions(), request);
+    }
+
+    /**
+     */
+    public com.andrewtinyakov.messenger.generated.grpc.OnlineCountMembersResponse onlineCountMembers(com.andrewtinyakov.messenger.generated.grpc.OnlineCountMembersRequest request) {
+      return io.grpc.stub.ClientCalls.blockingUnaryCall(
+          getChannel(), getOnlineCountMembersMethod(), getCallOptions(), request);
+    }
+
+    /**
+     */
+    public com.andrewtinyakov.messenger.generated.grpc.RecordLastSeenResponse recordLastSeen(com.andrewtinyakov.messenger.generated.grpc.RecordLastSeenRequest request) {
+      return io.grpc.stub.ClientCalls.blockingUnaryCall(
+          getChannel(), getRecordLastSeenMethod(), getCallOptions(), request);
     }
   }
 
@@ -556,10 +676,26 @@ public final class ChatAuthorizationGrpc {
 
     /**
      */
-    public com.google.common.util.concurrent.ListenableFuture<com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceResponse> authorizePresence(
-        com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest request) {
+    public com.google.common.util.concurrent.ListenableFuture<com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityResponse> presenceVisibility(
+        com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest request) {
       return io.grpc.stub.ClientCalls.futureUnaryCall(
-          getChannel().newCall(getAuthorizePresenceMethod(), getCallOptions()), request);
+          getChannel().newCall(getPresenceVisibilityMethod(), getCallOptions()), request);
+    }
+
+    /**
+     */
+    public com.google.common.util.concurrent.ListenableFuture<com.andrewtinyakov.messenger.generated.grpc.OnlineCountMembersResponse> onlineCountMembers(
+        com.andrewtinyakov.messenger.generated.grpc.OnlineCountMembersRequest request) {
+      return io.grpc.stub.ClientCalls.futureUnaryCall(
+          getChannel().newCall(getOnlineCountMembersMethod(), getCallOptions()), request);
+    }
+
+    /**
+     */
+    public com.google.common.util.concurrent.ListenableFuture<com.andrewtinyakov.messenger.generated.grpc.RecordLastSeenResponse> recordLastSeen(
+        com.andrewtinyakov.messenger.generated.grpc.RecordLastSeenRequest request) {
+      return io.grpc.stub.ClientCalls.futureUnaryCall(
+          getChannel().newCall(getRecordLastSeenMethod(), getCallOptions()), request);
     }
   }
 
@@ -568,7 +704,9 @@ public final class ChatAuthorizationGrpc {
   private static final int METHODID_VALIDATE_SESSIONS = 2;
   private static final int METHODID_AUTHORIZE_GROUP = 3;
   private static final int METHODID_AUTHORIZE_GROUPS = 4;
-  private static final int METHODID_AUTHORIZE_PRESENCE = 5;
+  private static final int METHODID_PRESENCE_VISIBILITY = 5;
+  private static final int METHODID_ONLINE_COUNT_MEMBERS = 6;
+  private static final int METHODID_RECORD_LAST_SEEN = 7;
 
   private static final class MethodHandlers<Req, Resp> implements
       io.grpc.stub.ServerCalls.UnaryMethod<Req, Resp>,
@@ -607,9 +745,17 @@ public final class ChatAuthorizationGrpc {
           serviceImpl.authorizeGroups((com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupsRequest) request,
               (io.grpc.stub.StreamObserver<com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupsResponse>) responseObserver);
           break;
-        case METHODID_AUTHORIZE_PRESENCE:
-          serviceImpl.authorizePresence((com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest) request,
-              (io.grpc.stub.StreamObserver<com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceResponse>) responseObserver);
+        case METHODID_PRESENCE_VISIBILITY:
+          serviceImpl.presenceVisibility((com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest) request,
+              (io.grpc.stub.StreamObserver<com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityResponse>) responseObserver);
+          break;
+        case METHODID_ONLINE_COUNT_MEMBERS:
+          serviceImpl.onlineCountMembers((com.andrewtinyakov.messenger.generated.grpc.OnlineCountMembersRequest) request,
+              (io.grpc.stub.StreamObserver<com.andrewtinyakov.messenger.generated.grpc.OnlineCountMembersResponse>) responseObserver);
+          break;
+        case METHODID_RECORD_LAST_SEEN:
+          serviceImpl.recordLastSeen((com.andrewtinyakov.messenger.generated.grpc.RecordLastSeenRequest) request,
+              (io.grpc.stub.StreamObserver<com.andrewtinyakov.messenger.generated.grpc.RecordLastSeenResponse>) responseObserver);
           break;
         default:
           throw new AssertionError();
@@ -665,12 +811,26 @@ public final class ChatAuthorizationGrpc {
               com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupsResponse>(
                 service, METHODID_AUTHORIZE_GROUPS)))
         .addMethod(
-          getAuthorizePresenceMethod(),
+          getPresenceVisibilityMethod(),
           io.grpc.stub.ServerCalls.asyncUnaryCall(
             new MethodHandlers<
-              com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceRequest,
-              com.andrewtinyakov.messenger.generated.grpc.AuthorizePresenceResponse>(
-                service, METHODID_AUTHORIZE_PRESENCE)))
+              com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest,
+              com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityResponse>(
+                service, METHODID_PRESENCE_VISIBILITY)))
+        .addMethod(
+          getOnlineCountMembersMethod(),
+          io.grpc.stub.ServerCalls.asyncUnaryCall(
+            new MethodHandlers<
+              com.andrewtinyakov.messenger.generated.grpc.OnlineCountMembersRequest,
+              com.andrewtinyakov.messenger.generated.grpc.OnlineCountMembersResponse>(
+                service, METHODID_ONLINE_COUNT_MEMBERS)))
+        .addMethod(
+          getRecordLastSeenMethod(),
+          io.grpc.stub.ServerCalls.asyncUnaryCall(
+            new MethodHandlers<
+              com.andrewtinyakov.messenger.generated.grpc.RecordLastSeenRequest,
+              com.andrewtinyakov.messenger.generated.grpc.RecordLastSeenResponse>(
+                service, METHODID_RECORD_LAST_SEEN)))
         .build();
   }
 
@@ -724,7 +884,9 @@ public final class ChatAuthorizationGrpc {
               .addMethod(getValidateSessionsMethod())
               .addMethod(getAuthorizeGroupMethod())
               .addMethod(getAuthorizeGroupsMethod())
-              .addMethod(getAuthorizePresenceMethod())
+              .addMethod(getPresenceVisibilityMethod())
+              .addMethod(getOnlineCountMembersMethod())
+              .addMethod(getRecordLastSeenMethod())
               .build();
         }
       }

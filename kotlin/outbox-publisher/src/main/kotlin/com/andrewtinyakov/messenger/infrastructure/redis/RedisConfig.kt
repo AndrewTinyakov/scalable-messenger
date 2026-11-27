@@ -7,11 +7,15 @@ import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactor
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate
 
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties(RedisRoomProperties::class)
+@EnableConfigurationProperties(RedisRoomProperties::class, RedisPresenceProperties::class)
 class RedisConfig {
     @Bean
     fun reactiveStringRedisTemplate(connections: LettuceConnectionFactory): ReactiveStringRedisTemplate {
         connections.initConnection()
         return ReactiveStringRedisTemplate(connections)
     }
+
+    @Bean
+    fun presenceRedis(properties: RedisPresenceProperties, rooms: ReactiveStringRedisTemplate): PresenceRedis =
+        PresenceRedis.of(properties, rooms)
 }

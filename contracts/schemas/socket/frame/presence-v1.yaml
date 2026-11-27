@@ -6,9 +6,6 @@ additionalProperties: false
 required:
   - type
   - version
-  - chatId
-  - observedAt
-  - validForMs
   - statuses
 properties:
   type:
@@ -16,30 +13,37 @@ properties:
   version:
     type: integer
     const: 1
-  chatId: &a1
-    type: string
-    pattern: ^[0-7][0-9A-HJKMNP-TV-Z]{25}$
-  observedAt:
-    type: string
-    format: date-time
-  validForMs:
-    type: integer
-    minimum: 1
-    maximum: 30000
   statuses:
     type: array
-    maxItems: 100
+    maxItems: 500
     items:
       type: object
       additionalProperties: false
       required:
         - userId
-        - state
+        - online
       properties:
-        userId: *a1
-        state:
+        userId: &a1
+          type: string
+          pattern: ^[0-7][0-9A-HJKMNP-TV-Z]{25}$
+        online:
+          type: boolean
+        lastSeenAt:
+          type: string
+          format: date-time
+        lastSeen:
           type: string
           enum:
-            - online
-            - offline
-            - unknown
+            - recently
+            - within_week
+            - within_month
+            - long_ago
+      not:
+        required:
+          - lastSeenAt
+          - lastSeen
+  unavailable:
+    type: array
+    maxItems: 500
+    uniqueItems: true
+    items: *a1

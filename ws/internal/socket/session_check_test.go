@@ -14,7 +14,7 @@ import (
 
 func newCheckedConnection(t *testing.T, server *Server, identity ticket.Identity, due time.Time) *Connection {
 	t.Helper()
-	connection := newConnection(server, nil, identity, "")
+	connection := newConnection(server, nil, identity)
 	t.Cleanup(connection.Close)
 	server.mu.Lock()
 	server.connections[connection] = struct{}{}

@@ -4,6 +4,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEve
 import { chatPeer, chatTitle, hasUnread, type Chat } from '../../entities/chat/model'
 import type { Message, PendingSend } from '../../entities/message/model'
 import type { User } from '../../entities/session/model'
+import { isOnline } from '../../features/presence/presenceLabel'
+import { usePresenceStatuses } from '../../features/presence/usePresence'
 import { ChatKind } from '../../shared/api/generated/socket-vocabulary'
 import { Avatar } from '../../shared/ui/Avatar'
 import { ChatRow, type OpenChatMenu } from './ChatRow'
@@ -21,7 +23,6 @@ interface Props {
   onReorderPinned?: (chatIds: string[]) => void
   selectedId: string | null
   liveChatId: string | null
-  presence: Record<string, 'online' | 'offline' | 'unknown'>
   onSelect(id: string): void
   onChatMenu: OpenChatMenu
   onCreate(): void
@@ -142,7 +143,6 @@ export function ChatList({
   onReorderPinned,
   selectedId,
   liveChatId,
-  presence,
   onSelect,
   onChatMenu,
   onCreate,
@@ -153,6 +153,7 @@ export function ChatList({
   loadingMore,
   onLoadMore,
 }: Props) {
+  const presence = usePresenceStatuses()
   const [filter, setFilter] = useState('')
   const listRef = useRef<HTMLElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
@@ -286,7 +287,7 @@ export function ChatList({
               userId={user.id}
               selected={selectedId === chat.id}
               live={liveChatId === chat.id}
-              online={peer !== undefined && presence[peer] === 'online'}
+              online={peer !== undefined && isOnline(presence.get(peer))}
               loaded={messages[chat.id]?.at(-1)}
               pending={latestPending.get(chat.id)}
               dragging={dragged === chat.id}

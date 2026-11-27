@@ -19,12 +19,14 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ChatAuthorization_AuthorizeSidebar_FullMethodName  = "/messenger.authorization.v1.ChatAuthorization/AuthorizeSidebar"
-	ChatAuthorization_ValidateSession_FullMethodName   = "/messenger.authorization.v1.ChatAuthorization/ValidateSession"
-	ChatAuthorization_ValidateSessions_FullMethodName  = "/messenger.authorization.v1.ChatAuthorization/ValidateSessions"
-	ChatAuthorization_AuthorizeGroup_FullMethodName    = "/messenger.authorization.v1.ChatAuthorization/AuthorizeGroup"
-	ChatAuthorization_AuthorizeGroups_FullMethodName   = "/messenger.authorization.v1.ChatAuthorization/AuthorizeGroups"
-	ChatAuthorization_AuthorizePresence_FullMethodName = "/messenger.authorization.v1.ChatAuthorization/AuthorizePresence"
+	ChatAuthorization_AuthorizeSidebar_FullMethodName   = "/messenger.authorization.v1.ChatAuthorization/AuthorizeSidebar"
+	ChatAuthorization_ValidateSession_FullMethodName    = "/messenger.authorization.v1.ChatAuthorization/ValidateSession"
+	ChatAuthorization_ValidateSessions_FullMethodName   = "/messenger.authorization.v1.ChatAuthorization/ValidateSessions"
+	ChatAuthorization_AuthorizeGroup_FullMethodName     = "/messenger.authorization.v1.ChatAuthorization/AuthorizeGroup"
+	ChatAuthorization_AuthorizeGroups_FullMethodName    = "/messenger.authorization.v1.ChatAuthorization/AuthorizeGroups"
+	ChatAuthorization_PresenceVisibility_FullMethodName = "/messenger.authorization.v1.ChatAuthorization/PresenceVisibility"
+	ChatAuthorization_OnlineCountMembers_FullMethodName = "/messenger.authorization.v1.ChatAuthorization/OnlineCountMembers"
+	ChatAuthorization_RecordLastSeen_FullMethodName     = "/messenger.authorization.v1.ChatAuthorization/RecordLastSeen"
 )
 
 // ChatAuthorizationClient is the client API for ChatAuthorization service.
@@ -36,7 +38,9 @@ type ChatAuthorizationClient interface {
 	ValidateSessions(ctx context.Context, in *ValidateSessionsRequest, opts ...grpc.CallOption) (*ValidateSessionsResponse, error)
 	AuthorizeGroup(ctx context.Context, in *AuthorizeGroupRequest, opts ...grpc.CallOption) (*AuthorizeGroupResponse, error)
 	AuthorizeGroups(ctx context.Context, in *AuthorizeGroupsRequest, opts ...grpc.CallOption) (*AuthorizeGroupsResponse, error)
-	AuthorizePresence(ctx context.Context, in *AuthorizePresenceRequest, opts ...grpc.CallOption) (*AuthorizePresenceResponse, error)
+	PresenceVisibility(ctx context.Context, in *PresenceVisibilityRequest, opts ...grpc.CallOption) (*PresenceVisibilityResponse, error)
+	OnlineCountMembers(ctx context.Context, in *OnlineCountMembersRequest, opts ...grpc.CallOption) (*OnlineCountMembersResponse, error)
+	RecordLastSeen(ctx context.Context, in *RecordLastSeenRequest, opts ...grpc.CallOption) (*RecordLastSeenResponse, error)
 }
 
 type chatAuthorizationClient struct {
@@ -97,10 +101,30 @@ func (c *chatAuthorizationClient) AuthorizeGroups(ctx context.Context, in *Autho
 	return out, nil
 }
 
-func (c *chatAuthorizationClient) AuthorizePresence(ctx context.Context, in *AuthorizePresenceRequest, opts ...grpc.CallOption) (*AuthorizePresenceResponse, error) {
+func (c *chatAuthorizationClient) PresenceVisibility(ctx context.Context, in *PresenceVisibilityRequest, opts ...grpc.CallOption) (*PresenceVisibilityResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(AuthorizePresenceResponse)
-	err := c.cc.Invoke(ctx, ChatAuthorization_AuthorizePresence_FullMethodName, in, out, cOpts...)
+	out := new(PresenceVisibilityResponse)
+	err := c.cc.Invoke(ctx, ChatAuthorization_PresenceVisibility_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *chatAuthorizationClient) OnlineCountMembers(ctx context.Context, in *OnlineCountMembersRequest, opts ...grpc.CallOption) (*OnlineCountMembersResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(OnlineCountMembersResponse)
+	err := c.cc.Invoke(ctx, ChatAuthorization_OnlineCountMembers_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *chatAuthorizationClient) RecordLastSeen(ctx context.Context, in *RecordLastSeenRequest, opts ...grpc.CallOption) (*RecordLastSeenResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RecordLastSeenResponse)
+	err := c.cc.Invoke(ctx, ChatAuthorization_RecordLastSeen_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +140,9 @@ type ChatAuthorizationServer interface {
 	ValidateSessions(context.Context, *ValidateSessionsRequest) (*ValidateSessionsResponse, error)
 	AuthorizeGroup(context.Context, *AuthorizeGroupRequest) (*AuthorizeGroupResponse, error)
 	AuthorizeGroups(context.Context, *AuthorizeGroupsRequest) (*AuthorizeGroupsResponse, error)
-	AuthorizePresence(context.Context, *AuthorizePresenceRequest) (*AuthorizePresenceResponse, error)
+	PresenceVisibility(context.Context, *PresenceVisibilityRequest) (*PresenceVisibilityResponse, error)
+	OnlineCountMembers(context.Context, *OnlineCountMembersRequest) (*OnlineCountMembersResponse, error)
+	RecordLastSeen(context.Context, *RecordLastSeenRequest) (*RecordLastSeenResponse, error)
 	mustEmbedUnimplementedChatAuthorizationServer()
 }
 
@@ -142,8 +168,14 @@ func (UnimplementedChatAuthorizationServer) AuthorizeGroup(context.Context, *Aut
 func (UnimplementedChatAuthorizationServer) AuthorizeGroups(context.Context, *AuthorizeGroupsRequest) (*AuthorizeGroupsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AuthorizeGroups not implemented")
 }
-func (UnimplementedChatAuthorizationServer) AuthorizePresence(context.Context, *AuthorizePresenceRequest) (*AuthorizePresenceResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method AuthorizePresence not implemented")
+func (UnimplementedChatAuthorizationServer) PresenceVisibility(context.Context, *PresenceVisibilityRequest) (*PresenceVisibilityResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method PresenceVisibility not implemented")
+}
+func (UnimplementedChatAuthorizationServer) OnlineCountMembers(context.Context, *OnlineCountMembersRequest) (*OnlineCountMembersResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method OnlineCountMembers not implemented")
+}
+func (UnimplementedChatAuthorizationServer) RecordLastSeen(context.Context, *RecordLastSeenRequest) (*RecordLastSeenResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RecordLastSeen not implemented")
 }
 func (UnimplementedChatAuthorizationServer) mustEmbedUnimplementedChatAuthorizationServer() {}
 func (UnimplementedChatAuthorizationServer) testEmbeddedByValue()                           {}
@@ -256,20 +288,56 @@ func _ChatAuthorization_AuthorizeGroups_Handler(srv interface{}, ctx context.Con
 	return interceptor(ctx, in, info, handler)
 }
 
-func _ChatAuthorization_AuthorizePresence_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(AuthorizePresenceRequest)
+func _ChatAuthorization_PresenceVisibility_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PresenceVisibilityRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(ChatAuthorizationServer).AuthorizePresence(ctx, in)
+		return srv.(ChatAuthorizationServer).PresenceVisibility(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: ChatAuthorization_AuthorizePresence_FullMethodName,
+		FullMethod: ChatAuthorization_PresenceVisibility_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ChatAuthorizationServer).AuthorizePresence(ctx, req.(*AuthorizePresenceRequest))
+		return srv.(ChatAuthorizationServer).PresenceVisibility(ctx, req.(*PresenceVisibilityRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ChatAuthorization_OnlineCountMembers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(OnlineCountMembersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatAuthorizationServer).OnlineCountMembers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChatAuthorization_OnlineCountMembers_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatAuthorizationServer).OnlineCountMembers(ctx, req.(*OnlineCountMembersRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ChatAuthorization_RecordLastSeen_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RecordLastSeenRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatAuthorizationServer).RecordLastSeen(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChatAuthorization_RecordLastSeen_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatAuthorizationServer).RecordLastSeen(ctx, req.(*RecordLastSeenRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -302,8 +370,16 @@ var ChatAuthorization_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _ChatAuthorization_AuthorizeGroups_Handler,
 		},
 		{
-			MethodName: "AuthorizePresence",
-			Handler:    _ChatAuthorization_AuthorizePresence_Handler,
+			MethodName: "PresenceVisibility",
+			Handler:    _ChatAuthorization_PresenceVisibility_Handler,
+		},
+		{
+			MethodName: "OnlineCountMembers",
+			Handler:    _ChatAuthorization_OnlineCountMembers_Handler,
+		},
+		{
+			MethodName: "RecordLastSeen",
+			Handler:    _ChatAuthorization_RecordLastSeen_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

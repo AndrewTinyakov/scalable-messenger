@@ -9,7 +9,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-func TestBatchedMaintenanceKeepsPerRoomAndLeaseOutcomes(t *testing.T) {
+func TestBatchedMaintenanceKeepsPerRoomOutcomes(t *testing.T) {
 	client, _ := connectionTestClients(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -31,14 +31,5 @@ func TestBatchedMaintenanceKeepsPerRoomAndLeaseOutcomes(t *testing.T) {
 	if positions[badRoom].Err == nil || positions["bad{}"].Err == nil {
 		t.Fatal("invalid rooms lost their failure outcomes")
 	}
-	user := fmt.Sprintf("maintenance-user-%d", time.Now().UnixNano())
-	lease, allowed, err := client.AcquireConnectionLease(ctx, user)
-	if err != nil || !allowed {
-		t.Fatalf("acquire=%v,%v", allowed, err)
-	}
-	defer client.ReleaseConnectionLease(ctx, user, lease)
-	results := client.RenewConnectionLeases(ctx, []ConnectionLease{{UserID: user, LeaseID: lease}, {UserID: user, LeaseID: "released"}, {}})
-	if len(results) != 3 || !results[0].Active || results[0].Err != nil || results[1].Active || results[1].Err != nil || results[2].Err == nil {
-		t.Fatalf("renew results=%+v", results)
-	}
+
 }

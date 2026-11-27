@@ -29,7 +29,7 @@ Endpoint options are `--api`, `--ws`, and `--origin`, defaulting to the existing
 
 ## Traffic
 
-`--send-rate` is the aggregate offered messages per second, spread evenly across chats. It is deliberately low relative to connected users. A deterministic ten percent of each chat's members, rounded up, send messages. In a direct conversation that means one sender. Each socket watches one selected foreground chat and at most 100 peers. Other chat memberships still receive and acknowledge transport notifications.
+`--send-rate` is the aggregate offered messages per second, spread evenly across chats. It is deliberately low relative to connected users. A deterministic ten percent of each chat's members, rounded up, send messages. In a direct conversation that means one sender. Each socket sends a `watch_presence` reset for up to 100 peers from its selected foreground chat during warmup and after reconnect. It requires fresh statuses for the first three peers, or all peers when fewer than three are watched. A selected group with up to 200 members also gets a `watch_online_count` request. Reports include presence and online-count frames, observed online/offline changes, watch commands and rate-limit errors. Presence counters include warmup. Other chat memberships still receive and acknowledge transport notifications.
 
 | Scenario | Topology |
 | --- | --- |

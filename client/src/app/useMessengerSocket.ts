@@ -12,7 +12,7 @@ import { reconnectDelay } from '../shared/lib/reconnect'
 
 interface MessengerSocketOptions {
   onFeatureEvent(event: SocketEvent): boolean
-  onSidebarEvent(event: SocketEvent): boolean
+  onPresenceEvent(event: SocketEvent): boolean
   sessionApi: ReturnType<typeof api.forSession>
   userId: string
   recovery: ChatRecovery
@@ -91,7 +91,7 @@ function socketErrorMessage(code?: string): string {
 
 export function useMessengerSocket({
   onFeatureEvent,
-  onSidebarEvent,
+  onPresenceEvent,
   sessionApi,
   userId,
   recovery,
@@ -214,7 +214,7 @@ export function useMessengerSocket({
           onFeatureEvent(frame)
           return
         }
-        if (onSidebarEvent(frame) || onFeatureEvent(frame)) return
+        if (onPresenceEvent(frame) || onFeatureEvent(frame)) return
         if (frame.type === EventType.SUBSCRIBED && frame.chatId === selectedRef.current) {
           window.clearTimeout(groupRetryRef.current)
           groupRetryRef.current = undefined
@@ -354,7 +354,7 @@ export function useMessengerSocket({
     }
   }, [
     onFeatureEvent,
-    onSidebarEvent,
+    onPresenceEvent,
     setNextRetryAt,
     setConnectionGeneration,
     retryNowRef,

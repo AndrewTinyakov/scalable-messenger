@@ -5,11 +5,9 @@ import type { DeleteScope, DeleteTarget } from '../../entities/message/historySn
 import { isContiguous } from '../../entities/message/historyWindow'
 import { type Message } from '../../entities/message/model'
 import type { ChatState } from '../../shared/api/featureDecode'
-import { ChatKind } from '../../shared/api/generated/socket-vocabulary'
 import { ApiError, type api } from '../../shared/api/http'
-import type { OutgoingSocketFrame, PresenceStatus, SocketEvent } from '../../shared/api/socket'
+import type { OutgoingSocketFrame, SocketEvent } from '../../shared/api/socket'
 import { createUlid } from '../../shared/lib/id'
-import { isId } from '../../shared/lib/validation'
 import { MutationRecovery } from './mutationRecovery'
 
 type SessionApi = ReturnType<typeof api.forSession>
@@ -26,7 +24,6 @@ interface Options {
   onReadCommitted?(chatId: string, through: string): void
   onReadFailed?(chatId: string): void
   fail(message: string): void
-  sharedPresence?: Record<string, PresenceStatus['state']>
 }
 
 const STATE_CHECK_MS = 60_000
@@ -43,8 +40,6 @@ type ReadWrite =
 export function useConversationFeatures(options: Options) {
   const optionsRef = useRef(options)
   optionsRef.current = options
-  const [watchTargets, setWatchTargets] = useState<string[] | null>(null)
-  const [presence, setPresence] = useState<Record<string, PresenceStatus['state']>>({})
   const [summary, setSummary] = useState({ throughSequence: '0', maxOtherReadSequence: '0' })
   const [reveal, setReveal] = useState<{
     messageId: string
@@ -53,8 +48,6 @@ export function useConversationFeatures(options: Options) {
   } | null>(null)
   const [jumpLoading, setJumpLoading] = useState<string | null>(null)
   const scope = useRef(0)
-  const presenceAt = useRef(0)
-  const presenceExpiry = useRef<ReturnType<typeof setTimeout>>()
   const jumpRequest = useRef(0)
   const readPending = useRef('0')
   const readNextAt = useRef(0)
@@ -193,31 +186,13 @@ export function useConversationFeatures(options: Options) {
     },
     [flushRead],
   )
-  const watchedRef = useRef<string[]>([])
-  const memberKey =
-    watchTargets?.join(',') ??
-    options.chat?.members
-      .slice(0, 100)
-      .map((member) => member.id)
-      .sort()
-      .join(',') ??
-    ''
-  watchedRef.current = memberKey ? memberKey.split(',') : []
-  const sharesPresence =
-    options.sharedPresence !== undefined &&
-    options.chat?.kind === ChatKind.DIRECT &&
-    isId(options.chat.id)
   useEffect(() => {
     scope.current += 1
     readPending.current = '0'
     readNextAt.current = 0
     if (readWrite.current.phase === 'waiting') clearTimeout(readWrite.current.timer)
     readWrite.current = { phase: 'idle' }
-    setWatchTargets(null)
-    presenceAt.current = 0
-    clearTimeout(presenceExpiry.current)
     mutationBusy.current.clear()
-    setPresence({})
     setSummary({ throughSequence: '0', maxOtherReadSequence: '0' })
     knownSeq.current = {
       chatId: chatId ?? '',
@@ -234,34 +209,12 @@ export function useConversationFeatures(options: Options) {
     return () => {
       if (readWrite.current.phase === 'waiting') clearTimeout(readWrite.current.timer)
       readWrite.current = { phase: 'idle' }
-      clearTimeout(presenceExpiry.current)
       scope.current += 1
     }
   }, [chatId])
   useEffect(() => {
-    if (!chatId || !options.connected) {
-      clearTimeout(presenceExpiry.current)
-      setPresence({})
-      return
-    }
-    setPresence((previous) =>
-      Object.fromEntries(
-        Object.entries(previous).filter(([id]) => watchedRef.current.includes(id)),
-      ),
-    )
-    const watch = () => {
-      if (sharesPresence) return
-      optionsRef.current.send({
-        type: 'watch_presence',
-        version: 1,
-        chatId,
-        userIds: memberKey ? memberKey.split(',') : [],
-      })
-    }
-    const renew = () => {
-      watch()
-      void flushRead()
-    }
+    if (!chatId || !options.connected) return
+    const renew = () => void flushRead()
     const refresh = () => {
       renew()
       checkState(chatId)
@@ -279,9 +232,8 @@ export function useConversationFeatures(options: Options) {
       window.clearInterval(stateTimer)
       window.removeEventListener('focus', focus)
       document.removeEventListener('visibilitychange', focus)
-      if (!sharesPresence) optionsRef.current.send({ type: 'unwatch_presence', version: 1 })
     }
-  }, [chatId, memberKey, sharesPresence, options.connected, checkState, flushRead])
+  }, [chatId, options.connected, checkState, flushRead])
   const onEvent = useCallback(
     (event: SocketEvent): boolean => {
       const current = optionsRef.current
@@ -316,30 +268,6 @@ export function useConversationFeatures(options: Options) {
       }
       if (event.type === 'reads_changed') {
         if (event.chatId === current.chat?.id) checkState(event.chatId, true)
-        return true
-      }
-      if (event.type === 'presence') {
-        if (
-          event.chatId !== current.chat?.id ||
-          !current.connected ||
-          Date.parse(event.observedAt) < presenceAt.current
-        )
-          return true
-        const observedAt = Date.parse(event.observedAt)
-        if (Date.now() - observedAt > event.validForMs || observedAt > Date.now() + 30000)
-          return true
-        presenceAt.current = observedAt
-        clearTimeout(presenceExpiry.current)
-        presenceExpiry.current = setTimeout(() => setPresence({}), event.validForMs)
-        const members = new Set(watchedRef.current)
-        setPresence((previous) => ({
-          ...previous,
-          ...Object.fromEntries(
-            event.statuses
-              .filter((status) => members.has(status.userId))
-              .map((status) => [status.userId, status.state]),
-          ),
-        }))
         return true
       }
       if (event.type === 'recovery_failed') {
@@ -506,12 +434,6 @@ export function useConversationFeatures(options: Options) {
     ),
     clearHistory,
     deleteMessages,
-    presence: !options.connected ? {} : sharesPresence ? (options.sharedPresence ?? {}) : presence,
-    watchMembers: useCallback(
-      (ids: string[] | null) =>
-        setWatchTargets(ids ? [...new Set(ids)].slice(0, 100).sort() : null),
-      [],
-    ),
     summary,
     reveal,
     jumpLoading,

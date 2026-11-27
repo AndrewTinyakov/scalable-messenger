@@ -9,13 +9,12 @@ import (
 type HandshakeStage string
 
 const (
-	HandshakeAdmission         HandshakeStage   = "admission"
-	HandshakeConnectionLease   HandshakeStage   = "connection_lease"
-	HandshakeHTTPUpgrade       HandshakeStage   = "http_upgrade"
-	HandshakeUserRoomJoin      HandshakeStage   = "user_room_join"
-	HandshakeSessionValidation HandshakeStage   = "session_validation"
-	HandshakePresenceEstablish HandshakeStage   = "presence_establishment"
-	HandshakeSetupCanceled     HandshakeOutcome = "canceled"
+	HandshakeAdmission           HandshakeStage   = "admission"
+	HandshakeConnectionAdmission HandshakeStage   = "connection_admission"
+	HandshakeHTTPUpgrade         HandshakeStage   = "http_upgrade"
+	HandshakeUserRoomJoin        HandshakeStage   = "user_room_join"
+	HandshakeSessionValidation   HandshakeStage   = "session_validation"
+	HandshakeSetupCanceled       HandshakeOutcome = "canceled"
 )
 
 type HandshakeMetrics struct {
@@ -84,7 +83,7 @@ func (setup *HandshakeSetup) observeStage(result string, now time.Time) {
 	}
 	stage := setup.stage
 	switch stage {
-	case HandshakeAdmission, HandshakeConnectionLease, HandshakeHTTPUpgrade, HandshakeUserRoomJoin, HandshakeSessionValidation, HandshakePresenceEstablish:
+	case HandshakeAdmission, HandshakeConnectionAdmission, HandshakeHTTPUpgrade, HandshakeUserRoomJoin, HandshakeSessionValidation:
 	default:
 		stage = "other"
 	}
@@ -95,7 +94,7 @@ func (setup *HandshakeSetup) observeStage(result string, now time.Time) {
 func handshakeResult(outcome HandshakeOutcome) string {
 	switch outcome {
 	case HandshakeInvalidTicket, HandshakeInvalidOrigin, HandshakeCapacity,
-		HandshakeLimitUnavailable, HandshakeRateLimited, HandshakeLeaseUnavailable,
+		HandshakeLimitUnavailable, HandshakeRateLimited, HandshakeAdmissionUnavailable,
 		HandshakeUserCapacity, HandshakeUpgradeError, HandshakeRoomJoinFailed,
 		HandshakeSessionRevoked, HandshakeSessionUnavailable, HandshakeSessionMismatch,
 		HandshakeAccepted, HandshakeSetupCanceled:

@@ -16,39 +16,38 @@ func validateFeatureFrame(f Frame) error {
 	if f.ForwardFromChatID != "" && (!ValidULID(f.ForwardFromChatID) || !ValidULID(f.ForwardFromMsgID) || f.ChatID == "" || f.RecipientID != "" || f.ReplyToMessageID != "") {
 		return errors.New("invalid forward source")
 	}
-	if f.Type != FrameWatchPresence && f.UserIDs != nil {
-		return errors.New("unexpected presence targets")
-	}
 	if f.ReplyToMessageID != "" && (!ValidULID(f.ReplyToMessageID) || f.ChatID == "" || f.RecipientID != "") {
 		return errors.New("invalid reply target")
 	}
-	if f.Type != FrameWatchPresence && f.Type != FrameUnwatchPresence {
-		return nil
-	}
-	if f.Kind != "" || f.RecipientID != "" || f.RequestID != "" || f.Body != "" || f.Sequence != "" || f.Epoch != "" || f.StreamID != "" || f.LastAppliedSequence != "" || f.Subscriptions != nil {
-		return errors.New("invalid presence watch")
-	}
-	if f.Type == FrameUnwatchPresence {
-		if f.ChatID != "" {
-			return errors.New("invalid presence unwatch")
+	switch f.Type {
+	case FrameWatchPresence:
+		return validatePresenceTargets(f.Add, f.Remove)
+	case FrameWatchOnline:
+		if f.ChatID != "" && !ValidULID(f.ChatID) {
+			return errors.New("invalid online count chat")
 		}
-		return nil
 	}
-	if !ValidULID(f.ChatID) || len(f.UserIDs) < 1 || len(f.UserIDs) > 100 {
-		return errors.New("invalid presence targets")
-	}
-	seen := make(map[string]bool, len(f.UserIDs))
-	for _, id := range f.UserIDs {
-		if !ValidULID(id) || seen[id] {
-			return errors.New("invalid presence target")
+	return nil
+}
+
+func validatePresenceTargets(lists ...[]string) error {
+	for _, ids := range lists {
+		if len(ids) > 500 {
+			return errors.New("too many presence targets")
 		}
-		seen[id] = true
+		seen := make(map[string]bool, len(ids))
+		for _, id := range ids {
+			if !ValidULID(id) || seen[id] {
+				return errors.New("invalid presence target")
+			}
+			seen[id] = true
+		}
 	}
 	return nil
 }
 
 func validateFeatureEvent(e Event) error {
-	if e.ObservedAt != "" || e.ValidForMS != 0 || e.Statuses != nil {
+	if e.Statuses != nil || e.Unavailable != nil || e.Online != 0 || e.Members != 0 || e.IdleAfterHiddenMS != 0 || e.IdleAfterInputMS != 0 || e.ReleaseAfterHiddenMS != 0 {
 		return errors.New("unexpected presence metadata")
 	}
 	if e.ForwardedFromUserID != "" && (e.Type != EventMessageSaved || !ValidULID(e.ForwardedFromUserID)) {

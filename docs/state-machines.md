@@ -9,11 +9,11 @@ This audit covers production client and server code at the PR #6 base, `73abbf4`
 | Owner | Previous representation | Explicit states and transitions |
 | --- | --- | --- |
 | Socket server | `closing` and `draining` booleans | Accepting → draining → closing, or accepting → closing. Drain never moves a closing server back to draining. Admission and readiness require accepting. |
-| Connection, ACK tracker, lease cleanup, sidebar coordinator | Separate `closed` booleans | Active → closed. Existing mutexes and `sync.Once` retain their ownership and synchronization duties. |
+| Connection, ACK tracker, sidebar coordinator | Separate `closed` booleans | Active → closed. Existing mutexes and `sync.Once` retain their ownership and synchronization duties. |
 | Per-connection command worker | `commandRunning` and `commandScheduled` booleans | Idle → queued → running → queued or idle. Running still counts toward per-connection admission capacity. |
 | Group authorization grant | `authorized` and `missed` booleans | Authorizing, authorizing with missed frames, authorized, authorized with missed frames. Authorization retains the missed-frame fact for SQL recovery notification. |
 | HTTP upgrade reservation | `reserved` boolean | Unreserved → reserved → released. Activation and deferred cleanup each release at their existing ownership boundary. |
-| Handshake connection lease | Lease ID presence and `leaseAttached` boolean | Unowned → owned → transferred, or owned → unowned during failed-handshake cleanup. |
+| Handshake connection admission | `handshakeAdmissionState` | Unowned → owned → transferred, or owned → unowned during failed-handshake cleanup. |
 | ACK deadline timer | Nil timer and zero armed deadline | Unused → armed → stopped, with stopped → armed and armed deadline replacement. Timer resource allocation is independent of armed/stopped status. |
 | Ping cadence | `pingSteady` boolean | Jittered first tick → steady interval. |
 | Room registry and local room | `closed` and `retired` booleans | Registry open → closed; local room active → retired. |
@@ -32,9 +32,9 @@ This audit covers production client and server code at the PR #6 base, `73abbf4`
 - Protocol event kinds, command kinds, error codes, handshake stages and monitoring outcome types already name their variants. Generated contract files were not edited.
 - Subscribe/reconnect retries and the socket reader/writer loops already express control flow in ordered operations, loops and `select` statements. Retry counts and backoff durations are measurements, not hidden state combinations.
 - Context cancellation, channel closure, wait groups and `sync.Once` already express cancellation, notification, joining and one-time cleanup. They remain synchronization mechanisms alongside explicit state values.
-- Subscription maps and pointer identity identify current memberships and grant generations. Presence/sidebar watch generations and expiration timestamps protect against stale asynchronous work. These retain their existing identity and time checks; an enum would not replace those facts.
+- Subscription maps and pointer identity identify current memberships and grant generations. Sidebar watch generations and expiration timestamps protect against stale asynchronous work; presence uses per-user versions and per-bucket sequences. These retain their existing identity and time checks; an enum would not replace those facts.
 - ACK pending entries, applied/dismissed baselines, message sequence heaps, room epochs and Redis Stream IDs are ordered recovery data. They are not mutually exclusive lifecycle modes.
-- Redis admission/established-presence sorted sets and expiry scores are authoritative lease records governed by the acquire, establish, renew and release scripts. The scripts and TTL behavior remain unchanged.
+- Redis connection counts and presence state are written by their owning gateway as absolute values; a dead gateway's entries are removed through the gateway registry. See ADR 0005.
 - Nil optional dependencies and resource pointers, boolean authorization/result values, immutable Redis-client ownership, set membership, and wire flags describe capabilities, results or data rather than evolving lifecycle modes.
 
 
@@ -93,6 +93,6 @@ This audit covers production client and server code at the PR #6 base, `73abbf4`
 - `HistoryVisibility`, `RecoveryState`, reading locations, latest/resolved/dismissed SQL sequences, mutation/visibility revisions, Redis cursors, and history bounds are independent facts and monotonic progress data. They are not alternative phases of one machine. Their existing feature methods retain the transitions and reconciliation rules.
 - Chat selection, direct draft selection, online observation, page visibility, selected-chat membership/removal, and history-reading intent can legitimately vary independently. Combining them into a product state enum would add combinations without eliminating invalid states.
 - Navigation promises, focus requests, paging/catch-up maps, per-message mutation sets, and optional subscriptions already encode one owned operation/resource at their existing boundary. Epoch/revision counters remain stale-result fences rather than artificial phases.
-- `WatchPacer`, recovery batching, notification throttles, automatic paging cooldowns, debounce timers, and presence expiry have a single scheduling owner plus independent queued data. No competing lifecycle flags were found to combine.
+- `WatchPacer`, `PresenceStore`, recovery batching, notification throttles, automatic paging cooldowns and debounce timers have a single scheduling owner plus independent queued data. No competing lifecycle flags were found to combine.
 - Dialog/form busy/error states, selection menus, reveal flags, drafts, member search, readers/pins paging flags, clipboard feedback, sound settings, and pointer movement flags are ordinary local UI facts or one request's status. They were inspected and left within their existing components. No rendered behavior or styling was changed.
 - Generated HTTP and socket vocabulary are protocol sources of truth and were not edited.

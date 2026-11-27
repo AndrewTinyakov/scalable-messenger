@@ -1,0 +1,7 @@
+{
+  "type": "presence_config",
+  "version": 1,
+  "idleAfterHiddenMs": 5000,
+  "idleAfterInputMs": 30000,
+  "releaseAfterHiddenMs": 300000
+}

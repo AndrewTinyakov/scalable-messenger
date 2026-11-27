@@ -20,44 +20,40 @@ import (
 )
 
 type Connection struct {
-	opened            time.Time
-	lastPing          atomic.Int64
-	closeCode         int
-	closeReason       string
-	server            *Server
-	socket            *websocket.Conn
-	session           ticket.Identity
-	connectionLeaseID string
-	authorizedUntil   atomic.Int64
-	ctx               context.Context
-	cancel            context.CancelFunc
-	out               chan outbound
-	mu                sync.Mutex
-	queuedBytes       int
-	queuedItems       int
-	state             lifecycleState
-	subscriptions     *chatSubscriptions
-	acks              *ackTracker
-	once              sync.Once
-	expiry            *time.Timer
-	commands          []queuedCommand
-	commandBytes      int
-	commandState      commandState
-	nextLeaseRenewal  time.Time
-	nextSessionCheck  time.Time
-	sidebarSerial     atomic.Uint64
-	presenceSerial    atomic.Uint64
-	presenceChatID    string
+	opened           time.Time
+	lastPing         atomic.Int64
+	closeCode        int
+	closeReason      string
+	server           *Server
+	socket           *websocket.Conn
+	session          ticket.Identity
+	authorizedUntil  atomic.Int64
+	ctx              context.Context
+	cancel           context.CancelFunc
+	out              chan outbound
+	mu               sync.Mutex
+	queuedBytes      int
+	queuedItems      int
+	state            lifecycleState
+	subscriptions    *chatSubscriptions
+	acks             *ackTracker
+	once             sync.Once
+	expiry           *time.Timer
+	commands         []queuedCommand
+	commandBytes     int
+	commandState     commandState
+	nextSessionCheck time.Time
+	sidebarSerial    atomic.Uint64
+	presence         connectionPresence
 }
 
-func newConnection(server *Server, socket *websocket.Conn, session ticket.Identity, leaseID string) *Connection {
+func newConnection(server *Server, socket *websocket.Conn, session ticket.Identity) *Connection {
 	server.startRuntime()
 	ctx, cancel := context.WithCancel(server.ctx)
-	c := &Connection{server: server, socket: socket, session: session, connectionLeaseID: leaseID, ctx: ctx, cancel: cancel, out: make(chan outbound, server.config.QueueItems), acks: newACKTracker(server.config.PendingACKLimit, server.config.ACKTimeout)}
+	c := &Connection{server: server, socket: socket, session: session, ctx: ctx, cancel: cancel, out: make(chan outbound, server.config.QueueItems), acks: newACKTracker(server.config.PendingACKLimit, server.config.ACKTimeout)}
 	c.opened = time.Now()
 	c.acks.metrics = server.metrics
 	c.subscriptions = newChatSubscriptions(c)
-	c.nextLeaseRenewal = time.Now().Add(jitteredFirstTick(30 * time.Second))
 	c.authorizeUntil(session.ExpiresAt)
 	return c
 }
@@ -126,7 +122,7 @@ func (c *Connection) Close() {
 		c.queuedItems = 0
 		c.mu.Unlock()
 		c.cancel()
-		c.clearPresence()
+		c.stopPresence()
 		c.sidebarSerial.Add(1)
 		if c.server.sidebar != nil {
 			c.server.sidebar.remove(c)
@@ -139,7 +135,7 @@ func (c *Connection) Close() {
 			c.server.rooms.LeaveAll(grant)
 		}
 		c.server.remove(c)
-		c.server.releaseConnectionLease(c.session.UserID, c.connectionLeaseID)
+		c.server.admission.Release(c.session.UserID)
 	})
 }
 

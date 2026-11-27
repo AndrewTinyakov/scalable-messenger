@@ -6,20 +6,19 @@ additionalProperties: false
 required:
   - type
   - version
-  - chatId
-  - userIds
 properties:
   type:
     const: watch_presence
   version:
     type: integer
     const: 1
-  chatId: &a1
-    type: string
-    pattern: ^[0-7][0-9A-HJKMNP-TV-Z]{25}$
-  userIds:
+  reset:
+    type: boolean
+  add: &a1
     type: array
-    minItems: 1
-    maxItems: 100
+    maxItems: 500
     uniqueItems: true
-    items: *a1
+    items:
+      type: string
+      pattern: ^[0-7][0-9A-HJKMNP-TV-Z]{25}$
+  remove: *a1

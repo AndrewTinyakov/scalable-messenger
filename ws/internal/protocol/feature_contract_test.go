@@ -72,36 +72,34 @@ func TestFeatureSendReplyRequiresExistingChatAndValidTarget(t *testing.T) {
 
 func TestFeaturePresenceWatchStrictShapeAndBounds(t *testing.T) {
 	base := func() map[string]any {
-		return map[string]any{"type": "watch_presence", "version": 1, "chatId": testID, "userIds": []string{testID}}
+		return map[string]any{"type": "watch_presence", "version": 1, "reset": true, "add": []string{testID}, "remove": []string{}}
 	}
 	if _, err := DecodeFrame(featureJSON(t, base())); err != nil {
 		t.Fatal(err)
 	}
-	ids := make([]string, 100)
+	if _, err := DecodeFrame([]byte(`{"type":"watch_presence","version":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	ids := make([]string, 500)
 	for i := range ids {
 		ids[i] = fmt.Sprintf("%026d", i+1)
 	}
 	fields := base()
-	fields["userIds"] = ids
-	if frame, err := DecodeFrame(featureJSON(t, fields)); err != nil || len(frame.UserIDs) != 100 {
+	fields["add"] = ids
+	if frame, err := DecodeFrame(featureJSON(t, fields)); err != nil || len(frame.Add) != 500 || !frame.Reset {
 		t.Fatalf("maximum presence watch = %+v, %v", frame, err)
 	}
 	for _, tc := range []struct {
 		name   string
 		mutate func(map[string]any)
 	}{
-		{"empty", func(f map[string]any) { f["userIds"] = []string{} }},
-		{"missing", func(f map[string]any) { delete(f, "userIds") }},
-		{"oversize", func(f map[string]any) { f["userIds"] = append(ids, testID) }},
-		{"duplicate", func(f map[string]any) { f["userIds"] = []string{testID, testID} }},
-		{"invalid peer", func(f map[string]any) { f["userIds"] = []string{"invalid"} }},
-		{"null peers", func(f map[string]any) { f["userIds"] = nil }},
-		{"null peer", func(f map[string]any) { f["userIds"] = []any{nil} }},
+		{"oversize", func(f map[string]any) { f["add"] = append(ids, testID) }},
+		{"duplicate", func(f map[string]any) { f["remove"] = []string{testID, testID} }},
+		{"invalid peer", func(f map[string]any) { f["add"] = []string{"invalid"} }},
+		{"null peer", func(f map[string]any) { f["add"] = []any{nil} }},
 		{"unknown field", func(f map[string]any) { f["online"] = true }},
-		{"foreign reply", func(f map[string]any) { f["replyToMessageId"] = testID }},
+		{"chat identity", func(f map[string]any) { f["chatId"] = testID }},
 		{"foreign send", func(f map[string]any) { f["body"] = "hello" }},
-		{"missing chat", func(f map[string]any) { delete(f, "chatId") }},
-		{"invalid chat", func(f map[string]any) { f["chatId"] = "invalid" }},
 		{"wrong version", func(f map[string]any) { f["version"] = 2 }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -112,17 +110,18 @@ func TestFeaturePresenceWatchStrictShapeAndBounds(t *testing.T) {
 			}
 		})
 	}
-	if _, err := DecodeFrame([]byte(`{"type":"unwatch_presence","version":1}`)); err != nil {
-		t.Fatal(err)
+	for _, payload := range []string{`{"type":"activity","version":1,"active":true,"visible":false}`, `{"type":"watch_online_count","version":1}`, `{"type":"watch_online_count","version":1,"chatId":"` + testID + `"}`} {
+		if _, err := DecodeFrame([]byte(payload)); err != nil {
+			t.Fatalf("rejected %s: %v", payload, err)
+		}
 	}
-	for _, extra := range []string{`,"chatId":"` + testID + `"`, `,"userIds":[]`, `,"replyToMessageId":"` + testID + `"`, `,"unknown":true`, `,"chatId":null`} {
-		payload := []byte(`{"type":"unwatch_presence","version":1` + extra + `}`)
-		if _, err := DecodeFrame(payload); err == nil {
-			t.Fatalf("accepted malformed unwatch %s", payload)
+	for _, payload := range []string{`{"type":"activity","version":1,"active":true}`, `{"type":"watch_online_count","version":1,"chatId":"invalid"}`, `{"type":"unwatch_presence","version":1}`} {
+		if _, err := DecodeFrame([]byte(payload)); err == nil {
+			t.Fatalf("accepted %s", payload)
 		}
 	}
 	for _, kind := range []string{"subscribe", "unsubscribe", "send"} {
-		fields := map[string]any{"type": kind, "version": 1, "chatId": testID, "userIds": []string{testID}}
+		fields := map[string]any{"type": kind, "version": 1, "chatId": testID, "add": []string{testID}}
 		if kind == "subscribe" {
 			fields["kind"] = "GROUP"
 		}
@@ -176,7 +175,7 @@ func TestFeatureMessageVersionAndReplyPreviewContracts(t *testing.T) {
 		{"deleted preview leaks body", func(f map[string]any) { f["replyDeleted"] = true }},
 		{"live preview empty", func(f map[string]any) { f["replyBody"] = "" }},
 		{"unknown reply property", func(f map[string]any) { f["replyUnknown"] = true }},
-		{"presence on saved", func(f map[string]any) { f["observedAt"] = "2026-09-27T09:00:01Z" }},
+		{"presence on saved", func(f map[string]any) { f["statuses"] = []any{} }},
 		{"chat sequence on saved", func(f map[string]any) { f["seq"] = "1" }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -297,7 +296,7 @@ func TestFeatureOptionalValuesCannotUseEmptyStringToBypassShapeValidation(t *tes
 		{"empty saved reply target", func() map[string]any { f := featureSaved(); f["replyToMessageId"] = ""; return f }()},
 		{"orphan empty quote body", func() map[string]any { f := featureSaved(); f["replyBody"] = ""; return f }()},
 		{"empty foreign message metadata", map[string]any{"type": "chat_deleted", "version": 1, "eventId": testID, "room": "group:" + testID, "chatId": testID, "messageVersion": ""}},
-		{"empty foreign presence metadata", func() map[string]any { f := featureSaved(); f["observedAt"] = ""; return f }()},
+		{"empty foreign presence metadata", func() map[string]any { f := featureSaved(); f["unavailable"] = []string{}; return f }()},
 		{"missing tombstone body", func() map[string]any {
 			f := featureChanged()
 			delete(f, "body")
@@ -316,8 +315,8 @@ func TestFeatureOptionalValuesCannotUseEmptyStringToBypassShapeValidation(t *tes
 		fields map[string]any
 	}{
 		{"empty reply target", map[string]any{"type": "send", "version": 1, "chatId": testID, "requestId": testID, "body": "hello", "replyToMessageId": ""}},
-		{"empty foreign reply target", map[string]any{"type": "unwatch_presence", "version": 1, "replyToMessageId": ""}},
-		{"empty foreign watch body", map[string]any{"type": "watch_presence", "version": 1, "chatId": testID, "userIds": []string{testID}, "body": ""}},
+		{"empty foreign reply target", map[string]any{"type": "watch_presence", "version": 1, "replyToMessageId": ""}},
+		{"empty foreign watch body", map[string]any{"type": "watch_presence", "version": 1, "add": []string{testID}, "body": ""}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := DecodeFrame(featureJSON(t, tc.fields)); err == nil {
@@ -361,25 +360,32 @@ func TestFeatureSharedDurableFixturesRoundTripWithoutLosingTombstonesOrReplyFlag
 	}
 }
 
-func TestFeatureSharedPresenceFixtureMatchesGatewayWire(t *testing.T) {
-	payload, err := os.ReadFile("../../../contracts/fixtures/valid/socket-presence.json")
-	if err != nil {
-		t.Fatal(err)
+func TestFeatureSharedPresenceFixturesMatchGatewayWire(t *testing.T) {
+	for _, name := range []string{"socket-presence", "online-count", "presence-config"} {
+		payload, err := os.ReadFile("../../../contracts/fixtures/valid/" + name + ".json")
+		if err != nil {
+			t.Fatal(err)
+		}
+		event, err := messagecodec.Decode[Event](payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		frame, err := NewEventFrame(event)
+		if err != nil {
+			t.Fatal(err)
+		}
+		featureAssertJSONEqual(t, frame.Payload(), payload)
+		if _, err := DecodeEvent(payload); err == nil {
+			t.Fatalf("gateway-only %s was accepted as a durable room event", name)
+		}
 	}
-	event, err := messagecodec.Decode[Event](payload)
-	if err != nil {
-		t.Fatal(err)
+	config, err := NewEventFrame(Event{Type: EventPresenceConfig, Version: 1, IdleAfterInputMS: 30000, ReleaseAfterHiddenMS: 300000})
+	if err != nil || !strings.Contains(string(config.Payload()), `"idleAfterHiddenMs":0`) {
+		t.Fatalf("zero hidden timeout = %s, %v", config.Payload(), err)
 	}
-	if event.Type != EventPresence || event.ChatID != testID || event.ValidForMS != 15000 || len(event.Statuses) != 1 || event.Statuses[0].State != "online" {
-		t.Fatalf("shared presence fixture = %+v", event)
-	}
-	frame, err := NewEventFrame(event)
-	if err != nil {
-		t.Fatal(err)
-	}
-	featureAssertJSONEqual(t, frame.Payload(), payload)
-	if _, err := DecodeEvent(payload); err == nil {
-		t.Fatal("gateway-only presence was accepted as a durable room event")
+	frame, err := NewEventFrame(Event{Type: EventOnlineCount, Version: 1, ChatID: testID, Members: 2})
+	if err != nil || !strings.Contains(string(frame.Payload()), `"online":0`) {
+		t.Fatalf("zero online count = %s, %v", frame.Payload(), err)
 	}
 }
 

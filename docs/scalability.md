@@ -4,7 +4,7 @@ The main workloads are idle connections and group fanout. More sockets increase 
 
 The gateway now shares one encoded event across recipients, keeps compact frame references in outbound and replay queues, and schedules ACK expiry only while an ACK is pending. Room membership locks are local to a room, and disconnect lookup visits only that connection's memberships. Quiet-room maintenance batches Redis position checks. Send and subscription commands use ordered, bounded workers so the physical reader can continue processing ACKs and pongs while authorization or broker confirmation waits.
 
-Transport close and grant revocation happen before bounded Redis lease cleanup. Draining rejects new upgrades, spreads connection closure over the configured drain interval, and joins owned work before shutdown completes. SQL commit, request deduplication, publisher confirmation and membership checks keep their existing guarantees. See the [broker decision](adr/0001-messenger-broker-split.md) for delivery and recovery rules.
+Transport close and grant revocation happen first; connection counts and presence are written asynchronously by the gateway, never per idle socket. Draining rejects new upgrades, spreads connection closure over the configured drain interval, and joins owned work before shutdown completes. SQL commit, request deduplication, publisher confirmation and membership checks keep their existing guarantees. See the [broker decision](adr/0001-messenger-broker-split.md) for delivery and recovery rules.
 
 ## Measured allocations
 
@@ -218,3 +218,5 @@ Pub/Sub remains one feed per Redis primary. More feed shards are a later profili
 ## Realistic multi-group workloads
 
 The load tool also supports seeded `mixed` scenarios with overlapping small and large groups, an explicit active-user fraction, varied payload sizes and independently scheduled sends. It verifies each socket's chat sequences and membership-specific notification counts. Existing idle, hot-group fanout, slow-reader, reconnect and drain modes remain available. See [the workload guide](../tests/load/ws/README.md) for scenario files, bounds and reuse commands. The 1000-user example is a test configuration, not a capacity claim.
+
+The [realistic Node workload](../tests/realistic-load/README.md) exercises the presence watch alongside message sends, reads, reconnects and other chat activity. The [gateway-owned presence benchmark](benchmarks/2026-11-26.md) records its workload results and a separate quiet-watch probe against the polling build. The [November 21 campaign](benchmarks/2026-11-21.md) records the earlier workload results.

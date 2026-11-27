@@ -28,6 +28,7 @@ type Live struct {
 	PreviousStreamID string         `json:"previousStreamId,omitempty"`
 	HasPrevious      bool           `json:"-"`
 	Event            protocol.Event `json:"event"`
+	Raw              string         `json:"-"`
 	bufferBytes      int
 }
 
@@ -122,6 +123,9 @@ func (c *Client) Subscribe(ctx context.Context, room string) (*Listener, error) 
 }
 
 func decodeLive(room, payload string) (Live, error) {
+	if roomname.IsPresence(room) {
+		return Live{Raw: payload}, nil
+	}
 	if roomname.IsActivity(room) {
 		event, err := protocol.DecodeSidebarEvent([]byte(payload))
 		if err != nil {
@@ -239,7 +243,7 @@ func validRoom(room string) bool {
 	if strings.ContainsAny(room, "{} \n\r\t") {
 		return false
 	}
-	return roomname.IsUser(room) || roomname.IsGroup(room) || roomname.IsActivity(room)
+	return roomname.IsUser(room) || roomname.IsGroup(room) || roomname.IsActivity(room) || roomname.IsPresence(room)
 }
 
 func (c *Client) SetMetrics(metrics *monitoring.Metrics) { c.metrics = metrics }

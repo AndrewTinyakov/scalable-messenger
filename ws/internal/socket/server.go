@@ -13,6 +13,7 @@ import (
 	"messenger/ws/internal/config"
 	"messenger/ws/internal/grpcauth"
 	"messenger/ws/internal/monitoring"
+	"messenger/ws/internal/presence"
 	"messenger/ws/internal/protocol"
 	roomregistry "messenger/ws/internal/room"
 )
@@ -33,7 +34,11 @@ type Server struct {
 	publisher        CommandPublisher
 	sendLimiter      SendLimiter
 	handshakeLimiter HandshakeLimiter
-	connectionLeases ConnectionLeaser
+	admission        ConnectionAdmission
+	tracker          PresenceTracker
+	watchers         PresenceWatchers
+	watchLimiter     WatchLimiter
+	sidebarActivity  sidebarActivitySource
 	subscribeLimiter SubscriptionLimiter
 	groupAuthSlots   chan struct{}
 	rooms            RoomCoordinator
@@ -45,15 +50,12 @@ type Server struct {
 	connections      map[*Connection]struct{}
 	pendingUpgrades  int
 	upgradeWG        sync.WaitGroup
-	leaseCleanupCtx  context.Context
 	state            serverState
 	wg               sync.WaitGroup
 	writeBuffers     sync.Pool
 	runtimeOnce      sync.Once
 	closeOnce        sync.Once
 	commands         *commandQueue
-	cleanup          *leaseCleanup
-	presence         *presenceCoordinator
 	sidebar          *sidebarCoordinator
 }
 
@@ -75,10 +77,25 @@ type SessionAuthorizer interface {
 	ValidateSessions(context.Context, []string) (map[string]grpcauth.Session, error)
 }
 
-type ConnectionLeaser interface {
-	AcquireConnectionLease(context.Context, string) (string, bool, error)
-	RenewConnectionLease(context.Context, string, string) (bool, error)
-	ReleaseConnectionLease(context.Context, string, string) error
+type ConnectionAdmission interface {
+	Admit(context.Context, string) (bool, error)
+	Release(string)
+}
+
+type PresenceTracker interface {
+	SetActive(string, bool)
+}
+
+type PresenceWatchers interface {
+	Watch(context.Context, presence.Watcher, []string, []string, bool) error
+	WatchOnlineCount(context.Context, presence.Watcher, string) error
+	SetVisible(presence.Watcher, bool)
+	Revalidate(presence.Watcher)
+	Remove(presence.Watcher)
+}
+
+type WatchLimiter interface {
+	AllowPresenceWatch(context.Context, string) (bool, error)
 }
 
 type HandshakeLimiter interface {
@@ -96,7 +113,11 @@ type Dependencies struct {
 	Publisher           CommandPublisher
 	SendLimiter         SendLimiter
 	HandshakeLimiter    HandshakeLimiter
-	ConnectionLeases    ConnectionLeaser
+	Admission           ConnectionAdmission
+	Presence            PresenceTracker
+	Watchers            PresenceWatchers
+	WatchLimiter        WatchLimiter
+	SidebarActivity     sidebarActivitySource
 	SubscriptionLimiter SubscriptionLimiter
 	Rooms               RoomCoordinator
 }
@@ -109,7 +130,9 @@ func NewServer(parent context.Context, cfg config.Config, logger *slog.Logger, d
 		{"context", parent}, {"logger", logger}, {"registry", registry}, {"metrics", metrics},
 		{"group authorizer", dependencies.GroupAuthorizer}, {"session authorizer", dependencies.SessionAuthorizer},
 		{"publisher", dependencies.Publisher}, {"send limiter", dependencies.SendLimiter},
-		{"handshake limiter", dependencies.HandshakeLimiter}, {"connection leases", dependencies.ConnectionLeases},
+		{"handshake limiter", dependencies.HandshakeLimiter}, {"connection admission", dependencies.Admission},
+		{"presence tracker", dependencies.Presence}, {"presence watchers", dependencies.Watchers}, {"watch limiter", dependencies.WatchLimiter},
+		{"sidebar activity", dependencies.SidebarActivity},
 		{"subscription limiter", dependencies.SubscriptionLimiter}, {"rooms", dependencies.Rooms},
 	} {
 		if nilDependency(dependency.value) {
@@ -128,7 +151,11 @@ func NewServer(parent context.Context, cfg config.Config, logger *slog.Logger, d
 		publisher:        dependencies.Publisher,
 		sendLimiter:      dependencies.SendLimiter,
 		handshakeLimiter: dependencies.HandshakeLimiter,
-		connectionLeases: dependencies.ConnectionLeases,
+		admission:        dependencies.Admission,
+		tracker:          dependencies.Presence,
+		watchers:         dependencies.Watchers,
+		watchLimiter:     dependencies.WatchLimiter,
+		sidebarActivity:  dependencies.SidebarActivity,
 		subscribeLimiter: dependencies.SubscriptionLimiter,
 		rooms:            dependencies.Rooms,
 		groupAuthSlots:   make(chan struct{}, cfg.MaxGroupAuths),
@@ -140,7 +167,6 @@ func NewServer(parent context.Context, cfg config.Config, logger *slog.Logger, d
 	}
 	s.metrics.SetCapacity(monitoring.CapacityResource("pending_upgrades"), cfg.MaxPendingUpgrades)
 	registry.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{Name: "messenger_ws_oldest_pending_ack_seconds", Help: "Age of the oldest still-pending live acknowledgement on this node."}, s.oldestPendingACK))
-	s.presence = newPresenceCoordinator(s)
 	s.sidebar = newSidebarCoordinator(s)
 	s.startRuntime()
 	s.wg.Add(1)
@@ -161,14 +187,6 @@ func nilDependency(value any) bool {
 	}
 }
 
-func (s *Server) releaseConnectionLease(userID, leaseID string) {
-	if s.connectionLeases == nil || leaseID == "" {
-		return
-	}
-	s.startRuntime()
-	s.cleanup.enqueue(userID, leaseID)
-}
-
 func (s *Server) remove(c *Connection) {
 	s.mu.Lock()
 	if _, ok := s.connections[c]; ok {
@@ -186,16 +204,9 @@ func (s *Server) CloseContext(ctx context.Context) {
 	s.closeOnce.Do(func() { s.close(ctx) })
 }
 
-func (s *Server) close(base context.Context) {
-	cleanupTimeout := s.config.ShutdownTimeout
-	if cleanupTimeout <= 0 {
-		cleanupTimeout = 10 * time.Second
-	}
-	cleanupCtx, cancel := context.WithTimeout(base, cleanupTimeout)
-	defer cancel()
+func (s *Server) close(context.Context) {
 	s.mu.Lock()
 	s.state = serverClosing
-	s.leaseCleanupCtx = cleanupCtx
 	connections := make([]*Connection, 0, len(s.connections))
 	for c := range s.connections {
 		connections = append(connections, c)
@@ -223,9 +234,6 @@ func (s *Server) close(base context.Context) {
 	s.rooms.Close()
 	s.upgradeWG.Wait()
 	s.wg.Wait()
-	if s.cleanup != nil {
-		s.cleanup.close()
-	}
 }
 
 func (s *Server) oldestPendingACK() float64 {

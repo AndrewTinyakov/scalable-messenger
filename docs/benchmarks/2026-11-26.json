@@ -1,0 +1,1000 @@
+{
+  "date": "2026-11-26",
+  "checkout": "2773b263e27261e14b8d4118c91230b07791fad8",
+  "driver": "checkout plus the presence benchmark changes from this report",
+  "baselineImageRevision": "e56bc28",
+  "archivedComparison": {
+    "path": "2026-11-21.json",
+    "fixedWorkload": [
+      "1000-a",
+      "1000-b"
+    ],
+    "ramp": "stress-a2"
+  },
+  "environment": {
+    "host": "Apple M3 Pro, 11 logical CPUs, 36 GiB RAM, shared",
+    "docker": "OrbStack, arm64, 11 CPUs, 16818831360 bytes RAM",
+    "runtime": {
+      "node": "24.21.0",
+      "gatewayGo": "1.26.10",
+      "java": "Temurin 25.0.5.1+2",
+      "redis": "7.4.11",
+      "postgres": "17.10"
+    },
+    "replicas": {
+      "gateway": 2,
+      "api": 2,
+      "commandProcessor": 2,
+      "outboxPublisher": 2,
+      "postgres": 1,
+      "redisPrimary": 3,
+      "redisReplica": 3,
+      "rabbitMq": 3
+    },
+    "proxyLimits": {
+      "authPerSecond": 65,
+      "authBurst": 100,
+      "ticketsPerSecond": 200,
+      "ticketBurst": 200,
+      "websocketUpgradesPerSecond": 250,
+      "websocketUpgradeBurst": 250,
+      "connectionsPerIp": 12000
+    },
+    "candidateImageIds": {
+      "gateway": "sha256:80d82e28a8b820ec11a8414a1665b8d9eafc502bf2fcf04eee52eb995b2782ed",
+      "api": "sha256:309bf513c730a28097f7b42cdd6e1c1a59e15614fbfb03e29d2ffb68c66894c0",
+      "commandProcessor": "sha256:417715f5861d8fe9375d4ee45350fd82efa65bbbf23aaf6e44882c82b6bdb199",
+      "outboxPublisher": "sha256:582431bf1415cca92058e3d12f229e16ed3c3742fb0c0fa0bda1014e09bce33b"
+    }
+  },
+  "runs": [
+    {
+      "profile": "users-1000",
+      "seed": 1118,
+      "workers": 1,
+      "planFileSha256": "33fb6cb8fa3cdf7b177d3d2973781d210c0f912abd563ed5714f02d2100fb41a",
+      "startAtMs": 1795652534832,
+      "durationMs": 600000,
+      "users": 1000,
+      "deviceCredentials": 1350,
+      "fixtureChats": 1362,
+      "fixtureMessages": 60217,
+      "sessions": 1962,
+      "plannedActions": 52633,
+      "pools": {
+        "api": 16,
+        "pgbouncer": 32
+      },
+      "authPerSecond": 16,
+      "ticketsPerSecond": 25,
+      "passed": true,
+      "exitStatus": null,
+      "wrapperExitStatus": 1,
+      "correctness": {
+        "plannedSends": 8285,
+        "dispatched": 8285,
+        "saved": 8285,
+        "missing": 0,
+        "pending": 0,
+        "duplicates": 0,
+        "durableChecks": 8876,
+        "durableMismatches": 0,
+        "durableUnverified": 0,
+        "mutationChecks": 1182,
+        "recipientsExpected": 12461,
+        "recipientsMissing": 0,
+        "recipientsInterrupted": 14,
+        "readPropagationExpected": 129,
+        "readPropagationMissing": 0,
+        "readPropagationInterrupted": 0
+      },
+      "sqlTerminalSinceStart": {
+        "SAVED": 8285
+      },
+      "peakActionsInFlight": 57,
+      "lagLimitMs": 1500,
+      "presenceAndRateLimits": {
+        "presence.frames": 34906,
+        "presence.onlineCountFrames": 30334,
+        "presence.transitions": 29724,
+        "presence.watchFrames": 8429,
+        "presence.onlineCountWatchFrames": 5127,
+        "presence.snapshotChecks": 2618,
+        "presence.snapshotPassed": 2618,
+        "presence.snapshotMissing": 0,
+        "presence.snapshotDeferred": 0,
+        "socket.rateLimitErrorsWithRequest": 0,
+        "socket.rateLimitErrorsWithoutRequest": 0,
+        "completed.reconnect": 628,
+        "lagExceeded": 0
+      },
+      "actionFailureObservations": 0,
+      "trafficFailureObservations": 0,
+      "failuresByCode": {},
+      "verificationFailuresByCode": {},
+      "trafficHttpStatuses": {
+        "200": 93999,
+        "201": 27,
+        "204": 441
+      },
+      "ownAckLatency": {
+        "count": 8275,
+        "meanMs": 23.733783463202357,
+        "p50UpperMs": 32.768,
+        "p95UpperMs": 65.536,
+        "p99UpperMs": 131.072,
+        "maxMs": 480.99445800000103
+      },
+      "schedulingLag": {
+        "count": 52633,
+        "meanMs": 0.7447184606887642,
+        "p50UpperMs": 1.024,
+        "p95UpperMs": 2.048,
+        "p99UpperMs": 4.096,
+        "maxMs": 29.677708000002895
+      },
+      "stages": [],
+      "prometheus": {
+        "start": "2026-11-26T00:22:14.832000+00:00",
+        "end": "2026-11-26T00:32:14.832000+00:00",
+        "intervalSeconds": 600.0,
+        "scrapeStepSeconds": 5,
+        "rollingRateSeconds": 30,
+        "samples": {
+          "gatewayCpuCores": {
+            "count": 120,
+            "average": 0.05233332528957782,
+            "peak": 0.08079673626109912
+          },
+          "gatewayRssMiB": {
+            "count": 120,
+            "average": 116.0888671875,
+            "peak": 128.44921875
+          },
+          "gatewayConnections": {
+            "count": 120,
+            "average": 220.29166666666666,
+            "peak": 329.0
+          },
+          "gatewayWatches": {
+            "count": 120,
+            "average": 220.225,
+            "peak": 329.0
+          },
+          "gatewayWatchedSubjects": {
+            "count": 120,
+            "average": 1777.6416666666667,
+            "peak": 1900.0
+          },
+          "redisCpuCores": {
+            "count": 120,
+            "average": 0.04704035351610215,
+            "peak": 0.06149460978211665
+          },
+          "redisUsedMiB": {
+            "count": 120,
+            "average": 42.10084819793701,
+            "peak": 44.594505310058594
+          },
+          "redisCommandsPerSec": {
+            "count": 120,
+            "average": 1573.6084483674756,
+            "peak": 2375.449904396176
+          },
+          "apiCpuCores": {
+            "count": 120,
+            "average": 0.3341072792103115,
+            "peak": 0.6732272021761742
+          },
+          "apiJvmHeapMiB": {
+            "count": 120,
+            "average": 238.82305037180583,
+            "peak": 319.1727752685547
+          },
+          "presenceVisibilityGrpcPerSec": {
+            "count": 119,
+            "average": 11.706851111807547,
+            "peak": 19.200000000000003
+          },
+          "onlineCountMembersGrpcPerSec": {
+            "count": 119,
+            "average": 6.558091136993638,
+            "peak": 11.000681681801819
+          },
+          "presenceVisibilitySqlPerSec": {
+            "count": 119,
+            "average": 23.413702196738317,
+            "peak": 38.400000000000006
+          },
+          "onlineCountMembersSqlPerSec": {
+            "count": 119,
+            "average": 19.674273410980913,
+            "peak": 33.00204504540545
+          },
+          "recordLastSeenGrpcPerSec": {
+            "count": 120,
+            "average": 0.39700078917298937,
+            "peak": 0.40016648657301795
+          },
+          "recordLastSeenSqlPerSec": {
+            "count": 120,
+            "average": 0.39700078917298937,
+            "peak": 0.40016648657301795
+          },
+          "gatewayMatchedTransitionsPerSec": {
+            "count": 118,
+            "average": 22.01167141762069,
+            "peak": 35.56142731418514
+          },
+          "gatewayAllTransitionsPerSec": {
+            "count": 118,
+            "average": 22.347116482080764,
+            "peak": 35.8814369149532
+          },
+          "gatewayPresenceFramesPerSec": {
+            "count": 120,
+            "average": 108.44362927590154,
+            "peak": 211.92894471557725
+          }
+        },
+        "counterDeltasEstimated": {
+          "gatewayCpuCores": 31.764705882352942,
+          "redisCpuCores": 28.380779421538033,
+          "redisCommandsPerSec": 955282.4457507165,
+          "apiCpuCores": 199.8045406479625,
+          "presenceVisibilityGrpcPerSec": 7022.628775061249,
+          "onlineCountMembersGrpcPerSec": 3933.648699878561,
+          "presenceVisibilitySqlPerSec": 14045.257550122498,
+          "onlineCountMembersSqlPerSec": 11800.946099635683,
+          "recordLastSeenGrpcPerSec": 238.99090516555123,
+          "recordLastSeenSqlPerSec": 238.99090516555123,
+          "gatewayMatchedTransitionsPerSec": 13102.941105084748,
+          "gatewayAllTransitionsPerSec": 13303.526312356948,
+          "gatewayPresenceFramesPerSec": 65465.82197647059
+        }
+      },
+      "dockerStats": {
+        "samples": 31,
+        "firstSampleAt": "2026-11-26T00:24:37.995718+00:00",
+        "intervalSeconds": 15,
+        "workingSetMiB": {
+          "ws": {
+            "average": 107.69935483870968,
+            "peak": 115.22
+          },
+          "api": {
+            "average": 1288.8612903225805,
+            "peak": 1296.1999999999998
+          },
+          "redis": {
+            "average": 68.72874193548387,
+            "peak": 74.82
+          }
+        }
+      }
+    },
+    {
+      "profile": "stress-ramp",
+      "seed": 1118,
+      "workers": 2,
+      "planFileSha256": "2dd46b5f010f9fb1235fdf4a7eacb66d45b3977e0d526e1159de0d82d5087db6",
+      "startAtMs": 1795653630428,
+      "durationMs": 1440000,
+      "users": 8000,
+      "deviceCredentials": 10800,
+      "fixtureChats": 10884,
+      "fixtureMessages": 301025,
+      "sessions": 19295,
+      "plannedActions": 514052,
+      "pools": {
+        "api": 10,
+        "pgbouncer": 20
+      },
+      "authPerSecond": 50,
+      "ticketsPerSecond": 150,
+      "passed": false,
+      "exitStatus": 1,
+      "correctness": {
+        "plannedSends": 79942,
+        "dispatched": 70798,
+        "saved": 70689,
+        "missing": 9253,
+        "pending": 105,
+        "duplicates": 0,
+        "durableChecks": 74639,
+        "durableMismatches": 0,
+        "durableUnverified": 0,
+        "mutationChecks": 8788,
+        "recipientsExpected": 21689,
+        "recipientsMissing": 0,
+        "recipientsInterrupted": 214,
+        "readPropagationExpected": 288,
+        "readPropagationMissing": 9,
+        "readPropagationInterrupted": 23
+      },
+      "sqlTerminalSinceStart": {
+        "SAVED": 70689,
+        "REJECTED": 4
+      },
+      "peakActionsInFlight": 1021,
+      "lagLimitMs": 1500,
+      "presenceAndRateLimits": {
+        "presence.frames": 236595,
+        "presence.onlineCountFrames": 210104,
+        "presence.transitions": 184803,
+        "presence.watchFrames": 73081,
+        "presence.onlineCountWatchFrames": 50261,
+        "presence.snapshotChecks": 23792,
+        "presence.snapshotPassed": 23633,
+        "presence.snapshotMissing": 154,
+        "presence.snapshotDeferred": 5,
+        "socket.rateLimitErrorsWithRequest": 0,
+        "socket.rateLimitErrorsWithoutRequest": 14839,
+        "completed.reconnect": 5585,
+        "lagExceeded": 1574
+      },
+      "actionFailureObservations": 30633,
+      "trafficFailureObservations": 54559,
+      "failuresByCode": {
+        "socket.server/RATE_LIMITED": 14839,
+        "presence.snapshot/missing": 154,
+        "action.send/plannedChatUnavailable": 1493,
+        "action.read/plannedChatUnavailable": 4459,
+        "socket.server/DEPENDENCY_UNAVAILABLE": 2011,
+        "action.forward/socketUnavailable": 275,
+        "action.forward/sendPending": 7,
+        "socket.decode/framePresence": 718,
+        "action.login/socketClosed": 121,
+        "action.readers/plannedChatUnavailable": 83,
+        "action.scroll/plannedChatUnavailable": 698,
+        "action.deleteEveryone/unresolvedReference": 179,
+        "live/http401": 12,
+        "action.deleteSelf/plannedChatUnavailable": 22,
+        "action.chatRefresh/plannedChatUnavailable": 692,
+        "action.pinChat/plannedChatUnavailable": 29,
+        "action.send/socketUnavailable": 6459,
+        "sidebar.summary/http401": 16,
+        "action.mute/plannedChatUnavailable": 62,
+        "action.chatOpen/httpCapacity": 4815,
+        "action.appOpen/httpCapacity": 1460,
+        "sidebar.summary/httpCapacity": 4090,
+        "action.send/httpCapacity": 1614,
+        "action.foreground/httpCapacity": 1698,
+        "action.jump/httpCapacity": 33,
+        "action.readers/unresolvedReference": 378,
+        "action.edit/unresolvedReference": 340,
+        "live/httpCapacity": 1015,
+        "action.mute/httpCapacity": 85,
+        "sidebar.directory/httpCapacity": 222,
+        "action.direct/httpCapacity": 23,
+        "action.edit/httpCapacity": 52,
+        "live.visibility/httpCapacity": 346,
+        "live.recovery/httpCapacity": 407,
+        "action.group/httpCapacity": 23,
+        "action.chatRefresh/httpCapacity": 384,
+        "action.read/httpCapacity": 1369,
+        "action.direct/sendPending": 8,
+        "action.deleteEveryone/plannedChatUnavailable": 38,
+        "action.edit/plannedChatUnavailable": 66,
+        "action.scroll/unresolvedReference": 231,
+        "action.direct/socketUnavailable": 89,
+        "action.pinMessage/http401": 3,
+        "action.scroll/httpCapacity": 262,
+        "action.reconnect/httpCapacity": 640,
+        "action.forward/httpCapacity": 372,
+        "action.pinMessage/httpCapacity": 169,
+        "action.pinMessage/plannedChatUnavailable": 99,
+        "action.send/sendPending": 79,
+        "action.readers/httpCapacity": 50,
+        "action.send/unresolvedReference": 483,
+        "action.jump/plannedChatUnavailable": 287,
+        "action.deleteSelf/unresolvedReference": 166,
+        "live.pins/httpCapacity": 47,
+        "action.unread/httpCapacity": 76,
+        "action.lookup/httpCapacity": 64,
+        "action.sessions/httpCapacity": 98,
+        "action.unread/plannedChatUnavailable": 46,
+        "action.reconnect/unexpected": 32,
+        "action.forward/plannedChatUnavailable": 46,
+        "action.pinChat/httpCapacity": 78,
+        "action.appOpen/socketClosed": 109,
+        "action.deleteEveryone/httpCapacity": 27,
+        "action.pinMessage/http400": 5,
+        "action.pinMessage/unresolvedReference": 59,
+        "sidebar.directory/http401": 3,
+        "action.direct/http401": 1,
+        "action.logout/httpCapacity": 11,
+        "action.login/httpCapacity": 7,
+        "action.send/INVALID_REPLY_TARGET": 3,
+        "action.pinMessage/http404": 2,
+        "live.catchUp/httpCapacity": 32,
+        "action.deleteSelf/httpCapacity": 34,
+        "action.send/http401": 6,
+        "action.forward/catchUpCursorMissing": 3,
+        "action.foreground/catchUpCursorMissing": 4,
+        "live.visibility/http401": 2,
+        "action.chatOpen/http401": 8,
+        "socket.server/INVALID_FRAME": 4,
+        "action.readers/http401": 1,
+        "action.read/http401": 5,
+        "socket.close/unexpectedClose": 2,
+        "live/catchUpCursorMissing": 1,
+        "action.appOpen/http401": 2,
+        "action.foreground/http401": 3,
+        "action.chatRefresh/http401": 1,
+        "action.unread/http401": 1,
+        "socket.server/UNAUTHORIZED": 1,
+        "action.send/rejectedByStatus": 1,
+        "action.group/http401": 1,
+        "live.recovery/http401": 1,
+        "action.forward/http401": 3,
+        "live.changes/http401": 3,
+        "action.deleteSelf/http401": 1
+      },
+      "verificationFailuresByCode": {},
+      "trafficHttpStatuses": {
+        "200": 680422,
+        "201": 262,
+        "204": 4004,
+        "400": 5,
+        "401": 76,
+        "404": 2
+      },
+      "ownAckLatency": {
+        "count": 51205,
+        "meanMs": 423.7906117146581,
+        "p50UpperMs": 65.536,
+        "p95UpperMs": 4194.304,
+        "p99UpperMs": 7661.870417000027,
+        "maxMs": 7661.870417000027
+      },
+      "schedulingLag": {
+        "count": 514052,
+        "meanMs": 0.9493758108969315,
+        "p50UpperMs": 1.024,
+        "p95UpperMs": 2.048,
+        "p99UpperMs": 8.192,
+        "maxMs": 251.67762500001118
+      },
+      "stages": [
+        {
+          "users": 1000,
+          "atMs": 0,
+          "ownAckP99UpperMs": 131.072,
+          "presenceAndRateLimits": {
+            "presence.frames": 6641,
+            "presence.onlineCountFrames": 4396,
+            "presence.transitions": 3426,
+            "presence.watchFrames": 3871,
+            "presence.onlineCountWatchFrames": 2402,
+            "presence.snapshotChecks": 1284,
+            "presence.snapshotPassed": 1284,
+            "presence.snapshotMissing": 0,
+            "presence.snapshotDeferred": 0,
+            "socket.rateLimitErrorsWithRequest": 0,
+            "socket.rateLimitErrorsWithoutRequest": 0,
+            "completed.reconnect": 264,
+            "lagExceeded": 0
+          },
+          "failuresByCode": {}
+        },
+        {
+          "users": 2000,
+          "atMs": 240000,
+          "ownAckP99UpperMs": 262.144,
+          "presenceAndRateLimits": {
+            "presence.frames": 18226,
+            "presence.onlineCountFrames": 13278,
+            "presence.transitions": 11901,
+            "presence.watchFrames": 7936,
+            "presence.onlineCountWatchFrames": 4977,
+            "presence.snapshotChecks": 2488,
+            "presence.snapshotPassed": 2488,
+            "presence.snapshotMissing": 0,
+            "presence.snapshotDeferred": 0,
+            "socket.rateLimitErrorsWithRequest": 0,
+            "socket.rateLimitErrorsWithoutRequest": 0,
+            "completed.reconnect": 560,
+            "lagExceeded": 0
+          },
+          "failuresByCode": {}
+        },
+        {
+          "users": 3000,
+          "atMs": 480000,
+          "ownAckP99UpperMs": 524.288,
+          "presenceAndRateLimits": {
+            "presence.frames": 31644,
+            "presence.onlineCountFrames": 24365,
+            "presence.transitions": 23483,
+            "presence.watchFrames": 10850,
+            "presence.onlineCountWatchFrames": 6954,
+            "presence.snapshotChecks": 3355,
+            "presence.snapshotPassed": 3355,
+            "presence.snapshotMissing": 0,
+            "presence.snapshotDeferred": 0,
+            "socket.rateLimitErrorsWithRequest": 0,
+            "socket.rateLimitErrorsWithoutRequest": 0,
+            "completed.reconnect": 786,
+            "lagExceeded": 0
+          },
+          "failuresByCode": {}
+        },
+        {
+          "users": 4500,
+          "atMs": 720000,
+          "ownAckP99UpperMs": 2097.152,
+          "presenceAndRateLimits": {
+            "presence.frames": 55635,
+            "presence.onlineCountFrames": 44085,
+            "presence.transitions": 44619,
+            "presence.watchFrames": 16122,
+            "presence.onlineCountWatchFrames": 10236,
+            "presence.snapshotChecks": 5056,
+            "presence.snapshotPassed": 5046,
+            "presence.snapshotMissing": 1,
+            "presence.snapshotDeferred": 0,
+            "socket.rateLimitErrorsWithRequest": 0,
+            "socket.rateLimitErrorsWithoutRequest": 440,
+            "completed.reconnect": 1097,
+            "lagExceeded": 21
+          },
+          "failuresByCode": {
+            "socket.server/RATE_LIMITED": 440,
+            "presence.snapshot/missing": 1,
+            "action.send/plannedChatUnavailable": 8,
+            "action.read/plannedChatUnavailable": 16,
+            "socket.server/DEPENDENCY_UNAVAILABLE": 9,
+            "action.forward/socketUnavailable": 3,
+            "action.forward/sendPending": 2,
+            "socket.decode/framePresence": 1,
+            "socket.server/UNAUTHORIZED": 1,
+            "action.login/socketClosed": 1,
+            "action.chatRefresh/plannedChatUnavailable": 1
+          }
+        },
+        {
+          "users": 6000,
+          "atMs": 960000,
+          "ownAckP99UpperMs": 7661.870417000027,
+          "presenceAndRateLimits": {
+            "presence.frames": 78795,
+            "presence.onlineCountFrames": 72093,
+            "presence.transitions": 66147,
+            "presence.watchFrames": 20010,
+            "presence.onlineCountWatchFrames": 14702,
+            "presence.snapshotChecks": 6762,
+            "presence.snapshotPassed": 6685,
+            "presence.snapshotMissing": 69,
+            "presence.snapshotDeferred": 1,
+            "socket.rateLimitErrorsWithRequest": 0,
+            "socket.rateLimitErrorsWithoutRequest": 7227,
+            "completed.reconnect": 1544,
+            "lagExceeded": 701
+          },
+          "failuresByCode": {
+            "action.login/socketClosed": 60,
+            "socket.server/RATE_LIMITED": 7227,
+            "socket.server/DEPENDENCY_UNAVAILABLE": 608,
+            "action.send/plannedChatUnavailable": 415,
+            "action.read/plannedChatUnavailable": 1725,
+            "socket.decode/framePresence": 280,
+            "action.readers/plannedChatUnavailable": 23,
+            "action.scroll/plannedChatUnavailable": 253,
+            "action.forward/socketUnavailable": 100,
+            "presence.snapshot/missing": 69,
+            "action.deleteEveryone/unresolvedReference": 35,
+            "live/http401": 6,
+            "action.deleteSelf/plannedChatUnavailable": 6,
+            "action.chatRefresh/plannedChatUnavailable": 187,
+            "action.pinChat/plannedChatUnavailable": 9,
+            "action.send/socketUnavailable": 1181,
+            "sidebar.summary/http401": 9,
+            "action.mute/plannedChatUnavailable": 19,
+            "action.chatOpen/httpCapacity": 1268,
+            "action.appOpen/httpCapacity": 420,
+            "sidebar.summary/httpCapacity": 1078,
+            "action.send/httpCapacity": 416,
+            "action.foreground/httpCapacity": 426,
+            "action.jump/httpCapacity": 11,
+            "action.readers/unresolvedReference": 74,
+            "action.edit/unresolvedReference": 65,
+            "live/httpCapacity": 287,
+            "action.mute/httpCapacity": 26,
+            "sidebar.directory/httpCapacity": 55,
+            "action.direct/httpCapacity": 7,
+            "action.edit/httpCapacity": 10,
+            "live.visibility/httpCapacity": 73,
+            "live.recovery/httpCapacity": 127,
+            "action.group/httpCapacity": 10,
+            "action.chatRefresh/httpCapacity": 68,
+            "action.read/httpCapacity": 354,
+            "action.direct/sendPending": 4,
+            "action.deleteEveryone/plannedChatUnavailable": 10,
+            "action.edit/plannedChatUnavailable": 21,
+            "action.scroll/unresolvedReference": 57,
+            "action.direct/socketUnavailable": 26,
+            "action.pinMessage/http401": 1,
+            "action.scroll/httpCapacity": 55,
+            "action.reconnect/httpCapacity": 124,
+            "action.forward/httpCapacity": 100,
+            "action.pinMessage/httpCapacity": 46,
+            "action.pinMessage/plannedChatUnavailable": 29,
+            "action.send/sendPending": 31,
+            "action.readers/httpCapacity": 10,
+            "action.send/unresolvedReference": 84,
+            "action.jump/plannedChatUnavailable": 73,
+            "action.deleteSelf/unresolvedReference": 39,
+            "live.pins/httpCapacity": 13,
+            "action.unread/httpCapacity": 23,
+            "action.lookup/httpCapacity": 15,
+            "action.sessions/httpCapacity": 30,
+            "action.unread/plannedChatUnavailable": 13,
+            "action.reconnect/unexpected": 10,
+            "action.forward/plannedChatUnavailable": 16,
+            "action.pinChat/httpCapacity": 29,
+            "action.appOpen/socketClosed": 19,
+            "action.deleteEveryone/httpCapacity": 6,
+            "action.pinMessage/http400": 2,
+            "action.pinMessage/unresolvedReference": 10,
+            "sidebar.directory/http401": 2,
+            "action.direct/http401": 1,
+            "action.logout/httpCapacity": 1,
+            "action.login/httpCapacity": 1,
+            "action.send/INVALID_REPLY_TARGET": 2,
+            "action.pinMessage/http404": 2,
+            "live.catchUp/httpCapacity": 5,
+            "action.deleteSelf/httpCapacity": 5,
+            "action.send/http401": 3,
+            "action.forward/catchUpCursorMissing": 1,
+            "action.foreground/catchUpCursorMissing": 1,
+            "live.visibility/http401": 1,
+            "action.chatOpen/http401": 1,
+            "action.send/rejectedByStatus": 1,
+            "action.group/http401": 1,
+            "live.recovery/http401": 1,
+            "action.forward/http401": 1,
+            "live.changes/http401": 2
+          }
+        },
+        {
+          "users": 8000,
+          "atMs": 1200000,
+          "ownAckP99UpperMs": 4194.304,
+          "presenceAndRateLimits": {
+            "presence.frames": 45654,
+            "presence.onlineCountFrames": 51887,
+            "presence.transitions": 35227,
+            "presence.watchFrames": 14292,
+            "presence.onlineCountWatchFrames": 10990,
+            "presence.snapshotChecks": 4847,
+            "presence.snapshotPassed": 4775,
+            "presence.snapshotMissing": 84,
+            "presence.snapshotDeferred": 4,
+            "socket.rateLimitErrorsWithRequest": 0,
+            "socket.rateLimitErrorsWithoutRequest": 7172,
+            "completed.reconnect": 1334,
+            "lagExceeded": 852
+          },
+          "failuresByCode": {
+            "action.read/plannedChatUnavailable": 2718,
+            "socket.server/RATE_LIMITED": 7172,
+            "action.send/socketUnavailable": 5278,
+            "action.readers/unresolvedReference": 304,
+            "action.login/socketClosed": 60,
+            "action.readers/plannedChatUnavailable": 60,
+            "socket.decode/framePresence": 437,
+            "action.send/plannedChatUnavailable": 1070,
+            "action.forward/socketUnavailable": 172,
+            "socket.server/DEPENDENCY_UNAVAILABLE": 1394,
+            "action.chatRefresh/plannedChatUnavailable": 504,
+            "action.jump/plannedChatUnavailable": 214,
+            "action.scroll/plannedChatUnavailable": 445,
+            "socket.server/INVALID_FRAME": 4,
+            "action.deleteSelf/unresolvedReference": 127,
+            "sidebar.summary/http401": 7,
+            "action.direct/socketUnavailable": 63,
+            "action.mute/plannedChatUnavailable": 43,
+            "action.edit/unresolvedReference": 275,
+            "action.send/sendPending": 48,
+            "action.readers/http401": 1,
+            "action.edit/plannedChatUnavailable": 45,
+            "action.send/unresolvedReference": 399,
+            "action.deleteEveryone/plannedChatUnavailable": 28,
+            "presence.snapshot/missing": 84,
+            "action.unread/plannedChatUnavailable": 33,
+            "live/http401": 6,
+            "action.pinChat/plannedChatUnavailable": 20,
+            "action.pinMessage/plannedChatUnavailable": 70,
+            "live/httpCapacity": 728,
+            "action.send/httpCapacity": 1198,
+            "live.recovery/httpCapacity": 280,
+            "action.chatOpen/httpCapacity": 3547,
+            "action.appOpen/httpCapacity": 1040,
+            "action.reconnect/httpCapacity": 516,
+            "action.unread/httpCapacity": 53,
+            "action.read/httpCapacity": 1015,
+            "sidebar.summary/httpCapacity": 3012,
+            "live.visibility/httpCapacity": 273,
+            "action.scroll/httpCapacity": 207,
+            "action.direct/httpCapacity": 16,
+            "action.forward/httpCapacity": 272,
+            "action.deleteEveryone/unresolvedReference": 144,
+            "action.chatRefresh/httpCapacity": 316,
+            "sidebar.directory/httpCapacity": 167,
+            "action.pinMessage/httpCapacity": 123,
+            "action.deleteEveryone/httpCapacity": 21,
+            "action.foreground/httpCapacity": 1272,
+            "live.catchUp/httpCapacity": 27,
+            "action.deleteSelf/plannedChatUnavailable": 16,
+            "action.edit/httpCapacity": 42,
+            "action.direct/sendPending": 4,
+            "action.scroll/unresolvedReference": 174,
+            "action.pinMessage/unresolvedReference": 49,
+            "action.read/http401": 5,
+            "action.jump/httpCapacity": 22,
+            "action.pinMessage/http401": 2,
+            "action.forward/plannedChatUnavailable": 30,
+            "action.reconnect/unexpected": 22,
+            "action.sessions/httpCapacity": 68,
+            "action.pinChat/httpCapacity": 49,
+            "action.readers/httpCapacity": 40,
+            "socket.close/unexpectedClose": 2,
+            "action.appOpen/socketClosed": 90,
+            "action.mute/httpCapacity": 59,
+            "action.deleteSelf/httpCapacity": 29,
+            "action.lookup/httpCapacity": 49,
+            "live.pins/httpCapacity": 34,
+            "action.logout/httpCapacity": 10,
+            "action.login/httpCapacity": 6,
+            "live/catchUpCursorMissing": 1,
+            "action.forward/sendPending": 5,
+            "action.pinMessage/http400": 3,
+            "action.send/INVALID_REPLY_TARGET": 1,
+            "action.appOpen/http401": 2,
+            "action.group/httpCapacity": 13,
+            "action.foreground/http401": 3,
+            "action.chatOpen/http401": 7,
+            "action.foreground/catchUpCursorMissing": 3,
+            "action.chatRefresh/http401": 1,
+            "action.unread/http401": 1,
+            "action.send/http401": 3,
+            "sidebar.directory/http401": 1,
+            "live.visibility/http401": 1,
+            "action.forward/http401": 2,
+            "live.changes/http401": 1,
+            "action.deleteSelf/http401": 1,
+            "action.forward/catchUpCursorMissing": 2
+          }
+        }
+      ],
+      "prometheus": {
+        "start": "2026-11-26T00:40:30.428000+00:00",
+        "end": "2026-11-26T01:04:30.428000+00:00",
+        "intervalSeconds": 1440.0,
+        "scrapeStepSeconds": 5,
+        "rollingRateSeconds": 30,
+        "samples": {
+          "gatewayCpuCores": {
+            "count": 288,
+            "average": 0.2340079295628878,
+            "peak": 0.43440000000000056
+          },
+          "gatewayRssMiB": {
+            "count": 288,
+            "average": 326.8589138454861,
+            "peak": 437.796875
+          },
+          "gatewayConnections": {
+            "count": 288,
+            "average": 807.8159722222222,
+            "peak": 1500.0
+          },
+          "gatewayWatches": {
+            "count": 288,
+            "average": 800.2881944444445,
+            "peak": 1499.0
+          },
+          "gatewayWatchedSubjects": {
+            "count": 288,
+            "average": 12752.447916666666,
+            "peak": 14895.0
+          },
+          "redisCpuCores": {
+            "count": 288,
+            "average": 0.15312971277790347,
+            "peak": 0.2778638537919893
+          },
+          "redisUsedMiB": {
+            "count": 288,
+            "average": 134.96908039516873,
+            "peak": 158.43929290771484
+          },
+          "redisCommandsPerSec": {
+            "count": 288,
+            "average": 5737.335100962695,
+            "peak": 18250.923090705488
+          },
+          "apiCpuCores": {
+            "count": 288,
+            "average": 1.0224310462047308,
+            "peak": 2.0892
+          },
+          "apiJvmHeapMiB": {
+            "count": 288,
+            "average": 418.5059479872386,
+            "peak": 1277.2325286865234
+          },
+          "presenceVisibilityGrpcPerSec": {
+            "count": 287,
+            "average": 42.54836526673648,
+            "peak": 84.76
+          },
+          "onlineCountMembersGrpcPerSec": {
+            "count": 286,
+            "average": 27.72027170581043,
+            "peak": 54.72
+          },
+          "presenceVisibilitySqlPerSec": {
+            "count": 287,
+            "average": 85.09491747298729,
+            "peak": 169.64
+          },
+          "onlineCountMembersSqlPerSec": {
+            "count": 286,
+            "average": 83.1615134002702,
+            "peak": 164.2
+          },
+          "recordLastSeenGrpcPerSec": {
+            "count": 288,
+            "average": 0.40000078328178185,
+            "peak": 0.48011525532255483
+          },
+          "recordLastSeenSqlPerSec": {
+            "count": 288,
+            "average": 0.0,
+            "peak": 0.0
+          },
+          "gatewayMatchedTransitionsPerSec": {
+            "count": 286,
+            "average": 82.73669344227551,
+            "peak": 158.64642931434514
+          },
+          "gatewayAllTransitionsPerSec": {
+            "count": 286,
+            "average": 89.68133493227063,
+            "peak": 166.72674293943516
+          },
+          "gatewayPresenceFramesPerSec": {
+            "count": 288,
+            "average": 310.09809013515405,
+            "peak": 722.44
+          }
+        },
+        "counterDeltasEstimated": {
+          "gatewayCpuCores": 339.1676655052265,
+          "redisCpuCores": 220.63589116117913,
+          "redisCommandsPerSec": 8142773.129672938,
+          "apiCpuCores": 1479.6677351916378,
+          "presenceVisibilityGrpcPerSec": 61284.14244532297,
+          "onlineCountMembersGrpcPerSec": 39806.34783558033,
+          "presenceVisibilitySqlPerSec": 122565.2389554007,
+          "onlineCountMembersSqlPerSec": 119420.04583261511,
+          "recordLastSeenGrpcPerSec": 576.0,
+          "recordLastSeenSqlPerSec": 0.0,
+          "gatewayMatchedTransitionsPerSec": 118914.43040985646,
+          "gatewayAllTransitionsPerSec": 128904.89130736841,
+          "gatewayPresenceFramesPerSec": 448275.4947735191
+        }
+      },
+      "dockerStats": {
+        "samples": 96,
+        "firstSampleAt": "2026-11-26T00:40:34.444260+00:00",
+        "intervalSeconds": 15,
+        "workingSetMiB": {
+          "ws": {
+            "average": 312.9646875,
+            "peak": 422.1
+          },
+          "api": {
+            "average": 1740.1235416666666,
+            "peak": 2348.1040000000003
+          },
+          "redis": {
+            "average": 153.78239583333334,
+            "peak": 175.91
+          }
+        }
+      },
+      "recordLastSeenOversize": {
+        "gatewayWarningsDuringTraffic": 576,
+        "batchEntries": 1000,
+        "requestBytes": 37000,
+        "apiGrpcLimitBytes": 8192
+      }
+    }
+  ],
+  "idleProbes": [
+    {
+      "protocol": "legacy",
+      "idleStartMs": 1795652931859,
+      "idleEndMs": 1795652991859,
+      "idlePresenceFrames": 12,
+      "offlineDetectionMs": [
+        5000.793541999999,
+        4980.664791999996,
+        6001.310666999998
+      ],
+      "idlePresenceRedisClientCalls": 16,
+      "idlePresenceRedisClientCallsByCommand": {
+        "eval": 16
+      },
+      "idleAuthorizationCounterDeltas": {
+        "grpc.AuthorizePresence": 2.0,
+        "sql.AuthorizePresence": 2.0
+      },
+      "condition": "quiet",
+      "redisPrimaries": [
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "protocol": "current",
+      "idleStartMs": 1795653157060,
+      "idleEndMs": 1795653217061,
+      "idlePresenceFrames": 0,
+      "offlineDetectionMs": [
+        2092.9584160000013,
+        2201.1744999999937,
+        2199.403541000007
+      ],
+      "redisPrimaries": [
+        1,
+        2,
+        3
+      ],
+      "idlePresenceRedisClientCalls": 977,
+      "idlePresenceRedisClientCallsByCommand": {
+        "sunsubscribe": 977
+      },
+      "idleAuthorizationCounterDeltas": {
+        "grpc.PresenceVisibility": 0.0,
+        "sql.PresenceVisibility": 0.0,
+        "grpc.OnlineCountMembers": 0.0,
+        "sql.OnlineCountMembers": 0.0
+      },
+      "condition": "post-load bucket cleanup"
+    },
+    {
+      "protocol": "current",
+      "idleStartMs": 1795655133370,
+      "idleEndMs": 1795655193370,
+      "idlePresenceFrames": 0,
+      "offlineDetectionMs": [
+        2152.6313329999975,
+        2200.308125000003,
+        2200.954291999995
+      ],
+      "redisPrimaries": [
+        1,
+        2,
+        3
+      ],
+      "idlePresenceRedisClientCalls": 2,
+      "idlePresenceRedisClientCallsByCommand": {
+        "hgetall": 1,
+        "get": 1
+      },
+      "idleAuthorizationCounterDeltas": {
+        "grpc.PresenceVisibility": 0.0,
+        "sql.PresenceVisibility": 0.0,
+        "grpc.OnlineCountMembers": 0.0,
+        "sql.OnlineCountMembers": 0.0
+      },
+      "condition": "quiet after 45-second settle",
+      "lastPresenceRedisCommandOffsetMs": 0.057
+    }
+  ]
+}

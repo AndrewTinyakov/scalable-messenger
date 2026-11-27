@@ -1,10 +1,9 @@
-// One signed-in client device: its socket, selected chat, cached history and background refreshes.
-// It sends the same requests and frames as the browser client for each user-visible flow.
 import { setTimeout as delay } from 'node:timers/promises';
 import { MAX_PRESENCE_TARGETS } from '../features-load/presence.mjs';
 import { check, Fault, greater, isId, isSeq, join, query, Socket } from './transport.mjs';
 
 const STATE_CHECK_MS = 60_000;
+const LIVE_ONLINE_COUNT_MAX_MEMBERS = 200;
 const statusCodes = new Set(['INVALID_FRAME', 'RATE_LIMITED', 'ROOM_LIMIT', 'UNAUTHORIZED', 'DEPENDENCY_UNAVAILABLE', 'PUBLISH_UNKNOWN', 'PUBLISH_FAILED']);
 const rejections = new Set(['NOT_A_MEMBER', 'CHAT_NOT_FOUND', 'RECIPIENT_NOT_FOUND', 'INVALID_RECIPIENT', 'EMPTY_BODY',
   'BODY_TOO_LONG', 'REQUEST_ID_CONFLICT', 'PROCESSING_FAILED', 'INVALID_REPLY_TARGET', 'INVALID_FORWARD_SOURCE']);
@@ -34,7 +33,6 @@ const windowOwner = view => Math.max(view.changesSelection, view.installedWindow
 const recoveryState = (selection, view) => ({ selection, installation: view.installedWindow, remainingPages: 20, window: null, hasMore: false });
 
 export class Device {
-  // Sends without a terminal result, so reconciliation never scans the whole run.
   pendingSends = new Set();
   socket = null;
   selected = null;
@@ -43,11 +41,9 @@ export class Device {
   views = new Map();
   roomCursors = new Map();
   summaries = new Map();
-  // Delivery accounting uses these to tell misses from interruptions. `connection` changes when the socket
-  // closes (direct chats arrive on the account room); `selection` also changes on a chat switch (group rooms).
   connection = 0;
   selection = 0;
-  selectionEndedAt = new Map(); // selection -> when it ended, for the last 64 selections
+  selectionEndedAt = new Map();
 
   endSelection() {
     this.selectionEndedAt.set(this.selection, performance.now());
@@ -55,7 +51,6 @@ export class Device {
     this.selection++;
   }
 
-  /** How long this device kept the given chat selection open after `since`. */
   stayedSelected(selection, since) {
     const ended = selection === this.selection ? performance.now() : this.selectionEndedAt.get(selection) ?? since;
     return ended - since;
@@ -137,7 +132,6 @@ export class Device {
     return result.chats;
   }
 
-  // Mirrors useMessengerSocket's refresh queue: chat ID -> sequence the row must reach (null: refresh regardless).
   summaryLater(id, jitter, sequence = null) {
     const queued = this.summaries.get(id);
     if (queued === undefined && this.summaries.size >= 100) return;
@@ -168,7 +162,6 @@ export class Device {
     this.directory = this.directory.map(row => row.id === chat.id ? { ...row, ...chat } : row);
   }
 
-  // Mirrors useChatDirectory.applyActivity: show the next message locally, or report that the row needs a fetch.
   applyActivity(id, sequence, message) {
     const row = this.directory.find(item => item.id === id);
     if (!row || !greater(sequence, row.lastSequence)) return true;
@@ -245,7 +238,8 @@ export class Device {
     else this.watch.delete('watch_presence');
 
     const chat = this.selected;
-    const countChat = chat?.kind === 'GROUP' && chat.memberCount >= 1 && chat.memberCount <= 200 ? chat.id : null;
+    const countChat = chat?.kind === 'GROUP' && chat.memberCount >= 1 && chat.memberCount <= LIVE_ONLINE_COUNT_MAX_MEMBERS
+      ? chat.id : null;
     if (countChat !== (this.socket.onlineCountChat ?? null)) {
       this.offerWatch({ type: 'watch_online_count', ...(countChat ? { chatId: countChat } : {}) });
     } else this.watch.delete('watch_online_count');
@@ -493,8 +487,6 @@ export class Device {
     await this.refreshSnapshot(id, required, recovery);
   }
 
-  // Mirrors the browser: one /state check returns every counter the selected chat needs, and only the
-  // parts whose counter moved are fetched.
   async sync(id, { primary = false, seen } = {}) {
     const view = this.view(id);
     view.stateAt = performance.now();

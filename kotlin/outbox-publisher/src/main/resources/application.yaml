@@ -35,7 +35,6 @@ spring:
 messenger:
   redis:
     presence:
-      # The gateways' presence Redis settings; both empty means the room Redis.
       url: ${PRESENCE_REDIS_URL:}
       cluster-nodes: ${PRESENCE_REDIS_CLUSTER_NODES:}
       room-cluster-nodes: ${spring.data.redis.cluster.nodes:}

@@ -27,11 +27,9 @@ test('the plan is deterministic and stays within both builds\' watch limits', ()
     if (!plan.hot.includes(user)) assert.ok(peers.length <= LEGACY_SIDEBAR_LIMIT);
     const watch = watchSet(plan, user);
     assert.ok(watch.directChats.length <= LEGACY_SIDEBAR_LIMIT);
-    // The current API's 8 KiB request limit fits about 232 IDs in one visibility RPC.
     assert.ok(watch.subjects.length <= 232);
     assert.ok(!watch.subjects.includes(user));
   }
-  // Every user belongs to exactly one group, and the cohort opens it.
   assert.deepEqual(plan.groups.flatMap(group => group.members).sort((a, b) => a - b), [...plan.users.keys()]);
   const opener = plan.order[0];
   assert.equal(watchSet(plan, opener).group, plan.groups[plan.groupOf[opener]]);
@@ -84,7 +82,6 @@ test('the legacy adapter reads sidebar and open-chat polls', () => {
   ]));
   assert.deepEqual(hub.statuses, [[first, true, undefined]]);
   assert.equal(hub.counts['presence.unexpectedSubject'], 1);
-  // A repeated poll is not a change; unknown says nothing.
   watcher.receive(poll('presence', [
     { userId: plan.users[first].id, state: 'online' },
     { userId: plan.users[rest[0]].id, state: 'unknown' },
@@ -92,14 +89,12 @@ test('the legacy adapter reads sidebar and open-chat polls', () => {
   assert.equal(hub.statuses.length, 1);
   assert.equal(hub.readies, 0);
   const all = state => watcher.watch.subjects.map(subject => ({ userId: plan.users[subject].id, state: subject === first ? 'offline' : state }));
-  // An expired poll is dropped.
   watcher.receive(poll('sidebar_presence', all('online'), new Date(Date.now() - 20_000)));
   assert.equal(hub.statuses.length, 1);
   assert.equal(hub.counts['presence.staleFrame'], 1);
   watcher.receive(poll('sidebar_presence', all('online')));
   assert.deepEqual(hub.statuses[1], [first, false, true]);
   assert.equal(hub.readies, 1);
-  // Its sidebar poll runs out after validForMs.
   watcher.validUntil.sidebar = Date.now() - 1;
   assert.equal(watcher.ready, false);
 });
@@ -129,7 +124,6 @@ test('the current adapter is ready only once its group count arrives', () => {
   watcher.receive(frame({ type: 'online_count', version: 1, chatId: watcher.watch.group.id, online: 0, members: 64 }));
   assert.equal(watcher.ready, true);
   assert.equal(hub.readies, 1);
-  // Losing a state makes the socket not ready again.
   watcher.receive(frame({ type: 'presence', version: 1, statuses: [], unavailable: [plan.users[watcher.watch.subjects[0]].id] }));
   assert.equal(watcher.ready, false);
 });
@@ -141,7 +135,6 @@ function bench(t, deadlineMs) {
   return created;
 }
 
-// Three open watchers of one actor that all show it online.
 function watched(created) {
   const actor = created.plan.order[5];
   const watchers = created.watchers[actor].slice(0, 3);
@@ -159,7 +152,6 @@ test('each watcher of a change ends delivered, closed or already showing it', as
   const created = bench(t, 30);
   const { actor, watchers: [w1, w2, w3], client: get } = watched(created);
   get(w3).known.set(actor, false);
-  // A watcher without a known state still has to learn the new one.
   get(w2).known.delete(actor);
   const window = created.begin('test');
   created.expect(actor, false);
@@ -167,7 +159,6 @@ test('each watcher of a change ends delivered, closed or already showing it', as
   created.status(get(w1), actor, false, true, performance.now());
   get(w2).open = false;
   created.closed(get(w2), 1006, false, false);
-  // A delivery counts once its watcher has stayed connected until the deadline.
   assert.equal(window.changes.offline.delivered, 0);
   await tick(40);
   assert.equal(window.changes.offline.delivered, 1);
@@ -185,7 +176,6 @@ test('a delivery past the deadline settles earlier ones before the change ends',
   created.status(get(w1), actor, false, true, start);
   get(w3).open = false;
   created.closed(get(w3), 1006, false, false);
-  // The last watcher reports after the deadline, before any timer has run.
   created.status(get(w2), actor, false, true, start + 50);
   assert.equal(created.pending.size, 0);
   assert.equal(window.changes.offline.delivered, 1);
@@ -274,17 +264,14 @@ test('a delivery after the deadline counts as late, not delivered', async t => {
   const created = bench(t, 20);
   const { actor, watchers: [w1, w2], client: get } = watched(created);
   const window = created.begin('test');
-  // Backdated beyond its deadline: a report arriving now is late.
   created.expect(actor, false, { at: performance.now() - 50 });
   await tick(5);
   created.status(get(w1), actor, false, true, performance.now());
   assert.equal(window.changes.offline.late, 1);
   assert.equal(window.changes.offline.delivered, 0);
-  // A watcher closing after the deadline never reported in time.
   get(w2).open = false;
   created.closed(get(w2), 1006, false, false);
   assert.equal(window.changes.offline.missing, 1);
-  // A later change ends the expired one; its last watcher is missing, not superseded.
   created.expect(actor, true);
   assert.equal(window.changes.offline.superseded, 0);
   assert.equal(window.changes.offline.missing, 2);
@@ -304,8 +291,6 @@ test('a legacy source forgets its states once its polls expire', () => {
   watcher.receive(poll('sidebar_presence', [direct, shared].map(subject => ({ userId: plan.users[subject].id, state: 'online' }))));
   watcher.receive(poll('presence', [{ userId: plan.users[shared].id, state: 'offline' }]));
   assert.equal(watcher.known.get(shared), false);
-  // The sidebar's polls stop: its direct peer is unknown again, while the open
-  // group still vouches for the member both sources reported.
   watcher.validUntil.sidebar = Date.now() - 1;
   watcher.prune();
   assert.equal(watcher.known.has(direct), false);

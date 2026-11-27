@@ -55,7 +55,6 @@ function docker(args, signal, input) {
   });
 }
 
-// Older history is bulk-copied straight into Postgres. It bypasses the broker, so it produces no live events.
 async function loadFixture(project, plan, manifest, firstMessages, signal) {
   const db = await docker(['compose', '-p', project, 'ps', '-q', 'postgres'], signal);
   check(/^[a-f0-9]{12,64}$/.test(db), 'fixtureContainer');
@@ -126,7 +125,6 @@ export async function setup(plan, options, http, fingerprint) {
     return Array.from({ length: user.devices }, (_, index) => ({ username, password, deviceId: tag + 'd' + user.id + '-' + index }));
   });
   const manifest = { format: 'realistic-load-session-v1', fingerprint, tag, devices, chats: [] };
-  // The first device registers the account; the user's other devices sign in to it.
   await workers(devices, 12, async ([first, ...others]) => {
     await authenticate(http, first, 'register');
     for (const device of others) {

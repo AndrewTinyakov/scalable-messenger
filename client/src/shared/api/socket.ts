@@ -82,11 +82,9 @@ export function sendSocketFrame(socket: WebSocket, frame: OutgoingSocketFrame): 
 }
 
 type LiveEvent = { eventId: string; room: string; epoch: string; streamId: string }
-/** Chat, member and account sequences a hint can carry; see ADR 0005. */
 export type EventCounters = { seq?: string; memberSeq?: string; userSeq?: string }
 
 type MessageFields = Omit<Message, 'id'> & { messageId: string }
-/** The new message a chat-list row can show without fetching it. */
 export type ActivityMessage = {
   messageId: string
   senderId: string

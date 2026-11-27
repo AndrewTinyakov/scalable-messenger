@@ -173,7 +173,6 @@ test('ramp profile adds users in stages at a steady per-user rate', () => {
   const plan = buildPlan(input, 1118);
   const joined = id => input.ramp.stages.find(stage => id < stage.users).atMs;
   assert.ok(plan.sessions.every(session => session.start >= joined(session.actor) && session.end <= input.durationMs));
-  // Sessions per user per period match the profile, whatever the join time.
   const rate = users => {
     const ids = new Set(plan.population.filter(user => users(user.id)).map(user => user.id));
     const window = input.durationMs - joined([...ids][0]);

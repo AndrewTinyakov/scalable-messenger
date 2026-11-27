@@ -22,7 +22,6 @@ interface Props {
   onUnmute?: () => void
 }
 
-/** Groups up to this size show a live online count; larger ones only their size. */
 export const LIVE_ONLINE_COUNT_MAX_MEMBERS = 200
 
 function useSubtitle(chat: Chat, recipient: string | undefined): { text: string; online: boolean } {

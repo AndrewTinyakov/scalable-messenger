@@ -61,6 +61,8 @@ The client keeps one reference-counted store. It has a global cap of 500 distinc
 
 The sidebar watches the peers of every loaded direct chat, ranked visible first, then the next 20 rows, then the most recently shown. Loaded pages stay in memory for the session. The gateway enforces 500 distinct users per connection and rejects the excess IDs by name. A per-account rate limit (burst 30, three per second) is charged once per watch command that adds users. The client paces its presence and online count watches together at one per second, and after a rate-limit error it sends its whole watch set again.
 
+The client asks again for refused users after a new chat arrives and retries every minute even without an event. The gateway rechecks grants it already holds, so the client must ask again to learn about newly permitted users.
+
 ## Group online count
 
 A group of up to 200 members shows "N members, M online" while the chat is open. The client sends `presence.count {groupId}`. Kotlin authorizes the viewer and returns the member IDs the viewer may see. The gateway tracks those members internally and sends only `{online: M}` when M changes. A membership change invalidates the set, and the gateway resolves it again. Larger groups show only their member count. Hovering the count shows a paginated member preview, and clicking it opens the members dialog; both show live status for their loaded rows through ordinary watches.

@@ -26,7 +26,6 @@ export class Measurements {
   latencies = new Map();
   failures = Object.create(null);
   rss = 0;
-  // During a ramp, everything is also recorded under the stage that is running at the time.
   stages = null;
   stage = null;
 
@@ -69,7 +68,6 @@ export class Measurements {
     this.current()?.failure(operation, error);
   }
 
-  // A lossless form that a coordinator can add together across workers.
   raw() {
     return {
       counts: this.counts, statuses: this.statuses, failures: this.failures, rss: this.rss,

@@ -12,7 +12,6 @@ interface Props {
   load(chatId: string, after?: string): Promise<MemberPage>
 }
 
-/** A paginated member list with live status, shown while hovering the member count. */
 export function MembersPreview({ chatId, ownerId, load }: Props) {
   const [members, setMembers] = useState<User[]>([])
   const [cursor, setCursor] = useState<string | null>(null)

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { OutgoingSocketFrame } from '../../shared/api/socket'
-import { DENIED_RETRY_MS, MAX_WATCHED, PresenceStore, UNWATCH_DELAY_MS } from './presenceStore'
+import { MAX_WATCHED, PresenceStore, UNWATCH_DELAY_MS } from './presenceStore'
 
 const id = (n: number) => `01ARZ3NDEKTSV4RRFFQ${String(n).padStart(7, '0')}`
 const range = (from: number, count: number) => Array.from({ length: count }, (_, n) => id(from + n))
@@ -256,10 +256,12 @@ it('asks again for refused users every minute, even without an event', async () 
   store.watch('header', header, [id(1)])
   await vi.advanceTimersByTimeAsync(0)
   store.onEvent({ version: 1, type: 'presence', statuses: [], unavailable: [id(1)] })
-  await vi.advanceTimersByTimeAsync(DENIED_RETRY_MS - 1000)
+  await vi.advanceTimersByTimeAsync(59_999)
   expect(added()).toEqual([id(1)])
-  await vi.advanceTimersByTimeAsync(1000)
+  await vi.advanceTimersByTimeAsync(1)
   expect(added()).toEqual([id(1), id(1)])
+  store.onEvent({ version: 1, type: 'presence', statuses: [{ userId: id(1), online: true }] })
+  expect(store.getSnapshot().statuses.get(id(1))).toEqual({ userId: id(1), online: true })
 })
 
 it('sends the whole watch again after a failed watch', async () => {

@@ -33,7 +33,6 @@ type CatchUpRequest = {
   promise: Promise<void>
   socketGeneration: number
   requiredSequence: string
-  /** One more pass after this one, for hints about messages newer than its snapshot. */
   followUp?: Promise<void>
 }
 
@@ -492,11 +491,6 @@ export class ChatRecovery {
     }
   }
 
-  /**
-   * Fetches history the client is missing. A call during a running catch-up normally joins it.
-   * With `fresh`, the caller knows of a message that may postdate the running request's snapshot
-   * (a recovery_failed hint), so one more pass runs after it; concurrent fresh calls share that pass.
-   */
   catchUp(
     chatId: string,
     fromStart = false,
@@ -956,8 +950,6 @@ export class ChatRecovery {
               await this.catchUp(chatId, false, visibility.snapshotSequence, true)
             continue
           }
-          // A batch can be skipped when every history slot is busy, or dropped when a newer revision
-          // fences it. Only a pass that reconciled everything may mark this revision as verified.
           let complete = true
           const ids = this.state.retainedIds(chatId)
           for (let index = 0; index < ids.length; index += 100) {
@@ -981,7 +973,6 @@ export class ChatRecovery {
           )
           if (latest.skipped) complete = false
           if (!complete) {
-            // Retry a few times; after that, leave the revision unverified so the next hint repairs it.
             if (++incompletePasses >= 3 || !valid()) return
             request.phase = 'invalidated'
             continue
@@ -1078,10 +1069,6 @@ export class ChatRecovery {
     this.runtime!.changed()
     return true
   }
-  /**
-   * The quoted message was deleted or hidden after its replies loaded: show those quotes as unavailable now,
-   * then synchronize so any other stale rows in the retained windows are repaired too.
-   */
   quoteTargetGone(chatId: string, messageId: string): void {
     this.state.quoteTargetGone(chatId, messageId)
     this.runtime!.changed()

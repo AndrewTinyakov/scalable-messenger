@@ -81,9 +81,7 @@ export function useMessenger(session: Session, onSessionRevoked: () => void) {
   useEffect(() => {
     try {
       localStorage.removeItem(`${prefix}.messages`)
-    } catch {
-      /* Storage may be disabled. */
-    }
+    } catch {}
     setPending(requests.list())
   }, [prefix, requests])
 

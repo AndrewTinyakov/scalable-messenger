@@ -1,4 +1,3 @@
-// Presence-only load benchmark. See README.md.
 import { writeFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 import { buildPlan, DEFAULTS } from './plan.mjs';
@@ -41,7 +40,6 @@ if (command === 'seed') {
   const manifest = await readManifest(values.manifest);
   const plan = buildPlan(manifest.params);
   const http = ticketClient({ api: manifest.api, origin: manifest.origin, ticketRate: number('ticket-rate') });
-  // Tickets for everyone the scenario may connect, fetched before any timed window.
   console.error(`Fetching ${scenario.users} tickets`);
   const tickets = await fetchTickets(http, manifest, plan, plan.order.slice(0, scenario.users));
   const stopRefresh = refreshTickets(http, manifest, plan, tickets, console.error);

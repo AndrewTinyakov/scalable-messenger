@@ -1,8 +1,4 @@
-// The benchmark population, rebuilt from its parameters on every command so
-// both stacks get the same users, chats and contact graph.
-
 const CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
-// The legacy gateway accepts at most 100 chat IDs in one sidebar watch.
 export const LEGACY_SIDEBAR_LIMIT = 100;
 
 export const DEFAULTS = Object.freeze({
@@ -10,7 +6,6 @@ export const DEFAULTS = Object.freeze({
   groupSize: 64, groupCohortEvery: 5,
 });
 
-// sfc32: small, fast and identical in every Node version.
 export function random(seed) {
   let a = 0x9e3779b9, b = 0x243f6a88, c = 0xb7e15162, d = seed >>> 0;
   const next = () => {
@@ -36,9 +31,6 @@ export function shuffle(values, rand) {
   return values;
 }
 
-// A ULID-shaped ID: the fixed prefix keeps it inside the 0-7 first-character
-// range the protocol accepts, the kind letter keeps users and chats apart, and
-// the encoded index keeps it unique.
 function id(kind, index, rand) {
   let value = '01' + kind;
   for (let i = 0; i < 9; i++) value += CROCKFORD[Math.floor(rand() * 32)];
@@ -53,7 +45,6 @@ export function buildPlan(options = {}) {
   if (p.users < p.groupSize * 2 || p.users % p.groupSize) throw new Error('users must be a multiple of groupSize, with at least two groups');
   const rand = random(p.seed);
   const users = Array.from({ length: p.users }, (_, i) => ({ id: id('S', i, rand), username: 'pl' + i }));
-  // order[k] is the user that connects k-th; a plateau of S sockets is order[0..S).
   const order = shuffle([...users.keys()], rand);
   const position = new Int32Array(p.users);
   order.forEach((user, k) => { position[user] = k; });
@@ -61,8 +52,6 @@ export function buildPlan(options = {}) {
   const peers = users.map(() => []);
   const edges = new Set();
   const directs = [];
-  // Only `limited` users must stay within one legacy sidebar watch; a hot
-  // subject's own sidebar shows just its first page.
   const connect = (a, b, limited = [a, b]) => {
     if (a === b) return false;
     const key = Math.min(a, b) * p.users + Math.max(a, b);
@@ -80,8 +69,6 @@ export function buildPlan(options = {}) {
     for (let a = 0; a < p.users; a++) connect(a, target[a]);
   }
 
-  // The first users in connection order are always online and watched by
-  // followers drawn from the users connected at the top paired plateau.
   const hot = order.slice(0, p.hotSubjects);
   const pool = order.slice(p.hotSubjects, Math.min(p.hotPool, p.users));
   for (const subject of hot) {
@@ -103,13 +90,10 @@ export function buildPlan(options = {}) {
 
   return {
     params: p, users, order, position, peers, directs, groups, groupOf, hot,
-    // A user in the cohort keeps its group open, so it also watches the group.
     openGroup: user => position[user] % p.groupCohortEvery === 0 ? groups[groupOf[user]] : null,
   };
 }
 
-// What one user's client asks to watch: its loaded direct chats and, when its
-// group is open, that group's other members.
 export function watchSet(plan, user) {
   const group = plan.openGroup(user);
   const direct = plan.peers[user].slice(0, LEGACY_SIDEBAR_LIMIT);

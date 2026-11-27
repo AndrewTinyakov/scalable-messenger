@@ -26,12 +26,16 @@
     "test:system": "node --test --test-concurrency=1 tests/system/*.test.mjs",
     "test:resilience": "MESSENGER_RESILIENCE=1 node --test --test-concurrency=1 tests/system/*.test.mjs tests/resilience/*.test.mjs",
     "test:load": "go -C tests/load/ws test -race ./...",
-    "load:ws": "go -C tests/load/ws run ."
+    "load:ws": "go -C tests/load/ws run .",
+    "check:source-comments": "node scripts/check-source-comments.mjs"
   },
   "devDependencies": {
     "@asyncapi/modelina": "5.10.1",
     "@asyncapi/parser": "3.6.3",
-    "ws": "8.23.0"
+    "@babel/parser": "7.29.9",
+    "sh-syntax": "0.8.7",
+    "ws": "8.23.0",
+    "yaml": "2.9.1"
   },
   "overrides": {
     "jsonpath-plus": "10.4.0",

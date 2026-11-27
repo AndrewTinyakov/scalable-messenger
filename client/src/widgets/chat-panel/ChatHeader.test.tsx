@@ -66,21 +66,21 @@ it('shows the peer status, never a blank line once it is known', async () => {
   expect(line().textContent).toBe('last seen recently')
 })
 
-it('shows a live online count for small groups and opens members from it', async () => {
+it('shows the live online count at 200 members and releases the watch above that limit', async () => {
   vi.useFakeTimers()
   const store = new PresenceStore()
   const sent: { type: string; chatId?: string }[] = []
   store.connect((frame) => sent.push(frame))
-  const group: Chat = { ...chat, kind: ChatKind.GROUP, name: 'Team', memberCount: 3 }
+  const group: Chat = { ...chat, kind: ChatKind.GROUP, name: 'Team', memberCount: 200 }
   const line = await render(store, group)
   await act(async () => {
     await vi.advanceTimersByTimeAsync(1000)
   })
   expect(sent.at(-1)).toEqual({ type: 'watch_online_count', version: 1, chatId: group.id })
   await act(async () => {
-    store.onEvent({ type: 'online_count', version: 1, chatId: group.id, online: 2, members: 3 })
+    store.onEvent({ type: 'online_count', version: 1, chatId: group.id, online: 2, members: 200 })
   })
-  expect(line.textContent).toBe('3 members, 2 online')
+  expect(line.textContent).toBe('200 members, 2 online')
   expect(line.tagName).toBe('BUTTON')
   const large = await render(store, {
     ...group,

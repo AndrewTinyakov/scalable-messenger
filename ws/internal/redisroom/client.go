@@ -100,7 +100,6 @@ func validClusterSlots(slots []redis.ClusterSlot) bool {
 	return true
 }
 
-// AllowSend applies a shared per-user limit across all WS nodes.
 func (c *Client) AllowSend(ctx context.Context, userID string) (bool, error) {
 	const script = `local n=redis.call('INCR',KEYS[1]); if n==1 then redis.call('EXPIRE',KEYS[1],1) end; return n`
 	key := "messenger:rate:{" + userID + "}:send"

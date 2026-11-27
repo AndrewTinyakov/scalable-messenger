@@ -21,8 +21,6 @@ local nextTat=math.max(now,tat)+cost*interval
 redis.call('SET',KEYS[1],string.format('%.0f',nextTat),'PX',ARGV[3])
 return 1`)
 
-// Per-user connection keys share one Redis Cluster slot. Hashing keeps
-// untrusted identifier bytes out of the Redis key and hash tag.
 func connectionUserKey(userID, suffix string) string {
 	digest := sha256.Sum256([]byte(userID))
 	return "messenger:connection:{" + hex.EncodeToString(digest[:]) + "}:" + suffix
@@ -32,22 +30,14 @@ func validConnectionUserID(userID string) bool {
 	return userID != "" && len(userID) <= 256
 }
 
-// AllowSubscribe uses a Redis-time GCRA limit shared by all WS nodes. A
-// burst of up to limit attempts is allowed within window; denied attempts
-// do not extend the window. Apply it before each group authorization call.
 func (c *Client) AllowSubscribe(ctx context.Context, userID string, limit int, window time.Duration) (bool, error) {
 	return c.allowAttempt(ctx, userID, 1, limit, window, "subscribe")
 }
 
-// AllowSubscribeBatch charges one token for each requested chat in one atomic
-// Redis operation, so a batch cannot bypass or partly consume the rate limit.
 func (c *Client) AllowSubscribeBatch(ctx context.Context, userID string, count, limit int, window time.Duration) (bool, error) {
 	return c.allowAttempt(ctx, userID, count, limit, window, "subscribe")
 }
 
-// AllowHandshake applies an independent per-user Redis-time GCRA limit to
-// connection attempts. Check it after authentication and before acquiring a
-// connection slot so rejected attempts do not occupy one.
 func (c *Client) AllowHandshake(ctx context.Context, userID string, limit int, window time.Duration) (bool, error) {
 	return c.allowAttempt(ctx, userID, 1, limit, window, "handshake")
 }
@@ -64,8 +54,6 @@ func (c *Client) allowAttempt(ctx context.Context, userID string, cost, limit in
 	return result == 1, nil
 }
 
-// AllowPresenceWatch limits watch commands per user across all WS nodes:
-// a burst of 30, refilled at three per second.
 func (c *Client) AllowPresenceWatch(ctx context.Context, userID string) (bool, error) {
 	return c.allowAttempt(ctx, userID, 1, 30, 10*time.Second, "presence")
 }

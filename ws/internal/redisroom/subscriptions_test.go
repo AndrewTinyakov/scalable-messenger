@@ -23,18 +23,18 @@ func TestIdleListenersUseOnlyInlineEventStorage(t *testing.T) {
 	listeners := make([]*Listener, 10_000)
 	for i := range listeners {
 		listeners[i] = newListener(group, fmt.Sprintf("group:%d", i))
-		if &listeners[i].pending[0] != &listeners[i].inline[0] {
+		if &listeners[i].pending[0] != &listeners[i].inlineEvent[0] {
 			t.Fatalf("idle listener %d allocated a separate event buffer", i)
 		}
 	}
-	if !listeners[0].enqueue(Live{StreamID: "1-0"}, 1) {
+	if !listeners[0].enqueueLocked(Live{StreamID: "1-0"}, 1) {
 		t.Fatal("first event was rejected")
 	}
-	if &listeners[0].pending[0] != &listeners[0].inline[0] {
+	if &listeners[0].pending[0] != &listeners[0].inlineEvent[0] {
 		t.Fatal("first event allocated a separate event buffer")
 	}
 	for i, listener := range listeners[1:] {
-		if &listener.pending[0] != &listener.inline[0] {
+		if &listener.pending[0] != &listener.inlineEvent[0] {
 			t.Fatalf("idle listener %d allocated a separate event buffer", i+1)
 		}
 	}
@@ -45,7 +45,7 @@ func TestListenerEventBufferPreservesOrderAndBoundsBurst(t *testing.T) {
 	listener := newListener(group, "group:test")
 	ctx := context.Background()
 	for i := range roomEventBufferLimit / 2 {
-		if !listener.enqueue(Live{StreamID: fmt.Sprint(i)}, 1) {
+		if !listener.enqueueLocked(Live{StreamID: fmt.Sprint(i)}, 1) {
 			t.Fatalf("event %d was rejected before the buffer limit", i)
 		}
 	}
@@ -56,14 +56,14 @@ func TestListenerEventBufferPreservesOrderAndBoundsBurst(t *testing.T) {
 		}
 	}
 	for i := roomEventBufferLimit / 2; i < roomEventBufferLimit+roomEventBufferLimit/4; i++ {
-		if !listener.enqueue(Live{StreamID: fmt.Sprint(i)}, 1) {
+		if !listener.enqueueLocked(Live{StreamID: fmt.Sprint(i)}, 1) {
 			t.Fatalf("event %d was rejected before the buffer limit", i)
 		}
 	}
 	if got := listener.queued; got != roomEventBufferLimit {
 		t.Fatalf("queued events = %d, want %d", got, roomEventBufferLimit)
 	}
-	if listener.enqueue(Live{StreamID: "overflow"}, 1) {
+	if listener.enqueueLocked(Live{StreamID: "overflow"}, 1) {
 		t.Fatal("event beyond the buffer limit was accepted")
 	}
 	for i := roomEventBufferLimit / 4; i < roomEventBufferLimit+roomEventBufferLimit/4; i++ {
@@ -75,7 +75,7 @@ func TestListenerEventBufferPreservesOrderAndBoundsBurst(t *testing.T) {
 	if got := listener.queued; got != 0 {
 		t.Fatalf("queued events after drain = %d, want 0", got)
 	}
-	if &listener.pending[0] != &listener.inline[0] {
+	if &listener.pending[0] != &listener.inlineEvent[0] {
 		t.Fatal("drained listener retained the burst buffer")
 	}
 }
@@ -83,16 +83,16 @@ func TestListenerEventBufferPreservesOrderAndBoundsBurst(t *testing.T) {
 func TestListenerEventBufferLimitsBytes(t *testing.T) {
 	listener := newListener(&subscriptionGroup{}, "group:test")
 	size := roomEventBufferByteLimit/2 + 1
-	if !listener.enqueue(Live{StreamID: "1-0"}, size) {
+	if !listener.enqueueLocked(Live{StreamID: "1-0"}, size) {
 		t.Fatal("first event rejected")
 	}
-	if listener.enqueue(Live{StreamID: "2-0"}, size) {
+	if listener.enqueueLocked(Live{StreamID: "2-0"}, size) {
 		t.Fatal("second event exceeded byte limit")
 	}
 	if live, err := listener.Receive(context.Background()); err != nil || live.StreamID != "1-0" {
 		t.Fatalf("receive = %+v, %v", live, err)
 	}
-	if listener.queuedBytes != 0 || !listener.enqueue(Live{StreamID: "2-0"}, size) {
+	if listener.queuedBytes != 0 || !listener.enqueueLocked(Live{StreamID: "2-0"}, size) {
 		t.Fatal("drain did not release byte capacity")
 	}
 }
@@ -112,7 +112,7 @@ func TestListenerReceiveWakesAndStops(t *testing.T) {
 		received <- result{live, err}
 	}()
 	group.mu.Lock()
-	listener.enqueue(Live{StreamID: "1-0"}, 1)
+	listener.enqueueLocked(Live{StreamID: "1-0"}, 1)
 	group.mu.Unlock()
 	select {
 	case got := <-received:
@@ -129,7 +129,7 @@ func TestListenerReceiveWakesAndStops(t *testing.T) {
 	}()
 	want := errors.New("feed stopped")
 	group.mu.Lock()
-	listener.stop(want)
+	listener.stopLocked(want)
 	group.mu.Unlock()
 	select {
 	case got := <-stopped:
@@ -305,11 +305,9 @@ func TestLastListenerRejoinWaitsForClosedGroupToDrop(t *testing.T) {
 	group := first.group
 	group.mu.Lock()
 	delete(group.listeners, Channel(room))
-	first.stop(errSubscriptionClosed)
+	first.stopLocked(errSubscriptionClosed)
 	group.state = subscriptionClosed
 	group.mu.Unlock()
-	// Model the interval after the last listener marks the group closed but
-	// before its PubSub close removes it from the hub.
 	type result struct {
 		listener *Listener
 		err      error
@@ -321,7 +319,7 @@ func TestLastListenerRejoinWaitsForClosedGroupToDrop(t *testing.T) {
 	}()
 	select {
 	case got := <-rejoined:
-		t.Fatalf("rejoin returned before old group dropped: %+v", got)
+		t.Fatalf("rejoin returned before the old group left the hub: %+v", got)
 	case <-time.After(50 * time.Millisecond):
 	}
 	group.close()
@@ -336,7 +334,7 @@ func TestLastListenerRejoinWaitsForClosedGroupToDrop(t *testing.T) {
 			t.Fatalf("rejoined listener receive: event=%+v error=%v", live.Event, err)
 		}
 	case <-ctx.Done():
-		t.Fatal("rejoin did not finish after old group dropped")
+		t.Fatal("rejoin did not finish after the old group left the hub")
 	}
 }
 

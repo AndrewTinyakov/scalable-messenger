@@ -26,12 +26,9 @@ func (h *Hub) flushPending(now time.Time) {
 	}
 }
 
-// flushWatch sends a socket its rejected users and, unless its page is
-// hidden, its changed statuses and online count. Building and queueing hold
-// the socket's flush lock, so frames reach the socket in the order built.
 func (h *Hub) flushWatch(wt *watch) {
-	wt.flush.Lock()
-	defer wt.flush.Unlock()
+	wt.deliveryMu.Lock()
+	defer wt.deliveryMu.Unlock()
 	h.mu.Lock()
 	if h.watches[wt.watcher] != wt {
 		h.mu.Unlock()

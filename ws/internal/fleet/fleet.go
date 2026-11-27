@@ -23,9 +23,6 @@ type Store interface {
 	ForgetGateway(context.Context, string) error
 }
 
-// GatewayState is the per-gateway state kept outside connection counts.
-// RemoveGateway clears what a dead gateway identity left behind, using its
-// own index; Renew writes local state again after Redis lost it.
 type GatewayState interface {
 	RemoveGateway(context.Context, string) error
 	Renew()
@@ -38,33 +35,22 @@ type Config struct {
 	Timeout         time.Duration
 }
 
-// Fleet owns this gateway's identity and its per-user connection counts.
-// Redis holds one count per user and gateway, changed only when a
-// connection opens or closes, never while sockets are idle. Every Redis
-// change for one user runs under that user's lock, so the absolute count
-// it writes is never older than one already written.
 type Fleet struct {
-	store  Store
-	state  GatewayState
-	config Config
-	logger *slog.Logger
-	wake   chan struct{}
-	// admitting is held shared by each admission's Redis check and
-	// exclusively while the heartbeat detects and starts a renewal, so no
-	// admission can count against state that a renewal replaces.
-	admitting sync.RWMutex
-	mu        sync.Mutex
-	id        string
-	renewal   renewalPhase
-	counts    map[string]int
-	dirty     map[string]bool
-	locks     map[string]*userLock
-	retired   []string
+	store         Store
+	state         GatewayState
+	config        Config
+	logger        *slog.Logger
+	wake          chan struct{}
+	admissionGate sync.RWMutex
+	mu            sync.Mutex
+	id            string
+	renewal       renewalPhase
+	counts        map[string]int
+	dirty         map[string]bool
+	locks         map[string]*cancellableUserLock
+	retired       []string
 }
 
-// renewalPhase blocks admission while Redis may undercount this gateway's
-// connections: while a new identity registers, and until every local count
-// has been written again after Redis lost them.
 type renewalPhase uint8
 
 const (
@@ -73,8 +59,7 @@ const (
 	renewalRestoring
 )
 
-// userLock is a mutex whose waiters can give up when their context ends.
-type userLock struct {
+type cancellableUserLock struct {
 	held    chan struct{}
 	holders int
 }
@@ -82,7 +67,7 @@ type userLock struct {
 func New(store Store, state GatewayState, config Config, logger *slog.Logger) *Fleet {
 	return &Fleet{
 		store: store, state: state, config: config, logger: logger, wake: make(chan struct{}, 1), id: newID(),
-		counts: make(map[string]int), dirty: make(map[string]bool), locks: make(map[string]*userLock),
+		counts: make(map[string]int), dirty: make(map[string]bool), locks: make(map[string]*cancellableUserLock),
 	}
 }
 
@@ -102,7 +87,7 @@ func (f *Fleet) lockUser(ctx context.Context, userID string) (func(), error) {
 	f.mu.Lock()
 	lock := f.locks[userID]
 	if lock == nil {
-		lock = &userLock{held: make(chan struct{}, 1)}
+		lock = &cancellableUserLock{held: make(chan struct{}, 1)}
 		f.locks[userID] = lock
 	}
 	lock.holders++
@@ -132,8 +117,8 @@ func (f *Fleet) Admit(ctx context.Context, userID string) (bool, error) {
 		return false, err
 	}
 	defer unlock()
-	f.admitting.RLock()
-	defer f.admitting.RUnlock()
+	f.admissionGate.RLock()
+	defer f.admissionGate.RUnlock()
 	f.mu.Lock()
 	if f.renewal != renewalNone {
 		f.mu.Unlock()
@@ -149,7 +134,6 @@ func (f *Fleet) Admit(ctx context.Context, userID string) (bool, error) {
 	return admitted, err
 }
 
-// Release forgets one local connection; the writer stores the new count.
 func (f *Fleet) Release(userID string) {
 	f.mu.Lock()
 	if f.counts[userID]--; f.counts[userID] <= 0 {
@@ -207,7 +191,7 @@ func (f *Fleet) writeCounts(ctx context.Context) {
 		}
 		f.mu.Unlock()
 		for _, userID := range users {
-			f.writeUser(ctx, userID)
+			f.writeUserCount(ctx, userID)
 		}
 		f.mu.Lock()
 		if f.renewal == renewalRestoring && len(f.dirty) == 0 {
@@ -217,10 +201,7 @@ func (f *Fleet) writeCounts(ctx context.Context) {
 	}
 }
 
-// writeUser stores one user's current local count, and drops them from the
-// cleanup index once it is zero. It holds the user's lock, so no admission
-// for that user runs meanwhile.
-func (f *Fleet) writeUser(ctx context.Context, userID string) {
+func (f *Fleet) writeUserCount(ctx context.Context, userID string) {
 	unlock, err := f.lockUser(ctx, userID)
 	if err != nil {
 		return
@@ -248,20 +229,16 @@ func (f *Fleet) write(ctx context.Context, operation func(context.Context) error
 }
 
 func (f *Fleet) heartbeat(ctx context.Context) {
-	f.admitting.Lock()
-	renewed := f.renew(ctx)
-	f.admitting.Unlock()
+	f.admissionGate.Lock()
+	renewed := f.renewRegistrationWithAdmissionBlocked(ctx)
+	f.admissionGate.Unlock()
 	if renewed {
 		f.state.Renew()
 		f.signal()
 	}
 }
 
-// renew extends the registration and reports whether state must be written
-// again. If Redis lost the registration, every count is restored; if another
-// gateway declared this one dead, a new identity is registered first and
-// the old one is cleaned up like any dead gateway.
-func (f *Fleet) renew(ctx context.Context) bool {
+func (f *Fleet) renewRegistrationWithAdmissionBlocked(ctx context.Context) bool {
 	f.mu.Lock()
 	id := f.id
 	f.mu.Unlock()
@@ -358,17 +335,11 @@ func (f *Fleet) localUsers() []string {
 	return users
 }
 
-// clean removes a dead gateway identity's state through its indexes and the
-// given users, then forgets the identity. For a retired identity of this
-// gateway the users are its local ones, which also covers an admission whose
-// index entry another gateway's cleanup already deleted. Clearing a count
-// takes that user's lock, so a write still running under the retired
-// identity finishes first.
 func (f *Fleet) clean(ctx context.Context, gateway string, users []string) error {
 	if err := f.state.RemoveGateway(ctx, gateway); err != nil {
 		return err
 	}
-	clearUsers := func(users []string) error {
+	clearCountsUnderUserLocks := func(users []string) error {
 		for _, userID := range users {
 			unlock, err := f.lockUser(ctx, userID)
 			if err != nil {
@@ -382,7 +353,7 @@ func (f *Fleet) clean(ctx context.Context, gateway string, users []string) error
 		}
 		return nil
 	}
-	if err := clearUsers(users); err != nil {
+	if err := clearCountsUnderUserLocks(users); err != nil {
 		return err
 	}
 	var cursor uint64
@@ -393,7 +364,7 @@ func (f *Fleet) clean(ctx context.Context, gateway string, users []string) error
 		if err != nil {
 			return err
 		}
-		if err := clearUsers(users); err != nil {
+		if err := clearCountsUnderUserLocks(users); err != nil {
 			return err
 		}
 		if cursor = next; cursor == 0 {

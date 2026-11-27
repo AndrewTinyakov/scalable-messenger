@@ -20,8 +20,6 @@ const (
 	subscriptionHubClosed
 )
 
-// One PubSub connection handles all locally active channels on each Redis primary.
-// Redis Cluster requires a channel's SSUBSCRIBE to run on its slot owner.
 type subscriptionHub struct {
 	owner  *Client
 	mu     sync.Mutex
@@ -44,7 +42,7 @@ func (h *subscriptionHub) Subscribe(ctx context.Context, room string) (*Listener
 		listener, err := group.add(ctx, room)
 		if errors.Is(err, errSubscriptionClosed) {
 			select {
-			case <-group.dropped:
+			case <-group.removedFromHub:
 			case <-ctx.Done():
 				return nil, ctx.Err()
 			}
@@ -61,7 +59,7 @@ func (h *subscriptionHub) group(ctx context.Context, room string) (*subscription
 	if h.state == subscriptionHubClosed {
 		return nil, errSubscriptionClosed
 	}
-	address, err := h.address(ctx, room)
+	address, err := h.slotOwnerAddressLocked(ctx, room)
 	if err != nil {
 		return nil, err
 	}
@@ -76,10 +74,10 @@ func (h *subscriptionHub) group(ctx context.Context, room string) (*subscription
 	pubsub := client.SSubscribe(ctx)
 	group := &subscriptionGroup{
 		hub: h, address: address, client: client, owned: !standalone,
-		pubsub: pubsub, ctx: groupCtx, cancel: cancel, dropped: make(chan struct{}),
-		listeners:     make(map[string]*Listener),
-		unsubscribing: make(map[string]chan struct{}),
-		expectedAcks:  make(map[string]int),
+		pubsub: pubsub, ctx: groupCtx, cancel: cancel, removedFromHub: make(chan struct{}),
+		listeners:               make(map[string]*Listener),
+		pendingUnsubscribes:     make(map[string]chan struct{}),
+		expectedUnsubscribeAcks: make(map[string]int),
 		unsubscribe: func(ctx context.Context, channel string) error {
 			return pubsub.SUnsubscribe(ctx, channel)
 		},
@@ -102,8 +100,7 @@ func (h *subscriptionHub) Close() {
 	h.wg.Wait()
 }
 
-// forgetSlots makes the next subscription look up slot owners again.
-func (h *subscriptionHub) forgetSlots() {
+func (h *subscriptionHub) invalidateSlotOwners() {
 	h.mu.Lock()
 	h.slots = nil
 	h.mu.Unlock()

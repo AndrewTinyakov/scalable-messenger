@@ -8,8 +8,6 @@ import (
 	"time"
 )
 
-// This measures the sweep scheduler with fixed Tail latency. It does not
-// substitute for a Redis Cluster load test.
 func BenchmarkPositionSweep(b *testing.B) {
 	for _, roomCount := range []int{1000, 10000} {
 		for _, tailLatency := range []time.Duration{0, time.Millisecond, 10 * time.Millisecond} {

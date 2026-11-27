@@ -45,7 +45,7 @@ func TestSharedSidebarContracts(t *testing.T) {
 	}
 }
 
-func TestSidebarActivityMessagePreview(t *testing.T) {
+func TestSidebarActivityRequiresAllMessageFieldsWhenPresent(t *testing.T) {
 	data, err := os.ReadFile("../../../contracts/fixtures/valid/sidebar-activity-message.json")
 	if err != nil {
 		t.Fatal(err)

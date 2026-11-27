@@ -6,8 +6,6 @@ import (
 	"messenger/ws/internal/protocol"
 )
 
-// connectionPresence is guarded by Connection.mu. A connection counts as
-// active until its client reports otherwise.
 type connectionPresence struct {
 	started bool
 	active  bool

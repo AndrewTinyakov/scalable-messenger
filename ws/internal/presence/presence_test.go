@@ -90,8 +90,7 @@ func (s *fakeStore) SubscribePresence(ctx context.Context, bucket int) (Feed, er
 	return fakeFeed(feed), nil
 }
 
-// publish changes a user's state the way the Redis script does.
-func (s *fakeStore) publish(userID string, online bool, seqStep int64) {
+func (s *fakeStore) publishPresenceTransition(userID string, online bool, seqStep int64) {
 	s.mu.Lock()
 	bucket := roomname.PresenceBucketOf(userID)
 	state := s.states[userID]
@@ -103,11 +102,10 @@ func (s *fakeStore) publish(userID string, online bool, seqStep int64) {
 	s.sequences[bucket] += seqStep
 	payload, _ := json.Marshal(transition{UserID: userID, Version: strconv.FormatInt(state.Version, 10), Seq: s.sequences[bucket], Online: online, LastSeen: state.LastSeen})
 	s.mu.Unlock()
-	s.send(bucket, string(payload))
+	s.sendRawBucketMessage(bucket, string(payload))
 }
 
-// send delivers a raw message to every feed subscribed to the bucket.
-func (s *fakeStore) send(bucket int, raw string) {
+func (s *fakeStore) sendRawBucketMessage(bucket int, raw string) {
 	s.mu.Lock()
 	feeds := append([]chan redisroom.Live(nil), s.feeds[bucket]...)
 	s.mu.Unlock()
@@ -140,13 +138,12 @@ func (f fakeFeed) Receive(ctx context.Context) (redisroom.Live, error) {
 func (fakeFeed) Close() error { return nil }
 
 type fakeAuth struct {
-	mu      sync.Mutex
-	levels  map[string]grpcauth.PresenceLevel
-	members map[string][]string
-	calls   [][]string
-	hold    chan struct{}
-	// countHold stalls the next roster read the same way.
-	countHold chan struct{}
+	mu                  sync.Mutex
+	levels              map[string]grpcauth.PresenceLevel
+	members             map[string][]string
+	calls               [][]string
+	visibilityReplyHold chan struct{}
+	rosterReplyHold     chan struct{}
 }
 
 func (a *fakeAuth) PresenceVisibility(_ context.Context, _ string, ids []string) (map[string]grpcauth.Visibility, error) {
@@ -160,9 +157,8 @@ func (a *fakeAuth) PresenceVisibility(_ context.Context, _ string, ids []string)
 		}
 		result[id] = grpcauth.Visibility{Level: level}
 	}
-	// A held call answers with the levels it read, once released.
-	hold := a.hold
-	a.hold = nil
+	hold := a.visibilityReplyHold
+	a.visibilityReplyHold = nil
 	a.mu.Unlock()
 	if hold != nil {
 		<-hold
@@ -173,8 +169,8 @@ func (a *fakeAuth) PresenceVisibility(_ context.Context, _ string, ids []string)
 func (a *fakeAuth) OnlineCountMembers(_ context.Context, _, chatID string, limit int) (int, []string, error) {
 	a.mu.Lock()
 	members, ok := a.members[chatID]
-	hold := a.countHold
-	a.countHold = nil
+	hold := a.rosterReplyHold
+	a.rosterReplyHold = nil
 	a.mu.Unlock()
 	if hold != nil {
 		<-hold
@@ -256,7 +252,7 @@ func TestHubSharesSubjectsAndPushesOnlyTransitions(t *testing.T) {
 		t.Fatalf("subscriptions = %d, want 1 shared", store.subscribes)
 	}
 	bob.quiet(t)
-	store.publish(alice, false, 1)
+	store.publishPresenceTransition(alice, false, 1)
 	for _, w := range []*fakeWatcher{bob, carol} {
 		event := w.next(t)
 		if len(event.Statuses) != 1 || event.Statuses[0].Online || event.Statuses[0].LastSeenAt == "" {
@@ -321,7 +317,7 @@ func TestHubPausesHiddenWatchersAndResyncsGaps(t *testing.T) {
 	}
 	bob.next(t)
 	hub.SetVisible(bob, false)
-	store.publish(alice, true, 1)
+	store.publishPresenceTransition(alice, true, 1)
 	bob.quiet(t)
 	hub.SetVisible(bob, true)
 	if event := bob.next(t); !event.Statuses[0].Online {
@@ -336,7 +332,7 @@ func TestHubPausesHiddenWatchersAndResyncsGaps(t *testing.T) {
 	for roomname.PresenceBucketOf(user(neighbour)) != roomname.PresenceBucketOf(alice) {
 		neighbour++
 	}
-	store.publish(user(neighbour), true, 3)
+	store.publishPresenceTransition(user(neighbour), true, 3)
 	if event := bob.next(t); event.Statuses[0].Online {
 		t.Fatalf("gap was not resynced: %+v", event)
 	}
@@ -357,7 +353,7 @@ func TestHubSendsOnlineCountForSmallGroups(t *testing.T) {
 	if event := bob.next(t); event.Type != protocol.EventOnlineCount || event.Online != 1 || event.Members != 3 {
 		t.Fatalf("count = %+v", event)
 	}
-	store.publish(user(2), true, 1)
+	store.publishPresenceTransition(user(2), true, 1)
 	if event := bob.next(t); event.Online != 2 {
 		t.Fatalf("count after transition = %+v", event)
 	}
@@ -458,7 +454,7 @@ func TestHubSuspendsRevokedGrantsUntilRenewal(t *testing.T) {
 	auth.levels = map[string]grpcauth.PresenceLevel{alice: grpcauth.PresenceNone}
 	auth.mu.Unlock()
 	hub.Revalidate(bob)
-	store.publish(alice, true, 1)
+	store.publishPresenceTransition(alice, true, 1)
 	event := bob.next(t)
 	if len(event.Statuses) != 0 || len(event.Unavailable) != 1 || event.Unavailable[0] != alice {
 		t.Fatalf("after revocation = %+v", event)
@@ -475,15 +471,13 @@ func TestHubKeepsAGrantNewerThanAnOldRenewal(t *testing.T) {
 		t.Fatal(err)
 	}
 	bob.next(t)
-	// A renewal reads that access is gone, then stalls.
 	release := make(chan struct{})
 	auth.mu.Lock()
 	auth.levels = map[string]grpcauth.PresenceLevel{alice: grpcauth.PresenceNone}
-	auth.hold = release
+	auth.visibilityReplyHold = release
 	auth.mu.Unlock()
 	hub.Revalidate(bob)
-	waitHeld(auth, func() bool { return auth.hold != nil })
-	// Access returns and the socket watches again before the renewal answers.
+	waitHeld(auth, func() bool { return auth.visibilityReplyHold != nil })
 	auth.mu.Lock()
 	auth.levels = nil
 	auth.mu.Unlock()
@@ -493,7 +487,7 @@ func TestHubKeepsAGrantNewerThanAnOldRenewal(t *testing.T) {
 	bob.next(t)
 	close(release)
 	time.Sleep(50 * time.Millisecond)
-	store.publish(alice, true, 1)
+	store.publishPresenceTransition(alice, true, 1)
 	event := bob.next(t)
 	if len(event.Unavailable) != 0 || len(event.Statuses) != 1 || !event.Statuses[0].Online {
 		t.Fatalf("after the stale renewal = %+v", event)
@@ -513,7 +507,7 @@ func TestHubResyncAcceptsRolledBackState(t *testing.T) {
 	store.mu.Lock()
 	store.states[alice] = redisroom.PresenceState{Online: false, Version: 3, LastSeen: time.Now().UnixMilli()}
 	store.mu.Unlock()
-	hub.resync(context.Background(), hub.buckets[roomname.PresenceBucketOf(alice)])
+	hub.reloadBucketSnapshot(context.Background(), hub.buckets[roomname.PresenceBucketOf(alice)])
 	hub.flushWatch(hub.watches[bob])
 	if event := bob.next(t); event.Statuses[0].Online {
 		t.Fatalf("rolled back state ignored: %+v", event)
@@ -560,13 +554,13 @@ func TestTrackerClearsRecentlyOfflineUsersAgainOnRefresh(t *testing.T) {
 	tracker := NewTracker(store, recorderFunc(func(context.Context, []grpcauth.LastSeen) error { return nil }), func() string { return "gateway" }, testConfig(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	alice := user(1)
 	tracker.SetActive(alice, true)
-	tracker.write(context.Background())
+	tracker.writePending(context.Background())
 	tracker.SetActive(alice, false)
 	time.Sleep(80 * time.Millisecond)
-	tracker.write(context.Background())
+	tracker.writePending(context.Background())
 	before := writeCount(store)
 	tracker.refresh(time.Now())
-	tracker.write(context.Background())
+	tracker.writePending(context.Background())
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	if len(store.writes) != before+1 || store.writes[before][alice] {
@@ -589,7 +583,7 @@ func TestHubStopsCountingAfterRevocation(t *testing.T) {
 	auth.mu.Unlock()
 	hub.Revalidate(bob)
 	time.Sleep(50 * time.Millisecond)
-	store.publish(user(1), true, 1)
+	store.publishPresenceTransition(user(1), true, 1)
 	bob.quiet(t)
 	hub.mu.Lock()
 	defer hub.mu.Unlock()
@@ -635,7 +629,6 @@ func TestHubSendsTheCountAgainWhenOnlyTheGroupSizeChanges(t *testing.T) {
 	if event := bob.next(t); event.Online != 0 || event.Members != 2 {
 		t.Fatalf("count = %+v", event)
 	}
-	// An offline member joins: the online number stays, the size does not.
 	auth.mu.Lock()
 	auth.members["group"] = []string{user(1), user(2), user(3)}
 	auth.mu.Unlock()

@@ -15,18 +15,16 @@ import (
 	"messenger/ws/internal/roomname"
 )
 
-// subject is one watched user, shared by every local socket that watches it.
 type subject struct {
-	id       string
-	bucket   int
-	state    redisroom.PresenceState
-	known    bool
-	watchers map[*watch]struct{}
-	counters map[*watch]struct{}
-	// adding counts each socket's authorizations for this user in flight.
-	adding    map[*watch]int
-	idleSince time.Time
-	pushedAt  time.Time
+	id          string
+	bucket      int
+	state       redisroom.PresenceState
+	known       bool
+	watchers    map[*watch]struct{}
+	counters    map[*watch]struct{}
+	pendingAdds map[*watch]int
+	idleSince   time.Time
+	pushedAt    time.Time
 }
 
 type grant struct {
@@ -35,23 +33,21 @@ type grant struct {
 }
 
 type watch struct {
-	watcher     Watcher
-	flush       sync.Mutex
-	grants      map[string]*grant
-	dirty       map[string]struct{}
-	unavailable map[string]struct{}
-	hidden      bool
-	renewing    bool
-	recheck     bool
-	authorized  uint64
-	count       *onlineCount
-	countChat   string
-	counted     uint64
-	resolving   uint64
+	watcher         Watcher
+	deliveryMu      sync.Mutex
+	grants          map[string]*grant
+	dirty           map[string]struct{}
+	unavailable     map[string]struct{}
+	hidden          bool
+	renewing        bool
+	recheck         bool
+	grantGeneration uint64
+	count           *onlineCount
+	countChat       string
+	countGeneration uint64
+	resolving       uint64
 }
 
-// Hub delivers presence transitions to local sockets. It keeps one entry
-// per watched user and one Redis subscription per presence bucket.
 type Hub struct {
 	store    Store
 	auth     Authorizer
@@ -68,7 +64,6 @@ type Hub struct {
 	hot      map[*subject]struct{}
 }
 
-// NewHub creates a hub whose subscriptions live until ctx ends.
 func NewHub(ctx context.Context, store Store, auth Authorizer, config Config, logger *slog.Logger, metrics *monitoring.PresenceMetrics) *Hub {
 	return &Hub{
 		store: store, auth: auth, config: config, logger: logger, metrics: metrics, ctx: ctx,
@@ -77,7 +72,6 @@ func NewHub(ctx context.Context, store Store, auth Authorizer, config Config, lo
 	}
 }
 
-// Run delivers and maintains presence until the hub's context ends.
 func (h *Hub) Run() {
 	ctx := h.ctx
 	flush := time.NewTicker(h.config.FlushInterval)
@@ -97,8 +91,6 @@ func (h *Hub) Run() {
 	}
 }
 
-// Watch changes the set of users a socket observes. Only added users are
-// authorized; the rest keep their grants.
 func (h *Hub) Watch(ctx context.Context, w Watcher, add, remove []string, reset bool) error {
 	h.mu.Lock()
 	wt := h.watchLocked(w)
@@ -124,44 +116,38 @@ func (h *Hub) Watch(ctx context.Context, w Watcher, add, remove []string, reset 
 			continue
 		}
 		requested = append(requested, id)
-		h.attachLocked(id).adding[wt]++
+		h.attachLocked(id).pendingAdds[wt]++
 	}
-	generation := wt.authorized
+	generation := wt.grantGeneration
 	h.mu.Unlock()
 	defer h.flushWatch(wt)
 	if len(requested) == 0 {
 		return nil
 	}
-	// The users' buckets are subscribed before access is read, so a
-	// revocation published after the answer reaches this gateway and fences it.
-	if err := h.awaitBuckets(ctx, requested); err != nil {
-		h.abandon(wt, requested)
+	if err := h.awaitBucketSubscriptions(ctx, requested); err != nil {
+		h.abandonAdds(wt, requested)
 		return err
 	}
 	visibility, err := h.auth.PresenceVisibility(ctx, w.PresenceSession(), requested)
 	if err != nil {
-		h.abandon(wt, requested)
+		h.abandonAdds(wt, requested)
 		return err
 	}
-	// The add stops being tracked in the same step that installs its result,
-	// so a revocation always sees one or the other.
 	h.mu.Lock()
 	h.finishAddsLocked(wt, requested)
-	unknown := h.grantLocked(wt, requested, visibility, generation, nil)
-	// A revocation during the check installed the result suspended; check again now.
+	unknown := h.installGrantsLocked(wt, requested, visibility, generation, nil)
 	r, renew := renewal{}, false
-	if generation != wt.authorized {
+	if generation != wt.grantGeneration {
 		r, renew = h.startRenewalLocked(wt, maps.Clone(wt.grants))
 	}
 	h.mu.Unlock()
 	if renew {
 		h.renew(r)
 	}
-	return h.load(ctx, unknown)
+	return h.loadSnapshotsAfterSubscribe(ctx, unknown)
 }
 
-// abandon forgets adds whose authorization failed.
-func (h *Hub) abandon(wt *watch, ids []string) {
+func (h *Hub) abandonAdds(wt *watch, ids []string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.finishAddsLocked(wt, ids)
@@ -170,15 +156,14 @@ func (h *Hub) abandon(wt *watch, ids []string) {
 func (h *Hub) finishAddsLocked(wt *watch, ids []string) {
 	for _, id := range ids {
 		if s := h.subjects[id]; s != nil {
-			if s.adding[wt]--; s.adding[wt] <= 0 {
-				delete(s.adding, wt)
+			if s.pendingAdds[wt]--; s.pendingAdds[wt] <= 0 {
+				delete(s.pendingAdds, wt)
 			}
 			h.releaseLocked(s)
 		}
 	}
 }
 
-// SetVisible pauses status delivery while the socket's page is hidden.
 func (h *Hub) SetVisible(w Watcher, visible bool) {
 	h.mu.Lock()
 	wt := h.watches[w]
@@ -193,8 +178,6 @@ func (h *Hub) SetVisible(w Watcher, visible bool) {
 	}
 }
 
-// Revalidate suspends a socket's grants and online count and checks them
-// again, after an event that may have revoked access.
 func (h *Hub) Revalidate(w Watcher) {
 	h.mu.Lock()
 	wt := h.watches[w]
@@ -203,7 +186,7 @@ func (h *Hub) Revalidate(w Watcher) {
 		return
 	}
 	now := time.Now()
-	wt.authorized++
+	wt.grantGeneration++
 	for _, g := range wt.grants {
 		g.expires = now
 	}
@@ -235,8 +218,6 @@ func (h *Hub) Remove(w Watcher) {
 	h.metrics.PresenceWatches.Set(float64(len(h.watches)))
 }
 
-// watchLocked returns the socket's watch, creating it unless the socket has
-// already closed.
 func (h *Hub) watchLocked(w Watcher) *watch {
 	wt := h.watches[w]
 	if wt == nil && !w.Closed() {
@@ -253,21 +234,18 @@ func (h *Hub) markUnavailableLocked(wt *watch, id string) {
 	}
 }
 
-// grant installs an authorization result. A result read before a later
-// revocation event is installed suspended, so it renews before any delivery.
-// A renewal passes the grants it read, and applies only to those still held.
-func (h *Hub) grant(wt *watch, ids []string, visibility map[string]grpcauth.Visibility, generation uint64, held map[string]*grant) []string {
+func (h *Hub) installGrants(wt *watch, ids []string, visibility map[string]grpcauth.Visibility, generation uint64, held map[string]*grant) []string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.grantLocked(wt, ids, visibility, generation, held)
+	return h.installGrantsLocked(wt, ids, visibility, generation, held)
 }
 
-func (h *Hub) grantLocked(wt *watch, ids []string, visibility map[string]grpcauth.Visibility, generation uint64, held map[string]*grant) []string {
+func (h *Hub) installGrantsLocked(wt *watch, ids []string, visibility map[string]grpcauth.Visibility, generation uint64, held map[string]*grant) []string {
 	if h.watches[wt.watcher] != wt {
 		return nil
 	}
 	expires := time.Now().Add(h.config.GrantTTL - rand.N(h.config.GrantTTL/10))
-	if generation != wt.authorized {
+	if generation != wt.grantGeneration {
 		expires = time.Now()
 	}
 	var unknown []string
@@ -299,7 +277,7 @@ func (h *Hub) grantLocked(wt *watch, ids []string, visibility map[string]grpcaut
 func (h *Hub) attachLocked(id string) *subject {
 	s := h.subjects[id]
 	if s == nil {
-		s = &subject{id: id, bucket: roomname.PresenceBucketOf(id), watchers: make(map[*watch]struct{}), counters: make(map[*watch]struct{}), adding: make(map[*watch]int)}
+		s = &subject{id: id, bucket: roomname.PresenceBucketOf(id), watchers: make(map[*watch]struct{}), counters: make(map[*watch]struct{}), pendingAdds: make(map[*watch]int)}
 		h.subjects[id] = s
 		h.bucketLocked(s.bucket).subjects[id] = s
 		h.metrics.PresenceSubjects.Set(float64(len(h.subjects)))
@@ -321,13 +299,11 @@ func (h *Hub) dropLocked(wt *watch, id string) {
 }
 
 func (h *Hub) releaseLocked(s *subject) {
-	if len(s.watchers) == 0 && len(s.counters) == 0 && len(s.adding) == 0 {
+	if len(s.watchers) == 0 && len(s.counters) == 0 && len(s.pendingAdds) == 0 {
 		s.idleSince = time.Now()
 	}
 }
 
-// markLocked queues a changed subject for every socket that observes it,
-// at most once per hot interval for widely watched users.
 func (h *Hub) markLocked(s *subject, now time.Time) {
 	if len(s.watchers) > h.config.HotWatchers && now.Sub(s.pushedAt) < h.config.HotInterval {
 		h.hot[s] = struct{}{}
@@ -344,15 +320,12 @@ func (h *Hub) markLocked(s *subject, now time.Time) {
 	}
 }
 
-// renewal is a claimed check of some of a socket's grants.
 type renewal struct {
 	wt         *watch
 	held       map[string]*grant
 	generation uint64
 }
 
-// startRenewalLocked claims the socket's renewal of the held grants, or asks
-// the running one to check all its grants again when it finishes.
 func (h *Hub) startRenewalLocked(wt *watch, held map[string]*grant) (renewal, bool) {
 	if wt.renewing {
 		wt.recheck = true
@@ -362,12 +335,9 @@ func (h *Hub) startRenewalLocked(wt *watch, held map[string]*grant) (renewal, bo
 		return renewal{}, false
 	}
 	wt.renewing = true
-	return renewal{wt, held, wt.authorized}, true
+	return renewal{wt, held, wt.grantGeneration}, true
 }
 
-// renew authorizes the held grants again. Its result is fenced by the
-// generation captured when it started, and applies only to grants that were
-// not replaced meanwhile, so it never overwrites a newer authorization.
 func (h *Hub) renew(r renewal) {
 	wt := r.wt
 	ids := slices.Collect(maps.Keys(r.held))
@@ -380,7 +350,7 @@ func (h *Hub) renew(r renewal) {
 		if err != nil {
 			h.logger.Warn("renew presence grants", "error", err)
 		} else {
-			h.grant(wt, ids, visibility, r.generation, r.held)
+			h.installGrants(wt, ids, visibility, r.generation, r.held)
 		}
 		h.mu.Lock()
 		wt.renewing = false
@@ -421,7 +391,7 @@ func (h *Hub) sweep(now time.Time) {
 	var counts []countRefresh
 	for _, wt := range h.watches {
 		stale := wt.count == nil || !now.Before(wt.count.expires)
-		if wt.countChat != "" && stale && wt.resolving != wt.counted {
+		if wt.countChat != "" && stale && wt.resolving != wt.countGeneration {
 			counts = append(counts, countRefresh{wt, wt.countChat})
 		}
 		expired := false
@@ -443,7 +413,7 @@ func (h *Hub) sweep(now time.Time) {
 	}
 	if len(unknown) > 0 {
 		ctx, cancel := context.WithTimeout(h.ctx, h.config.Timeout)
-		if err := h.load(ctx, unknown); err != nil {
+		if err := h.loadSnapshotsAfterSubscribe(ctx, unknown); err != nil {
 			h.logger.Warn("load presence", "error", err)
 		}
 		cancel()

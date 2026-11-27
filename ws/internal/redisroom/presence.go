@@ -12,8 +12,6 @@ import (
 	"messenger/ws/internal/roomname"
 )
 
-// Account state is online while any gateway field is present. A transition
-// increments the version and the bucket sequence and publishes atomically.
 var setPresenceScript = redis.NewScript(`
 local function online()
   for _,field in ipairs(redis.call('HKEYS',KEYS[1])) do
@@ -61,10 +59,6 @@ func presenceGatewayKey(gateway string) string {
 	return "messenger:presence:gateway:{" + gateway + "}:users"
 }
 
-// SetPresence records whether this gateway holds an active connection for
-// each user. A user joins the gateway's index before its state goes online
-// and leaves it only after its state is cleared, so a dead gateway's state
-// can always be found. Errors are reported per user so callers can retry.
 func (c *Client) SetPresence(ctx context.Context, gateway string, active map[string]bool) map[string]error {
 	index := presenceGatewayKey(gateway)
 	failed := make(map[string]error)
@@ -113,7 +107,6 @@ func (c *Client) SetPresence(ctx context.Context, gateway string, active map[str
 	return failed
 }
 
-// PresenceGatewayUsers pages through the users a gateway may still mark online.
 func (c *Client) PresenceGatewayUsers(ctx context.Context, gateway string, cursor uint64) ([]string, uint64, error) {
 	return c.redis.SScan(ctx, presenceGatewayKey(gateway), cursor, "", 500).Result()
 }
@@ -122,8 +115,6 @@ func (c *Client) ForgetPresenceGateway(ctx context.Context, gateway string) erro
 	return c.redis.Del(ctx, presenceGatewayKey(gateway)).Err()
 }
 
-// PresenceSnapshot reads current account states and the latest sequence of
-// each bucket they belong to.
 func (c *Client) PresenceSnapshot(ctx context.Context, userIDs []string) (map[string]PresenceState, map[int]int64, error) {
 	pipe := c.redis.Pipeline()
 	states := make(map[string]*redis.MapStringStringCmd, len(userIDs))

@@ -37,6 +37,17 @@ This audit covers production client and server code at the PR #6 base, `73abbf4`
 - Redis connection counts and presence state are written by their owning gateway as absolute values; a dead gateway's entries are removed through the gateway registry. See ADR 0005.
 - Nil optional dependencies and resource pointers, boolean authorization/result values, immutable Redis-client ownership, set membership, and wire flags describe capabilities, results or data rather than evolving lifecycle modes.
 
+### Gateway ordering and lock ownership
+
+Each handshake reserves node capacity before the HTTP upgrade so simultaneous upgrades count toward the limit. It joins the user room before validating the session against the API. A racing logout can then be observed as a room event or rejected by session validation. The connection mutex guards its presence state, and the randomized first ping spreads new connections across one interval before the ticker returns to its regular cadence.
+
+The ACK tracker counts message frames offered to the socket writer, separately from Redis Stream positions. A receipt resolves one live notification. An applied acknowledgement records device application, and a dismissal resolves the skipped interval. Its cursor limit bounds allocations for client-supplied chat IDs.
+
+The Redis subscription hub owns the primary groups and slot cache. A channel uses the primary for the CRC16/XMODEM hash of its room name, modulo 16,384. The hub releases its mutex before entering a group. The group may take the hub mutex while holding its own. The group mutex guards the listeners, their queues and results, pending unsubscriptions and expected acknowledgements. Closing the readiness or completion channel publishes its result. An unsolicited unsubscribe invalidates the slot cache and retires the listener. Unsubscribe failure rebuilds the shared feed, and a reconnect also invalidates cached slot owners. Rejoining a closed group waits for its removal from the hub.
+
+After a room feed reconnects, the gateway compares the position from the new live subscription to the last known position. It replays publications made during the outage or requests a fresh SQL recovery. Adopting the new tail alone would hide that gap.
+
+The room and presence Redis adapters return a nil interface when listener creation fails. A nil concrete listener pointer boxed into an interface would compare unequal to nil.
 
 ## Kotlin services
 

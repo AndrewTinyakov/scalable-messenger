@@ -12,8 +12,6 @@ import (
 	"messenger/ws/internal/roomname"
 )
 
-// bucket is one Redis subscription shared by every subject in a presence
-// bucket. seq tracks the bucket's transition sequence to detect gaps.
 type bucket struct {
 	id       int
 	subjects map[string]*subject
@@ -55,8 +53,6 @@ func (h *Hub) forgetLocked(s *subject) {
 	}
 }
 
-// listen keeps the bucket subscribed. After a lost subscription it
-// subscribes again and reloads the bucket's subjects before trusting events.
 func (h *Hub) listen(ctx context.Context, b *bucket) {
 	backoff := 100 * time.Millisecond
 	for subscribed := false; ctx.Err() == nil; {
@@ -72,7 +68,7 @@ func (h *Hub) listen(ctx context.Context, b *bucket) {
 		}
 		backoff = 100 * time.Millisecond
 		if subscribed {
-			h.resync(ctx, b)
+			h.reloadBucketSnapshot(ctx, b)
 		}
 		subscribed = true
 		b.once.Do(func() { close(b.ready) })
@@ -98,7 +94,6 @@ func (h *Hub) apply(ctx context.Context, b *bucket, live redisroom.Live) {
 		return
 	}
 	if message.Revoked != nil {
-		// A revocation carries only its "r" list; any other key, even a zero one or "R", makes it invalid.
 		var keys map[string]json.RawMessage
 		_ = json.Unmarshal([]byte(live.Raw), &keys)
 		foreign := slices.ContainsFunc(message.Revoked, func(id string) bool { return roomname.PresenceBucketOf(id) != b.id })
@@ -138,14 +133,11 @@ func (h *Hub) apply(ctx context.Context, b *bucket, live redisroom.Live) {
 	h.metrics.PresenceEvents.WithLabelValues(result).Inc()
 	if gap {
 		h.metrics.PresenceResyncs.WithLabelValues("sequence_gap").Inc()
-		h.resync(ctx, b)
+		h.reloadBucketSnapshot(ctx, b)
 	}
 }
 
-// resync forgets what the bucket's subjects were known to be and reloads
-// them. Versions start over, so state that Redis rolled back still applies;
-// subjects that fail to load stay unknown and the sweep retries them.
-func (h *Hub) resync(ctx context.Context, b *bucket) {
+func (h *Hub) reloadBucketSnapshot(ctx context.Context, b *bucket) {
 	h.mu.Lock()
 	ids := make([]string, 0, len(b.subjects))
 	for id, s := range b.subjects {
@@ -156,13 +148,12 @@ func (h *Hub) resync(ctx context.Context, b *bucket) {
 	h.mu.Unlock()
 	loadCtx, cancel := context.WithTimeout(ctx, h.config.Timeout)
 	defer cancel()
-	if err := h.load(loadCtx, ids); err != nil {
+	if err := h.loadSnapshotsAfterSubscribe(loadCtx, ids); err != nil {
 		h.logger.Warn("resync presence bucket", "bucket", b.id, "error", err)
 	}
 }
 
-// awaitBuckets waits until the attached subjects' buckets are subscribed.
-func (h *Hub) awaitBuckets(ctx context.Context, ids []string) error {
+func (h *Hub) awaitBucketSubscriptions(ctx context.Context, ids []string) error {
 	h.mu.Lock()
 	waits := make(map[int]*bucket)
 	for _, id := range ids {
@@ -184,13 +175,11 @@ func (h *Hub) awaitBuckets(ctx context.Context, ids []string) error {
 	return nil
 }
 
-// load subscribes to the subjects' buckets, then reads their state, so no
-// transition between the two is missed.
-func (h *Hub) load(ctx context.Context, ids []string) error {
+func (h *Hub) loadSnapshotsAfterSubscribe(ctx context.Context, ids []string) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	if err := h.awaitBuckets(ctx, ids); err != nil {
+	if err := h.awaitBucketSubscriptions(ctx, ids); err != nil {
 		return err
 	}
 	for start := 0; start < len(ids); start += h.config.MaxWatched {

@@ -29,8 +29,6 @@ func gatewayDeadKey(gateway string) string { return "messenger:gateway:{" + gate
 
 func gatewayReapingKey(gateway string) string { return "messenger:gateway:{" + gateway + "}:reaping" }
 
-// AdmitConnection adds one connection for the user on this gateway when the
-// fleet-wide total stays within limit.
 func (c *Client) AdmitConnection(ctx context.Context, userID, gateway string, limit int) (bool, error) {
 	if !validConnectionUserID(userID) || gateway == "" {
 		return false, errors.New("invalid connection admission")
@@ -45,13 +43,10 @@ func (c *Client) AdmitConnection(ctx context.Context, userID, gateway string, li
 	return admitted == 1, nil
 }
 
-// UnindexConnections removes a user from this gateway's cleanup index once
-// the gateway holds no connections for them.
 func (c *Client) UnindexConnections(ctx context.Context, userID, gateway string) error {
 	return c.redis.SRem(ctx, gatewayUsersKey(gateway), userID).Err()
 }
 
-// SetConnections writes this gateway's absolute connection count for a user.
 func (c *Client) SetConnections(ctx context.Context, userID, gateway string, count int) error {
 	if !validConnectionUserID(userID) || gateway == "" || count < 0 {
 		return errors.New("invalid connection count")
@@ -73,9 +68,6 @@ func (c *Client) SetConnections(ctx context.Context, userID, gateway string, cou
 	return nil
 }
 
-// Heartbeat extends this gateway's registration. It reports registered=false
-// when Redis had lost the registration and dead=true once another gateway
-// has removed it.
 func (c *Client) Heartbeat(ctx context.Context, gateway string, ttl time.Duration) (registered, dead bool, err error) {
 	marked, err := c.redis.Exists(ctx, gatewayDeadKey(gateway)).Result()
 	if err != nil || marked == 1 {
@@ -92,10 +84,6 @@ func (c *Client) ExpiredGateways(ctx context.Context, limit int64) ([]string, er
 	return c.redis.ZRangeArgs(ctx, redis.ZRangeArgs{Key: gatewaysKey, Start: "-inf", Stop: time.Now().UnixMilli(), ByScore: true, Count: limit}).Result()
 }
 
-// ClaimGateway lets one caller remove a gateway that is still expired and
-// marks it dead before any state is removed, so the gateway stops writing
-// under that identity. The claim expires so another gateway can finish an
-// interrupted removal.
 func (c *Client) ClaimGateway(ctx context.Context, gateway string) (bool, error) {
 	claimed, err := c.redis.SetNX(ctx, gatewayReapingKey(gateway), 1, time.Minute).Result()
 	if err != nil || !claimed {
@@ -115,7 +103,6 @@ func (c *Client) GatewayUsers(ctx context.Context, gateway string, cursor uint64
 	return c.redis.SScan(ctx, gatewayUsersKey(gateway), cursor, "", 500).Result()
 }
 
-// ForgetGateway drops a removed gateway's index and registration.
 func (c *Client) ForgetGateway(ctx context.Context, gateway string) error {
 	if err := c.redis.Del(ctx, gatewayUsersKey(gateway)).Err(); err != nil {
 		return err

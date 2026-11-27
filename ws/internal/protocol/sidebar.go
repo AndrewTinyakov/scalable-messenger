@@ -12,7 +12,6 @@ import (
 
 var usernamePattern = regexp.MustCompile(`^[a-z0-9_]{3,40}$`)
 
-// validActivityMessage accepts activity without a message, or with every message field present and valid.
 func validActivityMessage(event Event) bool {
 	if event.MessageID == "" && event.SenderID == "" && event.SenderUsername == "" && event.CreatedAt == "" && event.Preview == "" {
 		return true

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Client } from './client.mjs';
 import { buildPlan, LEGACY_SIDEBAR_LIMIT, watchSet } from './plan.mjs';
-import { Bench } from './run.mjs';
+import { Bench, percentiles, score } from './run.mjs';
 
 const small = { seed: 7, users: 256, degree: 6, hotSubjects: 2, hotFollowers: 40, hotPool: 128, groupSize: 64 };
 const isId = value => /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/.test(value);
@@ -170,6 +170,25 @@ test('each watcher of a change ends delivered, closed or already showing it', t 
   assert.equal(window.changes.offline.delivered, 1);
   assert.equal(window.changes.offline.watcherClosed, 1);
   assert.equal(created.pending.size, 0);
+  created.window = null;
+});
+
+test('the on-time share leaves out watchers that closed and changes superseded in time', () => {
+  const changes = { offline: { armed: 10, delivered: 3, late: 1, missing: 0, superseded: 2, watcherClosed: 4, alreadyShown: 5 } };
+  const [{ changes: { offline } }] = score([{ changes }]);
+  assert.equal(offline.scored, 4);
+  assert.equal(offline.onTime, 0.75);
+  assert.equal(score([{ changes: { online: { armed: 1, delivered: 0, late: 0, missing: 0, superseded: 0, watcherClosed: 1 } } }])[0].changes.online.onTime, null);
+});
+
+test('delivery percentiles come from raw samples', t => {
+  assert.deepEqual(percentiles([]), {});
+  const samples = Array.from({ length: 100 }, (_, i) => 100 - i);
+  assert.deepEqual(percentiles(samples), { p50Ms: 50, p90Ms: 90, p99Ms: 99 });
+  const created = bench(t, 1000);
+  const window = created.begin('test');
+  for (const ms of [2105, 2110, 2300]) window.observe('delivery.offline', ms);
+  assert.deepEqual(window.samples.get('delivery.offline'), [2105, 2110, 2300]);
   created.window = null;
 });
 

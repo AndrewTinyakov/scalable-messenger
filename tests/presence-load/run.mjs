@@ -19,6 +19,8 @@ class Window {
     this.started = performance.now();
     this.baseline = { ...counts };
     this.latency = new Map();
+    // Raw delivery samples, so percentiles are exact rather than bucket bounds.
+    this.samples = new Map();
     this.changes = {};
     this.tasks = new Set();
     this.schedules = [];
@@ -27,6 +29,10 @@ class Window {
   observe(name, ms) {
     if (!this.latency.has(name)) this.latency.set(name, new Histogram());
     this.latency.get(name).observe(ms);
+    if (name.startsWith('delivery.')) {
+      if (!this.samples.has(name)) this.samples.set(name, []);
+      this.samples.get(name).push(ms);
+    }
   }
 
   // Outcomes per watcher for one kind of change, e.g. "offline" or "hot.online".
@@ -319,7 +325,8 @@ export class Bench {
       schedules: window.schedules,
       // Late deliveries complete this object; drain() waits for them before the report is written.
       changes: window.changes,
-      latencyMs: Object.fromEntries([...window.latency].map(([name, histogram]) => [name, histogram.report()])),
+      latencyMs: Object.fromEntries([...window.latency].map(([name, histogram]) =>
+        [name, { ...histogram.report(), ...percentiles(window.samples.get(name)) }])),
       generator: { ...loop, rssMiB, limited: loop.eventLoopP99Ms > 50 },
       ...extra,
     };
@@ -346,11 +353,34 @@ export class Bench {
   }
 }
 
+// Exact nearest-rank percentiles of raw samples.
+export function percentiles(samples) {
+  if (!samples?.length) return {};
+  const sorted = [...samples].sort((a, b) => a - b);
+  const at = fraction => sorted[Math.max(0, Math.ceil(sorted.length * fraction) - 1)];
+  return { p50Ms: at(0.5), p90Ms: at(0.9), p99Ms: at(0.99) };
+}
+
+// Adds each change's on-time share once its outcomes are final. Only watchers
+// that stayed connected until the outcome was known are scored: one that
+// closed before the deadline, or a change superseded in time, says nothing
+// about the server.
+export function score(windows) {
+  for (const window of windows) {
+    for (const outcome of Object.values(window.changes ?? {})) {
+      outcome.scored = outcome.delivered + outcome.late + outcome.missing;
+      outcome.onTime = outcome.scored ? outcome.delivered / outcome.scored : null;
+    }
+  }
+  return windows;
+}
+
 function summary(report) {
-  const changes = Object.entries(report.changes).map(([kind, { delivered, armed, late, missing }]) => {
+  const changes = Object.entries(report.changes).map(([kind, { delivered, armed, late, missing, watcherClosed }]) => {
     const latency = report.latencyMs['delivery.' + kind];
     return `${kind} ${delivered}/${armed}${late ? ` (${late} late)` : ''}${missing ? ` (${missing} missing)` : ''}` +
-      (latency ? ` p50/p99 ${latency.p50UpperMs.toFixed(0)}/${latency.p99UpperMs.toFixed(0)} ms` : '');
+      `${watcherClosed ? ` (${watcherClosed} watchers closed)` : ''}` +
+      (latency ? ` p50/p90/p99 ${latency.p50Ms.toFixed(0)}/${latency.p90Ms.toFixed(0)}/${latency.p99Ms.toFixed(0)} ms` : '');
   }).join(', ');
   const mean = (name, digits) => report.server?.[name]?.mean?.toFixed(digits) ?? '-';
   const server = report.server && !report.server.error

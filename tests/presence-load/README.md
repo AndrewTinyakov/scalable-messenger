@@ -51,8 +51,8 @@ Each `run` fetches WebSocket tickets for its users before any timed window. A cl
 |---|---|---|
 | `smoke` | 64 sockets. Fails unless every intended socket is ready, probe changes are delivered both ways in time, and a watch for a stranger is denied without revealing their status | Both |
 | `idle` | 1,000, 2,000 and 3,500 sockets. At each plateau: 60 s with no changes (`quiet-N`), then 3 min while 32 actors and the four hot subjects disconnect for 20 s and reconnect (`idle-N`; hot-subject changes are labelled `hot`) | Both |
-| `churn` | 1,600 sockets. Disconnect-and-reconnect cycles at 2, 10 and 25 per second, 2 min each. Then activity changes at 5, 25 and 100 per second (current only): a user stops interacting for 20 s with its tab still visible, then resumes | Both |
-| `quick` | 2,000 sockets: `quiet-2000` and `idle-2000` as in `idle`, then `churn-10` and `activity-25` (current only) as in `churn` | Both |
+| `churn` | 1,600 sockets. Disconnect-and-reconnect cycles at 2, 10 and 25 per second in connection order, 2 min each, then at 25 per second in a seeded random order (`churn-25-shuffled`). Then activity changes at 5, 25 and 100 per second (current only): a user stops interacting for 20 s with its tab still visible, then resumes | Both |
+| `quick` | 2,000 sockets: `quiet-2000` and `idle-2000` as in `idle`, then `churn-10`, `churn-10-shuffled` and `activity-25` (current only) as in `churn` | Both |
 | `gateway-kill` | 1,600 sockets. `docker kill --fault-container` (a gateway). The sockets it closed are the victims; they stay offline for 150 s while the surviving gateway's watchers must see them go offline. Then they reconnect to the surviving gateway; each victim's online change is timed from its own reconnect attempt, with a 30 s deadline. Finally the failed gateway restarts | Both |
 | `redis-kill` | 1,600 sockets. 64 actors cycle once per second while `--fault-container` (a Redis primary) is down for 2 min, then while it recovers | Both |
 | `capacity` | 2,000, 4,000, 8,000, 12,000 and 15,000 sockets. A stage passes when at least 99% of its sockets are open and ready at the end and error frames during ramp and measurement stay within 1%; the run stops at the first failure | Both |
@@ -81,6 +81,8 @@ A delivery is measured per watcher. When an actor goes offline or online, every 
 - **Missing.** It does not report the new state within that grace, its socket closes after the deadline, or the actor changes again after the deadline.
 - **Superseded.** The actor changed again before the deadline.
 - **Watcher closed.** The watcher's own socket closed before the deadline.
+
+Each outcome set also reports `scored` (delivered, late and missing) and `onTime`, delivered divided by scored. Watchers that closed and changes superseded before the deadline are left out, because they say nothing about the server. In connection order, a group's members leave within moments of each other, so many watchers close before an offline change is due; compare `onTime`, not delivered over armed. Delivery latency reports exact `p50Ms`, `p90Ms` and `p99Ms` from raw samples next to the histogram bounds.
 
 Online latency includes the actor's WebSocket handshake.
 

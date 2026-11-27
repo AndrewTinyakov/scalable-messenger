@@ -2,6 +2,7 @@
 import { execFile } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { promisify } from 'node:util';
+import { random } from './plan.mjs';
 
 const run = promisify(execFile);
 
@@ -14,8 +15,19 @@ const OFFLINE_MS = 20 * SECOND;
 // build has several chances to see each online period.
 const MIN_ONLINE_MS = 40 * SECOND;
 const CYCLE_MS = OFFLINE_MS + MIN_ONLINE_MS;
+// The shuffled churn order, the same on every run and build.
+const CHURN_SEED = 2511;
 
 const population = (bench, size) => bench.plan.order.slice(0, size);
+
+function shuffle(items, rand) {
+  const result = [...items];
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+}
 
 async function docker(...args) {
   const { stdout } = await run('docker', args);
@@ -114,13 +126,17 @@ export async function idle(bench, { plateaus = [1000, 2000, 3500] } = {}) {
   return windows;
 }
 
-export async function churn(bench, { size = 1600, rates = [2, 10, 25], activityRates = [5, 25, 100] } = {}) {
+// Clustered churn cycles users in connection order, so a group's members leave
+// within moments of each other and many watchers close before their actor's
+// change is due. The shuffled windows repeat a rate in a seeded random order.
+export async function churn(bench, { size = 1600, rates = [2, 10, 25], shuffledRates = [25], activityRates = [5, 25, 100] } = {}) {
   const users = await start(bench, size);
   const hot = new Set(bench.plan.hot);
   const ordinary = users.filter(user => !hot.has(user));
+  const shuffled = shuffle(ordinary, random(CHURN_SEED));
   const windows = [];
-  for (const rate of rates) {
-    windows.push(await bench.measure(`churn-${rate}`, () => cycles(bench, ordinary, 2 * MINUTE, rate)));
+  for (const [rate, order, suffix] of [...rates.map(rate => [rate, ordinary, '']), ...shuffledRates.map(rate => [rate, shuffled, '-shuffled'])]) {
+    windows.push(await bench.measure(`churn-${rate}${suffix}`, () => cycles(bench, order, 2 * MINUTE, rate)));
     await delay(30 * SECOND);
   }
   if (bench.protocol !== 'current') return windows;
@@ -140,7 +156,7 @@ export async function churn(bench, { size = 1600, rates = [2, 10, 25], activityR
 // A short check for routine runs: one idle plateau and one churn rate.
 export async function quick(bench) {
   const size = 2000;
-  return [...await idle(bench, { plateaus: [size] }), ...await churn(bench, { size, rates: [10], activityRates: [25] })];
+  return [...await idle(bench, { plateaus: [size] }), ...await churn(bench, { size, rates: [10], shuffledRates: [10], activityRates: [25] })];
 }
 
 // Kills one gateway. Its sockets stay offline for the hold, so the surviving

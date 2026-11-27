@@ -2,7 +2,7 @@
 import { writeFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 import { buildPlan, DEFAULTS } from './plan.mjs';
-import { Bench } from './run.mjs';
+import { Bench, score } from './run.mjs';
 import { SCENARIOS } from './scenarios.mjs';
 import { detectCookieName, fetchTickets, readManifest, refreshTickets, seedDatabase, ticketClient, writeManifest } from './seed.mjs';
 
@@ -53,6 +53,7 @@ if (command === 'seed') {
   try {
     const windows = await scenario.run(bench, { container: values['fault-container'] });
     await bench.drain();
+    score(windows);
     const { failures } = bench;
     const report = {
       protocol: values.protocol, scenario: values.scenario, project: manifest.project, params: manifest.params,

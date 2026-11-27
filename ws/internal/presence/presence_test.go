@@ -29,6 +29,7 @@ type fakeStore struct {
 	sequences  map[int]int64
 	feeds      map[int][]chan redisroom.Live
 	subscribes int
+	snapshots  int
 	writes     []map[string]bool
 	writeErr   error
 }
@@ -53,6 +54,7 @@ func (s *fakeStore) SetPresence(_ context.Context, _ string, active map[string]b
 func (s *fakeStore) PresenceSnapshot(_ context.Context, ids []string) (map[string]redisroom.PresenceState, map[int]int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.snapshots++
 	states := make(map[string]redisroom.PresenceState, len(ids))
 	sequences := make(map[int]int64)
 	for _, id := range ids {

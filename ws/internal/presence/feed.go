@@ -3,6 +3,7 @@ package presence
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -88,8 +89,20 @@ func (h *Hub) listen(ctx context.Context, b *bucket) {
 }
 
 func (h *Hub) apply(ctx context.Context, b *bucket, live redisroom.Live) {
-	var event transition
-	if err := json.Unmarshal([]byte(live.Raw), &event); err != nil || roomname.PresenceBucketOf(event.UserID) != b.id {
+	var message struct {
+		transition
+		revocation
+	}
+	if err := json.Unmarshal([]byte(live.Raw), &message); err != nil {
+		h.metrics.PresenceEvents.WithLabelValues("invalid").Inc()
+		return
+	}
+	if len(message.Revoked) > 0 {
+		h.revoke(slices.DeleteFunc(message.Revoked, func(id string) bool { return roomname.PresenceBucketOf(id) != b.id }))
+		return
+	}
+	event := message.transition
+	if roomname.PresenceBucketOf(event.UserID) != b.id {
 		h.metrics.PresenceEvents.WithLabelValues("invalid").Inc()
 		return
 	}

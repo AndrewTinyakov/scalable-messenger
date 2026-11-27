@@ -15,7 +15,8 @@ func PresenceBucket(bucket int) string { return PresencePrefix + strconv.Itoa(bu
 
 func IsPresence(room string) bool { return strings.HasPrefix(room, PresencePrefix) }
 
-// PresenceBucketOf is part of the Redis key layout. Changing it re-keys all
+// PresenceBucketOf is part of the Redis key layout, and the outbox publisher
+// mirrors it in PresenceBuckets.kt. Changing it re-keys all
 // presence state.
 func PresenceBucketOf(userID string) int {
 	hash := fnv.New32a()

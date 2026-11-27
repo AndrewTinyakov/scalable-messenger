@@ -1,5 +1,8 @@
 package com.andrewtinyakov.messenger.infrastructure.redis
 
+import com.andrewtinyakov.messenger.auth.model.UserId
+import com.andrewtinyakov.messenger.chat.model.ChatId
+import com.andrewtinyakov.messenger.chat.repository.ChatRepository
 import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStage
 import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStageRecorder
 import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxMessage
@@ -18,6 +21,7 @@ class RoomEventPublisher(
     private val outboxPublisherProperties: OutboxPublisherProperties,
     mapper: ObjectMapper,
     private val publicationHydration: PublicationHydration,
+    chatRepository: ChatRepository,
 ) : OutboxEventPublisher,
     AutoCloseable {
     private val scheduler = Schedulers.newBoundedElastic(
@@ -25,7 +29,9 @@ class RoomEventPublisher(
         outboxPublisherProperties.roomPublicationQueueCapacity,
         "room-publication",
     )
-    private val publication = RoomPublicationScript(redis, mapper, properties)
+    private val publication = RoomPublicationScript(redis, mapper, properties) { chatId ->
+        chatRepository.findMemberIds(ChatId(chatId)).map(UserId::value)
+    }
 
     override fun hydrate(messages: List<OutboxMessage>): List<OutboxMessage> = publicationHydration.prepare(messages)
 

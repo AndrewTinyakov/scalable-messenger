@@ -106,7 +106,7 @@ class MessageFeatureHttpTests
             val member = account()
             val chat = chats.createGroup(UserId(owner.first), "HTTP auth", listOf(member.first).map(::UserId)).id
             sends.process(command(owner.first, newId(), "text", chat = chat))
-            val id = db.queryForObject("SELECT id FROM messages WHERE chat_id=?", String::class.java, chat)!!
+            val id = legacyJdbc.queryForObject("SELECT id FROM messages WHERE chat_id=?", String::class.java, chat)!!
             assertEquals(401, request("/$chat/messages/$id?expectedVersion=1", null, "DELETE").statusCode())
             assertEquals(400, request("/$chat/messages/invalid?expectedVersion=1", owner.second, "DELETE").statusCode())
             assertEquals(400, request("/$chat/messages/$id?expectedVersion=01", owner.second, "DELETE").statusCode())
@@ -147,7 +147,7 @@ class MessageFeatureHttpTests
             val member = account()
             val chat = chats.createGroup(UserId(owner.first), "HTTP scoped deletion", listOf(member.first).map(::UserId)).id
             sends.process(command(owner.first, newId(), "private hide", chat = chat))
-            val target = db.queryForObject("SELECT id FROM messages WHERE chat_id=?", String::class.java, chat)!!
+            val target = legacyJdbc.queryForObject("SELECT id FROM messages WHERE chat_id=?", String::class.java, chat)!!
             val requestId = newId()
             val accepted =
                 request(

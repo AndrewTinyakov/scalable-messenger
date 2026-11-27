@@ -49,7 +49,7 @@ class DirectChatLookupTests
         fun `draft reads return the recipient without creating durable state`() {
             val sender = account()
             val recipient = user("draft_${newId()}")
-            val username = db.queryForObject("SELECT username FROM users WHERE id=?", String::class.java, recipient)
+            val username = legacyJdbc.queryForObject("SELECT username FROM users WHERE id=?", String::class.java, recipient)
             val before = durableCounts(sender.first, recipient)
 
             repeat(2) {
@@ -73,7 +73,7 @@ class DirectChatLookupTests
                 CommandResult.SAVED,
                 messageSendService.process(command(left.first, newId(), "hello", recipient = right.first)),
             )
-            val chatId = db.queryForObject("SELECT chat_id FROM messages WHERE sender_id=?", String::class.java, left.first)
+            val chatId = legacyJdbc.queryForObject("SELECT chat_id FROM messages WHERE sender_id=?", String::class.java, left.first)
             val before = durableCounts(left.first, right.first)
 
             for ((viewer, recipient) in listOf(left to right, right to left)) {
@@ -130,7 +130,7 @@ class DirectChatLookupTests
                 CommandResult.SAVED,
                 messageSendService.process(command(sender.first, newId(), "hello", recipient = recipient)),
             )
-            db.update("DELETE FROM chat_members WHERE user_id=?", sender.first)
+            legacyJdbc.update("DELETE FROM chat_members WHERE user_id=?", sender.first)
 
             val response = get(recipient, sender.second)
 

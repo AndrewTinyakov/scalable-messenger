@@ -58,6 +58,24 @@ class JooqPlainSqlScannerTests {
     }
 
     @Test
+    fun `rejects SQL strings sent through JDBC or Spring JDBC`() {
+        assertEquals(
+            mapOf(
+                "statementExecute" to "execute",
+                "statementQuery" to "executeQuery",
+                "prepare" to "prepareStatement",
+                "template" to "update",
+            ),
+            violations.filter { it.caller.owner.endsWith("/JdbcSqlFixture") }.associate { it.caller.name to it.target.name },
+        )
+    }
+
+    @Test
+    fun `permits JDBC SQL execution only in PostgresStatements`() {
+        assertTrue(violations.none { it.caller.owner.endsWith("/PostgresStatements") })
+    }
+
+    @Test
     fun `permits SQL tagging only in the database listener render hook`() {
         assertEquals(
             listOf("executeEnd" to "batchSQL", "executeEnd" to "sql", "renderEnd" to "field"),

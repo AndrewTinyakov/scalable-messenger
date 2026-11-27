@@ -33,14 +33,14 @@ class SidebarAuthorizationTests
             val foreign = chats.createGroup(UserId(stranger), "Foreign", listOf(peer).map(::UserId))
             val request = newId()
             sends.process(command(owner, request, "Direct", recipient = peer))
-            val direct = db.queryForObject(
+            val direct = legacyJdbc.queryForObject(
                 "SELECT chat_id FROM send_requests WHERE sender_id=? AND request_id=?",
                 String::class.java,
                 owner,
                 request,
             )!!
             val session = SessionId("a".repeat(64))
-            db.update(
+            legacyJdbc.update(
                 "INSERT INTO sessions(token_hash,user_id,device_id,expires_at) VALUES (?,?,'sidebar',now()+interval '1 hour')",
                 session.value,
                 owner,
@@ -52,17 +52,17 @@ class SidebarAuthorizationTests
             assertNull(granted.single { it.group }.peerId)
             memberships.removeMember(ChatId(group.id), UserId(owner), UserId(peer))
             val peerSession = SessionId("b".repeat(64))
-            db.update(
+            legacyJdbc.update(
                 "INSERT INTO sessions(token_hash,user_id,device_id,expires_at) VALUES (?,?,'sidebar-peer',now()+interval '1 hour')",
                 peerSession.value,
                 peer,
             )
             assertTrue(repository.authorize(peerSession, listOf(ChatId(group.id)), OffsetDateTime.now())!!.isEmpty())
-            db.update("UPDATE chat_members SET hidden_through_sequence=1 WHERE chat_id=? AND user_id=?", direct, owner)
+            legacyJdbc.update("UPDATE chat_members SET hidden_through_sequence=1 WHERE chat_id=? AND user_id=?", direct, owner)
             assertTrue(repository.authorize(session, listOf(ChatId(direct)), OffsetDateTime.now())!!.isEmpty())
-            db.update("UPDATE chats SET deleted_at=now() WHERE id=?", group.id)
+            legacyJdbc.update("UPDATE chats SET deleted_at=now() WHERE id=?", group.id)
             assertTrue(repository.authorize(session, listOf(ChatId(group.id)), OffsetDateTime.now())!!.isEmpty())
-            db.update("UPDATE sessions SET expires_at=now()-interval '1 minute' WHERE token_hash=?", session.value)
+            legacyJdbc.update("UPDATE sessions SET expires_at=now()-interval '1 minute' WHERE token_hash=?", session.value)
             assertNull(repository.authorize(session, ids, OffsetDateTime.now()))
         }
     }

@@ -58,6 +58,7 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter:6.0.3")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     add(plainSqlFixture.implementationConfigurationName, "org.jooq:jooq:3.21.7")
+    add(plainSqlFixture.implementationConfigurationName, "org.springframework:spring-jdbc:7.0.9")
     add(architectureTestSources.implementationConfigurationName, "com.lemonappdev:konsist:0.18.1")
     add(architectureTestSources.implementationConfigurationName, "com.tngtech.archunit:archunit:1.5.1")
     add(architectureTestSources.implementationConfigurationName, "org.jetbrains.kotlin:kotlin-compiler-embeddable:2.3.21")
@@ -85,7 +86,7 @@ fun Configuration.jooqArtifact(): FileCollection = incoming.artifactView {
 
 val checkJooqPlainSql = tasks.register<JavaExec>("checkJooqPlainSql") {
     group = LifecycleBasePlugin.VERIFICATION_GROUP
-    description = "Reject plain SQL calls and callable references in compiled jOOQ callers"
+    description = "Reject plain SQL strings sent through jOOQ, JDBC or Spring JDBC outside PostgresStatements"
     javaLauncher.set(javaToolchains.launcherFor(java.toolchain))
     mainClass.set("com.andrewtinyakov.messenger.checks.CheckJooqPlainSqlKt")
     classpath = sourceSets.main.get().runtimeClasspath

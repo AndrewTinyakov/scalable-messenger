@@ -56,7 +56,7 @@ class LegacyChatDeletionUpgradeTests
         @Test
         fun `V6 closed chats upgrade to durable bounded purge without changing active history or send dedup`() {
             val database = "upgrade_${newId().lowercase()}"
-            db.execute("CREATE DATABASE \"$database\"")
+            legacyJdbc.execute("CREATE DATABASE \"$database\"")
             try {
                 val originalUrl = source.connection.use { it.metaData.url }
                 val upgradedSource = PGSimpleDataSource().apply {
@@ -239,7 +239,7 @@ class LegacyChatDeletionUpgradeTests
                 )
                 assertNull(sql.queryForObject("SELECT direct_pair_key FROM chats WHERE id=?", String::class.java, closedDirect))
             } finally {
-                db.execute("DROP DATABASE \"$database\" WITH (FORCE)")
+                legacyJdbc.execute("DROP DATABASE \"$database\" WITH (FORCE)")
             }
         }
     }

@@ -170,7 +170,7 @@ class GrpcTransportTests : MessengerIntegrationTest() {
         val loggedOut = register("out")
         val expired = register("old")
         authenticationService.logout(loggedOut.token)
-        db.update(
+        legacyJdbc.update(
             "UPDATE sessions SET expires_at=? WHERE token_hash=?",
             OffsetDateTime.now().minusSeconds(1),
             expired.session.sessionId.value,
@@ -194,7 +194,7 @@ class GrpcTransportTests : MessengerIntegrationTest() {
     @Test
     fun `RPCs reject sessions expired in SQL`() {
         val credentials = authenticationService.register("exp_${UUID.randomUUID().toString().replace("-", "").take(20)}", "test-password")
-        db.update(
+        legacyJdbc.update(
             "UPDATE sessions SET expires_at=? WHERE token_hash=?",
             OffsetDateTime.now().minusSeconds(1),
             credentials.session.sessionId.value,
@@ -258,8 +258,8 @@ class GrpcTransportTests : MessengerIntegrationTest() {
     fun `group authorization rejects direct chats even when the session user is a member`() {
         val credentials = authenticationService.register(username = "direct_${newId().lowercase()}", password = "test-password")
         val chatId = newId()
-        db.update("INSERT INTO chats(id,kind,direct_pair_key) VALUES (?,'DIRECT',?)", chatId, "pair_$chatId")
-        db.update("INSERT INTO chat_members(chat_id,user_id) VALUES (?,?)", chatId, credentials.session.userId.value)
+        legacyJdbc.update("INSERT INTO chats(id,kind,direct_pair_key) VALUES (?,'DIRECT',?)", chatId, "pair_$chatId")
+        legacyJdbc.update("INSERT INTO chat_members(chat_id,user_id) VALUES (?,?)", chatId, credentials.session.userId.value)
         withClient { client ->
             assertRpcStatus(Status.Code.PERMISSION_DENIED) {
                 client.authorizeGroup(

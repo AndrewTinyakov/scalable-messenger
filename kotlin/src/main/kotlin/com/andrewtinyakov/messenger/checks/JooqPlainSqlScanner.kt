@@ -94,8 +94,14 @@ internal class JooqPlainSqlScanner(
                         }
 
                         private fun checkCall(target: JooqMethod) {
-                            if (isBatchRead(target) || jooqApi.forbids(target, parents)) add(violation(target))
+                            if (isBatchRead(target) || jooqApi.forbids(target, parents) || isRawJdbc(target)) add(violation(target))
                         }
+
+                        private fun isRawJdbc(target: JooqMethod) = caller.owner != postgresStatements && (
+                            (target.owner in jdbcStatements && target.name in statementSqlMethods && target.descriptor.startsWith("(Ljava/lang/String;")) ||
+                                (target.owner == "java/sql/Connection" && target.name in connectionSqlMethods) ||
+                                target.owner.startsWith("org/springframework/jdbc/core/")
+                            )
 
                         private fun violation(target: JooqMethod) = JooqPlainSqlViolation(caller, sourceFile, line, target)
 
@@ -114,6 +120,10 @@ internal class JooqPlainSqlScanner(
     }
 
     private companion object {
+        const val postgresStatements = "com/andrewtinyakov/messenger/infrastructure/database/PostgresStatements"
+        val jdbcStatements = setOf("java/sql/Statement", "java/sql/PreparedStatement", "java/sql/CallableStatement")
+        val statementSqlMethods = setOf("execute", "executeQuery", "executeUpdate", "executeLargeUpdate", "addBatch")
+        val connectionSqlMethods = setOf("prepareStatement", "prepareCall", "nativeSQL")
         val customQueryParts = setOf("CustomField", "CustomCondition", "CustomQueryPart").map { "org/jooq/impl/$it" }
         val customRenderSignatures = setOf("(C)Lorg/jooq/Context;", "(Ljava/lang/String;)Lorg/jooq/Context;")
         val sqlTaggingHook = JooqMethod(

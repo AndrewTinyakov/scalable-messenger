@@ -2,13 +2,14 @@ package com.andrewtinyakov.messenger.shared
 
 import com.andrewtinyakov.messenger.ApiApplication
 import com.andrewtinyakov.messenger.generated.messaging.command.SendMessageCommandV1
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.USERS
 import com.andrewtinyakov.messenger.shared.id.newId
+import org.jooq.DSLContext
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestInstance
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import org.testcontainers.containers.PostgreSQLContainer
@@ -32,7 +33,10 @@ abstract class MessengerIntegrationTest {
     private lateinit var testExecutor: ExecutorService
 
     @Autowired
-    protected lateinit var db: JdbcTemplate
+    protected lateinit var db: DSLContext
+
+    @Autowired
+    protected lateinit var legacyJdbc: org.springframework.jdbc.core.JdbcTemplate
 
     @BeforeEach
     fun startConcurrentTasks() {
@@ -65,7 +69,7 @@ abstract class MessengerIntegrationTest {
     }
 
     protected fun user(name: String): String = newId().also { id ->
-        db.update("INSERT INTO users(id,username,password_hash) VALUES (?,?,'x')", id, name)
+        db.insertInto(USERS).set(USERS.ID, id).set(USERS.USERNAME, name).set(USERS.PASSWORD_HASH, "x").execute()
     }
 
     protected fun command(sender: String, request: String, body: String, chat: String? = null, recipient: String? = null) =

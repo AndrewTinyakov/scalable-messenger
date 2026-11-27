@@ -1,6 +1,6 @@
 package com.andrewtinyakov.messenger.infrastructure.database
 
-internal enum class PostgresExplainFormat {
+enum class PostgresExplainFormat {
     TEXT,
     JSON,
 }

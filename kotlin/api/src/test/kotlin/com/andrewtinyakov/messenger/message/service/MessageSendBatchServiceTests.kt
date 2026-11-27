@@ -44,14 +44,14 @@ class MessageSendBatchServiceTests
                     chats.allocateSequencesForMembers(ChatId(chat), listOf(UserId(sender), UserId(outsider)))
                 },
             )
-            assertEquals(1L, db.queryForObject("SELECT next_sequence FROM chats WHERE id=?", Long::class.java, chat))
+            assertEquals(1L, legacyJdbc.queryForObject("SELECT next_sequence FROM chats WHERE id=?", Long::class.java, chat))
             assertEquals(
                 1L,
                 transactions.execute {
                     chats.allocateSequencesForMembers(ChatId(chat), listOf(UserId(sender), UserId(sender), UserId(recipient)))
                 },
             )
-            assertEquals(4L, db.queryForObject("SELECT next_sequence FROM chats WHERE id=?", Long::class.java, chat))
+            assertEquals(4L, legacyJdbc.queryForObject("SELECT next_sequence FROM chats WHERE id=?", Long::class.java, chat))
         }
 
         @Test
@@ -77,12 +77,12 @@ class MessageSendBatchServiceTests
             assertTrue(statements.get() in 1..30, "Expected one to 30 SQL executions, observed ${statements.get()}")
             assertEquals(
                 (1L..16L).toList(),
-                db.queryForList("SELECT sequence FROM messages WHERE chat_id=? ORDER BY sequence", Long::class.java, chat),
+                legacyJdbc.queryForList("SELECT sequence FROM messages WHERE chat_id=? ORDER BY sequence", Long::class.java, chat),
             )
-            assertEquals(16, db.queryForObject("SELECT count(*) FROM send_requests WHERE chat_id=?", Int::class.java, chat))
+            assertEquals(16, legacyJdbc.queryForObject("SELECT count(*) FROM send_requests WHERE chat_id=?", Int::class.java, chat))
             assertEquals(
                 32,
-                db.queryForObject("SELECT count(*) FROM messenger_outbox_events WHERE payload->>'chatId'=?", Int::class.java, chat),
+                legacyJdbc.queryForObject("SELECT count(*) FROM messenger_outbox_events WHERE payload->>'chatId'=?", Int::class.java, chat),
             )
         }
 
@@ -106,10 +106,10 @@ class MessageSendBatchServiceTests
             )
             assertEquals(
                 listOf("first", "other sender"),
-                db.queryForList("SELECT body FROM messages WHERE chat_id=? ORDER BY sequence", String::class.java, chat),
+                legacyJdbc.queryForList("SELECT body FROM messages WHERE chat_id=? ORDER BY sequence", String::class.java, chat),
             )
-            assertEquals(2, db.queryForObject("SELECT count(*) FROM send_requests WHERE chat_id=?", Int::class.java, chat))
-            assertEquals(3L, db.queryForObject("SELECT next_sequence FROM chats WHERE id=?", Long::class.java, chat))
+            assertEquals(2, legacyJdbc.queryForObject("SELECT count(*) FROM send_requests WHERE chat_id=?", Int::class.java, chat))
+            assertEquals(3L, legacyJdbc.queryForObject("SELECT next_sequence FROM chats WHERE id=?", Long::class.java, chat))
         }
 
         @Test
@@ -143,12 +143,12 @@ class MessageSendBatchServiceTests
 
             assertEquals(
                 listOf(1L, 2L),
-                db.queryForList("SELECT sequence FROM messages WHERE chat_id=? ORDER BY sequence", Long::class.java, chat),
+                legacyJdbc.queryForList("SELECT sequence FROM messages WHERE chat_id=? ORDER BY sequence", Long::class.java, chat),
             )
-            assertEquals(3L, db.queryForObject("SELECT next_sequence FROM chats WHERE id=?", Long::class.java, chat))
+            assertEquals(3L, legacyJdbc.queryForObject("SELECT next_sequence FROM chats WHERE id=?", Long::class.java, chat))
             assertEquals(
                 1,
-                db.queryForObject(
+                legacyJdbc.queryForObject(
                     """
                     SELECT count(DISTINCT transaction_id) FROM (
                         SELECT xmin::text AS transaction_id FROM messages WHERE chat_id=?
@@ -172,18 +172,18 @@ class MessageSendBatchServiceTests
             val failingRequest = newId()
             val commands = listOf(command(sender, newId(), "first", chat = chat), command(sender, failingRequest, "fails", chat = chat))
             val constraint = "reject_${newId()}"
-            db.execute("ALTER TABLE send_requests ADD CONSTRAINT \"$constraint\" CHECK (request_id <> '$failingRequest')")
+            legacyJdbc.execute("ALTER TABLE send_requests ADD CONSTRAINT \"$constraint\" CHECK (request_id <> '$failingRequest')")
             try {
                 assertThrows(RuntimeException::class.java) { batches.process(commands) }
-                assertEquals(0, db.queryForObject("SELECT count(*) FROM messages WHERE chat_id=?", Int::class.java, chat))
-                assertEquals(0, db.queryForObject("SELECT count(*) FROM send_requests WHERE chat_id=?", Int::class.java, chat))
+                assertEquals(0, legacyJdbc.queryForObject("SELECT count(*) FROM messages WHERE chat_id=?", Int::class.java, chat))
+                assertEquals(0, legacyJdbc.queryForObject("SELECT count(*) FROM send_requests WHERE chat_id=?", Int::class.java, chat))
                 assertEquals(
                     0,
-                    db.queryForObject("SELECT count(*) FROM messenger_outbox_events WHERE payload->>'chatId'=?", Int::class.java, chat),
+                    legacyJdbc.queryForObject("SELECT count(*) FROM messenger_outbox_events WHERE payload->>'chatId'=?", Int::class.java, chat),
                 )
-                assertEquals(1L, db.queryForObject("SELECT next_sequence FROM chats WHERE id=?", Long::class.java, chat))
+                assertEquals(1L, legacyJdbc.queryForObject("SELECT next_sequence FROM chats WHERE id=?", Long::class.java, chat))
             } finally {
-                db.execute("ALTER TABLE send_requests DROP CONSTRAINT \"$constraint\"")
+                legacyJdbc.execute("ALTER TABLE send_requests DROP CONSTRAINT \"$constraint\"")
             }
         }
 
@@ -200,7 +200,7 @@ class MessageSendBatchServiceTests
 
             assertEquals(
                 (1L..8L).toList(),
-                db.queryForList("SELECT sequence FROM messages WHERE chat_id=? ORDER BY sequence", Long::class.java, chat),
+                legacyJdbc.queryForList("SELECT sequence FROM messages WHERE chat_id=? ORDER BY sequence", Long::class.java, chat),
             )
         }
 
@@ -221,11 +221,11 @@ class MessageSendBatchServiceTests
 
             assertEquals(
                 "NOT_A_MEMBER",
-                db.queryForObject("SELECT reason FROM send_requests WHERE request_id=?", String::class.java, rejected.requestId),
+                legacyJdbc.queryForObject("SELECT reason FROM send_requests WHERE request_id=?", String::class.java, rejected.requestId),
             )
             assertEquals(
                 listOf(1L, 2L),
-                db.queryForList("SELECT sequence FROM messages WHERE chat_id=? ORDER BY sequence", Long::class.java, chat),
+                legacyJdbc.queryForList("SELECT sequence FROM messages WHERE chat_id=? ORDER BY sequence", Long::class.java, chat),
             )
         }
 
@@ -247,19 +247,19 @@ class MessageSendBatchServiceTests
 
             assertEquals(
                 "EMPTY_BODY",
-                db.queryForObject("SELECT reason FROM send_requests WHERE request_id=?", String::class.java, blank.requestId),
+                legacyJdbc.queryForObject("SELECT reason FROM send_requests WHERE request_id=?", String::class.java, blank.requestId),
             )
             assertEquals(
                 "BODY_TOO_LONG",
-                db.queryForObject("SELECT reason FROM send_requests WHERE request_id=?", String::class.java, oversized.requestId),
+                legacyJdbc.queryForObject("SELECT reason FROM send_requests WHERE request_id=?", String::class.java, oversized.requestId),
             )
             assertEquals(
                 "INVALID_RECIPIENT",
-                db.queryForObject("SELECT reason FROM send_requests WHERE request_id=?", String::class.java, self.requestId),
+                legacyJdbc.queryForObject("SELECT reason FROM send_requests WHERE request_id=?", String::class.java, self.requestId),
             )
             assertEquals(
                 listOf(1L),
-                db.queryForList("SELECT sequence FROM messages WHERE chat_id=? ORDER BY sequence", Long::class.java, chat),
+                legacyJdbc.queryForList("SELECT sequence FROM messages WHERE chat_id=? ORDER BY sequence", Long::class.java, chat),
             )
         }
 
@@ -276,19 +276,19 @@ class MessageSendBatchServiceTests
             )
 
             val pair = listOf(left, right).sorted().joinToString(":")
-            val chat = db.queryForObject("SELECT id FROM chats WHERE direct_pair_key=?", String::class.java, pair)!!
+            val chat = legacyJdbc.queryForObject("SELECT id FROM chats WHERE direct_pair_key=?", String::class.java, pair)!!
             assertEquals(
                 listOf(1L, 2L),
-                db.queryForList("SELECT sequence FROM messages WHERE chat_id=? ORDER BY sequence", Long::class.java, chat),
+                legacyJdbc.queryForList("SELECT sequence FROM messages WHERE chat_id=? ORDER BY sequence", Long::class.java, chat),
             )
         }
 
         private fun directChat(sender: String, recipient: String): String = newId().also { chat ->
-            db.update(
+            legacyJdbc.update(
                 "INSERT INTO chats(id,kind,direct_pair_key) VALUES (?,'DIRECT',?)",
                 chat,
                 listOf(sender, recipient).sorted().joinToString(":"),
             )
-            db.update("INSERT INTO chat_members(chat_id,user_id) VALUES (?,?),(?,?)", chat, sender, chat, recipient)
+            legacyJdbc.update("INSERT INTO chat_members(chat_id,user_id) VALUES (?,?),(?,?)", chat, sender, chat, recipient)
         }
     }

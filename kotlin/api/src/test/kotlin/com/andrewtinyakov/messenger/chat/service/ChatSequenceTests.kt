@@ -68,7 +68,7 @@ class ChatSequenceTests
             assertEquals(5, head(chat))
             assertEquals(
                 listOf(5L, 5L),
-                db.queryForList("SELECT seq FROM message_changes WHERE chat_id=? AND kind='REMOVED'", Long::class.java, chat),
+                legacyJdbc.queryForList("SELECT seq FROM message_changes WHERE chat_id=? AND kind='REMOVED'", Long::class.java, chat),
             )
             assertEquals("5", latest(chat, "history_changed", "group:$chat").path("seq").stringValue())
             assertEquals(5, column(chat, "pins_seq"), "deleting a pinned message changes the shared pins")
@@ -120,7 +120,7 @@ class ChatSequenceTests
             assertEquals(0, memberSeq(chat, owner))
             assertEquals(
                 0,
-                db.queryForObject(
+                legacyJdbc.queryForObject(
                     "SELECT count(*) FROM messenger_outbox_events WHERE payload->>'chatId'=? AND room=? AND payload->>'type' IN " +
                         "('chat_preferences_changed','history_changed')",
                     Int::class.java,
@@ -138,7 +138,7 @@ class ChatSequenceTests
             sends.process(command(owner, request, "hello", recipient = peer))
             val status = sendStatus.status(UserId(owner), RequestId(request))
             val chat = status.chatId!!
-            val created = db.queryForList(
+            val created = legacyJdbc.queryForList(
                 "SELECT payload->>'userSeq' FROM messenger_outbox_events WHERE payload->>'type'='chat_created' AND payload->>'chatId'=?",
                 String::class.java,
                 chat,
@@ -166,7 +166,7 @@ class ChatSequenceTests
             preferences.pin(ChatId(first), UserId(member))
             preferences.pin(ChatId(second), UserId(member))
             assertEquals(5, userSeq(member))
-            val numbers = db.queryForList(
+            val numbers = legacyJdbc.queryForList(
                 "SELECT payload->>'userSeq' FROM messenger_outbox_events WHERE room=? AND payload->>'type'='chat_preferences_changed' " +
                     "ORDER BY (payload->>'userSeq')::bigint",
                 String::class.java,
@@ -291,22 +291,22 @@ class ChatSequenceTests
 
         private fun head(chat: String): Long = column(chat, "next_sequence") - 1
 
-        private fun column(chat: String, name: String): Long = db.queryForObject(
+        private fun column(chat: String, name: String): Long = legacyJdbc.queryForObject(
             "SELECT $name FROM chats WHERE id=?",
             Long::class.java,
             chat,
         )!!
 
         private fun activityAt(chat: String): OffsetDateTime? =
-            db.queryForObject("SELECT last_activity_at FROM chats WHERE id=?", OffsetDateTime::class.java, chat)
+            legacyJdbc.queryForObject("SELECT last_activity_at FROM chats WHERE id=?", OffsetDateTime::class.java, chat)
 
         private fun memberSeq(chat: String, user: String): Long =
-            db.queryForObject("SELECT member_seq FROM chat_members WHERE chat_id=? AND user_id=?", Long::class.java, chat, user)!!
+            legacyJdbc.queryForObject("SELECT member_seq FROM chat_members WHERE chat_id=? AND user_id=?", Long::class.java, chat, user)!!
 
-        private fun userSeq(user: String): Long = db.queryForObject("SELECT event_seq FROM users WHERE id=?", Long::class.java, user)!!
+        private fun userSeq(user: String): Long = legacyJdbc.queryForObject("SELECT event_seq FROM users WHERE id=?", Long::class.java, user)!!
 
         private fun latest(chat: String, type: String, room: String): JsonNode = mapper.readTree(
-            db.queryForList(
+            legacyJdbc.queryForList(
                 "SELECT payload::text FROM messenger_outbox_events WHERE payload->>'chatId'=? AND payload->>'type'=? AND room=? " +
                     "ORDER BY created_at DESC, id DESC LIMIT 1",
                 String::class.java,

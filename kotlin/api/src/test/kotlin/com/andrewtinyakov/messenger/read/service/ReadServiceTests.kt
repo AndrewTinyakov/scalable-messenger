@@ -50,7 +50,7 @@ class ReadServiceTests
             val chat = ChatId(chatService.createGroup(owner, "Read receipts", members).id)
             val ids = (1..messages).map { sequence ->
                 MessageId(newId()).also { id ->
-                    db.update(
+                    legacyJdbc.update(
                         "INSERT INTO messages(id,chat_id,sequence,sender_id,body,created_at) VALUES (?,?,?,?,'hello',?::timestamptz)",
                         id.value,
                         chat.value,
@@ -60,7 +60,7 @@ class ReadServiceTests
                     )
                 }
             }
-            db.update("UPDATE chats SET next_sequence=? WHERE id=?", messages.toLong() + 1, chat.value)
+            legacyJdbc.update("UPDATE chats SET next_sequence=? WHERE id=?", messages.toLong() + 1, chat.value)
             return ReadFixture(owner, members, chat, ids)
         }
 
@@ -107,11 +107,11 @@ class ReadServiceTests
             val clock = MutableClock("2026-11-02T12:00:00Z")
             val repository = JooqReadRepository(jooq, clock)
             tx.execute { repository.advance(f.chat, f.members.first(), 1) }
-            db.update("UPDATE chats SET deleted_at=now() WHERE id=?", f.chat.value)
+            legacyJdbc.update("UPDATE chats SET deleted_at=now() WHERE id=?", f.chat.value)
             tx.execute { repository.pendingNotifications(OffsetDateTime.now(clock), 1000) }
             assertEquals(
                 0,
-                db.queryForObject("SELECT count(*) FROM pending_read_notifications WHERE chat_id=?", Int::class.java, f.chat.value),
+                legacyJdbc.queryForObject("SELECT count(*) FROM pending_read_notifications WHERE chat_id=?", Int::class.java, f.chat.value),
             )
         }
 
@@ -137,7 +137,7 @@ class ReadServiceTests
             val clock = MutableClock("2026-11-02T12:00:00Z")
             val reads = service(clock)
             reads.advance(f.chat, f.members.first(), 1L)
-            db.update("DELETE FROM messenger_outbox_events WHERE room=?", "group:${f.chat.value}")
+            legacyJdbc.update("DELETE FROM messenger_outbox_events WHERE room=?", "group:${f.chat.value}")
             clock.set("2026-11-02T12:00:01Z")
             reads.advance(f.chat, f.members.first(), 3L)
             reads.publishPendingNotifications()
@@ -150,7 +150,7 @@ class ReadServiceTests
             assertEquals(1, sharedNotifications(f.chat))
             assertEquals(
                 0,
-                db.queryForObject("SELECT count(*) FROM pending_read_notifications WHERE chat_id=?", Int::class.java, f.chat.value),
+                legacyJdbc.queryForObject("SELECT count(*) FROM pending_read_notifications WHERE chat_id=?", Int::class.java, f.chat.value),
             )
         }
 
@@ -180,7 +180,7 @@ class ReadServiceTests
             assertEquals("2", reads.summary(f.chat, f.owner).maxOtherReadSequence)
         }
 
-        private fun sharedNotifications(chatId: ChatId): Int = db.queryForObject(
+        private fun sharedNotifications(chatId: ChatId): Int = legacyJdbc.queryForObject(
             "SELECT count(*) FROM messenger_outbox_events WHERE room=? AND payload->>'type'='reads_changed'",
             Int::class.java,
             "group:${chatId.value}",
@@ -203,7 +203,7 @@ class ReadServiceTests
             for (member in f.members.take(2)) {
                 assertEquals(
                     1,
-                    db.queryForObject(
+                    legacyJdbc.queryForObject(
                         "SELECT count(*) FROM messenger_outbox_events WHERE room=? AND payload->>'type'='reads_changed' AND payload->>'chatId'=?",
                         Int::class.java,
                         "user:${member.value}",
@@ -250,7 +250,7 @@ class ReadServiceTests
             )
             assertEquals("3", reads.summary(f.chat, f.owner).maxOtherReadSequence)
             assertEquals("0", reads.summary(f.chat, member).maxOtherReadSequence)
-            assertEquals(2, db.queryForObject("SELECT count(*) FROM chat_read_ranges WHERE chat_id=?", Int::class.java, f.chat.value))
+            assertEquals(2, legacyJdbc.queryForObject("SELECT count(*) FROM chat_read_ranges WHERE chat_id=?", Int::class.java, f.chat.value))
             clock.set("2026-11-02T11:00:00Z")
             assertEquals(latest.readAt.toInstant(), reads.advance(f.chat, member, 3L).readAt!!.toInstant())
         }
@@ -284,7 +284,7 @@ class ReadServiceTests
             assertEquals("30", reads.summary(f.chat, f.members.first()).throughSequence)
             assertEquals(
                 0,
-                db.queryForObject(
+                legacyJdbc.queryForObject(
                     """SELECT count(*) FROM chat_read_ranges a JOIN chat_read_ranges b
             ON a.chat_id=b.chat_id AND a.user_id=b.user_id AND a.creation_day=b.creation_day
             AND a.through_sequence<b.through_sequence AND a.through_sequence>b.after_sequence WHERE a.chat_id=?""",
@@ -294,7 +294,7 @@ class ReadServiceTests
             )
             assertEquals(
                 1,
-                db.queryForObject(
+                legacyJdbc.queryForObject(
                     "SELECT count(*) FROM messenger_outbox_events WHERE payload->>'type'='reads_changed' AND payload->>'chatId'=? AND room LIKE 'group:%'",
                     Int::class.java,
                     f.chat.value,
@@ -302,7 +302,7 @@ class ReadServiceTests
             )
             assertEquals(
                 1,
-                db.queryForObject("SELECT count(*) FROM chat_read_notifications WHERE chat_id=?", Int::class.java, f.chat.value),
+                legacyJdbc.queryForObject("SELECT count(*) FROM chat_read_notifications WHERE chat_id=?", Int::class.java, f.chat.value),
             )
         }
 
@@ -330,7 +330,7 @@ class ReadServiceTests
                 assertEquals("2", reads.summary(f.chat, f.owner).maxOtherReadSequence)
                 assertEquals(
                     0,
-                    db.queryForObject(
+                    legacyJdbc.queryForObject(
                         "SELECT count(*) FROM messenger_outbox_events WHERE payload->>'type'='reads_changed' AND payload->>'chatId'=? AND room LIKE 'group:%'",
                         Int::class.java,
                         f.chat.value,
@@ -344,7 +344,7 @@ class ReadServiceTests
             }
             assertEquals(
                 1,
-                db.queryForObject(
+                legacyJdbc.queryForObject(
                     "SELECT count(*) FROM messenger_outbox_events WHERE payload->>'type'='reads_changed' AND payload->>'chatId'=? AND room LIKE 'group:%'",
                     Int::class.java,
                     f.chat.value,
@@ -365,13 +365,13 @@ class ReadServiceTests
             assertEquals(f.members.map { it.value }.sorted().drop(2), second.readers.map { it.userId })
             assertNull(second.nextUserId)
             assertEquals(Instant.parse("2026-11-08T12:00:00Z"), first.detailsExpiresAt.toInstant())
-            db.update("DELETE FROM chat_members WHERE chat_id=? AND user_id=?", f.chat.value, first.readers.first().userId)
+            legacyJdbc.update("DELETE FROM chat_members WHERE chat_id=? AND user_id=?", f.chat.value, first.readers.first().userId)
             assertEquals(2, reads.readers(f.chat, f.owner, f.messages.single(), null, 50).readers.size)
             clock.set("2026-11-08T12:00:00Z")
             assertFalse(reads.readers(f.chat, f.owner, f.messages.single(), null, 50).detailsAvailable)
             assertTrue(reads.readers(f.chat, f.owner, f.messages.single(), null, 50).readers.isEmpty())
             assertEquals("1", reads.summary(f.chat, f.owner).maxOtherReadSequence)
-            assertTrue(db.queryForObject("SELECT count(*) FROM chat_read_ranges WHERE chat_id=?", Int::class.java, f.chat.value)!! > 0)
+            assertTrue(legacyJdbc.queryForObject("SELECT count(*) FROM chat_read_ranges WHERE chat_id=?", Int::class.java, f.chat.value)!! > 0)
         }
 
         @Test
@@ -399,7 +399,7 @@ class ReadServiceTests
                 }.status,
             )
             reads.advance(f.chat, f.members.first(), 1L)
-            db.update("DELETE FROM chat_members WHERE chat_id=? AND user_id=?", f.chat.value, f.members.first().value)
+            legacyJdbc.update("DELETE FROM chat_members WHERE chat_id=? AND user_id=?", f.chat.value, f.members.first().value)
             assertEquals("0", reads.summary(f.chat, f.owner).maxOtherReadSequence)
             assertEquals(
                 HttpStatus.NOT_FOUND,
@@ -407,9 +407,9 @@ class ReadServiceTests
                     reads.advance(f.chat, f.members.first(), 1L)
                 }.status,
             )
-            db.update("UPDATE messages SET body='',deleted_at=now() WHERE id=?", f.messages.single().value)
+            legacyJdbc.update("UPDATE messages SET body='',deleted_at=now() WHERE id=?", f.messages.single().value)
             assertFalse(reads.readers(f.chat, f.owner, f.messages.single(), null, 50).detailsAvailable)
-            db.update("UPDATE chats SET deleted_at=now() WHERE id=?", f.chat.value)
+            legacyJdbc.update("UPDATE chats SET deleted_at=now() WHERE id=?", f.chat.value)
             assertEquals(HttpStatus.NOT_FOUND, assertThrows(ApiException::class.java) { reads.summary(f.chat, f.owner) }.status)
             assertEquals(
                 HttpStatus.NOT_FOUND,
@@ -428,7 +428,7 @@ class ReadServiceTests
         @Test
         fun `bounded cleanup removes expired creation buckets while progress and recent details survive`() {
             val f = fixture(messages = 2, createdAt = "2026-11-01T12:00:00Z")
-            db.update("UPDATE messages SET created_at='2026-11-08T11:00:00Z' WHERE id=?", f.messages.last().value)
+            legacyJdbc.update("UPDATE messages SET created_at='2026-11-08T11:00:00Z' WHERE id=?", f.messages.last().value)
             val clock = MutableClock("2026-11-08T11:59:59Z")
             val reads = service(clock)
             reads.advance(f.chat, f.members.first(), 1L)
@@ -449,7 +449,7 @@ class ReadServiceTests
             assertEquals(Instant.parse("2026-11-09T00:00:00Z"), recent.readers.single().readAt.toInstant())
             assertEquals(
                 0,
-                db.queryForObject(
+                legacyJdbc.queryForObject(
                     "SELECT count(*) FROM chat_read_ranges WHERE chat_id=? AND expires_at <= '2026-11-09T00:00:00Z'",
                     Int::class.java,
                     f.chat.value,
@@ -516,17 +516,17 @@ class ReadServiceTests
             val reads = service(clock)
             val member = f.members.first()
             val first = reads.advance(f.chat, member, 1L)
-            db.update("DELETE FROM chat_members WHERE chat_id=? AND user_id=?", f.chat.value, member.value)
+            legacyJdbc.update("DELETE FROM chat_members WHERE chat_id=? AND user_id=?", f.chat.value, member.value)
             assertEquals("0", reads.summary(f.chat, f.owner).maxOtherReadSequence)
             assertFalse(
-                db.queryForObject(
+                legacyJdbc.queryForObject(
                     "SELECT active_membership FROM chat_read_progress WHERE chat_id=? AND user_id=?",
                     Boolean::class.java,
                     f.chat.value,
                     member.value,
                 )!!,
             )
-            db.update("INSERT INTO chat_members(chat_id,user_id) VALUES (?,?)", f.chat.value, member.value)
+            legacyJdbc.update("INSERT INTO chat_members(chat_id,user_id) VALUES (?,?)", f.chat.value, member.value)
             assertEquals("1", reads.summary(f.chat, f.owner).maxOtherReadSequence)
             clock.set("2026-11-02T13:00:00Z")
             assertEquals(first.readAt!!.toInstant(), reads.advance(f.chat, member, 1L).readAt!!.toInstant())
@@ -561,7 +561,7 @@ class ReadServiceTests
                 val removed = pool.submit(
                     Callable {
                         removing.countDown()
-                        db.update("DELETE FROM chat_members WHERE chat_id=? AND user_id=?", f.chat.value, f.members.first().value)
+                        legacyJdbc.update("DELETE FROM chat_members WHERE chat_id=? AND user_id=?", f.chat.value, f.members.first().value)
                     },
                 )
                 assertTrue(removing.await(10, TimeUnit.SECONDS))
@@ -571,7 +571,7 @@ class ReadServiceTests
                 assertEquals(1, removed.get(10, TimeUnit.SECONDS))
                 assertEquals("0", reads.summary(f.chat, f.owner).maxOtherReadSequence)
                 assertFalse(
-                    db.queryForObject(
+                    legacyJdbc.queryForObject(
                         "SELECT active_membership FROM chat_read_progress WHERE chat_id=? AND user_id=?",
                         Boolean::class.java,
                         f.chat.value,
@@ -599,7 +599,7 @@ class ReadServiceTests
             assertTrue(serializedDetails.get("nextUserId").isNull)
             assertTrue(details.detailsAvailable)
             assertTrue(details.readers.isEmpty())
-            assertEquals(0, db.queryForObject("SELECT count(*) FROM chat_read_ranges WHERE chat_id=?", Int::class.java, f.chat.value))
+            assertEquals(0, legacyJdbc.queryForObject("SELECT count(*) FROM chat_read_ranges WHERE chat_id=?", Int::class.java, f.chat.value))
         }
 
         @Test
@@ -615,11 +615,11 @@ class ReadServiceTests
         @Test
         fun `small prefixes store only actual creation days without assuming chronological timestamps`() {
             val f = fixture(messages = 3)
-            db.update("UPDATE messages SET created_at='2026-10-28T13:00:00Z' WHERE id=?", f.messages[1].value)
-            db.update("UPDATE messages SET created_at='2026-11-02T11:00:00Z' WHERE id=?", f.messages[2].value)
+            legacyJdbc.update("UPDATE messages SET created_at='2026-10-28T13:00:00Z' WHERE id=?", f.messages[1].value)
+            legacyJdbc.update("UPDATE messages SET created_at='2026-11-02T11:00:00Z' WHERE id=?", f.messages[2].value)
             val reads = service(Clock.fixed(Instant.parse("2026-11-02T12:00:00Z"), ZoneOffset.UTC))
             reads.advance(f.chat, f.members.first(), 3L)
-            assertEquals(3, db.queryForObject("SELECT count(*) FROM chat_read_ranges WHERE chat_id=?", Int::class.java, f.chat.value))
+            assertEquals(3, legacyJdbc.queryForObject("SELECT count(*) FROM chat_read_ranges WHERE chat_id=?", Int::class.java, f.chat.value))
             for (id in f.messages) assertEquals(1, reads.readers(f.chat, f.owner, id, null, 50).readers.size)
         }
 
@@ -629,12 +629,12 @@ class ReadServiceTests
             val clock = MutableClock("2026-11-02T12:00:00Z")
             val reads = service(clock)
             reads.advance(f.chat, f.members.first(), 300L)
-            assertEquals(8, db.queryForObject("SELECT count(*) FROM chat_read_ranges WHERE chat_id=?", Int::class.java, f.chat.value))
+            assertEquals(8, legacyJdbc.queryForObject("SELECT count(*) FROM chat_read_ranges WHERE chat_id=?", Int::class.java, f.chat.value))
             assertEquals(1, reads.readers(f.chat, f.owner, f.messages.first(), null, 50).readers.size)
             assertEquals(1, reads.readers(f.chat, f.owner, f.messages.last(), null, 50).readers.size)
             val old = fixture(messages = 1, createdAt = "2026-10-25T12:00:00Z")
             reads.advance(old.chat, old.members.first(), 1L)
-            assertEquals(0, db.queryForObject("SELECT count(*) FROM chat_read_ranges WHERE chat_id=?", Int::class.java, old.chat.value))
+            assertEquals(0, legacyJdbc.queryForObject("SELECT count(*) FROM chat_read_ranges WHERE chat_id=?", Int::class.java, old.chat.value))
             assertEquals("1", reads.summary(old.chat, old.members.first()).throughSequence)
             assertFalse(reads.readers(old.chat, old.owner, old.messages.single(), null, 50).detailsAvailable)
         }

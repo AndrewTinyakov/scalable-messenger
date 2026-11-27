@@ -95,7 +95,7 @@ class TelegramFeatureHttpTests
             assertTrue(forever.path("mutedUntil").isNull)
             assertTrue(json(request("/$group", owner.second)).path("mutedForever").booleanValue())
             assertFalse(json(request("/$group", member.second)).path("mutedForever").booleanValue())
-            db.update("UPDATE chat_members SET muted_until = now() - interval '1 minute' WHERE chat_id=? AND user_id=?", group, owner.first)
+            legacyJdbc.update("UPDATE chat_members SET muted_until = now() - interval '1 minute' WHERE chat_id=? AND user_id=?", group, owner.first)
             val expired = json(request("/$group", owner.second))
             assertFalse(expired.path("mutedForever").booleanValue())
             assertFalse(expired.has("mutedUntil"))
@@ -114,10 +114,10 @@ class TelegramFeatureHttpTests
             val alice = account()
             val bob = account()
             sends.process(command(alice.first, newId(), "first", recipient = bob.first))
-            val direct = db.queryForObject("SELECT chat_id FROM messages WHERE sender_id=?", String::class.java, alice.first)!!
+            val direct = legacyJdbc.queryForObject("SELECT chat_id FROM messages WHERE sender_id=?", String::class.java, alice.first)!!
             sends.process(command(alice.first, newId(), "second", chat = direct))
             sends.process(command(bob.first, newId(), "third", chat = direct))
-            val (first, second, third) = db.queryForList(
+            val (first, second, third) = legacyJdbc.queryForList(
                 "SELECT id FROM messages WHERE chat_id=? ORDER BY sequence",
                 String::class.java,
                 direct,
@@ -159,9 +159,9 @@ class TelegramFeatureHttpTests
             assertEquals(1, json(request("/$direct/pins", alice.second)).path("totalCount").intValue())
 
             assertEquals(204, request("/$direct/pins/$second", alice.second, "PUT", """{"scope":"EVERYONE"}""").statusCode())
-            val version = db.queryForObject("SELECT message_version FROM messages WHERE id=?", Long::class.java, second)
+            val version = legacyJdbc.queryForObject("SELECT message_version FROM messages WHERE id=?", Long::class.java, second)
             assertEquals(200, request("/$direct/messages/$second?expectedVersion=$version", bob.second, "DELETE").statusCode())
-            assertEquals(0, db.queryForObject("SELECT count(*) FROM message_pins WHERE chat_id=? AND sequence=2", Int::class.java, direct))
+            assertEquals(0, legacyJdbc.queryForObject("SELECT count(*) FROM message_pins WHERE chat_id=? AND sequence=2", Int::class.java, direct))
 
             assertEquals(204, request("/$direct/pins/$third", alice.second, "DELETE").statusCode())
             assertEquals(0, json(request("/$direct/pins", bob.second)).path("totalCount").intValue())
@@ -169,7 +169,7 @@ class TelegramFeatureHttpTests
 
             val group = chats.createGroup(UserId(alice.first), "Group pins", listOf(bob.first).map(::UserId)).id
             sends.process(command(bob.first, newId(), "group text", chat = group))
-            val groupMessage = db.queryForObject("SELECT id FROM messages WHERE chat_id=?", String::class.java, group)!!
+            val groupMessage = legacyJdbc.queryForObject("SELECT id FROM messages WHERE chat_id=?", String::class.java, group)!!
             assertEquals(400, request("/$group/pins/$groupMessage", bob.second, "PUT", """{"scope":"SELF"}""").statusCode())
             assertEquals(204, request("/$group/pins/$groupMessage", bob.second, "PUT", """{"scope":"EVERYONE"}""").statusCode())
             assertEquals(1, outbox(group, "pins_changed", group, user = false))
@@ -182,8 +182,8 @@ class TelegramFeatureHttpTests
             val alice = account()
             val bob = account()
             sends.process(command(alice.first, newId(), "private reminder", recipient = bob.first))
-            val direct = db.queryForObject("SELECT chat_id FROM messages WHERE sender_id=?", String::class.java, alice.first)!!
-            val message = db.queryForObject("SELECT id FROM messages WHERE chat_id=?", String::class.java, direct)!!
+            val direct = legacyJdbc.queryForObject("SELECT chat_id FROM messages WHERE sender_id=?", String::class.java, alice.first)!!
+            val message = legacyJdbc.queryForObject("SELECT id FROM messages WHERE chat_id=?", String::class.java, direct)!!
             assertEquals(204, request("/$direct/pins/$message", alice.second, "PUT", """{"scope":"SELF"}""").statusCode())
             assertEquals(204, request("/$direct/pins/$message", alice.second, "DELETE").statusCode())
             assertEquals(204, request("/$direct/pins/$message", alice.second, "PUT", """{"scope":"SELF"}""").statusCode())
@@ -200,13 +200,13 @@ class TelegramFeatureHttpTests
             val member = account()
             val group = chats.createGroup(UserId(owner.first), "Pin cap", listOf(member.first).map(::UserId)).id
             repeat(201) { sends.process(command(owner.first, newId(), "message $it", chat = group)) }
-            db.update(
+            legacyJdbc.update(
                 "INSERT INTO message_pins(chat_id, sequence) SELECT chat_id, sequence FROM messages WHERE chat_id=? AND sequence <= 200",
                 group,
             )
-            val last = db.queryForObject("SELECT id FROM messages WHERE chat_id=? AND sequence=201", String::class.java, group)
+            val last = legacyJdbc.queryForObject("SELECT id FROM messages WHERE chat_id=? AND sequence=201", String::class.java, group)
             assertEquals(409, request("/$group/pins/$last", owner.second, "PUT", """{"scope":"EVERYONE"}""").statusCode())
-            val pinned = db.queryForObject("SELECT id FROM messages WHERE chat_id=? AND sequence=1", String::class.java, group)
+            val pinned = legacyJdbc.queryForObject("SELECT id FROM messages WHERE chat_id=? AND sequence=1", String::class.java, group)
             assertEquals(204, request("/$group/pins/$pinned", owner.second, "PUT", """{"scope":"EVERYONE"}""").statusCode())
             val page = json(request("/$group/pins", member.second))
             assertEquals(200, page.path("totalCount").intValue())
@@ -216,7 +216,7 @@ class TelegramFeatureHttpTests
         }
 
         private fun outbox(target: String, type: String, chatId: String, user: Boolean = true): Int =
-            db.queryForObject(
+            legacyJdbc.queryForObject(
                 "SELECT count(*) FROM messenger_outbox_events WHERE room=? AND payload->>'type'=? AND payload->>'chatId'=?",
                 Int::class.java,
                 if (user) "user:$target" else "group:$target",

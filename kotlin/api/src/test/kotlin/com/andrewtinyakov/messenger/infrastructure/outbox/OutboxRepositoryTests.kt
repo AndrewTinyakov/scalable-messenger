@@ -24,7 +24,7 @@ class OutboxRepositoryTests
         fun `publishers wake after the enqueueing transaction commits, not inside it`() {
             assertEquals(
                 0,
-                db.queryForObject("SELECT count(*) FROM pg_trigger WHERE tgrelid = 'messenger_outbox_events'::regclass", Int::class.java),
+                legacyJdbc.queryForObject("SELECT count(*) FROM pg_trigger WHERE tgrelid = 'messenger_outbox_events'::regclass", Int::class.java),
             )
             dataSource.connection.use { connection ->
                 connection.autoCommit = true
@@ -54,7 +54,7 @@ class OutboxRepositoryTests
                 assertThrows(DataIntegrityViolationException::class.java) {
                     outboxRepository.enqueue(listOf(OutboxMessage(id, "user:${newId()}", """{"$field":"retained content"}""")))
                 }
-                assertEquals(0, db.queryForObject("SELECT count(*) FROM messenger_outbox_events WHERE id=?", Int::class.java, id.value))
+                assertEquals(0, legacyJdbc.queryForObject("SELECT count(*) FROM messenger_outbox_events WHERE id=?", Int::class.java, id.value))
             }
         }
 
@@ -71,18 +71,18 @@ class OutboxRepositoryTests
 
             assertEquals(
                 "USER",
-                db.queryForObject("SELECT room_kind::text FROM messenger_outbox_events WHERE id=?", String::class.java, userEvent.value),
+                legacyJdbc.queryForObject("SELECT room_kind::text FROM messenger_outbox_events WHERE id=?", String::class.java, userEvent.value),
             )
             assertEquals(
                 "GROUP",
-                db.queryForObject("SELECT room_kind::text FROM messenger_outbox_events WHERE id=?", String::class.java, groupEvent.value),
+                legacyJdbc.queryForObject("SELECT room_kind::text FROM messenger_outbox_events WHERE id=?", String::class.java, groupEvent.value),
             )
 
-            db.update("UPDATE messenger_outbox_events SET room=? WHERE id=?", "group:${newId()}", userEvent.value)
+            legacyJdbc.update("UPDATE messenger_outbox_events SET room=? WHERE id=?", "group:${newId()}", userEvent.value)
 
             assertEquals(
                 "GROUP",
-                db.queryForObject("SELECT room_kind::text FROM messenger_outbox_events WHERE id=?", String::class.java, userEvent.value),
+                legacyJdbc.queryForObject("SELECT room_kind::text FROM messenger_outbox_events WHERE id=?", String::class.java, userEvent.value),
             )
         }
 
@@ -104,7 +104,7 @@ class OutboxRepositoryTests
                 assertEquals("23502", (failure.mostSpecificCause as SQLException).sqlState)
                 assertEquals(
                     0,
-                    db.queryForObject(
+                    legacyJdbc.queryForObject(
                         "SELECT count(*) FROM messenger_outbox_events WHERE id IN (?, ?)",
                         Int::class.java,
                         validEvent.value,

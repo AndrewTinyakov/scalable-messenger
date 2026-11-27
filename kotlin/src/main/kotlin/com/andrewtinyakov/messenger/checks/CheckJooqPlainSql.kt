@@ -21,9 +21,9 @@ fun main(args: Array<String>) {
         !isGeneratedJooqClass(repository, classDirectories.getValue(it), it)
     }.map { finding ->
         val sourcePath = sourcePath(repository, sourceDirectories.getValue(finding.caller.owner), finding)
-        "$sourcePath:${finding.line}: ${finding.caller.name} calls forbidden jOOQ API ${finding.target}"
+        "$sourcePath:${finding.line}: ${finding.caller.name} calls forbidden SQL API ${finding.target.owner}.${finding.target.name}"
     }.distinct().sorted()
-    check(findings.isEmpty()) { findings.joinToString("\n", prefix = "Forbidden jOOQ SQL calls:\n") }
+    check(findings.isEmpty()) { findings.joinToString("\n", prefix = "Forbidden SQL calls:\n") }
 }
 
 private fun sourcePath(repository: File, outputs: List<File>, finding: JooqPlainSqlViolation): String {

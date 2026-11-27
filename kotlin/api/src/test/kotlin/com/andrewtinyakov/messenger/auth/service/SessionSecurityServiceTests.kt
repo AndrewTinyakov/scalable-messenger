@@ -65,7 +65,7 @@ class SessionSecurityServiceTests : MessengerIntegrationTest() {
         assertEquals(emptyList<String>(), skipped)
 
         val nearlyDue = OffsetDateTime.now().minusHours(23)
-        db.update(
+        legacyJdbc.update(
             "UPDATE sessions SET last_used_at=?, expires_at=? WHERE token_hash=?",
             nearlyDue,
             nearlyDue.plusDays(30),
@@ -76,7 +76,7 @@ class SessionSecurityServiceTests : MessengerIntegrationTest() {
 
         val lastUsed = OffsetDateTime.now().minusHours(25)
         val expiresAt = lastUsed.plusDays(30)
-        db.update(
+        legacyJdbc.update(
             "UPDATE sessions SET last_used_at=?, expires_at=? WHERE token_hash=?",
             lastUsed,
             expiresAt,
@@ -104,7 +104,7 @@ class SessionSecurityServiceTests : MessengerIntegrationTest() {
     fun `renewal never revives an expired or revoked session`() {
         val credentials = register()
         val session = authenticationService.authenticatedSession(credentials.token)
-        db.update(
+        legacyJdbc.update(
             "UPDATE sessions SET last_used_at=?, expires_at=? WHERE token_hash=?",
             OffsetDateTime.now().minusDays(31),
             OffsetDateTime.now().minusDays(1),
@@ -232,7 +232,7 @@ class SessionSecurityServiceTests : MessengerIntegrationTest() {
         val current = authenticationService.register(username, "long-demo-password")
         val other = authenticationService.login(username, "long-demo-password")
         val function = "reject_password_${newId().lowercase()}"
-        db.execute(
+        legacyJdbc.execute(
             """
             CREATE FUNCTION $function() RETURNS trigger LANGUAGE plpgsql AS ${'$'}${'$'}
             BEGIN
@@ -245,7 +245,7 @@ class SessionSecurityServiceTests : MessengerIntegrationTest() {
             """.trimIndent(),
         )
         try {
-            db.execute("CREATE TRIGGER $function BEFORE INSERT ON messenger_outbox_events FOR EACH ROW EXECUTE FUNCTION $function()")
+            legacyJdbc.execute("CREATE TRIGGER $function BEFORE INSERT ON messenger_outbox_events FOR EACH ROW EXECUTE FUNCTION $function()")
             assertThrows(org.jooq.exception.DataAccessException::class.java) {
                 passwordChangeService.changePassword(
                     current.session.userId,
@@ -255,8 +255,8 @@ class SessionSecurityServiceTests : MessengerIntegrationTest() {
                 )
             }
         } finally {
-            db.execute("DROP TRIGGER IF EXISTS $function ON messenger_outbox_events")
-            db.execute("DROP FUNCTION $function()")
+            legacyJdbc.execute("DROP TRIGGER IF EXISTS $function ON messenger_outbox_events")
+            legacyJdbc.execute("DROP FUNCTION $function()")
         }
 
         assertNotNull(authenticationService.sessionIfActive(other.token))
@@ -331,28 +331,28 @@ class SessionSecurityServiceTests : MessengerIntegrationTest() {
         repeat(3) { assertEquals(401, attemptLogin(username, "wrong-password").status.value()) }
         assertEquals(
             3,
-            db.queryForObject("SELECT attempt_count FROM login_throttles WHERE throttle_key=concat(?, '@')", Int::class.java, username),
+            legacyJdbc.queryForObject("SELECT attempt_count FROM login_throttles WHERE throttle_key=concat(?, '@')", Int::class.java, username),
         )
         val firstBlock = blockedFor(username)
         assertTrue(firstBlock > Duration.ofMinutes(59) && firstBlock <= Duration.ofHours(1), firstBlock.toString())
 
-        db.update("UPDATE login_throttles SET blocked_until=now() - interval '1 second' WHERE throttle_key=concat(?, '@')", username)
+        legacyJdbc.update("UPDATE login_throttles SET blocked_until=now() - interval '1 second' WHERE throttle_key=concat(?, '@')", username)
         assertEquals(401, attemptLogin(username, "wrong-password").status.value())
         val secondBlock = blockedFor(username)
         assertTrue(secondBlock > Duration.ofMinutes(119) && secondBlock <= Duration.ofHours(2), secondBlock.toString())
 
-        db.update("UPDATE login_throttles SET blocked_until=now() - interval '1 second' WHERE throttle_key=concat(?, '@')", username)
+        legacyJdbc.update("UPDATE login_throttles SET blocked_until=now() - interval '1 second' WHERE throttle_key=concat(?, '@')", username)
         assertEquals(401, attemptLogin(username, "wrong-password").status.value())
         assertEquals(Duration.ofHours(2).toMinutes(), blockedFor(username).plusSeconds(30).toMinutes())
 
-        db.update(
+        legacyJdbc.update(
             "UPDATE login_throttles SET blocked_until=now() - interval '1 second', last_attempt_at=now() - interval '25 hours' WHERE throttle_key=concat(?, '@')",
             username,
         )
         assertEquals(401, attemptLogin(username, "wrong-password").status.value())
         assertEquals(
             1,
-            db.queryForObject("SELECT attempt_count FROM login_throttles WHERE throttle_key=concat(?, '@')", Int::class.java, username),
+            legacyJdbc.queryForObject("SELECT attempt_count FROM login_throttles WHERE throttle_key=concat(?, '@')", Int::class.java, username),
         )
         assertEquals(username, authenticationService.login(username, "long-demo-password").user.username)
         assertEquals(0, throttleRows(username))
@@ -382,7 +382,7 @@ class SessionSecurityServiceTests : MessengerIntegrationTest() {
         val username = "rehash_${newId().lowercase().take(16)}"
         val userId = newId()
         val legacy = BCryptPasswordEncoder().encode("legacy-password")!!
-        db.update("INSERT INTO users(id,username,password_hash) VALUES (?,?,?)", userId, username, legacy)
+        legacyJdbc.update("INSERT INTO users(id,username,password_hash) VALUES (?,?,?)", userId, username, legacy)
 
         authenticationService.login(username, "legacy-password")
         val upgraded = passwordHash(userId)
@@ -419,7 +419,7 @@ class SessionSecurityServiceTests : MessengerIntegrationTest() {
         assertEquals(HttpStatus.UNAUTHORIZED, rejected.status)
         assertEquals(
             1,
-            db.queryForObject(
+            legacyJdbc.queryForObject(
                 "SELECT count(*) FROM sessions WHERE user_id=? AND expires_at > now() + interval '1 minute'",
                 Int::class.java,
                 owner.user.id.value,
@@ -437,7 +437,7 @@ class SessionSecurityServiceTests : MessengerIntegrationTest() {
 
     private fun blockedFor(username: String): Duration = Duration.between(
         OffsetDateTime.now(),
-        db.queryForObject(
+        legacyJdbc.queryForObject(
             "SELECT blocked_until FROM login_throttles WHERE throttle_key=concat(?, '@')",
             OffsetDateTime::class.java,
             username,
@@ -445,12 +445,12 @@ class SessionSecurityServiceTests : MessengerIntegrationTest() {
     )
 
     private fun throttleRows(username: String): Int =
-        db.queryForObject("SELECT count(*) FROM login_throttles WHERE throttle_key=concat(?, '@')", Int::class.java, username)!!
+        legacyJdbc.queryForObject("SELECT count(*) FROM login_throttles WHERE throttle_key=concat(?, '@')", Int::class.java, username)!!
 
     private fun passwordHash(userId: String): String =
-        db.queryForObject("SELECT password_hash FROM users WHERE id=?", String::class.java, userId)!!
+        legacyJdbc.queryForObject("SELECT password_hash FROM users WHERE id=?", String::class.java, userId)!!
 
-    private fun revocations(sessionId: String): Int = db.queryForObject(
+    private fun revocations(sessionId: String): Int = legacyJdbc.queryForObject(
         "SELECT count(*) FROM messenger_outbox_events WHERE payload->>'type'='session_revoked' AND payload->>'sessionId'=?",
         Int::class.java,
         sessionId,

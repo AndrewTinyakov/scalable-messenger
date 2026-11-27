@@ -53,10 +53,10 @@ class ChatServiceTests
             val peer = user("activity-clock-peer")
             val chat = chatService.createGroup(UserId(owner), "Clock", listOf(peer).map(::UserId))
             tx.executeWithoutResult {
-                val began = db.queryForObject("SELECT transaction_timestamp()", java.time.OffsetDateTime::class.java)!!
-                db.execute("SELECT pg_sleep(0.03)")
+                val began = legacyJdbc.queryForObject("SELECT transaction_timestamp()", java.time.OffsetDateTime::class.java)!!
+                legacyJdbc.execute("SELECT pg_sleep(0.03)")
                 chatRepository.allocateSequencesForMembers(ChatId(chat.id), listOf(UserId(owner)))
-                val activity = db.queryForObject(
+                val activity = legacyJdbc.queryForObject(
                     "SELECT last_activity_at FROM chats WHERE id=?",
                     java.time.OffsetDateTime::class.java,
                     chat.id,
@@ -70,14 +70,14 @@ class ChatServiceTests
             val owner = user("window-owner")
             val peer = user("window-peer")
             val chat = chatService.createGroup(UserId(owner), "Hidden window", listOf(peer).map(::UserId))
-            db.update(
+            legacyJdbc.update(
                 "INSERT INTO messages(id,chat_id,sequence,sender_id,body,created_at) SELECT left(?,20)||lpad(i::text,6,'0'),?,i,?,'body',now() FROM generate_series(1,300) i",
                 chat.id,
                 chat.id,
                 peer,
             )
-            db.update("UPDATE chats SET next_sequence=301 WHERE id=?", chat.id)
-            db.update(
+            legacyJdbc.update("UPDATE chats SET next_sequence=301 WHERE id=?", chat.id)
+            legacyJdbc.update(
                 "INSERT INTO hidden_message_ranges(chat_id,user_id,after_sequence,through_sequence) VALUES (?,?,1,300)",
                 chat.id,
                 owner,
@@ -86,7 +86,7 @@ class ChatServiceTests
             assertEquals(null, result.lastMessage)
             assertEquals(0, result.unreadCount)
             assertEquals(true, result.unreadCountCapped)
-            assertEquals(1, db.queryForObject("SELECT count(*) FROM messages WHERE chat_id=? AND sequence=1", Int::class.java, chat.id))
+            assertEquals(1, legacyJdbc.queryForObject("SELECT count(*) FROM messages WHERE chat_id=? AND sequence=1", Int::class.java, chat.id))
         }
 
         @Test
@@ -94,8 +94,8 @@ class ChatServiceTests
             val owner = user("activity-owner")
             val peer = user("activity-peer")
             val chats = (1..3).map { chatService.createGroup(UserId(owner), "Activity $it", listOf(peer).map(::UserId)) }
-            db.update("UPDATE chat_members SET joined_at='2026-01-01T00:00:00Z' WHERE user_id=?", owner)
-            db.update("UPDATE chats SET last_activity_at='2026-02-01T00:00:00Z' WHERE id IN (?,?)", chats[0].id, chats[1].id)
+            legacyJdbc.update("UPDATE chat_members SET joined_at='2026-01-01T00:00:00Z' WHERE user_id=?", owner)
+            legacyJdbc.update("UPDATE chats SET last_activity_at='2026-02-01T00:00:00Z' WHERE id IN (?,?)", chats[0].id, chats[1].id)
             val first = chatService.list(UserId(owner), null, 1)
             val second = chatService.list(UserId(owner), first.nextCursor, 1)
             val third = chatService.list(UserId(owner), second.nextCursor, 1)
@@ -104,7 +104,7 @@ class ChatServiceTests
             messageSendService.process(command(peer, newId(), "Latest", chat = chats[2].id))
             assertEquals(chats[2].id, chatService.list(UserId(owner), null, 1).chats.single().id)
             assertTrue(chatService.get(ChatId(chats[2].id), UserId(owner)).activityAt != null)
-            val before = db.queryForObject(
+            val before = legacyJdbc.queryForObject(
                 "SELECT last_activity_at FROM chats WHERE id=?",
                 java.time.OffsetDateTime::class.java,
                 chats[0].id,
@@ -115,7 +115,7 @@ class ChatServiceTests
             }
             assertEquals(
                 before,
-                db.queryForObject("SELECT last_activity_at FROM chats WHERE id=?", java.time.OffsetDateTime::class.java, chats[0].id),
+                legacyJdbc.queryForObject("SELECT last_activity_at FROM chats WHERE id=?", java.time.OffsetDateTime::class.java, chats[0].id),
             )
         }
 
@@ -126,7 +126,7 @@ class ChatServiceTests
             val chat = chatService.createGroup(UserId(owner), "Unread", listOf(peer).map(::UserId))
 
             fun insert(after: Int, through: Int, sender: String) {
-                db.update(
+                legacyJdbc.update(
                     "INSERT INTO messages(id,chat_id,sequence,sender_id,body,created_at) SELECT left(?,20)||lpad(i::text,6,'0'),?,i,?,'body',now() FROM generate_series(?,?) i",
                     chat.id,
                     chat.id,
@@ -134,7 +134,7 @@ class ChatServiceTests
                     after,
                     through,
                 )
-                db.update("UPDATE chats SET next_sequence=? WHERE id=?", through + 1, chat.id)
+                legacyJdbc.update("UPDATE chats SET next_sequence=? WHERE id=?", through + 1, chat.id)
             }
 
             fun read() = chatService.get(ChatId(chat.id), UserId(owner))
@@ -147,18 +147,18 @@ class ChatServiceTests
             insert(257, 257, owner)
             assertEquals(255, read().unreadCount)
             assertEquals(true, read().unreadCountCapped)
-            db.update("DELETE FROM messages WHERE chat_id=? AND sequence=250", chat.id)
+            legacyJdbc.update("DELETE FROM messages WHERE chat_id=? AND sequence=250", chat.id)
             assertEquals(255, read().unreadCount)
-            db.update(
+            legacyJdbc.update(
                 "INSERT INTO hidden_message_ranges(chat_id,user_id,after_sequence,through_sequence) VALUES (?,?,100,257)",
                 chat.id,
                 owner,
             )
             assertEquals(100, read().unreadCount)
-            db.update("UPDATE chat_members SET cleared_through_sequence=100 WHERE chat_id=? AND user_id=?", chat.id, owner)
+            legacyJdbc.update("UPDATE chat_members SET cleared_through_sequence=100 WHERE chat_id=? AND user_id=?", chat.id, owner)
             assertEquals(0, read().unreadCount)
             assertEquals(null, read().lastMessage)
-            db.update(
+            legacyJdbc.update(
                 "INSERT INTO chat_read_progress(chat_id,user_id,through_sequence,read_at) VALUES (?,?,257,now()) ON CONFLICT(chat_id,user_id) DO UPDATE SET through_sequence=257,read_at=now()",
                 chat.id,
                 owner,
@@ -183,18 +183,18 @@ class ChatServiceTests
             assertEquals("x".repeat(160), listed.lastMessage.bodyPreview)
             assertEquals(false, listed.lastMessage.deleted)
             assertEquals(listed.lastMessage, chatService.get(ChatId(chat.id), UserId(owner)).lastMessage)
-            db.update("INSERT INTO hidden_message_ranges(chat_id,user_id,after_sequence,through_sequence) VALUES (?,?,1,2)", chat.id, owner)
+            legacyJdbc.update("INSERT INTO hidden_message_ranges(chat_id,user_id,after_sequence,through_sequence) VALUES (?,?,1,2)", chat.id, owner)
             assertEquals("1", chatService.get(ChatId(chat.id), UserId(owner)).lastMessage!!.sequence)
             assertEquals("2", chatService.get(ChatId(chat.id), UserId(member)).lastMessage!!.sequence)
-            db.update("DELETE FROM messages WHERE chat_id=? AND sequence=1", chat.id)
+            legacyJdbc.update("DELETE FROM messages WHERE chat_id=? AND sequence=1", chat.id)
             assertEquals(null, chatService.get(ChatId(chat.id), UserId(owner)).lastMessage)
-            db.update("UPDATE chat_members SET cleared_through_sequence=2 WHERE chat_id=? AND user_id=?", chat.id, member)
+            legacyJdbc.update("UPDATE chat_members SET cleared_through_sequence=2 WHERE chat_id=? AND user_id=?", chat.id, member)
             assertEquals(null, chatService.get(ChatId(chat.id), UserId(member)).lastMessage)
-            db.update("UPDATE chat_members SET hidden_through_sequence=2 WHERE chat_id=? AND user_id=?", chat.id, owner)
+            legacyJdbc.update("UPDATE chat_members SET hidden_through_sequence=2 WHERE chat_id=? AND user_id=?", chat.id, owner)
             assertEquals(null, chatService.get(ChatId(chat.id), UserId(owner)).lastMessage)
             messageSendService.process(command(member, newId(), "Visible again", chat = chat.id))
             assertEquals("3", chatService.get(ChatId(chat.id), UserId(owner)).lastMessage!!.sequence)
-            db.update("UPDATE chats SET cleared_through_sequence=3 WHERE id=?", chat.id)
+            legacyJdbc.update("UPDATE chats SET cleared_through_sequence=3 WHERE id=?", chat.id)
             assertEquals(null, chatService.get(ChatId(chat.id), UserId(owner)).lastMessage)
             chatMembershipService.removeMember(ChatId(chat.id), UserId(owner), UserId(member))
             assertThrows(ApiException::class.java) { chatService.get(ChatId(chat.id), UserId(member)) }
@@ -269,7 +269,7 @@ class ChatServiceTests
             assertEquals(emptyList<Any>(), chatRepository.findMemberIds(chatId))
             assertEquals(
                 0,
-                db.queryForObject("SELECT count(*) FROM messenger_outbox_events WHERE payload->>'chatId'=?", Int::class.java, chatId.value),
+                legacyJdbc.queryForObject("SELECT count(*) FROM messenger_outbox_events WHERE payload->>'chatId'=?", Int::class.java, chatId.value),
             )
         }
 
@@ -290,7 +290,7 @@ class ChatServiceTests
             assertEquals(1003, chatRepository.findMemberIds(ChatId(chat.id)).size)
             assertEquals(
                 1003,
-                db.queryForObject(
+                legacyJdbc.queryForObject(
                     "SELECT count(*) FROM messenger_outbox_events WHERE payload->>'type'='chat_created' AND payload->>'chatId'=?",
                     Int::class.java,
                     chat.id,
@@ -313,7 +313,7 @@ class ChatServiceTests
             assertEquals(1, chatService.get(chatId, UserId(owner)).memberCount)
             assertEquals(
                 2,
-                db.queryForObject(
+                legacyJdbc.queryForObject(
                     "SELECT count(*) FROM messenger_outbox_events WHERE payload->>'type'='member_removed' AND payload->>'chatId'=?",
                     Int::class.java,
                     chat.id,
@@ -344,7 +344,7 @@ class ChatServiceTests
             assertEquals(2, chatService.get(ChatId(chat.id), UserId(member)).memberCount)
             assertEquals(
                 0,
-                db.queryForObject(
+                legacyJdbc.queryForObject(
                     "SELECT count(*) FROM messenger_outbox_events WHERE payload->>'type'='member_removed' AND payload->>'chatId'=?",
                     Int::class.java,
                     chat.id,
@@ -433,7 +433,7 @@ class ChatServiceTests
             assertEquals(1, chatService.get(ChatId(chat.id), UserId(owner)).memberCount)
             assertEquals(
                 2,
-                db.queryForObject(
+                legacyJdbc.queryForObject(
                     "SELECT count(*) FROM messenger_outbox_events WHERE payload->>'type'='member_removed' AND payload->>'chatId'=?",
                     Int::class.java,
                     chat.id,
@@ -453,7 +453,7 @@ class ChatServiceTests
             val paused = object : GroupMembershipRepository by groupMembershipRepository {
                 override fun deleteMemberAndDecrementCount(chatId: ChatId, userId: UserId): Boolean {
                     val result = groupMembershipRepository.deleteMemberAndDecrementCount(chatId = chatId, userId = userId)
-                    removalBackend.complete(db.queryForObject("SELECT pg_backend_pid()", Int::class.java)!!)
+                    removalBackend.complete(legacyJdbc.queryForObject("SELECT pg_backend_pid()", Int::class.java)!!)
                     deleted.countDown()
                     check(release.await(10, TimeUnit.SECONDS))
                     return result
@@ -474,7 +474,7 @@ class ChatServiceTests
                 }
                 val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
                 while (
-                    db.queryForObject(
+                    legacyJdbc.queryForObject(
                         "SELECT count(*) FROM pg_stat_activity WHERE ? = ANY(pg_blocking_pids(pid))",
                         Int::class.java,
                         removalBackend.get(10, TimeUnit.SECONDS),
@@ -538,7 +538,7 @@ class ChatServiceTests
             assertEquals(2L, chatDirectoryRepository.findById(ChatId(chat.id))!!.lastSequence)
             assertEquals(
                 listOf("message_saved", "member_removed"),
-                db.queryForList(
+                legacyJdbc.queryForList(
                     "SELECT payload->>'type' FROM messenger_outbox_events WHERE room=? ORDER BY publication_order",
                     String::class.java,
                     "group:${chat.id}",
@@ -552,7 +552,7 @@ class ChatServiceTests
             tx.executeWithoutResult {
                 assertEquals(setOf(UserId(member)), groupMembershipRepository.lockUsers(userIds = listOf(UserId(member))))
                 val inserted = concurrently {
-                    db.update(
+                    legacyJdbc.update(
                         "INSERT INTO sessions(token_hash,user_id,device_id,expires_at) VALUES (?,?,'capacity-lock-device',now()+interval '1 hour')",
                         newId().padEnd(64, '0'),
                         member,
@@ -567,11 +567,11 @@ class ChatServiceTests
             val owner = user("group-capacity-owner")
             val member = user("group-capacity-member")
             val seeded = (1..199).map { newId() }
-            db.batchUpdate(
+            legacyJdbc.batchUpdate(
                 "INSERT INTO chats(id,kind,name,owner_id,member_count) VALUES (?,'GROUP','Capacity seed',?,2)",
                 seeded.map { arrayOf<Any>(it, owner) },
             )
-            db.batchUpdate(
+            legacyJdbc.batchUpdate(
                 "INSERT INTO chat_members(chat_id,user_id) VALUES (?,?),(?,?)",
                 seeded.map { arrayOf<Any>(it, owner, it, member) },
             )
@@ -611,7 +611,7 @@ class ChatServiceTests
             val chat = chatService.createGroup(UserId(owner), "Group", listOf(member).map(::UserId))
             assertEquals(
                 2,
-                db.queryForObject(
+                legacyJdbc.queryForObject(
                     "SELECT count(*) FROM messenger_outbox_events WHERE payload->>'type'='chat_created' AND payload->>'chatId'=?",
                     Int::class.java,
                     chat.id,
@@ -619,7 +619,7 @@ class ChatServiceTests
             )
             assertEquals(
                 1,
-                db.queryForObject(
+                legacyJdbc.queryForObject(
                     "SELECT count(*) FROM messenger_outbox_events WHERE room=? AND payload->>'chatId'=?",
                     Int::class.java,
                     "user:$member",
@@ -640,7 +640,7 @@ class ChatServiceTests
             assertEquals(1, chatService.get(ChatId(chat.id), UserId(owner)).memberCount)
             assertEquals(
                 1,
-                db.queryForObject(
+                legacyJdbc.queryForObject(
                     "SELECT count(*) FROM messenger_outbox_events WHERE room=? AND payload->>'type'='member_removed' AND payload->>'chatId'=?",
                     Int::class.java,
                     "user:$member",
@@ -649,7 +649,7 @@ class ChatServiceTests
             )
             assertEquals(
                 1,
-                db.queryForObject(
+                legacyJdbc.queryForObject(
                     "SELECT count(*) FROM messenger_outbox_events WHERE room=? AND payload->>'type'='member_removed' " +
                         "AND payload->>'memberId'=?",
                     Int::class.java,
@@ -672,7 +672,7 @@ class ChatServiceTests
             assertEquals(3, chatService.get(ChatId(chat.id), UserId(owner)).memberCount)
             assertEquals(3, chatService.get(ChatId(chat.id), UserId(second)).memberCount)
             assertEquals(1L, chatDirectoryRepository.findById(ChatId(chat.id))!!.lastSequence)
-            val payload = db.queryForObject(
+            val payload = legacyJdbc.queryForObject(
                 "SELECT payload::text FROM messenger_outbox_events WHERE room=? AND payload->>'type'='membership_changed'",
                 String::class.java,
                 "group:${chat.id}",
@@ -688,7 +688,7 @@ class ChatServiceTests
             assertEquals("group:${chat.id}", notification.get("room").stringValue())
             assertEquals(
                 1,
-                db.queryForObject(
+                legacyJdbc.queryForObject(
                     "SELECT count(*) FROM messenger_outbox_events WHERE payload->>'type'='membership_changed' AND payload->>'chatId'=?",
                     Int::class.java,
                     chat.id,
@@ -696,7 +696,7 @@ class ChatServiceTests
             )
             assertEquals(
                 1,
-                db.queryForObject(
+                legacyJdbc.queryForObject(
                     "SELECT count(*) FROM messenger_outbox_events WHERE room=? AND payload->>'type'='chat_created' AND payload->>'chatId'=?",
                     Int::class.java,
                     "user:$second",
@@ -733,7 +733,7 @@ class ChatServiceTests
             assertThrows(ApiException::class.java) { chatService.get(ChatId(chat.id), UserId(addition)) }
             assertEquals(
                 2,
-                db.queryForObject(
+                legacyJdbc.queryForObject(
                     "SELECT count(*) FROM messenger_outbox_events WHERE payload->>'chatId'=?",
                     Int::class.java,
                     chat.id,
@@ -776,7 +776,7 @@ class ChatServiceTests
             val owner = user("page-owner")
             val member = user("page-member")
             val ids = (1..3).map { chatService.createGroup(UserId(owner), "Page $it", listOf(member).map(::UserId)).id }
-            db.update("UPDATE chat_members SET joined_at='2026-09-26 10:00:00+00' WHERE user_id=?", owner)
+            legacyJdbc.update("UPDATE chat_members SET joined_at='2026-09-26 10:00:00+00' WHERE user_id=?", owner)
 
             val first = chatService.list(UserId(owner), null, 2)
             val second = chatService.list(UserId(owner), first.nextCursor, 2)

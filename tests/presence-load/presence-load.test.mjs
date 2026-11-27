@@ -176,6 +176,29 @@ test('each watcher of a change ends delivered, closed or already showing it', as
   created.window = null;
 });
 
+test('a delivery past the deadline settles earlier ones before the change ends', t => {
+  const created = bench(t, 20);
+  const { actor, watchers: [w1, w2, w3], client: get } = watched(created);
+  const window = created.begin('test');
+  created.expect(actor, false);
+  const start = performance.now();
+  created.status(get(w1), actor, false, true, start);
+  get(w3).open = false;
+  created.closed(get(w3), 1006, false, false);
+  // The last watcher reports after the deadline, before any timer has run.
+  created.status(get(w2), actor, false, true, start + 50);
+  assert.equal(created.pending.size, 0);
+  assert.equal(window.changes.offline.delivered, 1);
+  assert.equal(window.changes.offline.late, 1);
+  assert.equal(window.samples.get('delivery.offline').length, 1);
+  created.window = null;
+});
+
+test('readiness settling still works alongside delivery settling', async t => {
+  const created = bench(t, 20);
+  assert.equal(await created.settle(10, []), true);
+});
+
 test('a watcher that closes before the deadline is not scored, even after its frame arrived', async t => {
   const created = bench(t, 30);
   const { actor, watchers: [w1, w2], client: get } = watched(created);

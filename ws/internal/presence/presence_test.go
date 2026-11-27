@@ -102,10 +102,28 @@ func (s *fakeStore) publish(userID string, online bool, seqStep int64) {
 	s.states[userID] = state
 	s.sequences[bucket] += seqStep
 	payload, _ := json.Marshal(transition{UserID: userID, Version: strconv.FormatInt(state.Version, 10), Seq: s.sequences[bucket], Online: online, LastSeen: state.LastSeen})
+	s.mu.Unlock()
+	s.send(bucket, string(payload))
+}
+
+// send delivers a raw message to every feed subscribed to the bucket.
+func (s *fakeStore) send(bucket int, raw string) {
+	s.mu.Lock()
 	feeds := append([]chan redisroom.Live(nil), s.feeds[bucket]...)
 	s.mu.Unlock()
 	for _, feed := range feeds {
-		feed <- redisroom.Live{Raw: string(payload)}
+		feed <- redisroom.Live{Raw: raw}
+	}
+}
+func waitHeld(auth *fakeAuth, held func() bool) {
+	for {
+		auth.mu.Lock()
+		done := !held()
+		auth.mu.Unlock()
+		if done {
+			return
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 
@@ -464,11 +482,7 @@ func TestHubKeepsAGrantNewerThanAnOldRenewal(t *testing.T) {
 	auth.hold = release
 	auth.mu.Unlock()
 	hub.Revalidate(bob)
-	for held := true; held; time.Sleep(time.Millisecond) {
-		auth.mu.Lock()
-		held = auth.hold != nil
-		auth.mu.Unlock()
-	}
+	waitHeld(auth, func() bool { return auth.hold != nil })
 	// Access returns and the socket watches again before the renewal answers.
 	auth.mu.Lock()
 	auth.levels = nil

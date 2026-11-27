@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"messenger/ws/internal/grpcauth"
-	"messenger/ws/internal/redisroom"
 	"messenger/ws/internal/roomname"
 )
 
@@ -22,12 +21,7 @@ func (s *fakeStore) revoke(userIDs ...string) {
 	}
 	for b, ids := range byBucket {
 		payload, _ := json.Marshal(revocation{Revoked: ids})
-		s.mu.Lock()
-		feeds := append([]chan redisroom.Live(nil), s.feeds[b]...)
-		s.mu.Unlock()
-		for _, feed := range feeds {
-			feed <- redisroom.Live{Raw: string(payload)}
-		}
+		s.send(b, string(payload))
 	}
 }
 
@@ -135,11 +129,7 @@ func TestHubSuspendsAnAddAuthorizedBeforeARevocation(t *testing.T) {
 	auth.mu.Unlock()
 	watched := make(chan error, 1)
 	go func() { watched <- hub.Watch(context.Background(), bob, []string{alice}, nil, false) }()
-	for held := true; held; time.Sleep(time.Millisecond) {
-		auth.mu.Lock()
-		held = auth.hold != nil
-		auth.mu.Unlock()
-	}
+	waitHeld(auth, func() bool { return auth.hold != nil })
 	deny(auth, alice)
 	store.revoke(alice)
 	time.Sleep(20 * time.Millisecond)
@@ -147,12 +137,12 @@ func TestHubSuspendsAnAddAuthorizedBeforeARevocation(t *testing.T) {
 	if err := <-watched; err != nil {
 		t.Fatal(err)
 	}
-	store.publish(alice, true, 1)
-	bob.quiet(t)
-	hub.sweep(time.Now())
+	// The suspended result is checked again at once, not at the next sweep.
 	if event := bob.next(t); len(event.Statuses) != 0 || !slices.Equal(event.Unavailable, []string{alice}) {
 		t.Fatalf("after the stale add = %+v", event)
 	}
+	store.publish(alice, true, 1)
+	bob.quiet(t)
 }
 
 func TestHubRefreshesCountsThatIncludeARevokedMember(t *testing.T) {
@@ -173,18 +163,6 @@ func TestHubRefreshesCountsThatIncludeARevokedMember(t *testing.T) {
 	store.revoke(alice)
 	if event := bob.next(t); event.Members != 1 {
 		t.Fatalf("count after revocation = %+v", event)
-	}
-}
-
-func waitHeld(auth *fakeAuth, held func() bool) {
-	for {
-		auth.mu.Lock()
-		done := !held()
-		auth.mu.Unlock()
-		if done {
-			return
-		}
-		time.Sleep(time.Millisecond)
 	}
 }
 
@@ -266,17 +244,82 @@ func TestHubIgnoresMalformedRevocations(t *testing.T) {
 	generation := hub.watches[bob].authorized
 	hub.mu.Unlock()
 	for _, raw := range []string{`{"r":[]}`, `{"r":["` + foreign + `"]}`, `{"u":"` + alice + `","r":["` + alice + `"]}`} {
-		store.mu.Lock()
-		feeds := append([]chan redisroom.Live(nil), store.feeds[bucket]...)
-		store.mu.Unlock()
-		for _, feed := range feeds {
-			feed <- redisroom.Live{Raw: raw}
-		}
+		store.send(bucket, raw)
 	}
 	time.Sleep(20 * time.Millisecond)
 	hub.mu.Lock()
 	defer hub.mu.Unlock()
 	if hub.watches[bob].authorized != generation || !hub.watches[bob].grants[alice].expires.After(time.Now()) {
 		t.Fatal("a malformed revocation changed the watch")
+	}
+}
+
+func TestHubKeepsANewerAddFencedAfterAnOldRenewalEnds(t *testing.T) {
+	store, auth := newFakeStore(), &fakeAuth{}
+	alice := user(1)
+	hub := startHub(t, store, auth, testConfig())
+	bob := newFakeWatcher()
+	if err := hub.Watch(context.Background(), bob, []string{alice}, nil, false); err != nil {
+		t.Fatal(err)
+	}
+	bob.next(t)
+	// A renewal of Alice stalls; Bob removes and adds her again meanwhile.
+	renewal := make(chan struct{})
+	auth.mu.Lock()
+	auth.hold = renewal
+	auth.mu.Unlock()
+	hub.Revalidate(bob)
+	waitHeld(auth, func() bool { return auth.hold != nil })
+	if err := hub.Watch(context.Background(), bob, nil, []string{alice}, false); err != nil {
+		t.Fatal(err)
+	}
+	add := make(chan struct{})
+	auth.mu.Lock()
+	auth.hold = add
+	auth.mu.Unlock()
+	watched := make(chan error, 1)
+	go func() { watched <- hub.Watch(context.Background(), bob, []string{alice}, nil, false) }()
+	waitHeld(auth, func() bool { return auth.hold != nil })
+	// The old renewal ends while the new add is still in flight.
+	close(renewal)
+	time.Sleep(20 * time.Millisecond)
+	deny(auth, alice)
+	store.revoke(alice)
+	time.Sleep(20 * time.Millisecond)
+	close(add)
+	if err := <-watched; err != nil {
+		t.Fatal(err)
+	}
+	for {
+		event := bob.next(t)
+		if len(event.Statuses) != 0 {
+			t.Fatalf("a revoked user's status was sent: %+v", event)
+		}
+		if slices.Contains(event.Unavailable, alice) {
+			break
+		}
+	}
+	store.publish(alice, true, 1)
+	bob.quiet(t)
+}
+
+func TestHubRejectsARevocationMixedWithATransition(t *testing.T) {
+	store, auth := newFakeStore(), &fakeAuth{}
+	alice := user(1)
+	hub := startHub(t, store, auth, testConfig())
+	bob := newFakeWatcher()
+	if err := hub.Watch(context.Background(), bob, []string{alice}, nil, false); err != nil {
+		t.Fatal(err)
+	}
+	bob.next(t)
+	hub.mu.Lock()
+	generation := hub.watches[bob].authorized
+	hub.mu.Unlock()
+	store.send(roomname.PresenceBucketOf(alice), `{"r":["`+alice+`"],"v":"9","s":1,"o":true}`)
+	time.Sleep(20 * time.Millisecond)
+	hub.mu.Lock()
+	defer hub.mu.Unlock()
+	if hub.watches[bob].authorized != generation {
+		t.Fatal("a mixed message was taken as a revocation")
 	}
 }

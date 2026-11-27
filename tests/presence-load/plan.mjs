@@ -28,7 +28,7 @@ export function random(seed) {
   return next;
 }
 
-function shuffle(values, rand) {
+export function shuffle(values, rand) {
   for (let i = values.length - 1; i > 0; i--) {
     const j = Math.floor(rand() * (i + 1));
     [values[i], values[j]] = [values[j], values[i]];

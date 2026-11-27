@@ -3,7 +3,9 @@ package presence
 import (
 	"context"
 	"log/slog"
+	"maps"
 	"math/rand/v2"
+	"slices"
 	"sync"
 	"time"
 
@@ -21,8 +23,8 @@ type subject struct {
 	known    bool
 	watchers map[*watch]struct{}
 	counters map[*watch]struct{}
-	// adding holds sockets whose authorization for this user is in flight.
-	adding    map[*watch]struct{}
+	// adding counts each socket's authorizations for this user in flight.
+	adding    map[*watch]int
 	idleSince time.Time
 	pushedAt  time.Time
 }
@@ -122,7 +124,7 @@ func (h *Hub) Watch(ctx context.Context, w Watcher, add, remove []string, reset 
 			continue
 		}
 		requested = append(requested, id)
-		h.attachLocked(id).adding[wt] = struct{}{}
+		h.attachLocked(id).adding[wt]++
 	}
 	generation := wt.authorized
 	h.mu.Unlock()
@@ -132,7 +134,7 @@ func (h *Hub) Watch(ctx context.Context, w Watcher, add, remove []string, reset 
 	}
 	// The users' buckets are subscribed before access is read, so a
 	// revocation published after the answer reaches this gateway and fences it.
-	if err := h.subscribed(ctx, requested); err != nil {
+	if err := h.awaitBuckets(ctx, requested); err != nil {
 		h.abandon(wt, requested)
 		return err
 	}
@@ -141,16 +143,36 @@ func (h *Hub) Watch(ctx context.Context, w Watcher, add, remove []string, reset 
 		h.abandon(wt, requested)
 		return err
 	}
-	return h.load(ctx, h.grant(wt, requested, visibility, generation, nil))
+	h.mu.Lock()
+	h.finishAddsLocked(wt, requested)
+	h.mu.Unlock()
+	unknown := h.grant(wt, requested, visibility, generation, nil)
+	// A revocation during the check installed the result suspended; check again now.
+	h.mu.Lock()
+	r, renew := renewal{}, false
+	if generation != wt.authorized {
+		r, renew = h.startRenewalLocked(wt, maps.Clone(wt.grants))
+	}
+	h.mu.Unlock()
+	if renew {
+		h.renew(r)
+	}
+	return h.load(ctx, unknown)
 }
 
 // abandon forgets adds whose authorization failed.
 func (h *Hub) abandon(wt *watch, ids []string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	h.finishAddsLocked(wt, ids)
+}
+
+func (h *Hub) finishAddsLocked(wt *watch, ids []string) {
 	for _, id := range ids {
 		if s := h.subjects[id]; s != nil {
-			delete(s.adding, wt)
+			if s.adding[wt]--; s.adding[wt] <= 0 {
+				delete(s.adding, wt)
+			}
 			h.releaseLocked(s)
 		}
 	}
@@ -188,11 +210,11 @@ func (h *Hub) Revalidate(w Watcher) {
 	if wt.count != nil {
 		wt.count.expires = now
 	}
-	held, generation, renew := h.startRenewalLocked(wt)
+	r, renew := h.startRenewalLocked(wt, maps.Clone(wt.grants))
 	refreshCount := h.startCountRefreshLocked(wt, wt.countChat)
 	h.mu.Unlock()
 	if renew {
-		h.renew(wt, held, generation)
+		h.renew(r)
 	}
 	refreshCount()
 }
@@ -237,12 +259,6 @@ func (h *Hub) markUnavailableLocked(wt *watch, id string) {
 func (h *Hub) grant(wt *watch, ids []string, visibility map[string]grpcauth.Visibility, generation uint64, held map[string]*grant) []string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	for _, id := range ids {
-		if s := h.subjects[id]; s != nil {
-			delete(s.adding, wt)
-			h.releaseLocked(s)
-		}
-	}
 	if h.watches[wt.watcher] != wt {
 		return nil
 	}
@@ -279,7 +295,7 @@ func (h *Hub) grant(wt *watch, ids []string, visibility map[string]grpcauth.Visi
 func (h *Hub) attachLocked(id string) *subject {
 	s := h.subjects[id]
 	if s == nil {
-		s = &subject{id: id, bucket: roomname.PresenceBucketOf(id), watchers: make(map[*watch]struct{}), counters: make(map[*watch]struct{}), adding: make(map[*watch]struct{})}
+		s = &subject{id: id, bucket: roomname.PresenceBucketOf(id), watchers: make(map[*watch]struct{}), counters: make(map[*watch]struct{}), adding: make(map[*watch]int)}
 		h.subjects[id] = s
 		h.bucketLocked(s.bucket).subjects[id] = s
 		h.metrics.PresenceSubjects.Set(float64(len(h.subjects)))
@@ -324,32 +340,33 @@ func (h *Hub) markLocked(s *subject, now time.Time) {
 	}
 }
 
-// startRenewalLocked claims the socket's renewal, or asks the running one
-// to check again when it finishes. It returns the grants being renewed.
-func (h *Hub) startRenewalLocked(wt *watch) (map[string]*grant, uint64, bool) {
-	if wt.renewing {
-		wt.recheck = true
-		return nil, 0, false
-	}
-	if len(wt.grants) == 0 {
-		return nil, 0, false
-	}
-	held := make(map[string]*grant, len(wt.grants))
-	for id, g := range wt.grants {
-		held[id] = g
-	}
-	wt.renewing = true
-	return held, wt.authorized, true
+// renewal is a claimed check of some of a socket's grants.
+type renewal struct {
+	wt         *watch
+	held       map[string]*grant
+	generation uint64
 }
 
-// renew authorizes the socket's grants again. Its result is fenced by the
+// startRenewalLocked claims the socket's renewal of the held grants, or asks
+// the running one to check all its grants again when it finishes.
+func (h *Hub) startRenewalLocked(wt *watch, held map[string]*grant) (renewal, bool) {
+	if wt.renewing {
+		wt.recheck = true
+		return renewal{}, false
+	}
+	if len(held) == 0 {
+		return renewal{}, false
+	}
+	wt.renewing = true
+	return renewal{wt, held, wt.authorized}, true
+}
+
+// renew authorizes the held grants again. Its result is fenced by the
 // generation captured when it started, and applies only to grants that were
 // not replaced meanwhile, so it never overwrites a newer authorization.
-func (h *Hub) renew(wt *watch, held map[string]*grant, generation uint64) {
-	ids := make([]string, 0, len(held))
-	for id := range held {
-		ids = append(ids, id)
-	}
+func (h *Hub) renew(r renewal) {
+	wt := r.wt
+	ids := slices.Collect(maps.Keys(r.held))
 	h.wg.Add(1)
 	go func() {
 		defer h.wg.Done()
@@ -359,21 +376,19 @@ func (h *Hub) renew(wt *watch, held map[string]*grant, generation uint64) {
 		if err != nil {
 			h.logger.Warn("renew presence grants", "error", err)
 		} else {
-			h.grant(wt, ids, visibility, generation, held)
+			h.grant(wt, ids, visibility, r.generation, r.held)
 		}
 		h.mu.Lock()
 		wt.renewing = false
 		recheck := wt.recheck
 		wt.recheck = false
-		var next map[string]*grant
-		var nextGeneration uint64
-		again := false
+		next, again := renewal{}, false
 		if recheck {
-			next, nextGeneration, again = h.startRenewalLocked(wt)
+			next, again = h.startRenewalLocked(wt, maps.Clone(wt.grants))
 		}
 		h.mu.Unlock()
 		if again {
-			h.renew(wt, next, nextGeneration)
+			h.renew(next)
 			return
 		}
 		h.flushWatch(wt)
@@ -394,11 +409,6 @@ func (h *Hub) sweep(now time.Time) {
 		}
 	}
 	h.metrics.PresenceSubjects.Set(float64(len(h.subjects)))
-	type renewal struct {
-		wt         *watch
-		held       map[string]*grant
-		generation uint64
-	}
 	type countRefresh struct {
 		wt     *watch
 		chatID string
@@ -415,13 +425,14 @@ func (h *Hub) sweep(now time.Time) {
 			expired = expired || !now.Before(g.expires)
 		}
 		if expired && !wt.renewing {
-			held, generation, _ := h.startRenewalLocked(wt)
-			renewals = append(renewals, renewal{wt, held, generation})
+			if r, ok := h.startRenewalLocked(wt, maps.Clone(wt.grants)); ok {
+				renewals = append(renewals, r)
+			}
 		}
 	}
 	h.mu.Unlock()
 	for _, r := range renewals {
-		h.renew(r.wt, r.held, r.generation)
+		h.renew(r)
 	}
 	for _, c := range counts {
 		h.refreshCount(c.wt, c.chatID)

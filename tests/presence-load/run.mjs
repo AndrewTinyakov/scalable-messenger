@@ -99,6 +99,7 @@ export class Bench {
     this.count(expected ? 'socket.closed' : wasOpen ? 'socket.unexpectedClose.' + code : 'socket.connectFailed');
     const now = performance.now();
     for (const change of this.pending.values()) {
+      this.settleDue(change, now);
       // A watcher that closes before the deadline is not scored, whether or
       // not its frame had already arrived.
       if (change.arrived.delete(client.index)) change.outcomes.watcherClosed++;
@@ -112,10 +113,11 @@ export class Bench {
     if (prior !== undefined) this.count('presence.transitions');
     const change = this.pending.get(subject);
     if (!change || change.online !== online || !change.waiting.delete(client.index)) return;
-    // An in-time delivery is settled at the deadline, once the watcher has stayed connected for it.
+    this.settleDue(change, now);
+    // An in-time delivery counts at the deadline, once the watcher has stayed connected for it.
     if (now <= change.deadline) change.arrived.set(client.index, now - change.at);
     else change.outcomes.late++;
-    if (!change.waiting.size && now > change.deadline) this.pending.delete(subject);
+    if (!change.waiting.size && now > change.deadline) this.finish(subject, change);
   }
 
   // Connections.
@@ -218,15 +220,15 @@ export class Bench {
     const deadline = at + deadlineMs;
     const change = { online, at, deadline, kind, window, outcomes, waiting, arrived: new Map() };
     this.pending.set(actor, change);
-    setTimeout(() => {
-      this.settle(change);
-      if (!change.waiting.size && this.pending.get(actor) === change) this.pending.delete(actor);
-    }, Math.max(0, deadline - performance.now())).unref();
+    setTimeout(() => change.waiting.size ? this.settleDeliveries(change) : this.finish(actor, change),
+      Math.max(0, deadline - performance.now())).unref();
     setTimeout(() => this.finish(actor, change), Math.max(0, deadline + LATE_GRACE_MS - performance.now())).unref();
   }
 
-  // Counts the in-time deliveries of watchers still connected.
-  settle(change) {
+  // Counts the in-time deliveries of watchers still connected. Outcomes depend
+  // on the time, not on when this runs, so callers settle a change whose
+  // deadline has passed before they change or read it.
+  settleDeliveries(change) {
     for (const ms of change.arrived.values()) {
       change.outcomes.delivered++;
       change.window.observe('delivery.' + change.kind, ms);
@@ -234,12 +236,16 @@ export class Bench {
     change.arrived.clear();
   }
 
+  settleDue(change, now = performance.now()) {
+    if (now > change.deadline) this.settleDeliveries(change);
+  }
+
   // Stops tracking a change. Watchers still waiting were superseded if the
   // deadline had not passed yet, and are missing otherwise.
   finish(actor, change) {
     if (this.pending.get(actor) !== change) return;
     this.pending.delete(actor);
-    this.settle(change);
+    this.settleDeliveries(change);
     change.outcomes[performance.now() <= change.deadline ? 'superseded' : 'missing'] += change.waiting.size;
   }
 
@@ -325,6 +331,7 @@ export class Bench {
     await Promise.all(window.tasks);
     const due = () => [...this.pending.values()].some(change => change.window === window && performance.now() <= change.deadline);
     while (due()) await delay(250);
+    for (const change of this.pending.values()) if (change.window === window) this.settleDue(change);
     const report = {
       name: window.name, startedAt: window.startedAt, endedAt, durationMs: Math.round(durationMs),
       sockets, watchEdges: { expected, known, coverage: expected ? known / expected : null },

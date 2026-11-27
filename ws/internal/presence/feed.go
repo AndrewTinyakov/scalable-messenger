@@ -99,7 +99,7 @@ func (h *Hub) apply(ctx context.Context, b *bucket, live redisroom.Live) {
 	}
 	if message.Revoked != nil {
 		foreign := slices.ContainsFunc(message.Revoked, func(id string) bool { return roomname.PresenceBucketOf(id) != b.id })
-		if message.UserID != "" || len(message.Revoked) == 0 || foreign {
+		if message.transition != (transition{}) || len(message.Revoked) == 0 || foreign {
 			h.metrics.PresenceEvents.WithLabelValues("invalid").Inc()
 			return
 		}
@@ -157,8 +157,8 @@ func (h *Hub) resync(ctx context.Context, b *bucket) {
 	}
 }
 
-// subscribed waits until the attached subjects' buckets are subscribed.
-func (h *Hub) subscribed(ctx context.Context, ids []string) error {
+// awaitBuckets waits until the attached subjects' buckets are subscribed.
+func (h *Hub) awaitBuckets(ctx context.Context, ids []string) error {
 	h.mu.Lock()
 	waits := make(map[int]*bucket)
 	for _, id := range ids {
@@ -186,7 +186,7 @@ func (h *Hub) load(ctx context.Context, ids []string) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	if err := h.subscribed(ctx, ids); err != nil {
+	if err := h.awaitBuckets(ctx, ids); err != nil {
 		return err
 	}
 	for start := 0; start < len(ids); start += h.config.MaxWatched {

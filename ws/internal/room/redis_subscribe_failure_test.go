@@ -16,6 +16,7 @@ import (
 )
 
 func TestFailedRedisSubscriptionDoesNotCrashRoomListener(t *testing.T) {
+	// t.TempDir() on macOS exceeds the 104-byte Unix socket path limit.
 	dir, err := os.MkdirTemp("/tmp", "ws-redis-")
 	if err != nil {
 		t.Fatal(err)

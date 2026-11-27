@@ -47,33 +47,22 @@ func (h *Hub) revoke(ids []string) {
 			counts[wt] = struct{}{}
 		}
 	}
-	type renewal struct {
-		wt         *watch
-		held       map[string]*grant
-		generation uint64
-	}
 	var renewals []renewal
 	for wt, held := range affected {
 		// Results read before now install suspended.
 		wt.authorized++
-		if len(held) == 0 {
-			continue
+		if r, ok := h.startRenewalLocked(wt, held); ok {
+			renewals = append(renewals, r)
 		}
-		if wt.renewing {
-			wt.recheck = true
-			continue
-		}
-		wt.renewing = true
-		renewals = append(renewals, renewal{wt, held, wt.authorized})
 	}
 	refreshes := make([]func(), 0, len(counts))
 	for wt := range counts {
 		refreshes = append(refreshes, h.startCountRefreshLocked(wt, wt.countChat))
 	}
 	h.mu.Unlock()
-	h.metrics.PresenceEvents.WithLabelValues("revoked").Add(float64(len(ids)))
+	h.metrics.PresenceEvents.WithLabelValues("revoked").Inc()
 	for _, r := range renewals {
-		h.renew(r.wt, r.held, r.generation)
+		h.renew(r)
 	}
 	for _, refresh := range refreshes {
 		refresh()

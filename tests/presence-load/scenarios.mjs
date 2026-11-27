@@ -2,7 +2,7 @@
 import { execFile } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { promisify } from 'node:util';
-import { random } from './plan.mjs';
+import { random, shuffle } from './plan.mjs';
 
 const run = promisify(execFile);
 
@@ -19,15 +19,6 @@ const CYCLE_MS = OFFLINE_MS + MIN_ONLINE_MS;
 const CHURN_SEED = 2511;
 
 const population = (bench, size) => bench.plan.order.slice(0, size);
-
-function shuffle(items, rand) {
-  const result = [...items];
-  for (let i = result.length - 1; i > 0; i--) {
-    const j = Math.floor(rand() * (i + 1));
-    [result[i], result[j]] = [result[j], result[i]];
-  }
-  return result;
-}
 
 async function docker(...args) {
   const { stdout } = await run('docker', args);
@@ -133,12 +124,14 @@ export async function churn(bench, { size = 1600, rates = [2, 10, 25], shuffledR
   const users = await start(bench, size);
   const hot = new Set(bench.plan.hot);
   const ordinary = users.filter(user => !hot.has(user));
-  const shuffled = shuffle(ordinary, random(CHURN_SEED));
   const windows = [];
-  for (const [rate, order, suffix] of [...rates.map(rate => [rate, ordinary, '']), ...shuffledRates.map(rate => [rate, shuffled, '-shuffled'])]) {
-    windows.push(await bench.measure(`churn-${rate}${suffix}`, () => cycles(bench, order, 2 * MINUTE, rate)));
+  const measure = async (name, order, rate) => {
+    windows.push(await bench.measure(name, () => cycles(bench, order, 2 * MINUTE, rate)));
     await delay(30 * SECOND);
-  }
+  };
+  for (const rate of rates) await measure(`churn-${rate}`, ordinary, rate);
+  const shuffled = shuffle([...ordinary], random(CHURN_SEED));
+  for (const rate of shuffledRates) await measure(`churn-${rate}-shuffled`, shuffled, rate);
   if (bench.protocol !== 'current') return windows;
   // An actor stops interacting for 20 s, then resumes; its tab stays visible.
   const toggle = async (actor, window) => {

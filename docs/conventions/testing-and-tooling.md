@@ -14,7 +14,7 @@
 - Format through the project commands: `npm run format` for Go imports, Kotlin and the client. CI runs the matching `format:check`.
 - Call standard tools directly. Add a wrapper script only when it adds behaviour the tool lacks.
 - Grafana dashboards are maintained as JSON in `deploy/grafana`.
-- Short chained calls stay on the closing-parenthesis line of a wrapped call. `kotlin/.editorconfig` keeps IntelliJ and ktlint in agreement. Check both the wrapped and the joined form before changing formatter settings.
+- When a call wraps its arguments, put a short chained call on the line with the closing parenthesis, as in `).toOutboxMessage(mapper)`. `kotlin/.editorconfig` stops IntelliJ and ktlint from splitting that layout, but neither joins a split chain, so reviewers enforce it. Check both forms before changing formatter settings.
 - Generated code, including jOOQ, AsyncAPI, OpenAPI and gRPC models, comes from its source. Change the source or the generator, then regenerate.
 
 ## Documentation

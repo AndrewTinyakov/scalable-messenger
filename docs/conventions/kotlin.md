@@ -47,7 +47,7 @@ These rules apply to the `api`, `command-processor`, `outbox-publisher` and `sha
 - Take a row lock only where the operation needs it, through a method named `find...ForUpdate`.
 - Avoid round trips. Reuse rows already fetched or returned, and batch writes where measurements support it.
 - Database observability is global, through the jOOQ listener. Repositories use plain `tx.execute { ... }` without per-call labels.
-- Database routing stays generic. A service chooses the read consistency it needs through `ReadTransactions`, and features never touch connection pools directly.
+- Database routing stays generic. A service chooses the read consistency it needs through `ReadTransactions`, and features never touch connection pools directly. Application work goes through PgBouncer in transaction pooling mode. Flyway and the publisher's `LISTEN` connection use direct PostgreSQL connections. See [chat sequences and replica reads](../adr/0005-chat-sequences-and-replica-reads.md).
 
 ## Transactions and events
 
@@ -62,3 +62,9 @@ These rules apply to the `api`, `command-processor`, `outbox-publisher` and `sha
 - Use the vocabulary in [CONTEXT.md](../../CONTEXT.md) in code, and one name per role across features: a `SendRequest` variable is `request`.
 - Name injected dependencies by role: `repository`, `service`, `mapper` and `tx` when unambiguous, otherwise qualified, such as `userRepository`.
 - Name session models for the stage they represent. They carry identity and the user ID, not display data.
+
+## Sessions and clients
+
+- HTTP sessions are stateful and opaque, with sliding expiry. Each device's session appears in the session list and can be revoked.
+- A live socket learns about revocation promptly through the outbox, and the gateway revalidates its sessions in jittered batches as a backstop.
+- Clients refresh chat state for a change that affects the viewer or a detected sequence gap, through the versioned `/state` route, rather than on every event or timer.

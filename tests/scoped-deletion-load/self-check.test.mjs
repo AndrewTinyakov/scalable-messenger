@@ -13,7 +13,7 @@ test('fixture identities are valid, deterministic and scoped to their own chat',
 });
 
 test('sparse coverage accepts certified absences and rejects rows outside its interval', () => {
-  const page = { snapshotSequence: '1000000', visibilityRevision: '1', clearedThroughSequence: '0', globalClearedThroughSequence: '0', coverageAfterSequence: '100', coverageThroughSequence: '999900', messages: [{ sequence: '101' }, { sequence: '999900' }] };
+  const page = { snapshotSequence: '1000000', visibilitySeq: '1', clearedThroughSequence: '0', globalClearedThroughSequence: '0', coverageAfterSequence: '100', coverageThroughSequence: '999900', messages: [{ sequence: '101' }, { sequence: '999900' }] };
   assert.equal(snapshot(page, true), page);
   assert.equal(snapshot({ ...page, messages: [] }, true).messages.length, 0);
   assert.throws(() => snapshot({ ...page, messages: [{ sequence: '100' }] }, true));
@@ -72,7 +72,7 @@ test('mixed traffic completes its reconnect before historical fixture creation',
     notifications: async () => {},
     api: async () => {
       actions.push('recover');
-      return { snapshotSequence: '3', visibilityRevision: '0', clearedThroughSequence: '0', globalClearedThroughSequence: '0', coverageAfterSequence: '0', coverageThroughSequence: '3', messages: [{ id: '3', sequence: '3' }] };
+      return { snapshotSequence: '3', visibilitySeq: '0', clearedThroughSequence: '0', globalClearedThroughSequence: '0', coverageAfterSequence: '0', coverageThroughSequence: '3', messages: [{ id: '3', sequence: '3' }] };
     },
   };
   const stop = new Error('fixture checkpoint');

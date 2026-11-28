@@ -67,6 +67,9 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter:6.0.3")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     add(plainSqlFixture.implementationConfigurationName, "org.jooq:jooq:3.21.7")
+    add(architectureFixture.implementationConfigurationName, "org.springframework:spring-tx:7.0.9")
+    add(architectureFixture.implementationConfigurationName, "org.springframework:spring-context:7.0.9")
+    add(architectureFixture.implementationConfigurationName, "org.jooq:jooq:3.21.7")
     add(architectureTestSources.implementationConfigurationName, "com.lemonappdev:konsist:0.18.1")
     add(architectureTestSources.implementationConfigurationName, "com.tngtech.archunit:archunit:1.5.1")
     add(architectureTestSources.implementationConfigurationName, "org.jetbrains.kotlin:kotlin-compiler-embeddable:2.3.21")
@@ -107,13 +110,7 @@ gradle.projectsEvaluated {
             it.name in setOf("main", "test", "sidebarBenchmark")
         }
     }
-    val jooqArtifacts = files(
-        subprojects.flatMap { project ->
-            project.extensions.getByType<SourceSetContainer>()
-                .filter { it in applicationSourceSets }
-                .map { project.configurations[it.runtimeClasspathConfigurationName].jooqArtifact() }
-        },
-    )
+    val jooqArtifacts = configurations[plainSqlFixture.runtimeClasspathConfigurationName].jooqArtifact()
     val firstPartyClasses = files((applicationSourceSets + sourceSets.main.get() + sourceSets.test.get()).map { it.output.classesDirs })
     val productionClasses = files(applicationSourceSets.filter { it.name == "main" }.map { it.output.classesDirs })
     val testClasses = files(applicationSourceSets.filter { it.name != "main" }.map { it.output.classesDirs })
@@ -125,8 +122,6 @@ gradle.projectsEvaluated {
         }
     }
 
-    val apiMain = project(":api").extensions.getByType<SourceSetContainer>().named("main").get()
-    architectureFixture.compileClasspath += apiMain.compileClasspath
     tasks.named<Test>("architectureTest") {
         inputs.files(productionClasses, testClasses, architectureFixture.output.classesDirs)
         doFirst {

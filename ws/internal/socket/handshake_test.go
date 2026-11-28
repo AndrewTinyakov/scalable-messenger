@@ -3,12 +3,14 @@ package socket
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"messenger/ws/internal/fleet"
 	"messenger/ws/internal/grpcauth"
 	"messenger/ws/internal/protocol"
 	roomregistry "messenger/ws/internal/room"
@@ -83,9 +85,19 @@ func TestHandshakeSetupRejectsBeforeUpgrade(t *testing.T) {
 			server.handshakeLimiter = handshakeLimiterFunc(func(context.Context, string, int, time.Duration) (bool, error) {
 				return false, errors.New("Redis unavailable")
 			})
-		}, http.StatusServiceUnavailable, "handshake_limit_unavailable", map[string]string{"admission": "handshake_limit_unavailable"}},
+		}, http.StatusInternalServerError, "handshake_limit_unavailable", map[string]string{"admission": "handshake_limit_unavailable"}},
 		{"lease unavailable", func(server *Server, _ *http.Request) {
 			server.admission = handshakeAdmissionResult{err: errors.New("Redis unavailable")}
+		}, http.StatusInternalServerError, "admission_unavailable", map[string]string{"admission": "ready", "connection_admission": "admission_unavailable"}},
+		{"lease deadline", func(server *Server, _ *http.Request) {
+			server.admission = handshakeAdmissionResult{err: context.DeadlineExceeded}
+		}, http.StatusInternalServerError, "admission_unavailable", map[string]string{"admission": "ready", "connection_admission": "admission_unavailable"}},
+		{"gateway renewing", func(server *Server, _ *http.Request) {
+			server.admission = handshakeAdmissionResult{err: fmt.Errorf("admit: %w", fleet.ErrRenewing)}
+		}, http.StatusServiceUnavailable, "admission_unavailable", map[string]string{"admission": "ready", "connection_admission": "admission_unavailable"}},
+		{"server closing", func(server *Server, _ *http.Request) {
+			server.cancel()
+			server.admission = handshakeAdmissionResult{err: context.Canceled}
 		}, http.StatusServiceUnavailable, "admission_unavailable", map[string]string{"admission": "ready", "connection_admission": "admission_unavailable"}},
 		{"user capacity", func(server *Server, _ *http.Request) { server.admission = handshakeAdmissionResult{} }, http.StatusTooManyRequests, "user_capacity", map[string]string{"admission": "ready", "connection_admission": "user_capacity"}},
 		{"upgrade failure", func(*Server, *http.Request) {}, http.StatusBadRequest, "upgrade_error", map[string]string{"admission": "ready", "connection_admission": "ready", "http_upgrade": "upgrade_error"}},

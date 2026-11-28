@@ -269,13 +269,16 @@ func TestEpochChangeRequestsSQLRecovery(t *testing.T) {
 					return nil, nil
 				},
 			}
+			registry := prometheus.NewRegistry()
 			rooms := newPositionRooms(store)
+			rooms.metrics = monitoring.New(registry)
 			sink := &positionSink{}
 			addPositionRoom(rooms, "group:chat", sink)
 			test.advance(rooms)
 			if len(sink.events) == 0 || sink.events[0].Type != "recovery_failed" {
 				t.Fatalf("events = %+v, want SQL recovery", sink.events)
 			}
+			assertStaleRooms(t, registry, monitoring.RoomEpochChanged)
 			if test.wantLiveEvent {
 				if len(sink.events) != 2 || sink.events[1].EventID != "1-0" {
 					t.Fatalf("events = %+v, want the new live event after SQL recovery", sink.events)

@@ -32,13 +32,13 @@ func (l *staleRoomLogLimiter) allow(reason monitoring.RoomFailureReason, now tim
 	return true, suppressed
 }
 
-func (r *Rooms) recordStaleRoom(name string, reason monitoring.RoomFailureReason, recipients int, cause error) {
+func (r *Rooms) recordStaleRoom(name string, reason monitoring.RoomFailureReason, members int, cause error) {
 	r.metrics.RecordStaleRoom(reason)
 	allowed, suppressed := r.staleLog.allow(reason, time.Now())
 	if !allowed {
 		return
 	}
-	attributes := []any{"room", name, "reason", string(reason), "recipients", recipients, "suppressed", suppressed}
+	attributes := []any{"room", name, "reason", string(reason), "members", members, "suppressed", suppressed}
 	if cause != nil {
 		attributes = append(attributes, "error", cause)
 	}

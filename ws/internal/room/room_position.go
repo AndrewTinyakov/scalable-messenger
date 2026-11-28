@@ -240,9 +240,9 @@ func (r *Rooms) reconcileRoomPosition(ctx context.Context, entry *localRoom, old
 		return
 	}
 	reason, cause := monitoring.RoomEpochChanged, error(nil)
-	if oldEpoch == epoch {
+	if oldEpoch == "" || oldEpoch == epoch {
 		reason = monitoring.RoomUnrepairedGap
-		if oldLast != "" && last != "" {
+		if oldEpoch == epoch && oldLast != "" && last != "" {
 			if cause = r.replayRoomThrough(ctx, entry, oldEpoch, oldLast, last); cause == nil {
 				return
 			}

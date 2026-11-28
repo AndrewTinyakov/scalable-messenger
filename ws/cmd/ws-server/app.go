@@ -95,15 +95,19 @@ func run(ctx context.Context, logger *slog.Logger) error {
 		return fmt.Errorf("construct WebSocket server: %w", err)
 	}
 	defer ws.Close()
-	profiling, err := startProfiling(cfg.ProfilingPort, logger)
-	if err != nil {
-		logger.Warn("profiling server unavailable", "error", err)
+	if cfg.ProfilingPort > 0 {
+		listener, err := listenProfiling(cfg.ProfilingPort)
+		if err != nil {
+			logger.Warn("profiling server unavailable", "error", err)
+		} else {
+			profiling := serveProfiling(listener, logger)
+			defer func() {
+				stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+				defer cancel()
+				profiling.Stop(stopCtx)
+			}()
+		}
 	}
-	defer func() {
-		stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		profiling.Stop(stopCtx)
-	}()
 	httpServer := &http.Server{Addr: cfg.Address, Handler: ws.Handler(), ReadHeaderTimeout: 5 * time.Second}
 	result := make(chan error, 1)
 	go func() { result <- httpServer.ListenAndServe() }()
@@ -124,7 +128,10 @@ func run(ctx context.Context, logger *slog.Logger) error {
 			_ = httpServer.Close()
 		}
 		<-result
-		releaseGatewayPresence(shutdown, stopBackgroundWork, tracker, gateways.ID, logger)
+		stopBackgroundWork()
+		if clearErr := tracker.RemoveGateway(shutdown, gateways.ID()); clearErr != nil {
+			logger.Warn("clear gateway presence at shutdown; peers will reap it", "error", clearErr)
+		}
 		return err
 	}
 }

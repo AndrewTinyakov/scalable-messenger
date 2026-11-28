@@ -94,4 +94,4 @@ const (
 	RoomFrameEncodeFailed  RoomFailureReason = "frame_encode_failed"
 )
 
-var RoomFailureReasons = []RoomFailureReason{RoomFeedStopped, RoomPositionReadFailed, RoomEpochChanged, RoomUnrepairedGap, RoomReplayFailed, RoomFrameEncodeFailed}
+var roomFailureReasons = []RoomFailureReason{RoomFeedStopped, RoomPositionReadFailed, RoomEpochChanged, RoomUnrepairedGap, RoomReplayFailed, RoomFrameEncodeFailed}

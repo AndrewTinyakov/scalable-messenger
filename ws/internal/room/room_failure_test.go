@@ -44,10 +44,12 @@ func TestStaleRoomsAreCountedByReason(t *testing.T) {
 			reason: monitoring.RoomReplayFailed,
 		},
 		{
-			name:   "epoch changed",
-			store:  &positionStore{},
-			act:    reconcileTo("new-epoch", "1-0"),
-			reason: monitoring.RoomEpochChanged,
+			name:  "first epoch after an empty stream",
+			store: &positionStore{},
+			act: func(rooms *Rooms) {
+				rooms.reconcileRoomPosition(context.Background(), rooms.rooms["group:chat"], "", "", "epoch", "2-0")
+			},
+			reason: monitoring.RoomUnrepairedGap,
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -61,17 +63,26 @@ func TestStaleRoomsAreCountedByReason(t *testing.T) {
 			if len(sink.events) != 1 || sink.events[0].Type != "recovery_failed" {
 				t.Fatalf("events = %+v, want SQL recovery", sink.events)
 			}
-			counts := staleRoomCounts(t, registry)
-			for _, reason := range monitoring.RoomFailureReasons {
-				want := 0.0
-				if reason == test.reason {
-					want = 1
-				}
-				if counts[string(reason)] != want {
-					t.Fatalf("stale rooms %s = %v, want %v (all %v)", reason, counts[string(reason)], want, counts)
-				}
-			}
+			assertStaleRooms(t, registry, test.reason)
 		})
+	}
+}
+
+func assertStaleRooms(t *testing.T, registry *prometheus.Registry, counted monitoring.RoomFailureReason) {
+	t.Helper()
+	counts := staleRoomCounts(t, registry)
+	for _, reason := range []string{"feed_stopped", "position_read_failed", "epoch_changed", "unrepaired_gap", "replay_failed", "frame_encode_failed"} {
+		value, exported := counts[reason]
+		want := 0.0
+		if reason == string(counted) {
+			want = 1
+		}
+		if !exported || value != want {
+			t.Fatalf("stale rooms %s = %v (exported %v), want %v; all %v", reason, value, exported, want, counts)
+		}
+	}
+	if len(counts) != 6 {
+		t.Fatalf("stale room reasons = %v, want exactly six", counts)
 	}
 }
 

@@ -89,7 +89,7 @@ func New(registry *prometheus.Registry) *Metrics {
 		publishConfirmation:       prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "messenger_ws_publish_confirmation_seconds", Help: "RabbitMQ publisher duration from wire send attempt to confirmation or final transport failure, even after caller cancellation.", Buckets: latencyBuckets}, []string{"result"}),
 	}
 	registry.MustRegister(m.capacity, m.QueuedItems, m.CommandItems, m.CommandBytes, m.Draining, m.Connections, m.handshake, m.applied, m.dismissed, m.receivedMessages, m.frameErrors, m.RecoveryCloses, m.GroupLeaseExpired, m.groupAuthSeconds, m.subscriptionRefusals, m.RoomSubscriptions, m.RoomMemberships, m.QueuedBytes, m.SlowCloses, m.publishSeconds, m.replay, m.SQLFallback, m.staleRooms, m.PositionSweep, m.OldestPositionAge, m.FanoutRecipients, m.FanoutSeconds, m.SavedEventLag)
-	for _, reason := range RoomFailureReasons {
+	for _, reason := range roomFailureReasons {
 		m.staleRooms.WithLabelValues(string(reason))
 	}
 	registry.MustRegister(m.publishCapacityWait, m.publishQueueWait, m.publishChannelAcquisition, m.publishConfirmation)

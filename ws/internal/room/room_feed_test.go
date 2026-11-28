@@ -154,7 +154,8 @@ func TestJoinRecoversMissedEventsAfterRoomFeedRestart(t *testing.T) {
 	first := &restartFeed{results: make(chan feedResult, 1)}
 	second := &restartFeed{results: make(chan feedResult)}
 	store := &restartStore{feeds: []roomFeed{first, second}}
-	rooms := newRooms(store, slog.New(slog.NewTextHandler(io.Discard, nil)), 8, 8, 4096, time.Second, monitoring.New(prometheus.NewRegistry()))
+	registry := prometheus.NewRegistry()
+	rooms := newRooms(store, slog.New(slog.NewTextHandler(io.Discard, nil)), 8, 8, 4096, time.Second, monitoring.New(registry))
 	t.Cleanup(rooms.Close)
 	sink := &eventSink{events: make(chan protocol.Event, 8)}
 	if err := rooms.Join(context.Background(), sink, "group:chat", "chat", "epoch", "1-0"); err != nil {
@@ -172,6 +173,7 @@ func TestJoinRecoversMissedEventsAfterRoomFeedRestart(t *testing.T) {
 			t.Fatalf("replayed event = %q, want %q", event.EventID, want)
 		}
 	}
+	assertStaleRooms(t, registry, monitoring.RoomFeedStopped)
 }
 
 func TestJoinRecoversLiveGapThroughRoomFeed(t *testing.T) {

@@ -12,27 +12,31 @@ import (
 )
 
 type profilingServer struct {
-	server *http.Server
-	served chan struct{}
+	server        *http.Server
+	cancelRequest context.CancelFunc
+	served        chan struct{}
 }
 
-func startProfiling(port int, logger *slog.Logger) (*profilingServer, error) {
-	if port == 0 {
-		return nil, nil
-	}
-	listener, err := net.Listen("tcp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
-	if err != nil {
-		return nil, err
-	}
+func listenProfiling(port int) (net.Listener, error) {
+	return net.Listen("tcp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+}
+
+func serveProfiling(listener net.Listener, logger *slog.Logger) *profilingServer {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/debug/pprof/", pprof.Index)
 	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
 	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
 	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	requests, cancelRequest := context.WithCancel(context.Background())
 	profiling := &profilingServer{
-		server: &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second},
-		served: make(chan struct{}),
+		server: &http.Server{
+			Handler:           mux,
+			ReadHeaderTimeout: 5 * time.Second,
+			BaseContext:       func(net.Listener) context.Context { return requests },
+		},
+		cancelRequest: cancelRequest,
+		served:        make(chan struct{}),
 	}
 	go func() {
 		defer close(profiling.served)
@@ -41,13 +45,11 @@ func startProfiling(port int, logger *slog.Logger) (*profilingServer, error) {
 		}
 	}()
 	logger.Info("profiling server listening on loopback", "address", listener.Addr().String())
-	return profiling, nil
+	return profiling
 }
 
 func (p *profilingServer) Stop(ctx context.Context) {
-	if p == nil {
-		return
-	}
+	p.cancelRequest()
 	if err := p.server.Shutdown(ctx); err != nil {
 		_ = p.server.Close()
 	}

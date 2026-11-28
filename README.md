@@ -61,7 +61,11 @@ Password encoders are configured under `messenger.auth.password` in [the API YAM
 
 The same YAML configures browser origins, CORS methods, headers and credentials under `messenger.web.cors`, and endpoint rules under `messenger.web.security`. Endpoint patterns are relative to `spring.mvc.servlet.path`: with `/api`, use `/v1/auth/login` for the URL `/api/v1/auth/login`. The first matching group wins in this order: OPTIONS preflight, public, monitoring, denied. Remaining requests reach the application's session checks. Every configured origin must be an exact HTTP or HTTPS origin without a path or trailing slash; browser mutations still require one Origin header and `X-Messenger-CSRF: 1`.
 
-On pull requests and pushes to `main`, [CI](.github/workflows/verify.yaml) compiles Kotlin and Go, builds the client, runs linters and Go/client unit tests, and checks contracts, deployment configuration and fast AsyncAPI model generation. It also runs the API and outbox publisher Testcontainers tests. It can also be started manually. Superseded runs are canceled. Command-processor tests, dependency audits, full infrastructure, HTTP/SQL/gRPC generation checks, resilience and load checks run locally.
+On pull requests and pushes to `main`, [CI](.github/workflows/verify.yaml) runs Kotlin, Go, client, contracts and deployment checks in parallel. The `verify` job passes when every check succeeds. The workflow can also be started manually, and it cancels superseded runs. Command-processor tests, dependency audits, full infrastructure, HTTP/SQL/gRPC generation checks, resilience and load checks run locally.
+
+Run the same Kotlin compile, lint and test tasks locally with `./kotlin/gradlew -p kotlin --build-cache --parallel verifyKotlin`. It reuses compatible compile and lint outputs and runs the API and outbox suites fresh. These suites use Docker. Set `REDIS_TEST_URL` to a dedicated Redis 7.4 test instance to exercise Redis publication tests.
+
+For a focused Kotlin change, run `./kotlin/gradlew -p kotlin --build-cache :api:test --tests '*ChatSequenceTests'` with the module and test class you changed. Use `go -C ws test -race ./internal/room` for a Go package or `npm --prefix client test -- src/shared/api/socket.test.ts` for a client test file.
 
 Use [package.json](package.json) for generation and verification commands, and [compose.yaml](compose.yaml) for runtime settings. [CONTEXT.md](CONTEXT.md) defines terms; the [broker decision](docs/adr/0001-messenger-broker-split.md) records delivery guarantees.
 

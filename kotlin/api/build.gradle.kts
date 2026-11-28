@@ -67,6 +67,18 @@ tasks.withType<Test> {
     environment("WS_TICKET_SECRET", "test-ws-ticket-secret-long-enough-for-hmac-2026")
 }
 
+tasks.test {
+    outputs.upToDateWhen { false }
+    val authAndInfrastructure =
+        listOf("auth", "infrastructure", "shared").map { "com.andrewtinyakov.messenger.$it.*" }.toTypedArray()
+    when (val shard = providers.gradleProperty("apiTestShard").orNull) {
+        null -> Unit
+        "auth-and-infrastructure" -> filter.setIncludePatterns(*authAndInfrastructure)
+        "remaining" -> filter.setExcludePatterns(*authAndInfrastructure)
+        else -> error("Unknown API test shard: $shard")
+    }
+}
+
 tasks.named("forkedSpringBootRun") {
     dependsOn(":shared:jar", ":command-processor:jar", ":outbox-publisher:jar")
 }

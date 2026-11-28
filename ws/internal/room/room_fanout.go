@@ -58,15 +58,17 @@ func (r *Rooms) dispatchRoom(entry *localRoom, event protocol.Event) int {
 		r.failRoomEntry(entry, monitoring.RoomFrameEncodeFailed, err)
 		return 0
 	}
-	if needsRecovery {
-		r.recordStaleRoom(entry.name, monitoring.RoomEpochChanged, len(recipients), nil)
-	}
 	r.metrics.FanoutRecipients.Observe(float64(len(recipients)))
+	staleRecorded := false
 	for _, recipient := range recipients {
 		if recipient.member.hasLeft() {
 			continue
 		}
 		if needsRecovery {
+			if !staleRecorded {
+				r.recordStaleRoom(entry.name, monitoring.RoomEpochChanged, len(recipients), nil)
+				staleRecorded = true
+			}
 			closed := r.failRecipient(recipient.connection, entry.name, recipient.ids)
 			if closed || roomname.IsUser(entry.name) {
 				continue
@@ -128,10 +130,15 @@ func (r *Rooms) failRoomEntry(entry *localRoom, reason monitoring.RoomFailureRea
 	}
 	targets := entry.targetsLocked(true)
 	entry.mu.Unlock()
-	r.recordStaleRoom(entry.name, reason, len(targets), cause)
+	staleRecorded := false
 	for _, target := range targets {
-		if !target.member.hasLeft() {
-			r.failRecipient(target.connection, entry.name, target.ids)
+		if target.member.hasLeft() {
+			continue
 		}
+		if !staleRecorded {
+			r.recordStaleRoom(entry.name, reason, len(targets), cause)
+			staleRecorded = true
+		}
+		r.failRecipient(target.connection, entry.name, target.ids)
 	}
 }

@@ -44,10 +44,14 @@ func TestStaleRoomsAreCountedByReason(t *testing.T) {
 			reason: monitoring.RoomReplayFailed,
 		},
 		{
-			name:  "first epoch after an empty stream",
-			store: &positionStore{},
+			name: "first epoch after an empty stream",
+			store: &positionStore{tail: func(context.Context, string) (string, string, error) {
+				return "epoch", "2-0", nil
+			}},
 			act: func(rooms *Rooms) {
-				rooms.reconcileRoomPosition(context.Background(), rooms.rooms["group:chat"], "", "", "epoch", "2-0")
+				entry := rooms.rooms["group:chat"]
+				entry.epoch, entry.lastID = "", ""
+				rooms.checkAll(context.Background())
 			},
 			reason: monitoring.RoomUnrepairedGap,
 		},
@@ -132,4 +136,22 @@ func staleRoomCounts(t *testing.T, registry *prometheus.Registry) map[string]flo
 		}
 	}
 	return counts
+}
+
+func TestStaleRoomIsNotCountedWithoutMembersToRecover(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	rooms := newPositionRooms(&positionStore{tail: func(context.Context, string) (string, string, error) {
+		return "", "", errors.New("redis timeout")
+	}})
+	rooms.checkInterval = time.Hour
+	rooms.metrics = monitoring.New(registry)
+	sink := &positionSink{}
+	addPositionRoom(rooms, "group:chat", sink)
+	rooms.rooms["group:chat"].members[sink].leave()
+	rooms.checkAll(context.Background())
+	for reason, value := range staleRoomCounts(t, registry) {
+		if value != 0 {
+			t.Fatalf("stale rooms %s = %v with every member gone, want 0", reason, value)
+		}
+	}
 }

@@ -35,9 +35,12 @@ func TestRemoveGatewayClearsOnlyThatGatewayInRedis(t *testing.T) {
 	onlyStopping, shared := user(int(run%1e12)), user(int(run%1e12)+1)
 	store := RedisStore(client)
 	t.Cleanup(func() {
-		store.SetPresence(context.Background(), surviving, map[string]bool{shared: false})
-		_ = store.ForgetPresenceGateway(context.Background(), surviving)
-		_ = client.ForgetGateway(context.Background(), stopping)
+		cleanup := context.Background()
+		store.SetPresence(cleanup, stopping, map[string]bool{onlyStopping: false, shared: false})
+		store.SetPresence(cleanup, surviving, map[string]bool{shared: false})
+		_ = store.ForgetPresenceGateway(cleanup, stopping)
+		_ = store.ForgetPresenceGateway(cleanup, surviving)
+		_ = client.ForgetGateway(cleanup, stopping)
 	})
 	if _, _, err := client.Heartbeat(ctx, stopping, time.Minute); err != nil {
 		t.Fatal(err)
@@ -61,6 +64,12 @@ func TestRemoveGatewayClearsOnlyThatGatewayInRedis(t *testing.T) {
 	}
 	if users, _, err := store.PresenceGatewayUsers(ctx, stopping, 0); err != nil || len(users) != 0 {
 		t.Fatalf("presence index of the stopped gateway = %v, %v; want empty", users, err)
+	}
+	if failed := store.SetPresence(ctx, surviving, map[string]bool{shared: false}); len(failed) > 0 {
+		t.Fatal(failed)
+	}
+	if states, _, err := store.PresenceSnapshot(ctx, []string{shared}); err != nil || states[shared].Online {
+		t.Fatalf("shared user after the surviving gateway also cleared = %+v, %v; want offline with no field left by %s", states[shared], err, stopping)
 	}
 	if registered, dead, err := client.Heartbeat(ctx, stopping, time.Minute); err != nil || !registered || dead {
 		t.Fatalf("fleet registration after clearing presence = registered %v, dead %v, %v; want kept for peer reaping", registered, dead, err)

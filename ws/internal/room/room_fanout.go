@@ -3,6 +3,7 @@ package room
 import (
 	"time"
 
+	"messenger/ws/internal/monitoring"
 	"messenger/ws/internal/protocol"
 	"messenger/ws/internal/roomname"
 )
@@ -54,7 +55,7 @@ func (r *Rooms) dispatchRoom(entry *localRoom, event protocol.Event) int {
 	entry.mu.Unlock()
 	frame, err := protocol.NewEventFrame(event)
 	if err != nil {
-		r.failRoomEntry(entry)
+		r.failRoomEntry(entry, monitoring.RoomFrameEncodeFailed, err)
 		return 0
 	}
 	r.metrics.FanoutRecipients.Observe(float64(len(recipients)))
@@ -116,13 +117,7 @@ func (r *Rooms) failRecipient(c Recipient, name string, chatIDs []string) bool {
 	return false
 }
 
-func (r *Rooms) failRoom(name string) {
-	if entry := r.lookup(name); entry != nil {
-		r.failRoomEntry(entry)
-	}
-}
-
-func (r *Rooms) failRoomEntry(entry *localRoom) {
+func (r *Rooms) failRoomEntry(entry *localRoom, reason monitoring.RoomFailureReason, cause error) {
 	entry.mu.Lock()
 	if entry.state == roomRetired {
 		entry.mu.Unlock()
@@ -130,7 +125,13 @@ func (r *Rooms) failRoomEntry(entry *localRoom) {
 	}
 	targets := entry.targetsLocked(true)
 	entry.mu.Unlock()
-	r.metrics.StaleRooms.Inc()
+	recipients := 0
+	for _, target := range targets {
+		if !target.member.hasLeft() {
+			recipients++
+		}
+	}
+	r.recordStaleRoom(entry.name, reason, recipients, cause)
 	for _, target := range targets {
 		if !target.member.hasLeft() {
 			r.failRecipient(target.connection, entry.name, target.ids)

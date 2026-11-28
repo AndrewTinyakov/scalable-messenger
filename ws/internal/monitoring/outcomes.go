@@ -82,3 +82,16 @@ const (
 	CapacityOutboundItemsPerConnection CapacityResource = "outbound_items_per_connection"
 	CapacityOutboundBytesPerConnection CapacityResource = "outbound_bytes_per_connection"
 )
+
+type RoomFailureReason string
+
+const (
+	RoomFeedStopped        RoomFailureReason = "feed_stopped"
+	RoomPositionReadFailed RoomFailureReason = "position_read_failed"
+	RoomEpochChanged       RoomFailureReason = "epoch_changed"
+	RoomUnrepairedGap      RoomFailureReason = "unrepaired_gap"
+	RoomReplayFailed       RoomFailureReason = "replay_failed"
+	RoomFrameEncodeFailed  RoomFailureReason = "frame_encode_failed"
+)
+
+var RoomFailureReasons = []RoomFailureReason{RoomFeedStopped, RoomPositionReadFailed, RoomEpochChanged, RoomUnrepairedGap, RoomReplayFailed, RoomFrameEncodeFailed}

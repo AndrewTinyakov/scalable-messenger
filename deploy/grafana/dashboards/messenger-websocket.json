@@ -1868,8 +1868,8 @@
       },
       "targets": [
         {
-          "expr": "sum by (instance) (rate(messenger_ws_stale_rooms_total[$__rate_interval]))",
-          "legendFormat": "{{instance}}",
+          "expr": "sum by (instance, reason) (rate(messenger_ws_stale_rooms_total[$__rate_interval]))",
+          "legendFormat": "{{instance}} {{reason}}",
           "refId": "A",
           "instant": false
         }

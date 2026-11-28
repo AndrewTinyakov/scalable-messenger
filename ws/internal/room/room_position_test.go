@@ -391,7 +391,7 @@ func TestContinuityReplayMetricsRecordFailuresWithoutDispatch(t *testing.T) {
 			rooms := newPositionRooms(store)
 			sink := &positionSink{}
 			addPositionRoom(rooms, "group:chat", sink)
-			if rooms.replayRoomThrough(context.Background(), rooms.rooms["group:chat"], "epoch", "1-0", "3-0") {
+			if rooms.replayRoomThrough(context.Background(), rooms.rooms["group:chat"], "epoch", "1-0", "3-0") == nil {
 				t.Fatal("incomplete replay succeeded")
 			}
 			if len(sink.events) != 0 || replayCounterValue(t, rooms.metrics.ContinuityReplayEvents) != 0 {

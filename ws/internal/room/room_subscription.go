@@ -4,6 +4,8 @@ import (
 	"context"
 	"math/rand/v2"
 	"time"
+
+	"messenger/ws/internal/monitoring"
 )
 
 func subscriptionRetryDelay(attempt int) time.Duration {
@@ -47,8 +49,7 @@ func (r *Rooms) listen(ctx context.Context, entry *localRoom) {
 			if ctx.Err() != nil {
 				return
 			}
-			r.logger.Error("Redis room feed stopped", "room", entry.name, "error", err)
-			r.failRoomEntry(entry)
+			r.failRoomEntry(entry, monitoring.RoomFeedStopped, err)
 			_ = listener.Close()
 			attempt := 0
 			for {

@@ -74,7 +74,7 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	presenceConfig.Timeout = cfg.APITimeout
 	var gateways *fleet.Fleet
 	tracker := presence.NewTracker(presenceStore, groupAuth, func() string { return gateways.ID() }, presenceConfig, logger)
-	gateways = fleet.New(redis, tracker, fleet.Config{ConnectionLimit: 10, Heartbeat: cfg.GatewayHeartbeat, TTL: cfg.GatewayTTL, Timeout: cfg.APITimeout}, logger)
+	gateways = fleet.New(redis, tracker, fleet.Config{ConnectionLimit: 10, Heartbeat: cfg.GatewayHeartbeat, TTL: cfg.GatewayTTL, Timeout: cfg.APITimeout, OnHeartbeat: metrics.RecordHeartbeat}, logger)
 	background, stopBackground := context.WithCancel(context.WithoutCancel(ctx))
 	watchers := presence.NewHub(background, presenceStore, groupAuth, presenceConfig, logger, metrics.PresenceMetrics)
 	var backgroundWG sync.WaitGroup
@@ -94,6 +94,15 @@ func run(ctx context.Context, logger *slog.Logger) error {
 		return fmt.Errorf("construct WebSocket server: %w", err)
 	}
 	defer ws.Close()
+	profiling, err := startProfiling(cfg.ProfilingPort, logger)
+	if err != nil {
+		logger.Warn("profiling server unavailable", "error", err)
+	}
+	defer func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		profiling.Stop(stopCtx)
+	}()
 	httpServer := &http.Server{Addr: cfg.Address, Handler: ws.Handler(), ReadHeaderTimeout: 5 * time.Second}
 	result := make(chan error, 1)
 	go func() { result <- httpServer.ListenAndServe() }()

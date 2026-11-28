@@ -35,7 +35,7 @@ type Metrics struct {
 	publishSeconds       *prometheus.HistogramVec
 	replay               *prometheus.CounterVec
 	SQLFallback          prometheus.Counter
-	StaleRooms           prometheus.Counter
+	staleRooms           *prometheus.CounterVec
 	PositionSweep        prometheus.Histogram
 	OldestPositionAge    prometheus.Gauge
 	FanoutRecipients     prometheus.Histogram
@@ -76,7 +76,7 @@ func New(registry *prometheus.Registry) *Metrics {
 		publishSeconds:       prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "messenger_ws_publish_seconds", Help: "RabbitMQ publish latency through broker confirmation.", Buckets: latencyBuckets}, []string{"result"}),
 		replay:               prometheus.NewCounterVec(prometheus.CounterOpts{Name: "messenger_ws_replay_total", Help: "Short Redis history replay outcomes."}, []string{"result"}),
 		SQLFallback:          prometheus.NewCounter(prometheus.CounterOpts{Name: "messenger_ws_sql_fallback_total", Help: "Client recovery requests requiring SQL history."}),
-		StaleRooms:           prometheus.NewCounter(prometheus.CounterOpts{Name: "messenger_ws_stale_rooms_total", Help: "Room feeds found stale by Redis errors or position checks."}),
+		staleRooms:           prometheus.NewCounterVec(prometheus.CounterOpts{Name: "messenger_ws_stale_rooms_total", Help: "Room feeds whose local members were sent to recovery, by reason."}, []string{"reason"}),
 		PositionSweep:        prometheus.NewHistogram(prometheus.HistogramOpts{Name: "messenger_ws_position_sweep_seconds", Help: "Wall time for one sweep of local room positions.", Buckets: prometheus.ExponentialBuckets(0.01, 2, 14)}),
 		OldestPositionAge:    prometheus.NewGauge(prometheus.GaugeOpts{Name: "messenger_ws_oldest_room_position_seconds", Help: "Longest time since an active room's last successful position check or live publication."}),
 		FanoutRecipients:     prometheus.NewHistogram(prometheus.HistogramOpts{Name: "messenger_ws_fanout_recipients", Help: "Local recipients considered for each room event.", Buckets: prometheus.ExponentialBuckets(1, 4, 10)}),
@@ -88,7 +88,10 @@ func New(registry *prometheus.Registry) *Metrics {
 		publishChannelAcquisition: prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "messenger_ws_publish_channel_acquisition_seconds", Help: "RabbitMQ publisher channel acquisition duration including connection, topology declaration, confirm setup and broker failover.", Buckets: latencyBuckets}, []string{"result"}),
 		publishConfirmation:       prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "messenger_ws_publish_confirmation_seconds", Help: "RabbitMQ publisher duration from wire send attempt to confirmation or final transport failure, even after caller cancellation.", Buckets: latencyBuckets}, []string{"result"}),
 	}
-	registry.MustRegister(m.capacity, m.QueuedItems, m.CommandItems, m.CommandBytes, m.Draining, m.Connections, m.handshake, m.applied, m.dismissed, m.receivedMessages, m.frameErrors, m.RecoveryCloses, m.GroupLeaseExpired, m.groupAuthSeconds, m.subscriptionRefusals, m.RoomSubscriptions, m.RoomMemberships, m.QueuedBytes, m.SlowCloses, m.publishSeconds, m.replay, m.SQLFallback, m.StaleRooms, m.PositionSweep, m.OldestPositionAge, m.FanoutRecipients, m.FanoutSeconds, m.SavedEventLag)
+	registry.MustRegister(m.capacity, m.QueuedItems, m.CommandItems, m.CommandBytes, m.Draining, m.Connections, m.handshake, m.applied, m.dismissed, m.receivedMessages, m.frameErrors, m.RecoveryCloses, m.GroupLeaseExpired, m.groupAuthSeconds, m.subscriptionRefusals, m.RoomSubscriptions, m.RoomMemberships, m.QueuedBytes, m.SlowCloses, m.publishSeconds, m.replay, m.SQLFallback, m.staleRooms, m.PositionSweep, m.OldestPositionAge, m.FanoutRecipients, m.FanoutSeconds, m.SavedEventLag)
+	for _, reason := range RoomFailureReasons {
+		m.staleRooms.WithLabelValues(string(reason))
+	}
 	registry.MustRegister(m.publishCapacityWait, m.publishQueueWait, m.publishChannelAcquisition, m.publishConfirmation)
 	return m
 }
@@ -131,6 +134,10 @@ func (m *Metrics) RecordSubscriptionRefusal(reason SubscriptionRefusal) {
 
 func (m *Metrics) ObserveGroupAuthorization(duration time.Duration, outcome AuthorizationOutcome) {
 	m.groupAuthSeconds.WithLabelValues(string(outcome)).Observe(duration.Seconds())
+}
+
+func (m *Metrics) RecordStaleRoom(reason RoomFailureReason) {
+	m.staleRooms.WithLabelValues(string(reason)).Inc()
 }
 
 func (m *Metrics) RecordReplay(outcome ReplayOutcome) {

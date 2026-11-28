@@ -1,4 +1,3 @@
-// Replays a plan in open loop: each action starts at its planned time, whatever the server is doing.
 import { setTimeout as delay } from 'node:timers/promises';
 import { ulid } from '../support/fixtures.mjs';
 import { chatPath, Device, orderedMessages, pageSize } from './device.mjs';
@@ -8,8 +7,6 @@ import { verifyRun } from './verification.mjs';
 import { check, Fault, greater, Http, isId, isSeq, join, Measurements } from './transport.mjs';
 
 const confirmations = new Set(['send', 'forward', 'direct']);
-// In a sharded run the sender and the recipient can live in different processes, so a send carries its wall-clock
-// time and the receiving worker measures delivery from it.
 const SENT_AT = /\u2060t(\d{13})$/;
 
 export class Run {
@@ -26,7 +23,6 @@ export class Run {
   failedActions = 0;
   failedSamples = [];
 
-  // HTTP can return a message before its sender's confirmation indexes it; hold those sightings until then.
   early = new Map();
 
   constructor(plan, manifest, http, metrics, shard = { index: 0, count: 1 }) {
@@ -120,7 +116,6 @@ export class Run {
     const key = device.actor + '/' + id;
     if (isSeq(status.throughSequence) && greater(status.throughSequence, this.readFrontiers.get(key) ?? '0')) this.readFrontiers.set(key, status.throughSequence);
     for (const record of this.reads.get(id) ?? []) {
-      // Only a peer that kept the chat open since the read counts; a later reopen measures navigation, not propagation.
       if (record.observed || !record.devices.includes(device) || record.selections.get(device) !== device.selection) continue;
       if (record.actor !== device.actor && this.roster.get(id)?.kind !== 'DIRECT') continue;
       const value = record.actor === device.actor ? status.throughSequence : status.maxOtherReadSequence;
@@ -177,14 +172,12 @@ export class Run {
 
   expected(id, actor, peer) {
     if (peer !== undefined) return [actor, peer].flatMap(user => this.devices[user]).filter(device => device.connected);
-    // Group frames reach only devices whose subscription the gateway confirmed.
     const chat = this.roster.get(id);
     return chat.members.flatMap(user => this.devices[user]).filter(device =>
       device.connected && (chat.kind === 'DIRECT' || device.subscribedTo === id));
   }
 
   async reference(action, device, id) {
-    // A reply's parent can belong to another shard's user; quote the latest message in the chat instead.
     const reference = action.reference?.send !== undefined && this.shard.count > 1 && !this.byAction.has(action.reference.send)
       ? { back: 1 } : action.reference;
     const result = await resolveReference(reference, key => this.byAction.get(key), device.view(id).messages);
@@ -348,7 +341,6 @@ export class Run {
       case 'jump': {
         const view = device.view(id);
         const quote = view.messages.filter(message => isId(message.replyToMessageId)).at(-action.reference.quotedBack);
-        // Same guard as MessageItem's unavailableQuote: the browser disables these quotes.
         if (!quote || quote.replyDeleted || quote.replySenderId == null || quote.replyBody == null) {
           this.metrics.count('jump.unavailable');
           return;
@@ -363,8 +355,6 @@ export class Run {
         try {
           return await device.around(id, { id: quote.replyToMessageId });
         } catch (error) {
-          // The quoted message was deleted after this page loaded. The browser shows
-          // "Could not find the original message"; that is an expected outcome, not a failure.
           if (error.code !== 'http404') throw error;
           this.metrics.count('jump.anchorGone');
           return;
@@ -475,7 +465,6 @@ export async function run(plan, manifest, http, metrics, { shard = { index: 0, c
     check(wait > -1000, 'startAtPassed');
     if (wait > 0) await delay(wait, undefined, { signal: state.signal });
   }
-  // The generator samples its own health, so a saturated driver can be told apart from a slow server.
   let lastSample = performance.now();
   let lastUtilization = performance.eventLoopUtilization();
   const sampleRss = () => {

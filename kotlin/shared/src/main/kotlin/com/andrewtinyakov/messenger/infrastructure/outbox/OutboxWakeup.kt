@@ -11,13 +11,6 @@ import javax.sql.DataSource
 
 const val OUTBOX_WAKEUP_CHANNEL = "messenger_outbox"
 
-/**
- * Wakes publishers after an enqueueing transaction commits, outside that transaction.
- *
- * A NOTIFY inside the writer's transaction would serialize every commit that enqueues events. Wakeups are coalesced:
- * each process has at most one NOTIFY running and one waiting, and every commit is followed by a NOTIFY that starts
- * after it. A lost wakeup only delays publication until the publishers' next poll.
- */
 @Component
 class OutboxWakeup(
     private val dataSource: DataSource,
@@ -48,7 +41,6 @@ class OutboxWakeup(
             dataSource.connection.use { connection ->
                 connection.autoCommit = false
                 connection.createStatement().use { statement ->
-                    // The wakeup carries no data, so it doesn't need to wait for its own WAL flush.
                     statement.execute("SET LOCAL synchronous_commit TO OFF")
                     statement.execute("NOTIFY $OUTBOX_WAKEUP_CHANNEL")
                 }

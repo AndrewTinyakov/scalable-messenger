@@ -1,7 +1,3 @@
-// Loads the plan into a fresh stack's PostgreSQL and fetches WebSocket tickets.
-// Creating 400,000 direct chats over HTTP would take hours; the rows written here
-// are the ones both builds' authorization queries read: users, sessions, chats
-// and memberships.
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { once } from 'node:events';
@@ -16,7 +12,6 @@ const csv = values => values.map(value => value === null ? '' : `"${String(value
 function* rows(plan, tokens) {
   yield 'BEGIN;\n';
   yield 'COPY users (id, username, password_hash) FROM STDIN WITH (FORMAT csv);\n';
-  // An unusable hash: these accounts only sign in through seeded sessions.
   for (const user of plan.users) yield csv([user.id, user.username, '!presence-load']);
   yield '\\.\n';
   yield 'COPY sessions (token_hash, user_id, device_id, expires_at, device_label) FROM STDIN WITH (FORMAT csv);\n';
@@ -67,7 +62,6 @@ export function session(manifest, plan, index) {
   return { cookie: `${manifest.cookieName}=${manifest.tokens[index]}`, userId: plan.users[index].id, deviceId: deviceId(index) };
 }
 
-// The API reads one cookie name, chosen by its secure-cookie setting.
 export async function detectCookieName(http, manifest, plan) {
   for (const cookieName of COOKIE_NAMES) {
     try {
@@ -84,8 +78,6 @@ export function ticketClient({ api, origin, ticketRate }) {
   return new Http({ api, origin, authRate: 1, ticketRate, capacity: 4 }, new Measurements());
 }
 
-// Tickets last an hour and the gateway does not consume them, so a client
-// reuses one for every reconnect. `expiresAt` is in Unix seconds.
 export async function fetchTickets(http, manifest, plan, users, tickets = new Map()) {
   await workers(users, 128, async index => {
     const ticket = await http.request(session(manifest, plan, index), '/auth/ws-ticket', 'POST');
@@ -94,7 +86,6 @@ export async function fetchTickets(http, manifest, plan, users, tickets = new Ma
   return tickets;
 }
 
-// Replaces tickets that expire within ten minutes, once a minute, until stopped.
 export function refreshTickets(http, manifest, plan, tickets, log) {
   let running = false;
   const timer = setInterval(async () => {

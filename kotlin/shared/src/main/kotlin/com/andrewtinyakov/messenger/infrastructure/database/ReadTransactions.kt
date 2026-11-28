@@ -1,6 +1,8 @@
 package com.andrewtinyakov.messenger.infrastructure.database
 
+import com.andrewtinyakov.messenger.infrastructure.database.monitoring.DatabaseMetrics
 import org.jooq.DSLContext
+import org.jooq.impl.DSL
 import org.springframework.beans.factory.ObjectProvider
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.dao.TransientDataAccessException
@@ -49,9 +51,13 @@ class ReadTransactions(
         }
     }
 
-    @Suppress("UNCHECKED_CAST")
     private fun <T> read(snapshot: Boolean, block: () -> T): T = readOnly.execute {
-        if (snapshot) db.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+        if (snapshot) {
+            db.batch(
+                db.setLocal(DSL.name("transaction_isolation"), DSL.inline("repeatable read")),
+                db.setLocal(DSL.name("transaction_read_only"), DSL.inline("on")),
+            ).execute()
+        }
         block()
-    } as T
+    }
 }

@@ -166,8 +166,6 @@ func (h *handshake) establish(c *Connection) bool {
 		c.Close()
 		return false
 	}
-	// Subscribe before querying SQL so a logout racing this connection is
-	// either observed as a room event or rejected by ValidateSession.
 	if !h.validateSession(c) {
 		return false
 	}
@@ -261,7 +259,6 @@ func (s *Server) register(c *Connection) bool {
 	return true
 }
 
-// Reserve before HTTP upgrade so concurrent handshakes count toward capacity.
 func (s *Server) reserveUpgrade() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()

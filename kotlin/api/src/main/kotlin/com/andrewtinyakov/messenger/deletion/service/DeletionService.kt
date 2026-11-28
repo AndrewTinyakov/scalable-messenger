@@ -119,10 +119,10 @@ class DeletionService(
                 rows = applied.deletedRows,
             )
             enqueueDeletionEvents(chatId, userId, scope, target, chat, applied.sequences)
-            CommittedDeletion(saved(userId, requestId).toResponse(), newlyAccepted = true)
+            CommittedDeletion(saved(userId, requestId), newlyAccepted = true)
         }
         if (committed.newlyAccepted) metrics.accepted(scope, target)
-        committed.response
+        committed.operation.toResponse()
     }
 
     private fun clearThroughLatest(
@@ -166,7 +166,7 @@ class DeletionService(
         if (existing.chatId != chatId || existing.fingerprint != fingerprint) {
             conflict(ApiErrorCode.REQUEST_ID_REUSED, "Deletion request ID changed")
         }
-        return CommittedDeletion(existing.toResponse(), newlyAccepted = false)
+        return CommittedDeletion(existing, newlyAccepted = false)
     }
 
     private fun requireChatDeletionAllowed(
@@ -206,7 +206,7 @@ class DeletionService(
             sequences = DeletionSequences(seq = chat.lastSequence, visibilitySeq = chat.visibilitySeq),
             rows = 0,
         )
-        return CommittedDeletion(saved(userId, requestId).toResponse(), newlyAccepted = false)
+        return CommittedDeletion(saved(userId, requestId), newlyAccepted = false)
     }
 
     private fun requireExpectedVersions(targets: List<DeletionMessage>, expectedVersions: Map<MessageId, Long>) {

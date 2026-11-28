@@ -9,7 +9,6 @@ const BUCKETS = {
   long_ago: 'last seen a long time ago',
 } as const
 
-/** Text for a user's status. Never empty once a status has arrived. */
 export function presenceLabel(view: PresenceView | undefined, now = Date.now()): string {
   if (!view) return ''
   if ('unavailable' in view) return BUCKETS.recently

@@ -14,35 +14,31 @@ type localUser struct {
 	seen   time.Time
 }
 
-// Tracker publishes this gateway's share of each user's presence. It writes
-// to Redis only when its active connection count for a user crosses zero,
-// after a grace period on the way down.
 type Tracker struct {
-	store    Store
-	gateway  func() string
-	config   Config
-	logger   *slog.Logger
-	lastSeen *lastSeen
-	wake     chan struct{}
-	writing  sync.Mutex
-	mu       sync.Mutex
-	users    map[string]*localUser
-	pending  map[string]bool
-	cleared  map[string]time.Time
+	store           Store
+	gateway         func() string
+	config          Config
+	logger          *slog.Logger
+	lastSeen        *lastSeen
+	wake            chan struct{}
+	redisWriteMu    sync.Mutex
+	mu              sync.Mutex
+	users           map[string]*localUser
+	pending         map[string]bool
+	recentlyCleared map[string]time.Time
 }
 
 func NewTracker(store Store, recorder LastSeenRecorder, gateway func() string, config Config, logger *slog.Logger) *Tracker {
 	return &Tracker{
 		store: store, gateway: gateway, config: config, logger: logger,
-		lastSeen: newLastSeen(recorder, config, logger),
-		wake:     make(chan struct{}, 1),
-		users:    make(map[string]*localUser),
-		pending:  make(map[string]bool),
-		cleared:  make(map[string]time.Time),
+		lastSeen:        newLastSeen(recorder, config, logger),
+		wake:            make(chan struct{}, 1),
+		users:           make(map[string]*localUser),
+		pending:         make(map[string]bool),
+		recentlyCleared: make(map[string]time.Time),
 	}
 }
 
-// SetActive adds or removes one active connection for a user.
 func (t *Tracker) SetActive(userID string, active bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -91,8 +87,6 @@ func (t *Tracker) queueLocked(userID string, user *localUser, online bool) {
 	t.signal()
 }
 
-// Renew writes every locally online user again under the gateway's current
-// identity, after Redis lost the registration or the identity changed.
 func (t *Tracker) Renew() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -111,12 +105,9 @@ func (t *Tracker) signal() {
 	}
 }
 
-// RemoveGateway clears the presence a gateway identity left behind, page by
-// page from its index. It waits for any write in progress, so a write under
-// a retired identity of this gateway cannot land afterwards.
 func (t *Tracker) RemoveGateway(ctx context.Context, gateway string) error {
-	t.writing.Lock()
-	defer t.writing.Unlock()
+	t.redisWriteMu.Lock()
+	defer t.redisWriteMu.Unlock()
 	var cursor uint64
 	for {
 		users, next, err := t.store.PresenceGatewayUsers(ctx, gateway, cursor)
@@ -150,20 +141,18 @@ func (t *Tracker) Run(ctx context.Context) {
 			wg.Wait()
 			return
 		case <-t.wake:
-			t.write(ctx)
+			t.writePending(ctx)
 		case <-retry.C:
-			t.write(ctx)
+			t.writePending(ctx)
 		case now := <-active.C:
 			t.refresh(now)
 		}
 	}
 }
 
-// write sends pending state. Renewal waits for it, so no write under an
-// identity can land after that identity was cleared.
-func (t *Tracker) write(ctx context.Context) {
-	t.writing.Lock()
-	defer t.writing.Unlock()
+func (t *Tracker) writePending(ctx context.Context) {
+	t.redisWriteMu.Lock()
+	defer t.redisWriteMu.Unlock()
 	t.mu.Lock()
 	if len(t.pending) == 0 {
 		t.mu.Unlock()
@@ -187,9 +176,9 @@ func (t *Tracker) write(ctx context.Context) {
 		}
 		user := t.users[userID]
 		if online {
-			delete(t.cleared, userID)
+			delete(t.recentlyCleared, userID)
 		} else if user != nil {
-			t.cleared[userID] = time.Now()
+			t.recentlyCleared[userID] = time.Now()
 		}
 		if user != nil {
 			if !user.online && user.active == 0 && user.grace == nil {
@@ -202,18 +191,15 @@ func (t *Tracker) write(ctx context.Context) {
 	}
 }
 
-// refresh records last seen for users still active and writes their state
-// again, which repairs state a Redis failover rolled back. Users cleared in
-// the last interval are cleared once more for the same reason.
 func (t *Tracker) refresh(now time.Time) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	for userID, at := range t.cleared {
+	for userID, at := range t.recentlyCleared {
 		if _, queued := t.pending[userID]; !queued && t.users[userID] == nil {
 			t.pending[userID] = false
 		}
 		if now.Sub(at) >= t.config.LastSeenActive {
-			delete(t.cleared, userID)
+			delete(t.recentlyCleared, userID)
 		}
 	}
 	for userID, user := range t.users {

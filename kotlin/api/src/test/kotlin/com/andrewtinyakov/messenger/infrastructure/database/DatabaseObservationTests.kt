@@ -3,6 +3,8 @@ package com.andrewtinyakov.messenger.infrastructure.database
 import com.andrewtinyakov.messenger.auth.model.User
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.auth.repository.UserRepository
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.USERS
+import com.andrewtinyakov.messenger.infrastructure.database.monitoring.DatabaseMetrics
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
 import com.andrewtinyakov.messenger.shared.id.newId
 import io.micrometer.core.instrument.Meter
@@ -12,8 +14,12 @@ import io.micrometer.core.instrument.config.MeterFilterReply
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.jooq.DSLContext
 import org.jooq.SQLDialect
+import org.jooq.exception.DataAccessException
 import org.jooq.impl.DSL
 import org.jooq.impl.DefaultConfiguration
+import org.jooq.impl.SQLDataType.CLOB
+import org.jooq.impl.SQLDataType.INTEGER
+import org.jooq.impl.SQLDataType.VARCHAR
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
@@ -24,6 +30,7 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.jdbc.support.JdbcTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
+import java.sql.SQLException
 import javax.sql.DataSource
 
 class DatabaseObservationTests : MessengerIntegrationTest() {
@@ -43,19 +50,28 @@ class DatabaseObservationTests : MessengerIntegrationTest() {
     fun `every statement starts with a sqlcommenter tag for the current entry point`() {
         val tag = "/*application='messenger-api',thread='sessions-cleanup'*/ "
         val padding = "x".repeat(1100)
+        val activityView = DSL.table(DSL.name("pg_catalog", "pg_stat_activity")).`as`("activity")
+        val query = DSL.field(DSL.name("activity", "query"), VARCHAR)
+        val pid = DSL.field(DSL.name("activity", "pid"), INTEGER)
+        val backendPid = postgresFunction("pg_backend_pid", INTEGER)
+        val seenStatements = DSL.table(DSL.name("seen_statements"))
+        val statement = DSL.field(DSL.name("statement"), CLOB)
+        val currentQuery = postgresFunction("current_query", VARCHAR)
         var activity: String? = null
         var batched: List<String> = emptyList()
         Thread({
-            activity = sql.resultQuery("select query from pg_stat_activity where pid = pg_backend_pid() and '$padding' <> ''")
-                .fetchOne(0, String::class.java)
+            activity = sql.select(query).from(activityView)
+                .where(pid.eq(backendPid), DSL.inline(padding).ne(DSL.inline("")))
+                .fetchOne(query)
             batched = tx.execute {
-                sql.execute("create temporary table seen_statements(statement text) on commit drop")
-                sql.batch(
-                    sql.query("insert into seen_statements select current_query() where '-- not a comment' <> ''"),
-                    sql.query("insert into seen_statements select current_query() where '/* not a comment */' <> ''"),
-                ).execute()
-                sql.resultQuery("select statement from seen_statements").fetch(0, String::class.java)
-            }!!
+                sql.createTemporaryTable(seenStatements).column(statement).onCommitDrop().execute()
+                val inserts = listOf("-- not a comment", "/* not a comment */").map { marker ->
+                    sql.insertInto(seenStatements, statement)
+                        .select(sql.select(currentQuery).where(DSL.inline(marker).ne(DSL.inline(""))))
+                }
+                sql.batch(inserts).execute()
+                sql.select(statement).from(seenStatements).fetch(statement)
+            }
         }, "sessions-cleanup-3").apply {
             start()
             join()
@@ -140,10 +156,13 @@ class DatabaseObservationTests : MessengerIntegrationTest() {
         val observedSql = DSL.using(DefaultConfiguration().set(SQLDialect.POSTGRES).set(dataSource).set(listener))
         val name = "recorder-${newId()}"
         TransactionTemplate(manager).execute {
-            observedSql.execute("insert into users(id,username,password_hash) values (?,?,?)", newId(), name, "hash")
+            observedSql.insertInto(USERS, USERS.ID, USERS.USERNAME, USERS.PASSWORD_HASH).values(newId(), name, "hash").execute()
         }
         assertNotNull(users.findUserByUsername(name))
-        assertThrows(org.jooq.exception.DataAccessException::class.java) { observedSql.execute("select * from missing_observation_table") }
+        val missingTable = DSL.table(DSL.name("missing_observation_table"))
+        val failure = assertThrows(DataAccessException::class.java) { observedSql.selectOne().from(missingTable).fetch() }
+        val sqlFailure = generateSequence<Throwable>(failure) { it.cause }.filterIsInstance<SQLException>().first()
+        assertEquals("42P01", sqlFailure.sqlState)
         assertTrue(broken.get("messenger.database.instrumentation.failures").gauge().value() > 0)
     }
 

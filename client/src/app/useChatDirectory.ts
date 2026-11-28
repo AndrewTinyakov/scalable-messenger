@@ -10,7 +10,6 @@ import { ApiError, type api } from '../shared/api/http'
 import type { ActivityMessage } from '../shared/api/socket'
 
 type SessionApi = ReturnType<typeof api.forSession>
-/** The server counts unread messages among the newest 256; past that it reports a capped count. */
 const UNREAD_WINDOW = 256
 
 interface ChatDirectoryOptions {
@@ -248,9 +247,7 @@ export function useChatDirectory({
         chatsRef.current = next
         setChats(next)
       })
-      .catch(() => {
-        /* A later chat refresh or selection retries. */
-      })
+      .catch(() => {})
     return () => {
       active = false
     }
@@ -340,11 +337,6 @@ export function useChatDirectory({
     },
     [refreshChatSummary],
   )
-  /**
-   * Shows a newly saved message in its chat-list row without asking the server.
-   * Returns false when the row can't be updated exactly, so the caller refreshes it instead:
-   * a message was missed in between, or the unread count would reach the server's cap.
-   */
   const applyActivity = useCallback(
     (chatId: string, sequence: string, message: ActivityMessage): boolean => {
       const existing = chatsRef.current.find((chat) => chat.id === chatId)

@@ -6,6 +6,8 @@ The gateway now shares one encoded event across recipients, keeps compact frame 
 
 Transport close and grant revocation happen first; connection counts and presence are written asynchronously by the gateway, never per idle socket. Draining rejects new upgrades, spreads connection closure over the configured drain interval, and joins owned work before shutdown completes. SQL commit, request deduplication, publisher confirmation and membership checks keep their existing guarantees. See the [broker decision](adr/0001-messenger-broker-split.md) for delivery and recovery rules.
 
+Send, handshake, subscription and presence watch limits are shared per user across gateways. Connection keys use the same SHA-256 hash tag to stay in one Redis slot and keep raw IDs out of keys. Handshake and subscription checks use independent Redis-time GCRA limits. A rejected attempt does not extend the window. The handshake checks its limit after authentication and before acquiring a fleet connection slot. Subscription attempts are charged before group authorization, with one token per requested chat in an atomic batch. The presence watch limit allows a burst of 30 and refills at three per second.
+
 ## Measured allocations
 
 These are local Go microbenchmarks on an Apple M3 Pro, comparing the saved initial working tree with the implementation. Each benchmark ran once for one second. They measure the named operation, not deployed requests per second or the maximum socket count.
@@ -18,6 +20,8 @@ These are local Go microbenchmarks on an Apple M3 Pro, comparing the saved initi
 | Decode a live Redis envelope, allocations | 251 allocs/op | 144 allocs/op |
 
 The queue allocation fell by about 94%. Shared event bytes also avoid encoding the same group event separately for every recipient. Logical item and byte limits still apply to every socket even when sockets reference the same bytes.
+
+Quiet Redis room listeners use one inline event slot. The ring buffer grows during bursts, subject to item and byte limits. `BenchmarkPositionSweep` measures the sweep scheduler with fixed stubbed Tail latency. Use a Redis Cluster workload to measure the real Redis path.
 
 Run the current benchmarks with:
 
@@ -211,6 +215,8 @@ go -C tests/load/ws test -race ./...
 
 The system suite checks replica discovery and drain/reconnect behavior. Run the observed public fanout smoke against the local Compose stack. Automatic CI compiles, lints and runs fast unit/contract checks without starting infrastructure.
 
+The Redis dial-failure test uses a short path under `/tmp` because macOS limits Unix socket paths to 104 bytes and the normal test temp directory can exceed it.
+
 Before raising node limits, measure long idle runs at the intended socket count, then the intended group size and event rate. Repeat with paused readers and a lost gateway. Increase the generator fleet if its CPU or source ports are limiting the result. Record the first limiting resource and keep admission headroom below it.
 
 Pub/Sub remains one feed per Redis primary. More feed shards are a later profiling decision if dispatch saturation becomes the limiting resource. Database scaling is outside this work.
@@ -220,3 +226,7 @@ Pub/Sub remains one feed per Redis primary. More feed shards are a later profili
 The load tool also supports seeded `mixed` scenarios with overlapping small and large groups, an explicit active-user fraction, varied payload sizes and independently scheduled sends. It verifies each socket's chat sequences and membership-specific notification counts. Existing idle, hot-group fanout, slow-reader, reconnect and drain modes remain available. See [the workload guide](../tests/load/ws/README.md) for scenario files, bounds and reuse commands. The 1000-user example is a test configuration, not a capacity claim.
 
 The [realistic Node workload](../tests/realistic-load/README.md) exercises the presence watch alongside message sends, reads, reconnects and other chat activity. The [gateway-owned presence benchmark](benchmarks/2026-11-26.md) records its workload results and a separate quiet-watch probe against the polling build. The [November 21 campaign](benchmarks/2026-11-21.md) records the earlier workload results.
+
+The presence-only benchmark waits until its monotonic clock passes the deadline before settling on-time deliveries. It keeps missed changes open for another 45 seconds. Reports during that period count as late and absent reports count as missing. The driver's tests cover a late frame arriving before the deadline timer runs, plus watcher closes and changes that supersede earlier ones. See the [presence load measurements](../tests/presence-load/README.md#measurements).
+
+The realistic workload schedules a read 1,250 ms after a chat visit starts to allow for the browser's 700 ms visible dwell, rendering, and read debounce. The first send is scheduled at 3,500 ms to allow time to read the chat and type a short reply. These offsets standardize the offered workload across runs.

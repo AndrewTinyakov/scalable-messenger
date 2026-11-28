@@ -43,10 +43,6 @@ interface MessengerSocketOptions {
 
 const PREVIEW_LENGTH = 160
 
-/**
- * The chat-list view of a new message. Group activity carries it; a saved direct or selected-chat message
- * has everything except the sender's name, which the row's members provide when known.
- */
 function activityMessage(
   frame: Extract<SocketEvent, { type: 'sidebar_activity' | typeof EventType.MESSAGE_SAVED }>,
   chats: Chat[],
@@ -132,7 +128,6 @@ export function useMessengerSocket({
           timer: ReturnType<typeof setTimeout>
         } = { phase: 'idle' }
     const disposed = () => summary.phase === 'closed'
-    // Chats whose row needs a refresh, with the sequence the row must reach (null: refresh regardless).
     const summaryChats = new Map<string, string | null>()
     const refreshSummaries = async () => {
       if (disposed() || summary.phase === 'refreshing') return
@@ -142,7 +137,6 @@ export function useMessengerSocket({
       const rows = listChats()
       await Promise.all(
         batch.map(async ([id, sequence]) => {
-          // Activity that arrived after this was queued may already have brought the row up to date.
           const row = rows.find((chat) => chat.id === id)
           if (sequence !== null && row && BigInt(row.lastSequence) >= BigInt(sequence)) return
           try {
@@ -161,7 +155,6 @@ export function useMessengerSocket({
     const invalidateSummary = (id: string, jitter = false, sequence: string | null = null) => {
       if (disposed() || (summaryChats.size >= 100 && !summaryChats.has(id))) return
       const queued = summaryChats.get(id)
-      // Keep the highest sequence to reach; any unconditional request makes the refresh unconditional.
       if (queued === undefined) summaryChats.set(id, sequence)
       else if (queued === null || sequence === null) summaryChats.set(id, null)
       else if (BigInt(sequence) > BigInt(queued)) summaryChats.set(id, sequence)
@@ -202,7 +195,6 @@ export function useMessengerSocket({
         } else if (
           frame.type === 'message_changed' ||
           frame.type === 'history_changed' ||
-          // Only my own reads change my unread count; only those carry my member sequence.
           (frame.type === 'reads_changed' && frame.memberSeq !== undefined)
         )
           invalidateSummary(frame.chatId)
@@ -311,7 +303,6 @@ export function useMessengerSocket({
             }, reconnectDelay(++groupRetryAttemptsRef.current))
           }
         } else if (frame.type === EventType.RECOVERY_FAILED) {
-          // The missing message may be newer than a catch-up already in flight, so read again after it.
           void catchUp(frame.chatId, false, true)
           void reconcilePending()
         } else if (frame.type === EventType.SUBSCRIPTION_EXPIRED) {

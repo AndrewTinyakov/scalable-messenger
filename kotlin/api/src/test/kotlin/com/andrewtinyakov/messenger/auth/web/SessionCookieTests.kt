@@ -2,6 +2,7 @@ package com.andrewtinyakov.messenger.auth.web
 
 import com.andrewtinyakov.messenger.auth.config.AuthProperties
 import com.andrewtinyakov.messenger.auth.model.SessionToken
+import com.andrewtinyakov.messenger.auth.web.controller.SessionCookie
 import jakarta.servlet.http.Cookie
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse

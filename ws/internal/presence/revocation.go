@@ -2,17 +2,10 @@ package presence
 
 import "time"
 
-// revocation asks gateways to check access to users again after a change
-// that may have ended it, such as a removal from a group. The outbox
-// publisher sends it on each user's bucket, so it reaches only gateways that
-// watch them. It carries no sequence; grant expiry covers a lost one.
 type revocation struct {
 	Revoked []string `json:"r"`
 }
 
-// revoke suspends every local grant on the users and checks them again,
-// along with online counts that may include them. Pairs that still share a
-// chat keep access once the check answers.
 func (h *Hub) revoke(ids []string) {
 	h.mu.Lock()
 	now := time.Now()
@@ -31,8 +24,7 @@ func (h *Hub) revoke(ids []string) {
 			g.expires = now
 			affected[wt][id] = g
 		}
-		// An add already in flight may have read access that is now gone.
-		for wt := range s.adding {
+		for wt := range s.pendingAdds {
 			if affected[wt] == nil {
 				affected[wt] = make(map[string]*grant)
 			}
@@ -41,7 +33,6 @@ func (h *Hub) revoke(ids []string) {
 			counts[wt] = struct{}{}
 		}
 	}
-	// A roster still being read may include a revoked user.
 	for _, wt := range h.watches {
 		if wt.countChat != "" && wt.count == nil {
 			counts[wt] = struct{}{}
@@ -49,8 +40,7 @@ func (h *Hub) revoke(ids []string) {
 	}
 	var renewals []renewal
 	for wt, held := range affected {
-		// Results read before now install suspended.
-		wt.authorized++
+		wt.grantGeneration++
 		if r, ok := h.startRenewalLocked(wt, held); ok {
 			renewals = append(renewals, r)
 		}

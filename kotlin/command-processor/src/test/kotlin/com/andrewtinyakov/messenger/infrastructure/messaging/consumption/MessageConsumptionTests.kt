@@ -1,5 +1,6 @@
 package com.andrewtinyakov.messenger.infrastructure.messaging.consumption
 
+import com.andrewtinyakov.messenger.infrastructure.messaging.monitoring.CommandMetrics
 import com.rabbitmq.client.Channel
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.junit.jupiter.api.Assertions.assertEquals

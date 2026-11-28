@@ -11,6 +11,7 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MES
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.PENDING_READ_NOTIFICATIONS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.USERS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.enums.ChatKind
+import com.andrewtinyakov.messenger.infrastructure.database.postgresFunction
 import com.andrewtinyakov.messenger.infrastructure.redis.RoomAddress
 import com.andrewtinyakov.messenger.message.model.MessageId
 import com.andrewtinyakov.messenger.message.repository.visibleMessage
@@ -23,6 +24,10 @@ import com.andrewtinyakov.messenger.read.model.ReadSummary
 import com.andrewtinyakov.messenger.shared.web.notFound
 import org.jooq.DSLContext
 import org.jooq.impl.DSL
+import org.jooq.impl.SQLDataType.BOOLEAN
+import org.jooq.impl.SQLDataType.INTEGER
+import org.jooq.impl.SQLDataType.LOCALDATE
+import org.jooq.impl.SQLDataType.LOCALDATETIME
 import org.springframework.stereotype.Repository
 import java.time.Clock
 import java.time.LocalDate
@@ -93,7 +98,8 @@ class JooqReadRepository(
             val today = acceptedAt.withOffsetSameInstant(ZoneOffset.UTC).toLocalDate()
             return (0L..MessageReadTarget.DETAILS_RETENTION_DAYS).map(today::minusDays)
         }
-        val day = DSL.field("({0} AT TIME ZONE 'UTC')::date", LocalDate::class.java, MESSAGES.CREATED_AT)
+        val utcCreatedAt = postgresFunction("timezone", LOCALDATETIME, DSL.inline("UTC"), MESSAGES.CREATED_AT)
+        val day = DSL.cast(utcCreatedAt, LOCALDATE)
         return db.selectDistinct(day).from(MESSAGES).where(
             MESSAGES.CHAT_ID.eq(chatId.value),
             MESSAGES.SEQUENCE.gt(after),
@@ -158,6 +164,8 @@ class JooqReadRepository(
     }
 
     override fun notificationRooms(chatId: ChatId, now: OffsetDateTime): List<String> {
+        val chatHash = postgresFunction("hashtext", INTEGER, DSL.`val`(chatId.value))
+        val lock = postgresFunction("pg_try_advisory_xact_lock", BOOLEAN, DSL.`val`(NOTIFICATION_LOCK_NAMESPACE), chatHash)
         val inserted = db.insertInto(
             CHAT_READ_NOTIFICATIONS,
             CHAT_READ_NOTIFICATIONS.CHAT_ID,
@@ -168,7 +176,7 @@ class JooqReadRepository(
                 DSL.`val`(chatId.value),
                 DSL.`val`(notificationBucket(now)),
                 DSL.`val`(now.plusMinutes(NOTIFICATION_BUCKET_RETENTION_MINUTES)),
-            ).where(DSL.condition("pg_try_advisory_xact_lock($NOTIFICATION_LOCK_NAMESPACE, hashtext({0}))", DSL.`val`(chatId.value))),
+            ).where(lock.isTrue),
         ).onConflictDoNothing().execute()
         if (inserted == 0) return emptyList()
         val kind = db.select(CHATS.KIND).from(CHATS).where(CHATS.ID.eq(chatId.value), CHATS.DELETED_AT.isNull).fetchOne(CHATS.KIND)
@@ -222,8 +230,7 @@ class JooqReadRepository(
     }
 
     private fun tryCleanupLock(): Boolean =
-        db.select(DSL.field("pg_try_advisory_xact_lock($CLEANUP_LOCK_KEY)", Boolean::class.java))
-            .fetchOne(0, Boolean::class.java) == true
+        db.fetchValue(postgresFunction("pg_try_advisory_xact_lock", BOOLEAN, DSL.`val`(CLEANUP_LOCK_KEY))) == true
 
     private fun notificationBucket(now: OffsetDateTime): Long = now.toEpochSecond() / NOTIFICATION_BUCKET_SECONDS
 

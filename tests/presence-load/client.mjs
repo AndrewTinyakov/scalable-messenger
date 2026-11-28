@@ -1,14 +1,7 @@
-// One benchmark device: a WebSocket that watches presence the way each build's
-// browser client does, and reports every status it learns.
 import WebSocket from 'ws';
 
 const otherSource = { sidebar: 'group', group: 'sidebar' };
 
-// How the browser clients watch. Legacy renews its sidebar watch every 20-23 s
-// and its open-chat watch every 12-15 s. Current sends its watch set once per
-// connection and, like its client, spaces watch commands one second apart.
-// The watch sets themselves are the seeded ones (see plan.mjs), not the
-// browser's rendered rows.
 const adapters = {
   legacy: {
     watch(client) {
@@ -23,8 +16,6 @@ const adapters = {
         client.every(12_000, 3_000, open);
       }
     },
-    // Each poll is valid for `validForMs` after `observedAt`; the browser drops
-    // a stale one and stops trusting a source whose polls stop arriving.
     statuses(frame, client) {
       const source = { sidebar_presence: 'sidebar', presence: 'group' }[frame.type];
       if (!source) return null;
@@ -33,8 +24,6 @@ const adapters = {
         client.hub.count('presence.staleFrame');
         return null;
       }
-      // Expired states go before this poll renews its source; a group poll
-      // carries only changes, so it must not revive them.
       adapters.legacy.prune(client);
       client.validUntil[source] = validUntil;
       return { source, entries: frame.statuses.map(status => [status.userId, { online: true, offline: false }[status.state]]) };
@@ -43,8 +32,6 @@ const adapters = {
       const now = Date.now();
       return client.validUntil.sidebar > now && (!client.watch.group || client.validUntil.group > now);
     },
-    // Forgets the states a source reported once its polls expire, keeping any
-    // state the other source still vouches for.
     prune(client) {
       const now = Date.now();
       for (const [source, states] of Object.entries(client.sources)) {
@@ -91,30 +78,22 @@ export class Client {
     this.reset();
   }
 
-  // State that belongs to one connection.
   reset() {
-    // subject index -> last known online state.
     this.known = new Map();
     this.readyAt = null;
-    // A current client with its group open is not ready until the online count arrives.
     this.awaitingCount = this.adapter === adapters.current && Boolean(this.watch.group);
     this.validUntil = {};
-    // Legacy only: the states each poll source last reported.
     this.sources = { sidebar: new Map(), group: new Map() };
-    // Error codes and denied user IDs seen on this connection.
     this.errors = [];
     this.denied = new Set();
     this.closing = false;
   }
 
-  // Ready while open with a fresh known state for every watched user and, for
-  // a current client with its group open, a received online count.
   get ready() {
     this.prune();
     return this.open && this.known.size === this.expected.size && !this.awaitingCount && this.adapter.fresh(this);
   }
 
-  // Drops states that are no longer valid; call before reading `known`.
   prune() {
     this.adapter.prune(this);
   }
@@ -204,8 +183,6 @@ export class Client {
     for (const [userId, online] of entries) {
       const subject = this.hub.userIndex(userId);
       if (subject === undefined || !this.expected.has(subject)) {
-        // A state for a user outside the watch set would leak presence; an
-        // "unavailable" answer for one is the expected denial.
         if (online === undefined) this.denied.add(userId);
         this.hub.count(online === undefined ? 'presence.denied' : 'presence.unexpectedSubject');
         continue;

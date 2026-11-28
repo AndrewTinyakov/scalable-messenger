@@ -1,7 +1,7 @@
 package com.andrewtinyakov.messenger.auth.config
 
-import com.andrewtinyakov.messenger.auth.web.ApiSessionInterceptor
-import com.andrewtinyakov.messenger.auth.web.AuthenticatedSessionArgumentResolver
+import com.andrewtinyakov.messenger.auth.web.controller.ApiSessionInterceptor
+import com.andrewtinyakov.messenger.auth.web.controller.AuthenticatedSessionArgumentResolver
 import org.springframework.context.annotation.Configuration
 import org.springframework.web.method.support.HandlerMethodArgumentResolver
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry

@@ -21,20 +21,20 @@ const (
 )
 
 type subscriptionGroup struct {
-	hub           *subscriptionHub
-	address       string
-	client        *redis.Client
-	owned         bool
-	pubsub        *redis.PubSub
-	ctx           context.Context
-	cancel        context.CancelFunc
-	dropped       chan struct{} // closed after this group leaves the hub
-	mu            sync.Mutex
-	listeners     map[string]*Listener
-	unsubscribing map[string]chan struct{} // per-channel unsubscribe completion, guarded by mu
-	expectedAcks  map[string]int           // our own SUNSUBSCRIBE replies still to arrive, guarded by mu
-	unsubscribe   func(context.Context, string) error
-	state         subscriptionGroupState
+	hub                     *subscriptionHub
+	address                 string
+	client                  *redis.Client
+	owned                   bool
+	pubsub                  *redis.PubSub
+	ctx                     context.Context
+	cancel                  context.CancelFunc
+	removedFromHub          chan struct{}
+	mu                      sync.Mutex
+	listeners               map[string]*Listener
+	pendingUnsubscribes     map[string]chan struct{}
+	expectedUnsubscribeAcks map[string]int
+	unsubscribe             func(context.Context, string) error
+	state                   subscriptionGroupState
 }
 
 func (group *subscriptionGroup) add(ctx context.Context, room string) (*Listener, error) {
@@ -45,7 +45,7 @@ func (group *subscriptionGroup) add(ctx context.Context, room string) (*Listener
 			group.mu.Unlock()
 			return nil, errSubscriptionClosed
 		}
-		if pending := group.unsubscribing[channel]; pending != nil {
+		if pending := group.pendingUnsubscribes[channel]; pending != nil {
 			group.mu.Unlock()
 			select {
 			case <-pending:
@@ -113,17 +113,15 @@ func (group *subscriptionGroup) read() {
 			switch item.Kind {
 			case "ssubscribe":
 				if listener != nil {
-					listener.signalReady(nil)
+					listener.signalReadyLocked(nil)
 				}
 			case "sunsubscribe":
-				// Redis also unsubscribes on its own when a slot moves; the
-				// listener must then resubscribe on the new owner.
-				if group.expectedAcks[item.Channel] > 0 {
-					if group.expectedAcks[item.Channel]--; group.expectedAcks[item.Channel] == 0 {
-						delete(group.expectedAcks, item.Channel)
+				if group.expectedUnsubscribeAcks[item.Channel] > 0 {
+					if group.expectedUnsubscribeAcks[item.Channel]--; group.expectedUnsubscribeAcks[item.Channel] == 0 {
+						delete(group.expectedUnsubscribeAcks, item.Channel)
 					}
 				} else if listener != nil {
-					group.hub.forgetSlots()
+					group.hub.invalidateSlotOwners()
 					go group.remove(listener, errSubscriptionMoved)
 				}
 			}
@@ -158,7 +156,7 @@ func (group *subscriptionGroup) deliver(message *redis.Message) {
 	}
 	group.mu.Lock()
 	if group.listeners[message.Channel] == listener {
-		if !listener.enqueue(live, len(message.Payload)) {
+		if !listener.enqueueLocked(live, len(message.Payload)) {
 			if group.hub.owner.metrics != nil {
 				group.hub.owner.metrics.BrokerEvents.WithLabelValues("buffer_full").Inc()
 			}
@@ -178,13 +176,13 @@ func (group *subscriptionGroup) remove(listener *Listener, reason error) {
 		return
 	}
 	delete(group.listeners, channel)
-	listener.stop(reason)
+	listener.stopLocked(reason)
 	last := len(group.listeners) == 0
 	if last {
 		group.state = subscriptionClosed
 	} else {
-		group.unsubscribing[channel] = make(chan struct{})
-		group.expectedAcks[channel]++
+		group.pendingUnsubscribes[channel] = make(chan struct{})
+		group.expectedUnsubscribeAcks[channel]++
 	}
 	group.mu.Unlock()
 	if last {
@@ -195,13 +193,11 @@ func (group *subscriptionGroup) remove(listener *Listener, reason error) {
 	err := group.unsubscribe(ctx, channel)
 	cancel()
 	if err != nil {
-		// The unsubscribe outcome is unknown. Rebuild the shared PubSub feed
-		// before a new listener can trust this channel again.
 		group.fail(fmt.Errorf("unsubscribe room %s: %w", listener.room, err))
 	}
 	group.mu.Lock()
-	close(group.unsubscribing[channel])
-	delete(group.unsubscribing, channel)
+	close(group.pendingUnsubscribes[channel])
+	delete(group.pendingUnsubscribes, channel)
 	group.mu.Unlock()
 }
 
@@ -216,7 +212,7 @@ func (group *subscriptionGroup) fail(err error) {
 		group.hub.owner.metrics.BrokerEvents.WithLabelValues("redis_feed_failed").Inc()
 	}
 	for _, listener := range group.listeners {
-		listener.stop(err)
+		listener.stopLocked(err)
 	}
 	clear(group.listeners)
 	group.mu.Unlock()
@@ -230,14 +226,14 @@ func (group *subscriptionGroup) close() {
 		_ = group.client.Close()
 	}
 	group.hub.drop(group)
-	close(group.dropped)
+	close(group.removedFromHub)
 }
 
 func (h *subscriptionHub) drop(group *subscriptionGroup) {
 	h.mu.Lock()
 	if h.groups[group.address] == group {
 		delete(h.groups, group.address)
-		h.slots = nil // A reconnect may have moved Redis Cluster slots.
+		h.slots = nil
 	}
 	h.mu.Unlock()
 }

@@ -31,7 +31,6 @@ type LastSeenRecorder interface {
 	RecordLastSeen(context.Context, []grpcauth.LastSeen) error
 }
 
-// Watcher is one socket that observes presence.
 type Watcher interface {
 	Enqueue(protocol.Event) bool
 	PresenceSession() string
@@ -64,13 +63,11 @@ func DefaultConfig() Config {
 
 type redisStore struct{ *redisroom.Client }
 
-// RedisStore adapts the Redis client to the presence store.
 func RedisStore(client *redisroom.Client) Store { return redisStore{client} }
 
 func (s redisStore) SubscribePresence(ctx context.Context, bucket int) (Feed, error) {
 	feed, err := s.Client.SubscribePresence(ctx, bucket)
 	if err != nil {
-		// A nil *Listener in the interface would not compare equal to nil.
 		return nil, err
 	}
 	return feed, nil

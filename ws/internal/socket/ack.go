@@ -14,9 +14,6 @@ import (
 var errPendingACKLimit = errors.New("pending ACK limit reached")
 var errInvalidACK = errors.New("invalid message acknowledgement")
 
-// ackTracker records frames offered to the socket writer, not Redis positions.
-// A received_message frame clears only that live notification. Applied frames
-// record device application, and dismissed frames resolve a skipped interval.
 type ackTracker struct {
 	state         lifecycleState
 	metrics       *monitoring.Metrics
@@ -83,13 +80,13 @@ func (tracker *ackTracker) apply(chatID, sequenceText string) error {
 	}
 	tracker.mu.Lock()
 	defer tracker.mu.Unlock()
-	if !tracker.claimPosition(chatID) {
+	if !tracker.claimPositionLocked(chatID) {
 		return errInvalidACK
 	}
 	if sequence > tracker.applied[chatID] {
 		tracker.applied[chatID] = sequence
 	}
-	tracker.resolvePending(chatID, sequence, true)
+	tracker.resolvePendingLocked(chatID, sequence, true)
 	return nil
 }
 
@@ -100,19 +97,17 @@ func (tracker *ackTracker) dismiss(chatID, sequenceText string) error {
 	}
 	tracker.mu.Lock()
 	defer tracker.mu.Unlock()
-	if !tracker.claimPosition(chatID) {
+	if !tracker.claimPositionLocked(chatID) {
 		return errInvalidACK
 	}
 	if sequence > tracker.dismissed[chatID] {
 		tracker.dismissed[chatID] = sequence
 	}
-	tracker.resolvePending(chatID, sequence, false)
+	tracker.resolvePendingLocked(chatID, sequence, false)
 	return nil
 }
 
-// Caller holds tracker.mu. Arbitrary client chat IDs must not grow the
-// per-connection cursor maps without bound.
-func (tracker *ackTracker) claimPosition(chatID string) bool {
+func (tracker *ackTracker) claimPositionLocked(chatID string) bool {
 	if _, exists := tracker.positionChats[chatID]; exists {
 		return true
 	}
@@ -156,8 +151,7 @@ func (tracker *ackTracker) receivedMessage(chatID, sequenceText string) error {
 	return nil
 }
 
-// Caller holds tracker.mu.
-func (tracker *ackTracker) resolvePending(chatID string, sequence uint64, applied bool) {
+func (tracker *ackTracker) resolvePendingLocked(chatID string, sequence uint64, applied bool) {
 	positions := tracker.pending[chatID]
 	for pending := range positions {
 		if pending <= sequence {

@@ -11,9 +11,7 @@ import (
 	"messenger/ws/internal/roomname"
 )
 
-// revoke sends a revocation on each user's bucket, the way the outbox
-// publisher does after a removal or a group deletion.
-func (s *fakeStore) revoke(userIDs ...string) {
+func (s *fakeStore) publishRevocation(userIDs ...string) {
 	byBucket := make(map[int][]string)
 	for _, id := range userIDs {
 		b := roomname.PresenceBucketOf(id)
@@ -21,7 +19,7 @@ func (s *fakeStore) revoke(userIDs ...string) {
 	}
 	for b, ids := range byBucket {
 		payload, _ := json.Marshal(revocation{Revoked: ids})
-		s.send(b, string(payload))
+		s.sendRawBucketMessage(b, string(payload))
 	}
 }
 
@@ -51,9 +49,8 @@ func TestHubRechecksOnlyTheRevokedSubject(t *testing.T) {
 		t.Fatal(err)
 	}
 	bob.next(t)
-	// Alice was removed from the only chat she shared with Bob.
 	deny(auth, alice)
-	store.revoke(alice)
+	store.publishRevocation(alice)
 	event := bob.next(t)
 	if len(event.Statuses) != 0 || !slices.Equal(event.Unavailable, []string{alice}) {
 		t.Fatalf("after revocation = %+v", event)
@@ -61,9 +58,9 @@ func TestHubRechecksOnlyTheRevokedSubject(t *testing.T) {
 	if call := lastCall(auth); !slices.Equal(call, []string{alice}) {
 		t.Fatalf("rechecked %v, want only alice", call)
 	}
-	store.publish(alice, true, 1)
+	store.publishPresenceTransition(alice, true, 1)
 	bob.quiet(t)
-	store.publish(carol, true, 1)
+	store.publishPresenceTransition(carol, true, 1)
 	if event := bob.next(t); len(event.Statuses) != 1 || event.Statuses[0].UserID != carol {
 		t.Fatalf("carol after revocation = %+v", event)
 	}
@@ -78,12 +75,11 @@ func TestHubKeepsASubjectAnotherChatStillShares(t *testing.T) {
 		t.Fatal(err)
 	}
 	bob.next(t)
-	store.revoke(alice)
-	// The recheck keeps access and sends the current status again.
+	store.publishRevocation(alice)
 	if event := bob.next(t); len(event.Unavailable) != 0 || len(event.Statuses) != 1 {
 		t.Fatalf("after the recheck = %+v", event)
 	}
-	store.publish(alice, true, 1)
+	store.publishPresenceTransition(alice, true, 1)
 	if event := bob.next(t); len(event.Unavailable) != 0 || len(event.Statuses) != 1 || !event.Statuses[0].Online {
 		t.Fatalf("after a revocation that changed nothing = %+v", event)
 	}
@@ -98,14 +94,14 @@ func TestHubRevocationLeavesTheBucketSequenceAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	bob.next(t)
-	store.publish(alice, true, 1)
+	store.publishPresenceTransition(alice, true, 1)
 	bob.next(t)
-	store.revoke(alice)
+	store.publishRevocation(alice)
 	bob.next(t)
 	store.mu.Lock()
 	subscribes, snapshots := store.subscribes, store.snapshots
 	store.mu.Unlock()
-	store.publish(alice, false, 1)
+	store.publishPresenceTransition(alice, false, 1)
 	if event := bob.next(t); len(event.Statuses) != 1 || event.Statuses[0].Online {
 		t.Fatalf("after revocation = %+v", event)
 	}
@@ -116,32 +112,29 @@ func TestHubRevocationLeavesTheBucketSequenceAlone(t *testing.T) {
 	}
 }
 
-func TestHubSuspendsAnAddAuthorizedBeforeARevocation(t *testing.T) {
+func TestHubImmediatelyRechecksFirstWatchAuthorizedBeforeRevocation(t *testing.T) {
 	store, auth := newFakeStore(), &fakeAuth{}
 	alice := user(1)
 	hub := startHub(t, store, auth, testConfig())
 	bob := newFakeWatcher()
-	// Bob's first watch of Alice reads that he may see her, then stalls while
-	// she is removed. No other socket here watches her.
 	release := make(chan struct{})
 	auth.mu.Lock()
-	auth.hold = release
+	auth.visibilityReplyHold = release
 	auth.mu.Unlock()
 	watched := make(chan error, 1)
 	go func() { watched <- hub.Watch(context.Background(), bob, []string{alice}, nil, false) }()
-	waitHeld(auth, func() bool { return auth.hold != nil })
+	waitHeld(auth, func() bool { return auth.visibilityReplyHold != nil })
 	deny(auth, alice)
-	store.revoke(alice)
+	store.publishRevocation(alice)
 	time.Sleep(20 * time.Millisecond)
 	close(release)
 	if err := <-watched; err != nil {
 		t.Fatal(err)
 	}
-	// The suspended result is checked again at once, not at the next sweep.
 	if event := bob.next(t); len(event.Statuses) != 0 || !slices.Equal(event.Unavailable, []string{alice}) {
 		t.Fatalf("after the stale add = %+v", event)
 	}
-	store.publish(alice, true, 1)
+	store.publishPresenceTransition(alice, true, 1)
 	bob.quiet(t)
 }
 
@@ -160,7 +153,7 @@ func TestHubRefreshesCountsThatIncludeARevokedMember(t *testing.T) {
 	auth.mu.Lock()
 	auth.members["group"] = []string{carol}
 	auth.mu.Unlock()
-	store.revoke(alice)
+	store.publishRevocation(alice)
 	if event := bob.next(t); event.Members != 1 {
 		t.Fatalf("count after revocation = %+v", event)
 	}
@@ -171,7 +164,6 @@ func TestHubFencesARosterReadBeforeARevocation(t *testing.T) {
 	alice, carol := user(1), user(3)
 	auth := &fakeAuth{members: map[string][]string{"group": {alice, carol}}}
 	hub := startHub(t, store, auth, testConfig())
-	// Another socket watches Alice, so her bucket is subscribed here.
 	dave := newFakeWatcher()
 	if err := hub.Watch(context.Background(), dave, []string{alice}, nil, false); err != nil {
 		t.Fatal(err)
@@ -180,14 +172,14 @@ func TestHubFencesARosterReadBeforeARevocation(t *testing.T) {
 	bob := newFakeWatcher()
 	release := make(chan struct{})
 	auth.mu.Lock()
-	auth.countHold = release
+	auth.rosterReplyHold = release
 	auth.mu.Unlock()
 	go func() { _ = hub.WatchOnlineCount(context.Background(), bob, "group") }()
-	waitHeld(auth, func() bool { return auth.countHold != nil })
+	waitHeld(auth, func() bool { return auth.rosterReplyHold != nil })
 	auth.mu.Lock()
 	auth.members["group"] = []string{carol}
 	auth.mu.Unlock()
-	store.revoke(alice)
+	store.publishRevocation(alice)
 	time.Sleep(20 * time.Millisecond)
 	close(release)
 	if event := bob.next(t); event.Members != 1 {
@@ -207,10 +199,10 @@ func TestHubRenewalDoesNotRestoreARemovedWatch(t *testing.T) {
 	bob.next(t)
 	release := make(chan struct{})
 	auth.mu.Lock()
-	auth.hold = release
+	auth.visibilityReplyHold = release
 	auth.mu.Unlock()
 	hub.Revalidate(bob)
-	waitHeld(auth, func() bool { return auth.hold != nil })
+	waitHeld(auth, func() bool { return auth.visibilityReplyHold != nil })
 	if err := hub.Watch(context.Background(), bob, nil, []string{alice}, false); err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +214,7 @@ func TestHubRenewalDoesNotRestoreARemovedWatch(t *testing.T) {
 	if restored {
 		t.Fatal("a renewal restored a removed watch")
 	}
-	store.publish(alice, true, 1)
+	store.publishPresenceTransition(alice, true, 1)
 	bob.quiet(t)
 }
 
@@ -241,15 +233,15 @@ func TestHubIgnoresMalformedRevocations(t *testing.T) {
 		foreign += "x"
 	}
 	hub.mu.Lock()
-	generation := hub.watches[bob].authorized
+	generation := hub.watches[bob].grantGeneration
 	hub.mu.Unlock()
 	for _, raw := range []string{`{"r":[]}`, `{"r":["` + foreign + `"]}`, `{"u":"` + alice + `","r":["` + alice + `"]}`} {
-		store.send(bucket, raw)
+		store.sendRawBucketMessage(bucket, raw)
 	}
 	time.Sleep(20 * time.Millisecond)
 	hub.mu.Lock()
 	defer hub.mu.Unlock()
-	if hub.watches[bob].authorized != generation || !hub.watches[bob].grants[alice].expires.After(time.Now()) {
+	if hub.watches[bob].grantGeneration != generation || !hub.watches[bob].grants[alice].expires.After(time.Now()) {
 		t.Fatal("a malformed revocation changed the watch")
 	}
 }
@@ -263,28 +255,26 @@ func TestHubKeepsANewerAddFencedAfterAnOldRenewalEnds(t *testing.T) {
 		t.Fatal(err)
 	}
 	bob.next(t)
-	// A renewal of Alice stalls; Bob removes and adds her again meanwhile.
 	renewal := make(chan struct{})
 	auth.mu.Lock()
-	auth.hold = renewal
+	auth.visibilityReplyHold = renewal
 	auth.mu.Unlock()
 	hub.Revalidate(bob)
-	waitHeld(auth, func() bool { return auth.hold != nil })
+	waitHeld(auth, func() bool { return auth.visibilityReplyHold != nil })
 	if err := hub.Watch(context.Background(), bob, nil, []string{alice}, false); err != nil {
 		t.Fatal(err)
 	}
 	add := make(chan struct{})
 	auth.mu.Lock()
-	auth.hold = add
+	auth.visibilityReplyHold = add
 	auth.mu.Unlock()
 	watched := make(chan error, 1)
 	go func() { watched <- hub.Watch(context.Background(), bob, []string{alice}, nil, false) }()
-	waitHeld(auth, func() bool { return auth.hold != nil })
-	// The old renewal ends while the new add is still in flight.
+	waitHeld(auth, func() bool { return auth.visibilityReplyHold != nil })
 	close(renewal)
 	time.Sleep(20 * time.Millisecond)
 	deny(auth, alice)
-	store.revoke(alice)
+	store.publishRevocation(alice)
 	time.Sleep(20 * time.Millisecond)
 	close(add)
 	if err := <-watched; err != nil {
@@ -299,7 +289,7 @@ func TestHubKeepsANewerAddFencedAfterAnOldRenewalEnds(t *testing.T) {
 			break
 		}
 	}
-	store.publish(alice, true, 1)
+	store.publishPresenceTransition(alice, true, 1)
 	bob.quiet(t)
 }
 
@@ -313,15 +303,15 @@ func TestHubRejectsARevocationMixedWithATransition(t *testing.T) {
 	}
 	bob.next(t)
 	hub.mu.Lock()
-	generation := hub.watches[bob].authorized
+	generation := hub.watches[bob].grantGeneration
 	hub.mu.Unlock()
 	for _, raw := range []string{`{"r":["` + alice + `"],"v":"9","s":1,"o":true}`, `{"r":["` + alice + `"],"o":false}`, `{"r":["` + alice + `"],"s":0}`, `{"R":["` + alice + `"]}`} {
-		store.send(roomname.PresenceBucketOf(alice), raw)
+		store.sendRawBucketMessage(roomname.PresenceBucketOf(alice), raw)
 	}
 	time.Sleep(20 * time.Millisecond)
 	hub.mu.Lock()
 	defer hub.mu.Unlock()
-	if hub.watches[bob].authorized != generation {
+	if hub.watches[bob].grantGeneration != generation {
 		t.Fatal("a mixed message was taken as a revocation")
 	}
 }

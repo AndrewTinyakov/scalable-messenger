@@ -1,11 +1,21 @@
 package com.andrewtinyakov.messenger.chat.service
 
 import com.andrewtinyakov.messenger.ApiApplication
+import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.auth.service.AuthenticationService
+import com.andrewtinyakov.messenger.chat.model.directPairKey
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHATS
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHAT_MEMBERS
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSAGES
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSENGER_OUTBOX_EVENTS
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.SEND_REQUESTS
+import com.andrewtinyakov.messenger.infrastructure.redis.RoomAddress
 import com.andrewtinyakov.messenger.message.model.CommandResult
 import com.andrewtinyakov.messenger.message.service.MessageSendService
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
+import com.andrewtinyakov.messenger.shared.id.isValidId
 import com.andrewtinyakov.messenger.shared.id.newId
+import org.jooq.DSLContext
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -31,6 +41,7 @@ class DirectChatLookupTests
         private val authenticationService: AuthenticationService,
         private val messageSendService: MessageSendService,
         private val mapper: ObjectMapper,
+        private val sql: DSLContext,
     ) : MessengerIntegrationTest() {
         private val http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()
 
@@ -39,7 +50,7 @@ class DirectChatLookupTests
             val sender = account()
             val recipient = user("draft_${newId()}")
             val username = db.queryForObject("SELECT username FROM users WHERE id=?", String::class.java, recipient)
-            val before = durableCounts()
+            val before = durableCounts(sender.first, recipient)
 
             repeat(2) {
                 val response = get(recipient, sender.second)
@@ -51,7 +62,7 @@ class DirectChatLookupTests
                 assertTrue(body.path("chat").isNull)
             }
 
-            assertEquals(before, durableCounts())
+            assertEquals(before, durableCounts(sender.first, recipient))
         }
 
         @Test
@@ -63,7 +74,7 @@ class DirectChatLookupTests
                 messageSendService.process(command(left.first, newId(), "hello", recipient = right.first)),
             )
             val chatId = db.queryForObject("SELECT chat_id FROM messages WHERE sender_id=?", String::class.java, left.first)
-            val before = durableCounts()
+            val before = durableCounts(left.first, right.first)
 
             for ((viewer, recipient) in listOf(left to right, right to left)) {
                 val response = get(recipient.first, viewer.second)
@@ -78,18 +89,19 @@ class DirectChatLookupTests
                 assertEquals(setOf(left.first, right.first), chat.path("members").toList().map { it.path("id").stringValue() }.toSet())
             }
 
-            assertEquals(before, durableCounts())
+            assertEquals(before, durableCounts(left.first, right.first))
         }
 
         @Test
         fun `self unknown and malformed recipients return useful client errors`() {
             val sender = account()
-            val before = durableCounts()
             val cases = listOf(
                 Triple(sender.first, 400, "VALIDATION_FAILED"),
                 Triple(newId(), 404, "NOT_FOUND"),
                 Triple("invalid", 400, "VALIDATION_FAILED"),
             )
+            val users = (listOf(sender.first) + cases.map { it.first }).toTypedArray()
+            val before = durableCounts(*users)
 
             for ((recipient, status, code) in cases) {
                 val response = get(recipient, sender.second)
@@ -101,7 +113,7 @@ class DirectChatLookupTests
                 }
             }
 
-            assertEquals(before, durableCounts())
+            assertEquals(before, durableCounts(*users))
         }
 
         @Test
@@ -138,8 +150,21 @@ class DirectChatLookupTests
             return http.send(request.build(), HttpResponse.BodyHandlers.ofString())
         }
 
-        private fun durableCounts(): List<Long?> =
-            listOf("chats", "chat_members", "messages", "send_requests", "messenger_outbox_events").map {
-                db.queryForObject("SELECT count(*) FROM $it", Long::class.java)
+        private fun durableCounts(vararg ids: String): List<Int> {
+            val users = ids.filter(::isValidId).map(::UserId).distinct()
+            val userIds = users.map(UserId::value)
+            val pairKeys = users.flatMapIndexed { index, user ->
+                users.drop(index + 1).map { directPairKey(user, it) }
             }
+            val memberships = sql.select(CHAT_MEMBERS.CHAT_ID).from(CHAT_MEMBERS).where(CHAT_MEMBERS.USER_ID.`in`(userIds))
+            val chatFilter = CHATS.ID.`in`(memberships).or(CHATS.DIRECT_PAIR_KEY.`in`(pairKeys))
+            val chats = sql.select(CHATS.ID).from(CHATS).where(chatFilter)
+            return listOf(
+                sql.fetchCount(CHATS, chatFilter),
+                sql.fetchCount(CHAT_MEMBERS, CHAT_MEMBERS.CHAT_ID.`in`(chats)),
+                sql.fetchCount(MESSAGES, MESSAGES.CHAT_ID.`in`(chats).or(MESSAGES.SENDER_ID.`in`(userIds))),
+                sql.fetchCount(SEND_REQUESTS, SEND_REQUESTS.CHAT_ID.`in`(chats).or(SEND_REQUESTS.SENDER_ID.`in`(userIds))),
+                sql.fetchCount(MESSENGER_OUTBOX_EVENTS, MESSENGER_OUTBOX_EVENTS.ROOM.`in`(users.map(RoomAddress::user))),
+            )
+        }
     }

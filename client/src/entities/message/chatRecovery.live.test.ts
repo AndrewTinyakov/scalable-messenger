@@ -244,7 +244,6 @@ it('reads history again after a recovery hint that arrives during an older catch
   )
   const opening = recovery.catchUp('chat')
   await vi.waitFor(() => expect(after).toHaveBeenCalledTimes(1))
-  // Message 2 commits after the running request took its snapshot; the socket reports recovery_failed.
   const hints = [
     recovery.catchUp('chat', false, '0', false, true),
     recovery.catchUp('chat', false, '0', false, true),

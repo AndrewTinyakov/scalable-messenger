@@ -1,7 +1,5 @@
 import { check, Measurements } from './transport.mjs';
 
-// Adds shard reports together. Correctness counters cover recipients in the sender's own shard; cross-shard
-// deliveries contribute latency through the send time each message carries.
 export function mergeReports(parts) {
   check(parts.length > 0 && parts.every(part => part.format === 'messenger-realistic-load-report-v2' && part.rawMetrics && part.verificationRawMetrics), 'shardReports');
   const [first] = parts;

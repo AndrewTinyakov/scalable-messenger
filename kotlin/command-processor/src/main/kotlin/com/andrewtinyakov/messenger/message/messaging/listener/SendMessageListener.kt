@@ -2,8 +2,8 @@ package com.andrewtinyakov.messenger.message.messaging.listener
 
 import com.andrewtinyakov.messenger.generated.messaging.command.SendMessageCommandV1
 import com.andrewtinyakov.messenger.infrastructure.messaging.consumption.CommandKind
-import com.andrewtinyakov.messenger.infrastructure.messaging.consumption.CommandMetrics
 import com.andrewtinyakov.messenger.infrastructure.messaging.consumption.consumeMessage
+import com.andrewtinyakov.messenger.infrastructure.messaging.monitoring.CommandMetrics
 import com.andrewtinyakov.messenger.infrastructure.messaging.rabbit.CommandTopology
 import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStage
 import com.andrewtinyakov.messenger.infrastructure.monitoring.SendStageEvent

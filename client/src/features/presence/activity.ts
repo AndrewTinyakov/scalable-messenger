@@ -4,12 +4,6 @@ export type Activity = { active: boolean; visible: boolean }
 
 const INPUT_EVENTS = ['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart', 'scroll']
 
-/**
- * Reports when this page becomes active or idle, and when it has been hidden
- * long enough to pause delivery. A page is idle once it has been hidden or
- * unfocused for a while, or has had no input for a while, whichever comes
- * first. Focus and return to the page count as input.
- */
 export function watchActivity(
   config: () => PresenceConfig,
   onChange: (activity: Activity) => void,

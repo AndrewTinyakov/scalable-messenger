@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -183,8 +184,75 @@ func (s *fakeState) Renew() {
 
 func testFleet(store *fakeStore) *Fleet { return testFleetWith(store, newFakeState()) }
 
-func testFleetWith(store *fakeStore, state GatewayState) *Fleet {
+func testFleetWith(store Store, state GatewayState) *Fleet {
 	return New(store, state, Config{ConnectionLimit: 2, Heartbeat: 20 * time.Millisecond, TTL: 60 * time.Millisecond, Timeout: time.Second}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+}
+
+type blockedCountWriteStore struct {
+	*fakeStore
+	writing chan struct{}
+	resume  chan struct{}
+}
+
+func (s *blockedCountWriteStore) SetConnections(ctx context.Context, userID, gateway string, count int) error {
+	if s.writing != nil {
+		close(s.writing)
+		s.writing = nil
+		select {
+		case <-s.resume:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return s.fakeStore.SetConnections(ctx, userID, gateway, count)
+}
+
+func TestFleetSerializesCountWritesWithAdmissionForTheSameUser(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		writing := make(chan struct{})
+		store := &blockedCountWriteStore{fakeStore: newFakeStore(), writing: writing, resume: make(chan struct{})}
+		f := testFleetWith(store, newFakeState())
+		if _, _, err := store.Heartbeat(t.Context(), f.ID(), f.config.TTL); err != nil {
+			t.Fatal(err)
+		}
+		for range 2 {
+			if admitted, err := f.Admit(t.Context(), "alice"); err != nil || !admitted {
+				t.Fatalf("initial admission = %v, %v", admitted, err)
+			}
+		}
+		f.Release("alice")
+		ctx, cancel := context.WithCancel(t.Context())
+		stopped := make(chan struct{})
+		go func() {
+			f.Run(ctx)
+			close(stopped)
+		}()
+		defer func() {
+			cancel()
+			<-stopped
+		}()
+		<-writing
+
+		admission := make(chan error, 1)
+		go func() {
+			admitted, err := f.Admit(ctx, "alice")
+			if err == nil && !admitted {
+				err = errors.New("admission rejected")
+			}
+			admission <- err
+		}()
+		synctest.Wait()
+		if len(admission) > 0 {
+			t.Fatal("admission completed while the older count was still being written")
+		}
+		close(store.resume)
+		if err := <-admission; err != nil {
+			t.Fatal(err)
+		}
+		if got := store.total("alice"); got != 2 {
+			t.Fatalf("count after admission = %d, want 2", got)
+		}
+	})
 }
 
 func eventually(t *testing.T, condition func() bool) {

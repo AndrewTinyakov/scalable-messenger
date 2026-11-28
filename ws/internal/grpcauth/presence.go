@@ -30,11 +30,8 @@ type LastSeen struct {
 	SeenAt time.Time
 }
 
-// presenceBatch keeps one visibility request inside the API's 8 KiB gRPC
-// message limit, which fits about 230 user IDs.
 const presenceBatch = 200
 
-// PresenceVisibility authorizes users in batches small enough for the API.
 func (c *Client) PresenceVisibility(ctx context.Context, sessionID string, userIDs []string) (map[string]Visibility, error) {
 	result := make(map[string]Visibility, len(userIDs))
 	for start := 0; start < len(userIDs); start += presenceBatch {

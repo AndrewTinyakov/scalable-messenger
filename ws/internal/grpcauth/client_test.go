@@ -93,7 +93,6 @@ func (s *authorizationServer) AuthorizeGroups(ctx context.Context, request *auth
 	return &authorization.AuthorizeGroupsResponse{AuthorizedChatIds: request.GetChatIds()}, nil
 }
 
-// maxPresenceRequestBytes is the API's default gRPC inbound message limit.
 const maxPresenceRequestBytes = 8192
 
 func (s *authorizationServer) PresenceVisibility(ctx context.Context, request *authorization.PresenceVisibilityRequest) (*authorization.PresenceVisibilityResponse, error) {

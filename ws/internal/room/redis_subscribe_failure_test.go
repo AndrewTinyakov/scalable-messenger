@@ -16,16 +16,15 @@ import (
 )
 
 func TestFailedRedisSubscriptionDoesNotCrashRoomListener(t *testing.T) {
-	// t.TempDir() on macOS exceeds the 104-byte Unix socket path limit.
-	dir, err := os.MkdirTemp("/tmp", "ws-redis-")
+	shortSocketDir, err := os.MkdirTemp("/tmp", "ws-redis-")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Remove(dir) })
+	t.Cleanup(func() { _ = os.Remove(shortSocketDir) })
 
 	missingSocket := (&url.URL{
 		Scheme: "unix",
-		Path:   filepath.Join(dir, "unavailable.sock"),
+		Path:   filepath.Join(shortSocketDir, "unavailable.sock"),
 	}).String()
 	client, err := redisroom.New(missingSocket, nil)
 	if err != nil {

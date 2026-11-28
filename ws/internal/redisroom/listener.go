@@ -17,8 +17,8 @@ const (
 type Listener struct {
 	group       *subscriptionGroup
 	room        string
-	inline      [1]Live // ordinary single-event delivery needs no allocation
-	pending     []Live  // ring buffer, grows only under a burst; guarded by group.mu
+	inlineEvent [1]Live
+	pending     []Live
 	head        int
 	queued      int
 	queuedBytes int
@@ -26,8 +26,8 @@ type Listener struct {
 	ready       chan struct{}
 	done        chan struct{}
 	state       listenerState
-	readyErr    error // guarded by group.mu until ready closes
-	terminalErr error // guarded by group.mu until done closes
+	readyErr    error
+	terminalErr error
 }
 
 func newListener(group *subscriptionGroup, room string) *Listener {
@@ -35,12 +35,11 @@ func newListener(group *subscriptionGroup, room string) *Listener {
 		group: group, room: room,
 		wake: make(chan struct{}, 1), ready: make(chan struct{}), done: make(chan struct{}),
 	}
-	listener.pending = listener.inline[:]
+	listener.pending = listener.inlineEvent[:]
 	return listener
 }
 
-// enqueue is called with group.mu held. A quiet room uses only its inline slot.
-func (listener *Listener) enqueue(live Live, size int) bool {
+func (listener *Listener) enqueueLocked(live Live, size int) bool {
 	if listener.queued == roomEventBufferLimit || listener.queuedBytes+size > roomEventBufferByteLimit {
 		return false
 	}
@@ -81,7 +80,7 @@ func (listener *Listener) Receive(ctx context.Context) (Live, error) {
 			listener.head = (listener.head + 1) % len(listener.pending)
 			listener.queued--
 			if listener.queued == 0 {
-				listener.pending = listener.inline[:]
+				listener.pending = listener.inlineEvent[:]
 				listener.head = 0
 			}
 			listener.group.mu.Unlock()
@@ -109,7 +108,7 @@ func (listener *Listener) Close() error {
 	return nil
 }
 
-func (listener *Listener) signalReady(err error) {
+func (listener *Listener) signalReadyLocked(err error) {
 	if listener.state == listenerSubscribing {
 		listener.readyErr = err
 		listener.state = listenerReady
@@ -117,11 +116,11 @@ func (listener *Listener) signalReady(err error) {
 	}
 }
 
-func (listener *Listener) stop(err error) {
-	listener.signalReady(err)
+func (listener *Listener) stopLocked(err error) {
+	listener.signalReadyLocked(err)
 	listener.terminalErr = err
 	listener.state = listenerStopped
-	listener.inline[0] = Live{}
+	listener.inlineEvent[0] = Live{}
 	listener.pending = nil
 	listener.head = 0
 	listener.queued = 0

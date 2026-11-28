@@ -7,6 +7,7 @@ import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.generated.messaging.event.SavedMessageReferenceV1
 import com.andrewtinyakov.messenger.infrastructure.outbox.EventId
 import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxMessage
+import com.andrewtinyakov.messenger.infrastructure.redis.monitoring.PublicationHydrationMetrics
 import com.andrewtinyakov.messenger.message.model.Message
 import com.andrewtinyakov.messenger.message.model.MessageId
 import com.andrewtinyakov.messenger.message.repository.MessageRepository

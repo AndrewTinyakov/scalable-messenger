@@ -1,14 +1,20 @@
 package com.andrewtinyakov.messenger.infrastructure.redis
 
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Test
+import tools.jackson.core.type.TypeReference
+import tools.jackson.databind.json.JsonMapper
+import java.io.File
 
 class PresenceBucketsTests {
     @Test
-    fun `buckets match the gateway's`() {
-        // Values from roomname.PresenceBucketOf in the gateway.
-        assertEquals(4005, PresenceBuckets.of("01ARZ3NDEKTSV4RRFFQ69G5FA1"))
-        assertEquals(3904, PresenceBuckets.of("01J00000000000000000000000"))
-        assertEquals(135, PresenceBuckets.of("x"))
+    fun `UTF-8 FNV-1a presence buckets match the gateway wire vectors`() {
+        val fixture = File("../../ws/internal/roomname/testdata/presence-buckets.json")
+        val expected = JsonMapper.builder().build().readValue(fixture, object : TypeReference<Map<String, Int>>() {})
+        assertFalse(expected.isEmpty())
+        expected.forEach { (userId, bucket) ->
+            assertEquals(bucket, PresenceBuckets.of(userId), userId)
+        }
     }
 }

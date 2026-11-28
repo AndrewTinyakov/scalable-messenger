@@ -13,9 +13,7 @@ type slotOwner struct {
 	address    string
 }
 
-// address is called with subscriptionHub.mu held. Redis Cluster's sharded
-// Pub/Sub must use a node serving the channel's hash slot.
-func (h *subscriptionHub) address(ctx context.Context, room string) (string, error) {
+func (h *subscriptionHub) slotOwnerAddressLocked(ctx context.Context, room string) (string, error) {
 	cluster, ok := h.owner.redis.(*redis.ClusterClient)
 	if !ok {
 		return "standalone", nil
@@ -42,8 +40,6 @@ func (h *subscriptionHub) address(ctx context.Context, room string) (string, err
 	return "", fmt.Errorf("no Redis Cluster owner for slot %d", slot)
 }
 
-// Channel(room) hashes the room name inside its braces. Redis Cluster uses
-// CRC16/XMODEM modulo 16384 for the hash slot.
 func roomSlot(room string) int {
 	var crc uint16
 	for i := 0; i < len(room); i++ {

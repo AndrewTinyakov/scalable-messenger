@@ -116,7 +116,6 @@ async function main() {
     composeProject: values['compose-project'] ?? 'messenger',
     authRate: Number(values['auth-rate'] ?? 1),
     ticketRate: Number(values['ticket-rate'] ?? 4),
-    // Driver queue limits are sized for 1,000 users and grow with the population.
     capacity: Math.ceil(plan.population.length / shardCount / 1000),
   };
   check(options.authRate >= 1 && options.authRate <= 200 && options.ticketRate >= 1 && options.ticketRate <= 500, 'rateBounds');

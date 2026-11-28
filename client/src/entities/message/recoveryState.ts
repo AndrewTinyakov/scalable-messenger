@@ -155,7 +155,6 @@ export class RecoveryState {
       this.historyBuffered[chatId] = filter(this.historyBuffered[chatId])
   }
 
-  /** Shows quotes of a message the server no longer returns as unavailable. */
   quoteTargetGone(chatId: string, messageId: string): void {
     this.filterWindows(chatId, () => true, new Set([messageId]))
   }

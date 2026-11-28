@@ -15,7 +15,6 @@ import java.util.UUID
 private const val MAX_ROOM_LENGTH = 96
 private const val MAX_REVOKED_PER_MESSAGE = 500
 
-// A deleted group of 100,000 can span all 4,096 buckets, so revocations go out in parallel within the publish timeout.
 private const val REVOCATION_CONCURRENCY = 64
 
 internal class RoomPublicationScript(
@@ -35,7 +34,7 @@ internal class RoomPublicationScript(
     fun publish(message: OutboxMessage): Mono<String> {
         require(message.room.length <= MAX_ROOM_LENGTH && message.room.none { it.isWhitespace() || it == '{' || it == '}' })
         return appendAndPublish(message, publicationOptions(message)).flatMap { streamId ->
-            publishSidebarActivity(message).then(publishPresenceRevocation(message)).thenReturn(streamId)
+            publishLiveSidebarActivity(message).then(publishPresenceRevocation(message)).thenReturn(streamId)
         }
     }
 
@@ -60,8 +59,7 @@ internal class RoomPublicationScript(
         ).single().doOnNext { check(streamIdPattern.matches(it)) { "Redis returned an invalid stream ID" } }
     }
 
-    // Activity is pub/sub only: it never enters the replay stream, so a preview isn't retained after deletion.
-    private fun publishSidebarActivity(message: OutboxMessage): Mono<Long> {
+    private fun publishLiveSidebarActivity(message: OutboxMessage): Mono<Long> {
         if (!RoomAddress.isGroup(message.room)) return Mono.empty()
         val event = mapper.readTree(message.payload)
         if (event.path("type").asText() != RoomEventType.MESSAGE_SAVED.value) return Mono.empty()
@@ -71,9 +69,6 @@ internal class RoomPublicationScript(
         return redis.execute(livePublishScript, listOf("messenger:{activity:$chatId}:live"), listOf(activity)).single()
     }
 
-    // A removal or group deletion can end who may see whose presence. Gateways that watch the affected users
-    // check those grants again; grant expiry covers a lost message. One copy of each event triggers it: the
-    // removed member's user room, or the deleted group's room.
     private fun publishPresenceRevocation(message: OutboxMessage): Mono<Void> = revokedUsers(message).flatMapMany { users ->
         Flux.fromIterable(users.groupBy(PresenceBuckets::of).entries)
             .concatMapIterable { (bucket, ids) -> ids.chunked(MAX_REVOKED_PER_MESSAGE).map { bucket to it } }
@@ -94,7 +89,6 @@ internal class RoomPublicationScript(
                 Mono.just(listOf(event.path("memberId").asText()))
             }
 
-            // The roster read blocks on SQL, so it must not run on a Redis I/O thread.
             type == RoomEventType.CHAT_DELETED.value && RoomAddress.isGroup(message.room) -> {
                 Mono.fromCallable { groupMembers(event.path("chatId").asText()) }.subscribeOn(Schedulers.boundedElastic())
             }

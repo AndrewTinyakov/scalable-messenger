@@ -6,7 +6,7 @@ import com.andrewtinyakov.messenger.infrastructure.outbox.MemoryOutbox
 import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxClaimRepository
 import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxMessage
 import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxPublisherProperties
-import com.andrewtinyakov.messenger.infrastructure.outbox.metrics.OutboxMetrics
+import com.andrewtinyakov.messenger.infrastructure.outbox.monitoring.OutboxMetrics
 import com.andrewtinyakov.messenger.infrastructure.outbox.outboxEvent
 import com.andrewtinyakov.messenger.infrastructure.outbox.outboxTransactions
 import com.andrewtinyakov.messenger.shared.id.newId

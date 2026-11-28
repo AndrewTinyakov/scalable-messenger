@@ -5,7 +5,6 @@ import type {
   SocketEvent,
 } from '../../shared/api/socket'
 
-/** Where a watch comes from. Pinned sources are never evicted by the cap. */
 export type PresenceSource = 'sidebar' | 'header' | 'members' | 'profile'
 
 const BUDGETS: Record<PresenceSource, number> = {
@@ -15,22 +14,15 @@ const BUDGETS: Record<PresenceSource, number> = {
   profile: 10,
 }
 const PINNED: PresenceSource[] = ['header', 'profile']
-/** Sources that fill the remaining capacity, most important first. */
 const FILL_ORDER: PresenceSource[] = ['members', 'sidebar']
 
 export const MAX_WATCHED = 500
 export const UNWATCH_DELAY_MS = 10_000
-/**
- * Watch frames go out in a short burst, then one per second. The gateway
- * allows each user a burst of 30 and 3 per second across all their tabs.
- */
 const SEND_BURST = 4
 const SEND_INTERVAL_MS = 1000
 const RATE_LIMIT_RETRY_MS = 3000
-/** How often to ask again for users the gateway refused. */
 export const DENIED_RETRY_MS = 60_000
 
-/** A status the UI can render. `unavailable` means the viewer may not see it. */
 export type PresenceView = PresenceStatus | { userId: string; unavailable: true }
 
 export type PresenceSnapshot = {
@@ -38,10 +30,6 @@ export type PresenceSnapshot = {
   onlineCounts: ReadonlyMap<string, { online: number; members: number }>
 }
 
-/**
- * Collects which users every part of the UI needs, sends one paced watch per
- * connection and keeps the latest status per user.
- */
 export class PresenceStore {
   private consumers = new Map<PresenceSource, Map<object, readonly string[]>>()
   private sent = new Set<string>()
@@ -49,7 +37,6 @@ export class PresenceStore {
   private statuses = new Map<string, PresenceView>()
   private onlineCounts = new Map<string, { online: number; members: number }>()
   private countWanted: string | undefined
-  /** The count watch the gateway has; null when it must be sent again. */
   private countSent: string | undefined | null
   private listeners = new Set<() => void>()
   private snapshot: PresenceSnapshot = { statuses: this.statuses, onlineCounts: this.onlineCounts }
@@ -76,7 +63,6 @@ export class PresenceStore {
 
   getSnapshot = () => this.snapshot
 
-  /** Replaces the users one consumer of a source needs, in priority order. */
   watch(source: PresenceSource, consumer: object, ids: readonly string[]) {
     const consumers = this.consumers.get(source) ?? new Map<object, readonly string[]>()
     if (ids.length) consumers.set(consumer, ids)
@@ -85,7 +71,6 @@ export class PresenceStore {
     this.schedule(this.now())
   }
 
-  /** Follows one small group's online count; the key changes with its size. */
   watchOnlineCount(chatId: string | undefined, members = 0) {
     const key = chatId ? `${chatId}:${members}` : undefined
     if (key === this.countWanted) return
@@ -93,7 +78,6 @@ export class PresenceStore {
     this.schedule(this.now())
   }
 
-  /** Starts a fresh watch on a new connection, or stops sending when null. */
   connect(send: ((frame: OutgoingSocketFrame) => void) | null) {
     this.countSent = this.countWanted === undefined ? undefined : null
     this.send = send
@@ -115,12 +99,10 @@ export class PresenceStore {
     this.schedule(this.now())
   }
 
-  /** Drops all watches while the page stays hidden, and restores them later. */
   setReleased(released: boolean) {
     if (released === this.released) return
     this.released = released
     if (!this.send) return
-    // A pending rate-limit replay rebuilds everything for the new state.
     if (this.resyncAt !== undefined) return this.schedule(this.resyncAt)
     this.connect(this.send)
   }
@@ -129,7 +111,6 @@ export class PresenceStore {
     const retryable =
       event.type === 'error' && ['RATE_LIMITED', 'DEPENDENCY_UNAVAILABLE'].includes(event.code)
     if (retryable && !event.requestId) {
-      // The gateway may have refused or failed a watch; send the whole set again later.
       this.resyncAt ??= this.now() + RATE_LIMIT_RETRY_MS
       this.schedule(this.resyncAt)
       return false
@@ -160,7 +141,6 @@ export class PresenceStore {
     for (const status of event.statuses) this.statuses.set(status.userId, status)
     for (const userId of event.unavailable ?? [])
       this.statuses.set(userId, { userId, unavailable: true })
-    // Access can arrive without an event this socket sees, so check refusals again later.
     if (event.unavailable?.length && this.deniedRetryAt === undefined) {
       this.deniedRetryAt = this.now() + DENIED_RETRY_MS
       this.schedule(this.deniedRetryAt)
@@ -169,10 +149,6 @@ export class PresenceStore {
     return true
   }
 
-  /**
-   * A new chat may let this user see someone the gateway refused. The gateway
-   * only rechecks grants it already holds, so ask for the refused users again.
-   */
   private retryDenied() {
     const denied = [...this.sent].filter((id) => {
       const view = this.statuses.get(id)
@@ -182,7 +158,6 @@ export class PresenceStore {
     if (denied.length) this.schedule(this.now())
   }
 
-  /** Drops statuses that are no longer watched, so they never render stale. */
   private forget(ids: string[]) {
     if (!ids.length) return
     this.statuses = new Map(this.statuses)
@@ -229,14 +204,12 @@ export class PresenceStore {
     this.sendTokens -= 1
   }
 
-  /** When the pacing next allows a frame. */
   private nextSendAt() {
     const now = this.now()
     this.refill(now)
     return this.sendTokens >= 1 ? now : now + (1 - this.sendTokens) * SEND_INTERVAL_MS
   }
 
-  /** Flushes no earlier than `at` and the send pacing allow. */
   private schedule(at: number) {
     if (!this.send) return
     const due = Math.max(at, this.nextSendAt())
@@ -260,7 +233,6 @@ export class PresenceStore {
     if (this.resyncAt !== undefined) {
       if (now < this.resyncAt) return this.schedule(this.resyncAt)
       this.connect(send)
-      // A refused clear may have left the gateway counting an old group.
       if (this.countSent === undefined) this.countSent = null
       return this.schedule(this.now())
     }
@@ -282,7 +254,6 @@ export class PresenceStore {
       if (this.sent.size - remove.length + add.length <= MAX_WATCHED) break
       if (!remove.includes(id)) remove.push(id)
     }
-    // Count changes are rare and go first so presence churn cannot starve them.
     if (this.countWanted !== this.countSent) {
       const chatId = this.countWanted?.split(':')[0]
       const previous = this.countSent?.split(':')[0]

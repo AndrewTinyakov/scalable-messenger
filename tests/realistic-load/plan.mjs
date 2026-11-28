@@ -1,17 +1,13 @@
-// Builds the whole workload from a profile and a seed, without network or clock access.
-// The same inputs always produce the same plan, so every run offers identical client behavior.
-
 const FORMAT = 'messenger-realistic-load-v1';
 const LIMITS = { users: 10_000, fixtureMessages: 1_000_000, actions: 1_000_000, sends: 200_000, sendsPerSecond: 1000 };
 
-// Offsets in milliseconds, taken from how the browser client behaves around one chat visit.
 const CLIENT = {
   firstVisitAfterOpen: 1700,
-  readDwell: 1250, // 700 ms visible dwell plus rendering and the read debounce
+  readDwell: 1250,
   scrollAfter: 2200,
   preferencesAfter: 2900,
   jumpAfter: 3300,
-  firstSendAfter: 3500, // time to read the chat and type a short reply
+  firstSendAfter: 3500,
   forwardAfter: 4300,
   sendGap: [1000, 3300],
   mutationAfterSend: 3100,
@@ -28,9 +24,9 @@ const ACTION_RATES = ['scroll', 'jump', 'background', 'blip', 'reply', 'mutation
   'pinMessage', 'mute', 'pinChat', 'unread', 'sessions', 'lookup', 'direct', 'group', 'relogin'];
 const PERSONAS = ['lurker', 'casual', 'active', 'power'];
 
-function random(seed) {
+function mulberry32(seed) {
   let state = seed >>> 0;
-  const next = () => { // mulberry32
+  const next = () => {
     state = (state + 0x6D2B79F5) >>> 0;
     let value = Math.imul(state ^ (state >>> 15), state | 1);
     value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
@@ -61,7 +57,6 @@ function random(seed) {
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const pairKey = (a, b) => (a < b ? a + '/' + b : b + '/' + a);
 
-// Gives exactly round(share * count) items to each index, then shuffles who gets which.
 function distribute(rng, count, shares) {
   const quotas = shares.map(share => share * count);
   const sizes = quotas.map(Math.floor);
@@ -100,7 +95,6 @@ export function validateProfile(profile, seed) {
       integer(timing.lagLimitMs, 1, 60000),
     rates: ACTION_RATES.every(key => probability(rates?.[key])) && rates.reply <= .5,
     text: integer(text?.median, 3, 4000) && Number.isFinite(text.spread) && text.spread >= 0 && text.spread <= 4,
-    // Each stage adds users who join at its start. The last stage includes everyone, and joins leave two minutes of traffic.
     ramp: ramp === undefined || (integer(ramp.periodMs, 60000, 3600000) && Array.isArray(ramp.stages) &&
       ramp.stages.length >= 2 && ramp.stages.length <= 20 && ramp.stages[0].atMs === 0 &&
       ramp.stages.at(-1).users === users && ramp.stages.every((stage, i) => integer(stage.users, 8, users) &&
@@ -119,8 +113,6 @@ function planPopulation(rng, { users, personas, devicesPerUser }) {
   }));
 }
 
-// Friends form clusters. Direct chats join cluster neighbours, small groups mostly stay inside one cluster,
-// and the large groups span everyone.
 function planChats(rng, population, { graph, history, text }) {
   const everyone = rng.shuffle(population.map(user => user.id));
   const clusters = [];
@@ -139,8 +131,8 @@ function planChats(rng, population, { graph, history, text }) {
       bytes: Math.round(clamp(rng.lognormal(text.median, text.spread), 12, 4000)),
       textSeed: Math.floor(rng() * 0x100000000),
     }));
-    if (kind === 'DIRECT') messages[0].actor = members[0]; // setup sends the first direct message live
-    messages.at(-1).replyTo = Math.min(4, Math.floor(length / 4)); // a quote that jumps beyond the first page
+    if (kind === 'DIRECT') messages[0].actor = members[0];
+    messages.at(-1).replyTo = Math.min(4, Math.floor(length / 4));
     chats.push({ id: chats.length, kind, members, history: messages });
   };
 
@@ -196,12 +188,10 @@ class Planner {
     });
   }
 
-  // Each device gets its sessions spread over the run. Only one session per device is open at a time.
   planUser(user, persona, directPairs, everyone) {
     const { rng, profile: { durationMs, timing, ramp } } = this;
     const chats = rng.shuffle(this.memberships[user.id]);
     const favorites = chats.slice(0, persona.favoriteChats);
-    // In a ramp, persona session counts are per ramp period, so a user's activity rate doesn't depend on when they join.
     const joined = ramp ? ramp.stages.find(stage => user.id < stage.users).atMs : 0;
     const window = durationMs - joined;
     const sessions = expected => {
@@ -232,7 +222,6 @@ class Planner {
       this.offer(session, at, 'sidebar');
     }
 
-    // Rare account and directory actions happen one after another near the end of the session.
     const others = rng.shuffle(everyone.filter(id => id !== session.actor));
     const stranger = others.find(peer => !directPairs.has(pairKey(session.actor, peer)));
     const rare = [];
@@ -266,7 +255,6 @@ class Planner {
     if (rng.chance(rates.scroll)) this.offer(session, at + CLIENT.scrollAfter, 'scroll', { chat });
     if (rng.chance(rates.jump)) this.offer(session, at + CLIENT.jumpAfter, 'jump', { chat, reference: { quotedBack: 1 } });
 
-    // While the app is in the background or offline, the user can't read or send.
     let away = null;
     if (until - at > CLIENT.background.minimumVisit && rng.chance(rates.background)) {
       const back = Math.min(until - 3000, at + CLIENT.background.after + CLIENT.background.length);
@@ -299,7 +287,6 @@ class Planner {
     if (source !== undefined && rng.chance(rates.forward) && at + CLIENT.forwardAfter < usable) {
       this.offer(session, at + CLIENT.forwardAfter, 'forward', { chat, source, reference: { back: 6 }, bytes: 32, textSeed: session.id });
     }
-    // A final read before leaving catches messages that arrived during the visit.
     if (until - at > 9000 && (!blip || until - 500 > blip.to)) this.offer(session, until - 500, 'read', { chat });
   }
 
@@ -307,7 +294,6 @@ class Planner {
     const { rng, profile: { rates } } = this;
     let at = from;
     for (let n = 0; n <= persona.burst && at + 900 < usable; n++) {
-      // Some replies quote recent history; the rest are planned later as answers to other people.
       const reference = rng.chance(rates.reply * .55) ? { back: 3 } : undefined;
       const id = this.send(session, at, chat, reference ? { reference } : {});
       if (rng.chance(rates.mutation) && at + CLIENT.mutationAfterSend < usable) {
@@ -322,7 +308,6 @@ class Planner {
     }
   }
 
-  // Tops up replies to the profile's share by having someone else who is in the chat at the time answer.
   planReplies() {
     const { rng, profile: { rates, timing } } = this;
     const sends = this.actions.filter(action => action.type === 'send');
@@ -346,7 +331,7 @@ class Planner {
 
 export function buildPlan(profile, seed) {
   validateProfile(profile, seed);
-  const rng = random(seed);
+  const rng = mulberry32(seed);
   const population = planPopulation(rng, profile);
   const { chats, directPairs, everyone } = planChats(rng, population, profile);
   const planner = new Planner(rng, profile, population, chats);

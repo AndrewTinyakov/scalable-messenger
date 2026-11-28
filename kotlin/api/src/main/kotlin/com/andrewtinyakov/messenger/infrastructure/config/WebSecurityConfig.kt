@@ -1,6 +1,6 @@
 package com.andrewtinyakov.messenger.infrastructure.config
 
-import com.andrewtinyakov.messenger.auth.web.BrowserRequestFilter
+import com.andrewtinyakov.messenger.auth.web.controller.BrowserRequestFilter
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.core.Ordered

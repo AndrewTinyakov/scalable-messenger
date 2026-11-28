@@ -207,7 +207,7 @@ func TestRestoredGroupFeedReplaysMessagesPublishedDuringOutage(t *testing.T) {
 	rooms := newPositionRooms(store)
 	sink := &positionSink{}
 	addPositionRoom(rooms, "group:chat", sink)
-	rooms.restorePosition(context.Background(), rooms.rooms["group:chat"], "epoch", "3-0")
+	rooms.reconcileAfterResubscribe(context.Background(), rooms.rooms["group:chat"], "epoch", "3-0")
 	if len(sink.events) != 2 || sink.events[0].EventID != "2-0" || sink.events[1].EventID != "3-0" {
 		t.Fatalf("events after feed restoration = %+v, want the complete gap", sink.events)
 	}
@@ -223,7 +223,7 @@ func TestRestoredGroupFeedRequestsFreshSQLRecoveryWhenReplayFails(t *testing.T) 
 	rooms := newPositionRooms(store)
 	sink := &positionSink{}
 	addPositionRoom(rooms, "group:chat", sink)
-	rooms.restorePosition(context.Background(), rooms.rooms["group:chat"], "epoch", "3-0")
+	rooms.reconcileAfterResubscribe(context.Background(), rooms.rooms["group:chat"], "epoch", "3-0")
 	if len(sink.events) != 1 || sink.events[0].Type != "recovery_failed" {
 		t.Fatalf("events after feed restoration = %+v, want a new SQL recovery signal", sink.events)
 	}
@@ -255,7 +255,7 @@ func TestEpochChangeRequestsSQLRecovery(t *testing.T) {
 		{
 			name: "restored feed",
 			advance: func(rooms *Rooms) {
-				rooms.restorePosition(context.Background(), rooms.rooms["group:chat"], "new-epoch", "1-0")
+				rooms.reconcileAfterResubscribe(context.Background(), rooms.rooms["group:chat"], "new-epoch", "1-0")
 			},
 		},
 	} {

@@ -1,5 +1,6 @@
 package com.andrewtinyakov.messenger.infrastructure.messaging.consumption
 
+import com.andrewtinyakov.messenger.infrastructure.messaging.monitoring.CommandMetrics
 import com.rabbitmq.client.Channel
 import org.slf4j.Logger
 import org.springframework.amqp.core.Message

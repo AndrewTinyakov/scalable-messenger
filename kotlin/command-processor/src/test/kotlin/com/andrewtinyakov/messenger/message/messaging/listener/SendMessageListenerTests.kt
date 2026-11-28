@@ -1,7 +1,7 @@
 package com.andrewtinyakov.messenger.message.messaging.listener
 
 import com.andrewtinyakov.messenger.generated.messaging.command.SendMessageCommandV1
-import com.andrewtinyakov.messenger.infrastructure.messaging.consumption.CommandMetrics
+import com.andrewtinyakov.messenger.infrastructure.messaging.monitoring.CommandMetrics
 import com.andrewtinyakov.messenger.message.model.CommandResult
 import com.andrewtinyakov.messenger.message.monitoring.MessageSendMetrics
 import com.andrewtinyakov.messenger.message.service.MessageSendBatchService

@@ -9,12 +9,8 @@ import (
 	"messenger/ws/internal/grpcauth"
 )
 
-// lastSeenBatch keeps each RecordLastSeen request under the API's 8 KiB
-// inbound gRPC message limit.
 const lastSeenBatch = 150
 
-// lastSeen sends durable "seen at" times in batches, at most once per user
-// per minimum gap.
 type lastSeen struct {
 	recorder LastSeenRecorder
 	config   Config

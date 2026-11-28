@@ -5,9 +5,10 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.Cha
 import org.jooq.Field
 import org.jooq.Record
 import org.jooq.impl.DSL
+import org.jooq.impl.SQLDataType.OFFSETDATETIME
 import java.time.OffsetDateTime
 
-val PERMANENT_MUTE: Field<OffsetDateTime> = DSL.field("'infinity'::timestamptz", OffsetDateTime::class.java)
+val PERMANENT_MUTE: Field<OffsetDateTime> = DSL.cast(DSL.inline("infinity"), OFFSETDATETIME)
 
 class ChatPreferenceFields(
     member: ChatMembers,

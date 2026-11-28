@@ -2,6 +2,10 @@ package com.andrewtinyakov.messenger.infrastructure.database
 
 import com.andrewtinyakov.messenger.ApiApplication
 import org.jooq.DSLContext
+import org.jooq.impl.DSL
+import org.jooq.impl.SQLDataType.BOOLEAN
+import org.jooq.impl.SQLDataType.INTEGER
+import org.jooq.impl.SQLDataType.OTHER
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -42,9 +46,12 @@ class ReplicaReadsTests {
 
     @Autowired private lateinit var sql: DSLContext
 
+    private val probeTable = DSL.table(DSL.name("replica_probe"))
+    private val probeId = DSL.field(DSL.name("id"), INTEGER)
+
     @BeforeEach
     fun createTable() {
-        tx.execute { sql.execute("create table if not exists replica_probe(id int primary key)") }
+        tx.execute { sql.createTableIfNotExists(probeTable).column(probeId).constraints(DSL.primaryKey(probeId)).execute() }
         awaitHealthy()
     }
 
@@ -55,14 +62,14 @@ class ReplicaReadsTests {
 
     @Test
     fun `replica reads run on the standby and primary reads on the primary`() {
-        assertEquals(true, reads.replica { recovering() })
+        assertEquals(true, reads.replica(snapshot = true) { recovering() })
         assertEquals(false, reads.primary { recovering() })
     }
 
     @Test
     fun `a stale replica result falls back to the primary`() {
         replicaAdmin("select pg_wal_replay_pause()")
-        tx.execute { sql.execute("insert into replica_probe values (1)") }
+        tx.execute { sql.insertInto(probeTable, probeId).values(1).execute() }
 
         val fromReplica = reads.replica { probe(1).takeIf { it } }
         val result = fromReplica ?: reads.primary { probe(1) }
@@ -74,28 +81,26 @@ class ReplicaReadsTests {
     @Test
     fun `a lagging replica is skipped without a query`() {
         replicaAdmin("select pg_wal_replay_pause()")
-        tx.execute { sql.execute("insert into replica_probe select g from generate_series(10, 5000) g") }
+        val series = DSL.generateSeries(10, 5000).`as`("g", "id")
+        tx.execute {
+            sql.insertInto(probeTable, probeId).select(sql.select(series.field(0, INTEGER)!!).from(series)).execute()
+        }
         lag.check()
 
         assertFalse(lag.healthy)
         assertNull(reads.replica { recovering() })
     }
 
-    private fun recovering(): Boolean = sql.resultQuery("select pg_is_in_recovery()").fetchOne(0, Boolean::class.java)!!
+    private fun recovering(): Boolean = sql.fetchValue(postgresFunction("pg_is_in_recovery", BOOLEAN))!!
 
-    private fun probe(id: Int): Boolean = sql.resultQuery(
-        "select exists(select 1 from replica_probe where id = ?)",
-        id,
-    ).fetchOne(0, Boolean::class.java)!!
+    private fun probe(id: Int): Boolean = sql.fetchExists(sql.selectOne().from(probeTable).where(probeId.eq(id)))
 
     private fun awaitHealthy() {
+        val tableExists = DSL.field(postgresFunction("to_regclass", OTHER, DSL.`val`(probeTable.name)).isNotNull)
         val deadline = System.nanoTime() + Duration.ofSeconds(30).toNanos()
         while (true) {
             lag.check()
-            if (lag.healthy &&
-                reads.replica { sql.resultQuery("select to_regclass('replica_probe') is not null").fetchOne(0, Boolean::class.java) } ==
-                true
-            ) {
+            if (lag.healthy && reads.replica { sql.fetchValue(tableExists) } == true) {
                 return
             }
             check(System.nanoTime() < deadline) { "Replica did not catch up" }

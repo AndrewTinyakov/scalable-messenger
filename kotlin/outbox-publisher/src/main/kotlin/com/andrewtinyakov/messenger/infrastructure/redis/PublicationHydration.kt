@@ -8,6 +8,7 @@ import com.andrewtinyakov.messenger.generated.messaging.event.RoomEventType
 import com.andrewtinyakov.messenger.generated.messaging.event.SidebarActivityEventV1
 import com.andrewtinyakov.messenger.infrastructure.outbox.EventId
 import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxMessage
+import com.andrewtinyakov.messenger.infrastructure.redis.monitoring.PublicationHydrationMetrics
 import com.andrewtinyakov.messenger.message.model.Message
 import com.andrewtinyakov.messenger.message.model.MessageId
 import com.andrewtinyakov.messenger.message.model.preview
@@ -50,7 +51,6 @@ class PublicationHydration(
             messageRepository.findMessagesForPublication(ids)
         }.associateBy { it.id }
 
-    // Chat-list rows show the sender's name, so group activity needs usernames. One lookup covers the batch.
     private fun findGroupSenderUsernames(
         rows: List<OutboxMessage>,
         references: Map<EventId, PublicationReference>,

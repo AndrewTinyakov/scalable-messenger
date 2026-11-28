@@ -5,8 +5,6 @@ import com.andrewtinyakov.messenger.auth.model.SessionCredentials
 import com.andrewtinyakov.messenger.auth.service.AuthenticationService
 import com.andrewtinyakov.messenger.auth.service.PasswordChangeService
 import com.andrewtinyakov.messenger.auth.service.UserLookupService
-import com.andrewtinyakov.messenger.auth.web.SessionCookie
-import com.andrewtinyakov.messenger.auth.web.expectedSessionIdentity
 import com.andrewtinyakov.messenger.auth.web.payload.AuthRequest
 import com.andrewtinyakov.messenger.auth.web.payload.AuthResponse
 import com.andrewtinyakov.messenger.auth.web.payload.ChangePasswordRequest

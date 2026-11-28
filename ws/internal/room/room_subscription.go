@@ -75,7 +75,7 @@ func (r *Rooms) listen(ctx context.Context, entry *localRoom) {
 					continue
 				}
 				listener = next
-				r.restorePosition(ctx, entry, epoch, last)
+				r.reconcileAfterResubscribe(ctx, entry, epoch, last)
 				break
 			}
 			continue
@@ -84,10 +84,7 @@ func (r *Rooms) listen(ctx context.Context, entry *localRoom) {
 	}
 }
 
-// restorePosition runs after the new live subscription is ready. A publication
-// made during the outage must be replayed or followed by a fresh SQL fallback
-// signal; simply adopting the new tail would hide it from position checks.
-func (r *Rooms) restorePosition(ctx context.Context, entry *localRoom, epoch, last string) {
+func (r *Rooms) reconcileAfterResubscribe(ctx context.Context, entry *localRoom, epoch, last string) {
 	entry.positionMu.Lock()
 	defer entry.positionMu.Unlock()
 	current, oldEpoch, oldLast := r.roomPosition(entry.name)

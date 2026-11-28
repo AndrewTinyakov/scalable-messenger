@@ -121,6 +121,12 @@ jobs:
         run: |
           npm ci
           npm --prefix contracts ci
+      - name: Check repository rules
+        run: |
+          npm run check:source-comments
+          node --test scripts/check-source-comments.test.mjs
+          go -C ws run ./cmd/check-comments ..
+          go -C ws test ./cmd/check-comments
       - name: Check contracts and generated message models
         run: |
           npm run validate:asyncapi

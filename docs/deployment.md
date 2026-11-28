@@ -106,6 +106,10 @@ RabbitMQ uses a random user password and Erlang cookie. Its management UI and cl
 
 Existing Postgres/RabbitMQ/Redis volumes do not automatically rotate credentials or create new Postgres roles. Back up data and apply the equivalent role/credential changes in a maintenance window before switching an existing deployment. Never delete persistent volumes to perform a production upgrade. For disposable development data, create a fresh Compose project and network ranges. Preserve the generated environment file across restarts.
 
+## Presence Redis
+
+Set `PRESENCE_REDIS_URL` and `PRESENCE_REDIS_CLUSTER_NODES` consistently on the gateway and outbox publisher so that presence revocations reach the gateway's subscriptions. When both settings are empty, the publisher uses its room Redis connection. An empty presence node list inherits the room cluster nodes. An empty presence URL inherits the room credentials and TLS settings. An explicit URL supplies its own credentials and TLS scheme. For a standalone URL, `?db=` takes precedence over the path's database number. The publisher opens its dedicated presence connection at startup.
+
 ## Network and host isolation
 
 Only `edge` permits external routing. `app`, `data`, `monitoring` and the existing `grpc` network are internal.

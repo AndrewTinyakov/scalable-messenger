@@ -1,11 +1,3 @@
-// Server-side measurements for one window, from the stack's own Prometheus.
-// Every query exists in both builds unless it names a build-specific RPC.
-//
-// A gauge is sampled every 5 s across the window. A counter's mean is
-// Prometheus's extrapolated rate over exactly the window; its peak comes from
-// 30 s rates that lie entirely inside the window, so a window shorter than
-// 60 s has no peak.
-
 const RATE_MS = 30_000;
 const rate = selector => range => `sum(rate(${selector}[${range}]))`;
 const rpc = method => rate(`grpc_server_seconds_count{job="api",rpc_method=~"${method}"}`);
@@ -27,11 +19,9 @@ export const COUNTERS = {
   apiGrpcPerSec: rate('grpc_server_seconds_count{job="api"}'),
   apiSqlPerSec: rate('messenger_database_query_seconds_count{job="api",entrypoint_kind="rpc"}'),
   validateSessionGrpcPerSec: rpc('ValidateSessions?'),
-  // Legacy presence authorization.
   authorizePresenceGrpcPerSec: rpc('AuthorizePresence'),
   authorizeSidebarGrpcPerSec: rpc('AuthorizeSidebar'),
   legacyPresenceSqlPerSec: sql('AuthorizePresence|AuthorizeSidebar'),
-  // Current presence authorization and persistence.
   presenceVisibilityGrpcPerSec: rpc('PresenceVisibility'),
   onlineCountMembersGrpcPerSec: rpc('OnlineCountMembers'),
   recordLastSeenGrpcPerSec: rpc('RecordLastSeen'),

@@ -4,7 +4,6 @@ import com.andrewtinyakov.messenger.auth.model.AuthenticatedSession
 import com.andrewtinyakov.messenger.auth.model.SessionId
 import com.andrewtinyakov.messenger.auth.model.isValidSessionId
 import com.andrewtinyakov.messenger.auth.service.SessionManagementService
-import com.andrewtinyakov.messenger.auth.web.SessionCookie
 import com.andrewtinyakov.messenger.auth.web.payload.ActiveSessionsResponse
 import com.andrewtinyakov.messenger.auth.web.payload.RevokedSessionsResponse
 import com.andrewtinyakov.messenger.auth.web.payload.toResponse

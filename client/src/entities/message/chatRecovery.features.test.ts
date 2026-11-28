@@ -755,15 +755,16 @@ describe('synchronizing quotes while every history slot is busy', () => {
       nextSequence: '2',
       hasMore: false,
     })
+    const resolve = vi.fn<NonNullable<RecoveryHistory['resolve']>>(async (_id, ids) => ({
+      ...metadata(),
+      messages: snapshot().messages.filter((row) => ids.includes(row.id)),
+    }))
     const { recovery } = connectedRecovery({
       latest: async () => snapshot(),
       after: async () => snapshot(),
       older: async () => snapshot(),
       visibility: async () => ({ ...metadata(), hidden: false }),
-      resolve: async (_id, ids) => ({
-        ...metadata(),
-        messages: snapshot().messages.filter((row) => ids.includes(row.id)),
-      }),
+      resolve,
     })
     await recovery.catchUp('chat', true)
     const stale = snapshot()
@@ -780,13 +781,57 @@ describe('synchronizing quotes while every history slot is busy', () => {
     )
     mutated = true
     const synchronized = recovery.synchronize('chat', metadata())
-    // Let synchronize reach its history requests while all slots are still taken.
     await new Promise((done) => setTimeout(done, 0))
+    expect(resolve).not.toHaveBeenCalled()
     release(stale)
     await Promise.all([...busy, synchronized])
-    // A later pass at the same revision must not treat the skipped work as verified.
-    await recovery.synchronize('chat')
+    expect(resolve).toHaveBeenCalledWith('chat', expect.arrayContaining([reply.id, quoted.id]))
     expect(recovery.visibleWindows().chat[0].replyBody).toBe(expected)
     recovery.dispose()
   })
+})
+
+it('reconciles retained history again at the same revision after incomplete passes', async () => {
+  const original = { ...message('1'), body: 'original', messageVersion: '1' }
+  const edited = { ...original, body: 'edited', messageVersion: '2' }
+  const latest = message('52')
+  const current = (mutationSeq: string) => ({
+    snapshotSequence: latest.sequence,
+    mutationSeq,
+    visibilitySeq: '0',
+    clearedThroughSequence: '0',
+    globalClearedThroughSequence: '0',
+  })
+  const resolve = vi.fn<NonNullable<RecoveryHistory['resolve']>>(async (_chatId, ids) => ({
+    ...current('0'),
+    messages: [original, latest].filter((row) => ids.includes(row.id)),
+  }))
+  const fetchLatest = vi.fn(async () => ({ ...current('0'), messages: [latest] }))
+  const { recovery } = connectedRecovery({
+    latest: fetchLatest,
+    after: async () => ({ messages: [], hasMore: false, nextSequence: latest.sequence }),
+    older: async () => ({ ...current('0'), messages: [] }),
+    visibility: async () => ({ ...current('1'), hidden: false }),
+    resolve,
+  })
+  try {
+    await recovery.catchUp('chat', true)
+    recovery.reveal('chat', [original], recovery.beginNavigation())
+    fetchLatest.mockResolvedValue({ ...current('1'), messages: [latest] })
+    await recovery.synchronize('chat', current('1'))
+    expect(resolve).toHaveBeenCalledTimes(3)
+    expect(recovery.visibleWindows().chat[0].body).toBe('original')
+
+    resolve.mockImplementation(async (_chatId, ids) => ({
+      ...current('1'),
+      messages: [edited, latest].filter((row) => ids.includes(row.id)),
+    }))
+    await recovery.synchronize('chat')
+    expect(resolve).toHaveBeenCalledTimes(4)
+    expect(recovery.visibleWindows().chat[0].body).toBe('edited')
+    await recovery.synchronize('chat')
+    expect(resolve).toHaveBeenCalledTimes(4)
+  } finally {
+    recovery.dispose()
+  }
 })

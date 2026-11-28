@@ -16,10 +16,6 @@ interface Options {
   send(frame: OutgoingSocketFrame): void
 }
 
-/**
- * Follows group activity for visible rows and the presence of every loaded
- * direct chat, visible rows first.
- */
 export function useSidebarWatch(options: Options) {
   const current = useRef(options)
   current.current = options

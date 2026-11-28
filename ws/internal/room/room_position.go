@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"messenger/ws/internal/monitoring"
 	"messenger/ws/internal/protocol"
 	"messenger/ws/internal/redisroom"
 )
@@ -179,7 +180,7 @@ func (r *Rooms) applyPosition(ctx context.Context, candidate positionCandidate, 
 	}
 	entry.mu.Unlock()
 	if position.Err != nil {
-		r.failRoomEntry(entry)
+		r.failRoomEntry(entry, monitoring.RoomPositionReadFailed, position.Err)
 		return
 	}
 	r.reconcileRoomPosition(ctx, entry, candidate.epoch, candidate.last, position.Epoch, position.StreamID)
@@ -238,28 +239,36 @@ func (r *Rooms) reconcileRoomPosition(ctx context.Context, entry *localRoom, old
 	if oldEpoch == epoch && oldLast == last {
 		return
 	}
-	if oldEpoch == epoch && oldLast != "" && last != "" && r.replayRoomThrough(ctx, entry, oldEpoch, oldLast, last) {
-		return
+	reason, cause := monitoring.RoomEpochChanged, error(nil)
+	if oldEpoch == "" || oldEpoch == epoch {
+		reason = monitoring.RoomUnrepairedGap
+		if oldEpoch == epoch && oldLast != "" && last != "" {
+			if cause = r.replayRoomThrough(ctx, entry, oldEpoch, oldLast, last); cause == nil {
+				return
+			}
+			if !errors.Is(cause, redisroom.ErrGap) {
+				reason = monitoring.RoomReplayFailed
+			}
+		}
 	}
-	r.failRoomEntry(entry)
+	r.failRoomEntry(entry, reason, cause)
 	r.setRoomPosition(entry, epoch, last)
 }
 
-func (r *Rooms) replayRoomThrough(ctx context.Context, entry *localRoom, epoch, after, through string) bool {
+func (r *Rooms) replayRoomThrough(ctx context.Context, entry *localRoom, epoch, after, through string) error {
 	checkCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	items, err := r.replay(checkCtx, entry.name, epoch, after, through, "continuity")
 	cancel()
 	if err != nil {
-		return false
+		return err
 	}
-
 	for _, item := range items {
 		if size := r.dispatchRoom(entry, item.Event); size > 0 {
 			r.metrics.ContinuityReplayEvents.Inc()
 			r.metrics.ContinuityReplayBytes.Add(float64(size))
 		}
 	}
-	return true
+	return nil
 }
 
 func (r *Rooms) replay(ctx context.Context, name, epoch, after, through, trigger string) (items []redisroom.Live, replayErr error) {

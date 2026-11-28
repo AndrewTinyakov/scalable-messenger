@@ -38,6 +38,8 @@ The room benchmarks cover group fanout, disconnect lookup and batched position s
 
 Compose uses one `ws` service with two replicas by default. Nginx resolves the Docker service name every five seconds and uses least connections for new upgrades. Existing sockets stay on their current gateway. Prometheus discovers every gateway through Docker DNS.
 
+A gateway that is draining, full or restoring its connection counts answers an upgrade with 503, and Nginx retries it on another gateway. When shared Redis admission fails, the gateway answers 500 instead. Retrying on another gateway would hit the same Redis, and a 503 there would count toward `max_fails` and take healthy gateways out of rotation.
+
 ```sh
 MESSENGER_WS_REPLICAS=4 scripts/dev-up.sh
 ```

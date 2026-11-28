@@ -60,6 +60,7 @@ type Config struct {
 	ReleaseAfterHidden     time.Duration
 	GatewayHeartbeat       time.Duration
 	GatewayTTL             time.Duration
+	ProfilingPort          int
 }
 
 func Load() (Config, error) {
@@ -212,6 +213,12 @@ func Load() (Config, error) {
 		if *setting.target, err = durationEnv(setting.name, setting.fallback); err != nil {
 			return c, err
 		}
+	}
+	if c.ProfilingPort, err = intEnv("WS_PPROF_PORT", 0); err != nil {
+		return c, err
+	}
+	if c.ProfilingPort < 0 || c.ProfilingPort > 65535 {
+		return c, fmt.Errorf("WS_PPROF_PORT must be 0 or a TCP port")
 	}
 	if len(c.WSTicketSecret) < 32 || c.APIGrpcAddress == "" || c.MaxFrameBytes <= 0 || c.QueueItems <= 0 || c.QueueBytes <= 0 || c.PendingACKLimit <= 0 || c.MaxConnections <= 0 || c.MaxPendingUpgrades <= 0 || c.HandshakeRate <= 0 || c.HandshakeWindow < time.Millisecond || c.HandshakeWindow/time.Microsecond < time.Duration(c.HandshakeRate) || c.MaxGroupAuths <= 0 || c.SubscribeRate <= 0 || c.SubscribeWindow < time.Millisecond || c.SubscribeWindow/time.Microsecond < time.Duration(c.SubscribeRate) || c.MaxRoomsPerConnection <= 0 || c.MaxRooms <= 0 || c.MaxMemberships <= 0 || c.CommandWorkers <= 0 || c.CommandQueueItems <= 0 || c.CommandQueueBytes <= 0 || c.ConnectionCommandItems <= 0 || c.ConnectionCommandBytes <= 0 || c.DrainTimeout < 0 || c.DrainTimeout >= c.ShutdownTimeout || c.PublishConcurrency <= 0 || c.ReplayLimit <= 0 || c.ConfirmTimeout <= 0 || c.APITimeout <= 0 || c.WriteTimeout <= 0 || c.ACKTimeout <= 0 || c.PongTimeout <= 0 || c.PingInterval <= 0 || c.PositionCheckInterval <= 0 || c.GroupLease <= 0 || c.ShutdownTimeout <= 0 || c.PingInterval >= c.PongTimeout || c.PresenceGrace < 0 || c.IdleAfterHidden < 0 || c.IdleAfterHidden > time.Hour || c.IdleAfterInput < time.Second || c.IdleAfterInput > time.Hour || c.ReleaseAfterHidden < time.Second || c.ReleaseAfterHidden > 24*time.Hour || c.GatewayHeartbeat <= 0 || c.GatewayTTL <= c.GatewayHeartbeat {
 		return c, fmt.Errorf("invalid WS capacity or timeout")

@@ -12,7 +12,7 @@ The new design uses the sockets a gateway already tracks. Ordinary presence writ
 
 A connection starts active and the client reports activity changes thereafter. It becomes idle after five seconds hidden or unfocused, or after 30 seconds without input, and becomes active again on focus or input. These thresholds come from the server in the handshake, so they can change without a client release. A user is online while at least one of their connections is active, on any device.
 
-When a gateway's last active connection for a user goes away, the gateway waits a two-second grace period before writing. A reload or quick reconnect within that window publishes nothing. Gateways ping sockets every 20 seconds and close a socket after 40 seconds without a pong. A lost network therefore shows offline within about 45 seconds. A clean close shows offline in about two seconds, and a crashed gateway within about 15 seconds.
+When a gateway's last active connection for a user goes away, the gateway waits a two-second grace period before writing. A reload or quick reconnect within that window publishes nothing. Gateways ping sockets every 20 seconds and close a socket after 40 seconds without a pong. A lost network therefore shows offline within about 45 seconds. A clean close shows offline in about two seconds, and a crashed gateway within about 15 seconds. A gateway stopping normally closes its sockets, stops its presence writers and clears its own presence before it exits. It leaves its registration for peers to reap, so anything it could not clear in time still goes offline through the crash path.
 
 ## Publisher state
 

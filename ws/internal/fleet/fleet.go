@@ -33,6 +33,7 @@ type Config struct {
 	Heartbeat       time.Duration
 	TTL             time.Duration
 	Timeout         time.Duration
+	OnHeartbeat     func(time.Time)
 }
 
 type Fleet struct {
@@ -277,7 +278,11 @@ func (f *Fleet) renewRegistrationWithAdmissionBlocked(ctx context.Context) bool 
 func (f *Fleet) beat(ctx context.Context, id string) (bool, bool, error) {
 	beatCtx, cancel := context.WithTimeout(ctx, f.config.Timeout)
 	defer cancel()
-	return f.store.Heartbeat(beatCtx, id, f.config.TTL)
+	registered, dead, err := f.store.Heartbeat(beatCtx, id, f.config.TTL)
+	if err == nil && !dead && f.config.OnHeartbeat != nil {
+		f.config.OnHeartbeat(time.Now())
+	}
+	return registered, dead, err
 }
 
 func (f *Fleet) reap(ctx context.Context) {

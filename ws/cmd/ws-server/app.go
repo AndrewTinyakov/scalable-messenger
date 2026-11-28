@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/http/pprof"
 	"slices"
 	"sync"
 	"time"
@@ -74,7 +75,7 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	presenceConfig.Timeout = cfg.APITimeout
 	var gateways *fleet.Fleet
 	tracker := presence.NewTracker(presenceStore, groupAuth, func() string { return gateways.ID() }, presenceConfig, logger)
-	gateways = fleet.New(redis, tracker, fleet.Config{ConnectionLimit: 10, Heartbeat: cfg.GatewayHeartbeat, TTL: cfg.GatewayTTL, Timeout: cfg.APITimeout}, logger)
+	gateways = fleet.New(redis, tracker, fleet.Config{ConnectionLimit: 10, Heartbeat: cfg.GatewayHeartbeat, TTL: cfg.GatewayTTL, Timeout: cfg.APITimeout, OnHeartbeat: metrics.RecordHeartbeat}, logger)
 	background, stopBackground := context.WithCancel(context.WithoutCancel(ctx))
 	watchers := presence.NewHub(background, presenceStore, groupAuth, presenceConfig, logger, metrics.PresenceMetrics)
 	var backgroundWG sync.WaitGroup
@@ -82,7 +83,8 @@ func run(ctx context.Context, logger *slog.Logger) error {
 		backgroundWG.Add(1)
 		go func() { defer backgroundWG.Done(); run(background) }()
 	}
-	defer func() { stopBackground(); backgroundWG.Wait() }()
+	stopBackgroundWork := func() { stopBackground(); backgroundWG.Wait() }
+	defer stopBackgroundWork()
 	rooms := roomregistry.NewRooms(redis, logger, cfg.ReplayLimit, cfg.QueueItems, cfg.QueueBytes, cfg.PositionCheckInterval, metrics, cfg.MaxRooms, cfg.MaxMemberships)
 	ws, err := socket.NewServer(context.WithoutCancel(ctx), cfg, logger, socket.Dependencies{
 		GroupAuthorizer: groupAuth, SessionAuthorizer: groupAuth, Publisher: publisher,
@@ -94,6 +96,19 @@ func run(ctx context.Context, logger *slog.Logger) error {
 		return fmt.Errorf("construct WebSocket server: %w", err)
 	}
 	defer ws.Close()
+	if cfg.ProfilingPort > 0 {
+		listener, err := listenProfiling(cfg.ProfilingPort)
+		if err != nil {
+			logger.Warn("profiling server unavailable", "error", err)
+		} else {
+			profiling := serveProfiling(listener, profilingHandler(pprof.Profile), logger)
+			defer func() {
+				stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+				defer cancel()
+				profiling.Stop(stopCtx)
+			}()
+		}
+	}
 	httpServer := &http.Server{Addr: cfg.Address, Handler: ws.Handler(), ReadHeaderTimeout: 5 * time.Second}
 	result := make(chan error, 1)
 	go func() { result <- httpServer.ListenAndServe() }()
@@ -109,12 +124,15 @@ func run(ctx context.Context, logger *slog.Logger) error {
 		defer cancel()
 		ws.Drain(shutdown)
 		ws.CloseContext(shutdown)
-		if err := httpServer.Shutdown(shutdown); err != nil {
+		err := httpServer.Shutdown(shutdown)
+		if err != nil {
 			_ = httpServer.Close()
-			<-result
-			return err
 		}
 		<-result
-		return nil
+		stopBackgroundWork()
+		if clearErr := tracker.RemoveGateway(shutdown, gateways.ID()); clearErr != nil {
+			logger.Warn("clear gateway presence at shutdown; peers will reap it", "error", clearErr)
+		}
+		return err
 	}
 }

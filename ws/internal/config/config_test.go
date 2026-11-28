@@ -159,3 +159,23 @@ func TestLoadGRPCTLSOverrides(t *testing.T) {
 		t.Fatalf("gRPC configuration = %q, %q, %q, %q, %q", c.APIGrpcAddress, c.APIGrpcCAFile, c.APIGrpcCertFile, c.APIGrpcKeyFile, c.APIGrpcServerName)
 	}
 }
+
+func TestLoadProfilingPort(t *testing.T) {
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.ProfilingPort != 0 {
+		t.Fatalf("ProfilingPort = %d, want disabled by default", c.ProfilingPort)
+	}
+	t.Setenv("WS_PPROF_PORT", "6060")
+	if c, err = Load(); err != nil || c.ProfilingPort != 6060 {
+		t.Fatalf("ProfilingPort = %d, %v, want 6060", c.ProfilingPort, err)
+	}
+	for _, invalid := range []string{"-1", "65536", "port"} {
+		t.Setenv("WS_PPROF_PORT", invalid)
+		if _, err := Load(); err == nil {
+			t.Fatalf("Load() accepted WS_PPROF_PORT=%q", invalid)
+		}
+	}
+}

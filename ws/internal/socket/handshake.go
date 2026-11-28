@@ -9,6 +9,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"messenger/ws/internal/fleet"
 	"messenger/ws/internal/grpcauth"
 	"messenger/ws/internal/monitoring"
 	"messenger/ws/internal/roomname"
@@ -129,7 +130,7 @@ func (h *handshake) admit(w http.ResponseWriter, r *http.Request) bool {
 		allowed, err := s.handshakeLimiter.AllowHandshake(ctx, h.identity.UserID, s.config.HandshakeRate, s.config.HandshakeWindow)
 		cancel()
 		if err != nil {
-			h.reject(w, monitoring.HandshakeLimitUnavailable, http.StatusServiceUnavailable, "connection admission unavailable")
+			h.reject(w, monitoring.HandshakeLimitUnavailable, h.admissionErrorStatus(err), "connection admission unavailable")
 			return false
 		}
 		if !allowed {
@@ -143,7 +144,7 @@ func (h *handshake) admit(w http.ResponseWriter, r *http.Request) bool {
 	allowed, err := s.admission.Admit(ctx, h.identity.UserID)
 	cancel()
 	if err != nil {
-		h.reject(w, monitoring.HandshakeAdmissionUnavailable, http.StatusServiceUnavailable, "connection admission unavailable")
+		h.reject(w, monitoring.HandshakeAdmissionUnavailable, h.admissionErrorStatus(err), "connection admission unavailable")
 		return false
 	}
 	if !allowed {
@@ -152,6 +153,13 @@ func (h *handshake) admit(w http.ResponseWriter, r *http.Request) bool {
 	}
 	h.admission = handshakeAdmissionOwned
 	return true
+}
+
+func (h *handshake) admissionErrorStatus(err error) int {
+	if h.server.ctx.Err() != nil || errors.Is(err, fleet.ErrRenewing) {
+		return http.StatusServiceUnavailable
+	}
+	return http.StatusInternalServerError
 }
 
 func (h *handshake) establish(c *Connection) bool {

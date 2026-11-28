@@ -33,6 +33,7 @@ type GatewayMetrics struct {
 	ContinuityReplayBytes  prometheus.Counter
 	CatchupSeconds         *prometheus.HistogramVec
 	SessionChecks          *prometheus.CounterVec
+	LastHeartbeat          prometheus.Gauge
 }
 
 func newGatewayMetrics(registry *prometheus.Registry) *GatewayMetrics {
@@ -58,9 +59,14 @@ func newGatewayMetrics(registry *prometheus.Registry) *GatewayMetrics {
 		ContinuityReplayBytes:  prometheus.NewCounter(prometheus.CounterOpts{Name: "messenger_ws_continuity_replay_bytes_total", Help: "Encoded event payload bytes offered to room fanout by continuity replay, counted once per room replay item."}),
 		CatchupSeconds:         prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "messenger_ws_catchup_seconds", Help: "Room join duration through replay and buffered-live handoff; fallback delegates complete recovery to SQL.", Buckets: latencyBuckets}, []string{"result"}),
 		SessionChecks:          prometheus.NewCounterVec(prometheus.CounterOpts{Name: "messenger_ws_session_checks_total", Help: "Periodic SQL session checks of open sockets by result."}, []string{"result"}),
+		LastHeartbeat:          prometheus.NewGauge(prometheus.GaugeOpts{Name: "messenger_ws_gateway_last_heartbeat_timestamp_seconds", Help: "Unix time of this gateway's last heartbeat that Redis accepted; zero before the first one."}),
 	}
-	registry.MustRegister(m.BrokerEvents, m.PendingACKs, m.ACKTimeouts, m.PendingUpgrades, m.CommandWorkers, m.AppliedLatency, m.Closes, m.ConnectionLifetime, m.CommandWait, m.CommandService, m.SendAdmission, m.Messages, m.MessageBytes, m.PingRTT, m.ReplaySeconds, m.ReplayEvents, m.ReplayBytes, m.ContinuityReplayEvents, m.ContinuityReplayBytes, m.CatchupSeconds, m.SessionChecks)
+	registry.MustRegister(m.BrokerEvents, m.PendingACKs, m.ACKTimeouts, m.PendingUpgrades, m.CommandWorkers, m.AppliedLatency, m.Closes, m.ConnectionLifetime, m.CommandWait, m.CommandService, m.SendAdmission, m.Messages, m.MessageBytes, m.PingRTT, m.ReplaySeconds, m.ReplayEvents, m.ReplayBytes, m.ContinuityReplayEvents, m.ContinuityReplayBytes, m.CatchupSeconds, m.SessionChecks, m.LastHeartbeat)
 	return m
+}
+
+func (m *GatewayMetrics) RecordHeartbeat(at time.Time) {
+	m.LastHeartbeat.Set(float64(at.UnixNano()) / float64(time.Second))
 }
 
 func CommandKind(kind protocol.FrameType) string {

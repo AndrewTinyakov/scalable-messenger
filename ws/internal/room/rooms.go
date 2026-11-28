@@ -56,6 +56,7 @@ type Rooms struct {
 	bufferBytes     int
 	checkInterval   time.Duration
 	metrics         *monitoring.Metrics
+	staleLog        staleRoomLogLimiter
 	wg              sync.WaitGroup
 }
 

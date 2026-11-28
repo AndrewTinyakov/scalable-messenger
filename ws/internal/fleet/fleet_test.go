@@ -377,3 +377,42 @@ func TestFleetBlocksAdmissionUntilRenewedCountsAreRestored(t *testing.T) {
 	eventually(t, func() bool { return store.total("alice") == 1 })
 	eventually(t, func() bool { admitted, err := f.Admit(ctx, "alice"); return err == nil && admitted })
 }
+
+type failingHeartbeatStore struct {
+	*fakeStore
+	err error
+}
+
+func (s *failingHeartbeatStore) Heartbeat(ctx context.Context, gateway string, ttl time.Duration) (bool, bool, error) {
+	if s.err != nil {
+		return false, false, s.err
+	}
+	return s.fakeStore.Heartbeat(ctx, gateway, ttl)
+}
+
+func TestFleetRecordsOnlyHeartbeatsRedisAccepted(t *testing.T) {
+	store := &failingHeartbeatStore{fakeStore: newFakeStore(), err: errors.New("redis down")}
+	var beats []time.Time
+	gateway := New(store, newFakeState(), Config{ConnectionLimit: 2, Heartbeat: time.Second, TTL: 3 * time.Second, Timeout: time.Second, OnHeartbeat: func(at time.Time) {
+		beats = append(beats, at)
+	}}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ctx := context.Background()
+	gateway.heartbeat(ctx)
+	if len(beats) != 0 {
+		t.Fatalf("recorded %d heartbeats while Redis failed, want 0", len(beats))
+	}
+	store.err = nil
+	gateway.heartbeat(ctx)
+	gateway.heartbeat(ctx)
+	if len(beats) != 2 {
+		t.Fatalf("recorded %d heartbeats, want 2", len(beats))
+	}
+	old := gateway.ID()
+	store.mu.Lock()
+	store.dead[old] = true
+	store.mu.Unlock()
+	gateway.heartbeat(ctx)
+	if gateway.ID() == old || len(beats) != 3 {
+		t.Fatalf("after removal: identity changed = %v, beats = %d, want new identity and one more beat", gateway.ID() != old, len(beats))
+	}
+}

@@ -136,9 +136,15 @@ Copy each replica's completed recording before recreating its container. Remove 
 
 Cross-process timing depends on clock alignment. An afterCompletion callback can run after another process has observed the committed row. A recipient can receive a publication before the publisher receives its Redis response. Small negative differences at those boundaries do not establish reordered delivery. Recording overhead and partial capture windows must be stated separately from unprofiled latency measurements.
 
+Gateway heap and goroutine profiles are off by default. Set `WS_PPROF_PORT` (for example `6060`) to serve `/debug/pprof/` on the container's loopback only. Read a profile from inside the container, for example `docker compose exec -T ws wget -qO- http://127.0.0.1:6060/debug/pprof/heap > heap.pb.gz`, and pair it with the container's RSS and socket count at the same moment.
+
 ## Background work and connection setup
 
 Replay lookup timers distinguish subscribe and continuity triggers. Continuity includes live-gap repair, position reconciliation and feed restoration. Existing replay event/byte counters count recipient queue admissions during subscribe. Continuity replay counters count encoded events entering room fanout once per room item, independent of recipient count. Neither count proves device application. Replay caps and retention gaps share the gap result because Redis returns the same typed error for both.
+
+`messenger_ws_stale_rooms_total` counts room failures that send the room's local members to recovery. The gateway closes each member's socket, and the client recovers from SQL after it reconnects. The count is per room, not per socket. The `reason` label is `feed_stopped` for a broken Redis subscription, `position_read_failed` for a failed position check read, `epoch_changed` for a reset stream seen live or by a position check, `unrepaired_gap` when retained history cannot cover a missed range, `replay_failed` when the replay read itself fails, and `frame_encode_failed`. The gateway logs one warning per reason every 30 seconds, with the count of suppressed lines since the last one.
+
+`messenger_ws_gateway_last_heartbeat_timestamp_seconds` is the Unix time of the gateway's last heartbeat that Redis accepted. `time() - messenger_ws_gateway_last_heartbeat_timestamp_seconds` approaching `WS_GATEWAY_TTL` (15 seconds by default) means peers are about to declare a live gateway dead.
 
 Outbox batch timers distinguish empty, work and failed attempts. The active batch panel excludes empty polling. Stage timers measure claim and SQL commit, publication per room, and SQL completion and commit. Retained counters count rows left pending by deadline, interruption, publication failure or completion failure. Attempts can count the same row again. Redis publication success remains separate from SQL completion.
 

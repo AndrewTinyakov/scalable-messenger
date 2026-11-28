@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	runtimepprof "runtime/pprof"
+	"net/http/pprof"
 	"testing"
 	"time"
 )
@@ -27,7 +27,12 @@ func TestProfilingServesHeapAndStopsDuringCPUProfile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	profiling := serveProfiling(listener, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	profileStarted := make(chan struct{})
+	profile := func(w http.ResponseWriter, r *http.Request) {
+		close(profileStarted)
+		pprof.Profile(w, r)
+	}
+	profiling := serveProfiling(listener, profilingHandler(profile), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -52,7 +57,7 @@ func TestProfilingServesHeapAndStopsDuringCPUProfile(t *testing.T) {
 		_ = response.Body.Close()
 		profileStatus <- response.StatusCode
 	}()
-	waitForActiveCPUProfile(t)
+	<-profileStarted
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	started := time.Now()
@@ -66,17 +71,4 @@ func TestProfilingServesHeapAndStopsDuringCPUProfile(t *testing.T) {
 	if _, err := http.Get(base + "heap"); err == nil {
 		t.Fatal("profiling server still serving after Stop")
 	}
-}
-
-func waitForActiveCPUProfile(t *testing.T) {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if err := runtimepprof.StartCPUProfile(io.Discard); err != nil {
-			return
-		}
-		runtimepprof.StopCPUProfile()
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatal("CPU profile never became active")
 }

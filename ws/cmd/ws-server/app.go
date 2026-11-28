@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/http/pprof"
 	"slices"
 	"sync"
 	"time"
@@ -100,7 +101,7 @@ func run(ctx context.Context, logger *slog.Logger) error {
 		if err != nil {
 			logger.Warn("profiling server unavailable", "error", err)
 		} else {
-			profiling := serveProfiling(listener, logger)
+			profiling := serveProfiling(listener, profilingHandler(pprof.Profile), logger)
 			defer func() {
 				stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
 				defer cancel()

@@ -21,17 +21,21 @@ func listenProfiling(port int) (net.Listener, error) {
 	return net.Listen("tcp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
 }
 
-func serveProfiling(listener net.Listener, logger *slog.Logger) *profilingServer {
+func profilingHandler(profile http.HandlerFunc) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/debug/pprof/", pprof.Index)
 	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/profile", profile)
 	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	return mux
+}
+
+func serveProfiling(listener net.Listener, handler http.Handler, logger *slog.Logger) *profilingServer {
 	requests, cancelRequest := context.WithCancel(context.Background())
 	profiling := &profilingServer{
 		server: &http.Server{
-			Handler:           mux,
+			Handler:           handler,
 			ReadHeaderTimeout: 5 * time.Second,
 			BaseContext:       func(net.Listener) context.Context { return requests },
 		},

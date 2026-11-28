@@ -2,6 +2,7 @@ package com.andrewtinyakov.messenger.infrastructure.database
 
 import com.andrewtinyakov.messenger.ApiApplication
 import org.jooq.DSLContext
+import org.jooq.SQLDialect
 import org.jooq.impl.DSL
 import org.jooq.impl.SQLDataType.BOOLEAN
 import org.jooq.impl.SQLDataType.INTEGER
@@ -44,20 +45,20 @@ class ReplicaReadsTests {
 
     @Autowired private lateinit var tx: TransactionTemplate
 
-    @Autowired private lateinit var sql: DSLContext
+    @Autowired private lateinit var db: DSLContext
 
     private val probeTable = DSL.table(DSL.name("replica_probe"))
     private val probeId = DSL.field(DSL.name("id"), INTEGER)
 
     @BeforeEach
     fun createTable() {
-        tx.execute { sql.createTableIfNotExists(probeTable).column(probeId).constraints(DSL.primaryKey(probeId)).execute() }
+        tx.execute { db.createTableIfNotExists(probeTable).column(probeId).constraints(DSL.primaryKey(probeId)).execute() }
         awaitHealthy()
     }
 
     @AfterEach
     fun resumeReplay() {
-        replicaAdmin("select pg_wal_replay_resume()")
+        replicaAdmin("pg_wal_replay_resume")
     }
 
     @Test
@@ -68,8 +69,8 @@ class ReplicaReadsTests {
 
     @Test
     fun `a stale replica result falls back to the primary`() {
-        replicaAdmin("select pg_wal_replay_pause()")
-        tx.execute { sql.insertInto(probeTable, probeId).values(1).execute() }
+        replicaAdmin("pg_wal_replay_pause")
+        tx.execute { db.insertInto(probeTable, probeId).values(1).execute() }
 
         val fromReplica = reads.replica { probe(1).takeIf { it } }
         val result = fromReplica ?: reads.primary { probe(1) }
@@ -80,10 +81,10 @@ class ReplicaReadsTests {
 
     @Test
     fun `a lagging replica is skipped without a query`() {
-        replicaAdmin("select pg_wal_replay_pause()")
+        replicaAdmin("pg_wal_replay_pause")
         val series = DSL.generateSeries(10, 5000).`as`("g", "id")
         tx.execute {
-            sql.insertInto(probeTable, probeId).select(sql.select(series.field(0, INTEGER)!!).from(series)).execute()
+            db.insertInto(probeTable, probeId).select(db.select(series.field(0, INTEGER)!!).from(series)).execute()
         }
         lag.check()
 
@@ -91,16 +92,16 @@ class ReplicaReadsTests {
         assertNull(reads.replica { recovering() })
     }
 
-    private fun recovering(): Boolean = sql.fetchValue(postgresFunction("pg_is_in_recovery", BOOLEAN))!!
+    private fun recovering(): Boolean = db.fetchValue(postgresFunction("pg_is_in_recovery", BOOLEAN))!!
 
-    private fun probe(id: Int): Boolean = sql.fetchExists(sql.selectOne().from(probeTable).where(probeId.eq(id)))
+    private fun probe(id: Int): Boolean = db.fetchExists(db.selectOne().from(probeTable).where(probeId.eq(id)))
 
     private fun awaitHealthy() {
         val tableExists = DSL.field(postgresFunction("to_regclass", OTHER, DSL.`val`(probeTable.name)).isNotNull)
         val deadline = System.nanoTime() + Duration.ofSeconds(30).toNanos()
         while (true) {
             lag.check()
-            if (lag.healthy && reads.replica { sql.fetchValue(tableExists) } == true) {
+            if (lag.healthy && reads.replica { db.fetchValue(tableExists) } == true) {
                 return
             }
             check(System.nanoTime() < deadline) { "Replica did not catch up" }
@@ -108,14 +109,16 @@ class ReplicaReadsTests {
         }
     }
 
-    private fun replicaAdmin(statement: String) {
-        DriverManager.getConnection(replicaUrl(), USER, PASSWORD).use { it.createStatement().use { s -> s.execute(statement) } }
+    private fun replicaAdmin(function: String) {
+        DriverManager.getConnection(replicaUrl(), USER, PASSWORD).use { connection ->
+            DSL.using(connection, SQLDialect.POSTGRES).select(postgresFunction(function, OTHER)).execute()
+        }
     }
 
     companion object {
         private const val USER = "messenger"
         private const val PASSWORD = "messenger"
-        private val primary = PostgreSQLContainer<Nothing>("postgres:17-alpine").apply {
+        private val primary = PostgreSQLContainer<Nothing>("postgres:19-alpine").apply {
             withDatabaseName("messenger")
             withUsername(USER)
             withPassword(PASSWORD)
@@ -127,7 +130,7 @@ class ReplicaReadsTests {
             start()
         }
 
-        private val replica = GenericContainer<Nothing>("postgres:17-alpine").apply {
+        private val replica = GenericContainer<Nothing>("postgres:19-alpine").apply {
             withExposedPorts(5432)
             withEnv("PGPASSWORD", PASSWORD)
             val script =

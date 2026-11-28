@@ -11,7 +11,7 @@ import { ulid } from '../support/fixtures.mjs';
 export const decimal = value => typeof value === 'string' && /^(0|[1-9][0-9]*)$/.test(value);
 
 export function snapshot(page, coverage = false) {
-  for (const key of ['snapshotSequence', 'visibilityRevision', 'clearedThroughSequence', 'globalClearedThroughSequence']) assert.ok(decimal(page[key]), `Invalid ${key}`);
+  for (const key of ['snapshotSequence', 'visibilitySeq', 'clearedThroughSequence', 'globalClearedThroughSequence']) assert.ok(decimal(page[key]), `Invalid ${key}`);
   if (coverage) {
     assert.ok(decimal(page.coverageAfterSequence) && decimal(page.coverageThroughSequence));
     assert.ok(BigInt(page.coverageAfterSequence) <= BigInt(page.coverageThroughSequence));
@@ -64,7 +64,7 @@ export class Runtime {
       assert.ok(session?.cookie && session.userId);
       const socket = new Socket(this.sockets.length, session, this.http, this.options, this.metrics, (device, frame, at) => {
         if (this.events.length === 256) this.events.shift();
-        this.events.push({ device: device.index, type: frame.type, chatId: frame.chatId, sequence: frame.sequence, mutationRevision: frame.mutationRevision, visibilityRevision: frame.visibilityRevision });
+        this.events.push({ device: device.index, type: frame.type, chatId: frame.chatId, sequence: frame.sequence, seq: frame.seq, memberSeq: frame.memberSeq });
         const record = this.seen.get(frame.requestId);
         if (record && frame.type === 'message_saved') {
           assert.equal(frame.body, record.body);
@@ -105,8 +105,9 @@ export class Runtime {
     return snapshot(result);
   }
   async hints(action, chat, devices, scope = 'SELF') {
-    const revision = await this.api(devices[0], `/chats/${chat.id}/visibility`);
-    const waits = devices.map(index => this.sockets[index].wait(frame => frame.type === 'history_changed' && frame.chatId === chat.id && BigInt(frame[scope === 'SELF' ? 'visibilityRevision' : 'mutationRevision']) > BigInt(revision[scope === 'SELF' ? 'visibilityRevision' : 'mutationRevision'])));
+    const visibility = await this.api(devices[0], `/chats/${chat.id}/visibility`);
+    const [frameKey, visibilityKey] = scope === 'SELF' ? ['memberSeq', 'visibilitySeq'] : ['seq', 'mutationSeq'];
+    const waits = devices.map(index => this.sockets[index].wait(frame => frame.type === 'history_changed' && frame.chatId === chat.id && decimal(frame[frameKey]) && BigInt(frame[frameKey]) > BigInt(visibility[visibilityKey])));
     const results = await Promise.allSettled([action(), ...waits]);
     for (const result of results) if (result.status === 'rejected') throw result.reason;
     return results[0].value;

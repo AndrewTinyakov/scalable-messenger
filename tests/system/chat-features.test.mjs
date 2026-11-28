@@ -93,7 +93,7 @@ test('chat features preserve live state, human reads, mutation recovery and glob
   const editAt = readerSocket.frames.length;
   const edited = await api(`${base}/messages/${first.messageId}`, { cookie: author.cookie, method: 'PATCH', body: { body: 'Edited original', expectedVersion: '1' } });
   assert.equal(edited.messageVersion, '2');
-  await readerSocket.waitFor((frame) => frame.type === 'history_changed' && frame.chatId === chatId && frame.mutationRevision === '1', 20000, editAt);
+  const editChange = await readerSocket.waitFor((frame) => frame.type === 'history_changed' && frame.chatId === chatId && frame.seq !== undefined, 20000, editAt);
   assert.equal((await api(`${base}/messages`, { cookie: reader.cookie })).messages.find((message) => message.id === reply.messageId).replyBody, edited.body);
   assert.equal(await status(`${base}/messages/${first.messageId}`, reader.cookie, 'PATCH', { body: 'Foreign edit', expectedVersion: '2' }), 403);
   assert.equal(await status(`${base}/messages/${first.messageId}`, author.cookie, 'PATCH', { body: 'Stale edit', expectedVersion: '1' }), 409);
@@ -104,7 +104,8 @@ test('chat features preserve live state, human reads, mutation recovery and glob
   } });
   assert.equal(deleted.state, 'COMPLETED');
   assert.equal(deleted.deletedRows, '1');
-  await readerSocket.waitFor((frame) => frame.type === 'history_changed' && frame.chatId === chatId && frame.mutationRevision === '2', 20000, deletionAt);
+  assert.ok(BigInt(deleted.seq) > BigInt(editChange.seq));
+  await readerSocket.waitFor((frame) => frame.type === 'history_changed' && frame.chatId === chatId && frame.seq === deleted.seq, 20000, deletionAt);
   assert.equal(await status(`${base}/messages/around?messageId=${first.messageId}&limit=50`, reader.cookie), 404);
   const around = await api(`${base}/messages/around?messageId=${reply.messageId}&limit=50`, { cookie: reader.cookie });
   assert.equal(around.anchorMessageId, reply.messageId);
@@ -114,8 +115,9 @@ test('chat features preserve live state, human reads, mutation recovery and glob
   assert.equal(currentReply.replySenderId, null);
   assert.equal(currentReply.replyBody, null);
   assert.equal(await status(`${base}/messages/${first.messageId}/reads`, author.cookie), 404);
-  const changes = await api(`${base}/messages/changes?afterRevision=0&limit=100`, { cookie: reader.cookie });
-  assert.deepEqual(changes.changes.map((change) => change.revision), ['1', '2']);
+  const changes = await api(`${base}/messages/changes?afterSeq=${BigInt(editChange.seq) - 1n}&limit=100`, { cookie: reader.cookie });
+  assert.equal(changes.lastSeq, deleted.seq);
+  assert.ok(changes.changes.length > 0);
   assert.ok(changes.changes.every((change) => change.kind === 'REMOVED' && change.messageId === first.messageId && change.message === null));
   const invalidRequest = ulid();
   authorSocket.send({ type: 'send', chatId, requestId: invalidRequest, body: 'Deleted target', replyToMessageId: first.messageId });

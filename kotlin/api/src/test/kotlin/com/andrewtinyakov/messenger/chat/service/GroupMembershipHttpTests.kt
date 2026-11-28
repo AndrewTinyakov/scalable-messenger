@@ -4,6 +4,8 @@ import com.andrewtinyakov.messenger.ApiApplication
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.auth.service.AuthenticationService
 import com.andrewtinyakov.messenger.chat.web.payload.CreateGroupChatRequest
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSAGES
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.USERS
 import com.andrewtinyakov.messenger.message.service.MessageSendService
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
 import com.andrewtinyakov.messenger.shared.id.newId
@@ -59,7 +61,7 @@ class GroupMembershipHttpTests
                 assertEquals(expected, ids(listed))
                 assertTrue(listed.path("nextCursor").isNull)
                 assertEquals(
-                    expected.map { db.queryForObject("SELECT username FROM users WHERE id=?", String::class.java, it) },
+                    expected.map { db.fetchValue(USERS.USERNAME, USERS.ID.eq(it))!! },
                     listed.path("members").toList().map { it.path("username").stringValue() },
                 )
                 assertEquals(owner.first, mapper.readTree(request("/$id", viewer.second).body()).path("ownerId").stringValue())
@@ -137,7 +139,7 @@ class GroupMembershipHttpTests
             val sender = account()
             val recipient = user("direct_${newId()}")
             messageSendService.process(command(sender.first, newId(), "hello", recipient = recipient))
-            val chatId = db.queryForObject("SELECT chat_id FROM messages WHERE sender_id=?", String::class.java, sender.first)
+            val chatId = db.fetchValue(MESSAGES.CHAT_ID, MESSAGES.SENDER_ID.eq(sender.first))!!
             assertEquals(404, request("/$chatId/members", sender.second).statusCode())
             val opened = mapper.readTree(request("/$chatId", sender.second).body())
             assertTrue(opened.path("ownerId").isNull || opened.path("ownerId").isMissingNode)

@@ -8,6 +8,8 @@ Start the local Docker Compose stack with the HTTPS browser defaults. In an exis
 scripts/dev-up.sh
 ```
 
+The stack runs PostgreSQL 19 on a fresh `postgres19-data` volume. Data from the PostgreSQL 17 `postgres-data` volume is not carried over; remove the old volume with `docker volume rm messenger_postgres-data`.
+
 Compose runs the backend and publishes the API proxy on `127.0.0.1:8081` and the WS proxy on `127.0.0.1:8082`. The React app runs separately with npm and Vite and talks to both proxies directly. Use Portless with its default HTTPS listener on port 443. [Portless](https://github.com/vercel-labs/portless)
 
 ```sh

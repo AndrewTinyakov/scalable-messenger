@@ -70,10 +70,17 @@ class JooqPresenceRepository(
             .`as`("seen", "user_id", "seen_at")
         val seenUser = values.field(0, USERS.ID.dataType)!!
         val seenAt = values.field(1, USERS.LAST_SEEN_AT.dataType)!!
-        db.update(USERS)
+        val locked = DSL.name("locked").fields("id").asMaterialized(
+            DSL.select(USERS.ID).from(USERS)
+                .where(USERS.ID.`in`(latest.map { (userId) -> userId.value }))
+                .orderBy(USERS.ID)
+                .forNoKeyUpdate(),
+        )
+        db.with(locked)
+            .update(USERS)
             .set(USERS.LAST_SEEN_AT, DSL.greatest(USERS.LAST_SEEN_AT, seenAt))
             .from(values)
-            .where(USERS.ID.eq(seenUser))
+            .where(USERS.ID.eq(seenUser), USERS.ID.`in`(DSL.select(locked.field(0, USERS.ID.dataType)).from(locked)))
             .execute()
     }
 

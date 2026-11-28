@@ -4,6 +4,7 @@
 
 - Unit and integration tests live in their own project. Cross-system end-to-end and load tests live under `tests/`.
 - Test through existing interfaces, and use real PostgreSQL, RabbitMQ and Redis for transaction, broker and recovery guarantees. Broker tests go through the consumer and assert ACK and rejection outcomes.
+- Tests reach the database through the same typed jOOQ as production code, using the base class's `db: DSLContext`. Inject failures with typed DDL, such as a temporary CHECK constraint, rather than SQL strings or triggers.
 - Behaviour that crosses a wire or persistence boundary gets a regression test, ideally sharing fixtures with `contracts/`.
 - Split a large test file only where its tests form cohesive groups.
 - Load workloads are realistic, deterministic for a given seed from the client's perspective, and configurable for heavier profiles. Load generation scales separately from the services. Compare before and after on equivalent profiles and report environment differences.

@@ -4,6 +4,12 @@ import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.deletion.model.DeletionScope
 import com.andrewtinyakov.messenger.deletion.service.DeletionService
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHATS
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHAT_MEMBERS
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSAGE_CHANGES
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSENGER_OUTBOX_EVENTS
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.USERS
+import com.andrewtinyakov.messenger.infrastructure.database.generated.tables.records.ChatsRecord
 import com.andrewtinyakov.messenger.message.model.MessageId
 import com.andrewtinyakov.messenger.message.model.RequestId
 import com.andrewtinyakov.messenger.message.model.pin.PinScope
@@ -16,6 +22,9 @@ import com.andrewtinyakov.messenger.read.service.ReadService
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
 import com.andrewtinyakov.messenger.shared.id.newId
 import com.andrewtinyakov.messenger.shared.web.ApiException
+import org.jooq.TableField
+import org.jooq.impl.DSL
+import org.jooq.impl.SQLDataType
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
@@ -44,6 +53,10 @@ class ChatSequenceTests
         private val mapper: ObjectMapper,
         private val history: MessageHistoryService,
     ) : MessengerIntegrationTest() {
+        private val eventChatId = DSL.jsonbGetAttributeAsText(MESSENGER_OUTBOX_EVENTS.PAYLOAD, "chatId")
+        private val eventType = DSL.jsonbGetAttributeAsText(MESSENGER_OUTBOX_EVENTS.PAYLOAD, "type")
+        private val eventUserSeq = DSL.jsonbGetAttributeAsText(MESSENGER_OUTBOX_EVENTS.PAYLOAD, "userSeq")
+
         @Test
         fun `each shared write takes one chat sequence and its hint carries it`() {
             val owner = user("seq-shared-owner")
@@ -62,16 +75,18 @@ class ChatSequenceTests
             pins.pin(ChatId(chat), UserId(owner), second, PinScope.EVERYONE)
             assertEquals(4, head(chat))
             assertEquals("4", latest(chat, "pins_changed", "group:$chat").path("seq").stringValue())
-            assertEquals(4, column(chat, "pins_seq"))
+            assertEquals(4, column(chat, CHATS.PINS_SEQ))
 
             deletions.deleteMessages(ChatId(chat), UserId(owner), RequestId(newId()), DeletionScope.EVERYONE, listOf(first, second))
             assertEquals(5, head(chat))
             assertEquals(
                 listOf(5L, 5L),
-                db.queryForList("SELECT seq FROM message_changes WHERE chat_id=? AND kind='REMOVED'", Long::class.java, chat),
+                db.select(MESSAGE_CHANGES.SEQ).from(MESSAGE_CHANGES)
+                    .where(MESSAGE_CHANGES.CHAT_ID.eq(chat), MESSAGE_CHANGES.KIND.eq("REMOVED"))
+                    .fetch(MESSAGE_CHANGES.SEQ),
             )
             assertEquals("5", latest(chat, "history_changed", "group:$chat").path("seq").stringValue())
-            assertEquals(5, column(chat, "pins_seq"), "deleting a pinned message changes the shared pins")
+            assertEquals(5, column(chat, CHATS.PINS_SEQ), "deleting a pinned message changes the shared pins")
 
             chats.addMembers(ChatId(chat), UserId(owner), listOf(UserId(extra)))
             assertEquals(6, head(chat))
@@ -120,12 +135,11 @@ class ChatSequenceTests
             assertEquals(0, memberSeq(chat, owner))
             assertEquals(
                 0,
-                db.queryForObject(
-                    "SELECT count(*) FROM messenger_outbox_events WHERE payload->>'chatId'=? AND room=? AND payload->>'type' IN " +
-                        "('chat_preferences_changed','history_changed')",
-                    Int::class.java,
-                    chat,
-                    "group:$chat",
+                db.fetchCount(
+                    MESSENGER_OUTBOX_EVENTS,
+                    eventChatId.eq(chat),
+                    MESSENGER_OUTBOX_EVENTS.ROOM.eq("group:$chat"),
+                    eventType.`in`("chat_preferences_changed", "history_changed"),
                 ),
             )
         }
@@ -138,18 +152,16 @@ class ChatSequenceTests
             sends.process(command(owner, request, "hello", recipient = peer))
             val status = sendStatus.status(UserId(owner), RequestId(request))
             val chat = status.chatId!!
-            val created = db.queryForList(
-                "SELECT payload->>'userSeq' FROM messenger_outbox_events WHERE payload->>'type'='chat_created' AND payload->>'chatId'=?",
-                String::class.java,
-                chat,
-            )
+            val created = db.select(eventUserSeq).from(MESSENGER_OUTBOX_EVENTS)
+                .where(eventType.eq("chat_created"), eventChatId.eq(chat))
+                .fetch(eventUserSeq)
             assertEquals(listOf("1", "1"), created)
 
             pins.pin(ChatId(chat), UserId(owner), MessageId(status.messageId!!), PinScope.SELF)
             assertEquals(1, memberSeq(chat, owner))
             assertEquals(0, memberSeq(chat, peer))
             assertEquals(1, head(chat))
-            assertEquals(0, column(chat, "pins_seq"))
+            assertEquals(0, column(chat, CHATS.PINS_SEQ))
             val event = latest(chat, "pins_changed", "user:$owner")
             assertEquals("1", event.path("memberSeq").stringValue())
             assertFalse(event.has("seq"))
@@ -166,12 +178,9 @@ class ChatSequenceTests
             preferences.pin(ChatId(first), UserId(member))
             preferences.pin(ChatId(second), UserId(member))
             assertEquals(5, userSeq(member))
-            val numbers = db.queryForList(
-                "SELECT payload->>'userSeq' FROM messenger_outbox_events WHERE room=? AND payload->>'type'='chat_preferences_changed' " +
-                    "ORDER BY (payload->>'userSeq')::bigint",
-                String::class.java,
-                "user:$member",
-            )
+            val numbers = db.select(eventUserSeq).from(MESSENGER_OUTBOX_EVENTS)
+                .where(MESSENGER_OUTBOX_EVENTS.ROOM.eq("user:$member"), eventType.eq("chat_preferences_changed"))
+                .orderBy(eventUserSeq.cast(SQLDataType.BIGINT)).fetch(eventUserSeq)
             assertEquals(listOf("3", "4", "5"), numbers)
             assertEquals("5", chatState.state(ChatId(first), UserId(member), minSeq = null).userSeq)
         }
@@ -289,30 +298,22 @@ class ChatSequenceTests
         private fun listed(user: String, chat: String): Boolean =
             chats.list(UserId(user), null, 100).chats.any { it.id == chat }
 
-        private fun head(chat: String): Long = column(chat, "next_sequence") - 1
+        private fun head(chat: String): Long = column(chat, CHATS.NEXT_SEQUENCE) - 1
 
-        private fun column(chat: String, name: String): Long = db.queryForObject(
-            "SELECT $name FROM chats WHERE id=?",
-            Long::class.java,
-            chat,
-        )!!
+        private fun column(chat: String, field: TableField<ChatsRecord, Long>): Long = db.fetchValue(field, CHATS.ID.eq(chat))!!
 
         private fun activityAt(chat: String): OffsetDateTime? =
-            db.queryForObject("SELECT last_activity_at FROM chats WHERE id=?", OffsetDateTime::class.java, chat)
+            db.select(CHATS.LAST_ACTIVITY_AT).from(CHATS).where(CHATS.ID.eq(chat)).fetchSingle().value1()
 
         private fun memberSeq(chat: String, user: String): Long =
-            db.queryForObject("SELECT member_seq FROM chat_members WHERE chat_id=? AND user_id=?", Long::class.java, chat, user)!!
+            db.fetchValue(CHAT_MEMBERS.MEMBER_SEQ, CHAT_MEMBERS.CHAT_ID.eq(chat).and(CHAT_MEMBERS.USER_ID.eq(user)))!!
 
-        private fun userSeq(user: String): Long = db.queryForObject("SELECT event_seq FROM users WHERE id=?", Long::class.java, user)!!
+        private fun userSeq(user: String): Long = db.fetchValue(USERS.EVENT_SEQ, USERS.ID.eq(user))!!
 
         private fun latest(chat: String, type: String, room: String): JsonNode = mapper.readTree(
-            db.queryForList(
-                "SELECT payload::text FROM messenger_outbox_events WHERE payload->>'chatId'=? AND payload->>'type'=? AND room=? " +
-                    "ORDER BY created_at DESC, id DESC LIMIT 1",
-                String::class.java,
-                chat,
-                type,
-                room,
-            ).single(),
+            db.select(MESSENGER_OUTBOX_EVENTS.PAYLOAD).from(MESSENGER_OUTBOX_EVENTS)
+                .where(eventChatId.eq(chat), eventType.eq(type), MESSENGER_OUTBOX_EVENTS.ROOM.eq(room))
+                .orderBy(MESSENGER_OUTBOX_EVENTS.CREATED_AT.desc(), MESSENGER_OUTBOX_EVENTS.ID.desc())
+                .limit(1).fetchSingle().value1().data(),
         )
     }

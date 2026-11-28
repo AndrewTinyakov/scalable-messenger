@@ -4,6 +4,7 @@ import com.andrewtinyakov.messenger.ApiApplication
 import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.auth.service.AuthenticationService
 import com.andrewtinyakov.messenger.chat.service.ChatService
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSAGES
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
 import com.andrewtinyakov.messenger.shared.id.newId
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -106,7 +107,7 @@ class MessageFeatureHttpTests
             val member = account()
             val chat = chats.createGroup(UserId(owner.first), "HTTP auth", listOf(member.first).map(::UserId)).id
             sends.process(command(owner.first, newId(), "text", chat = chat))
-            val id = db.queryForObject("SELECT id FROM messages WHERE chat_id=?", String::class.java, chat)!!
+            val id = db.select(MESSAGES.ID).from(MESSAGES).where(MESSAGES.CHAT_ID.eq(chat)).fetchSingle().value1()
             assertEquals(401, request("/$chat/messages/$id?expectedVersion=1", null, "DELETE").statusCode())
             assertEquals(400, request("/$chat/messages/invalid?expectedVersion=1", owner.second, "DELETE").statusCode())
             assertEquals(400, request("/$chat/messages/$id?expectedVersion=01", owner.second, "DELETE").statusCode())
@@ -147,7 +148,7 @@ class MessageFeatureHttpTests
             val member = account()
             val chat = chats.createGroup(UserId(owner.first), "HTTP scoped deletion", listOf(member.first).map(::UserId)).id
             sends.process(command(owner.first, newId(), "private hide", chat = chat))
-            val target = db.queryForObject("SELECT id FROM messages WHERE chat_id=?", String::class.java, chat)!!
+            val target = db.select(MESSAGES.ID).from(MESSAGES).where(MESSAGES.CHAT_ID.eq(chat)).fetchSingle().value1()
             val requestId = newId()
             val accepted =
                 request(

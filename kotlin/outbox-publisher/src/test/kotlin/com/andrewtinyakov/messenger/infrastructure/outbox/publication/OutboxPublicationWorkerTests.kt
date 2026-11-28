@@ -1,11 +1,15 @@
 package com.andrewtinyakov.messenger.infrastructure.outbox.publication
 
+import com.andrewtinyakov.messenger.infrastructure.database.PostgresStatements
+import com.andrewtinyakov.messenger.infrastructure.outbox.OUTBOX_WAKEUP_CHANNEL
 import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxPublisherProperties
+import org.jooq.impl.DSL
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.mock
+import org.mockito.Mockito.mockingDetails
 import org.mockito.Mockito.times
 import org.mockito.Mockito.verify
 import org.mockito.Mockito.`when`
@@ -138,5 +142,8 @@ class OutboxPublicationWorkerTests {
             release.countDown()
             publisher.stop()
         }
+        val listen = PostgresStatements.listen(DSL.name(OUTBOX_WAKEUP_CHANNEL))
+        val execution = mockingDetails(statement).invocations.single { it.method.name == "execute" }
+        assertEquals(PostgresStatements.render(listen), execution.arguments.single())
     }
 }

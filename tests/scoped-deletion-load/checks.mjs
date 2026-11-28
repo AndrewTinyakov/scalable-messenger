@@ -23,7 +23,7 @@ export async function functional(runtime) {
   }
   assert.equal((await runtime.resolve(1, group, [a.id, b.id])).messages.length, 2);
   await delay(150);
-  assert.ok(!runtime.events.slice(start).some(event => [1, 2].includes(event.device) && event.type === 'history_changed' && BigInt(event.visibilityRevision ?? '0') > 0n), 'Personal hint leaked to another account');
+  assert.ok(!runtime.events.slice(start).some(event => [1, 2].includes(event.device) && event.type === 'history_changed' && BigInt(event.memberSeq ?? '0') > 0n), 'Personal hint leaked to another account');
   const retried = await runtime.deletion(0, group, 'SELF', 'MESSAGES', [b.id, a.id], deletionId);
   assert.deepEqual(retried, hidden, 'Deletion retry changed its result');
   await runtime.deletion(0, group, 'EVERYONE', 'MESSAGES', [a.id, b.id], deletionId, [409]);

@@ -1,8 +1,11 @@
 package com.andrewtinyakov.messenger.infrastructure.outbox
 
 import com.andrewtinyakov.messenger.MessengerOutboxPublisherApplication
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSENGER_OUTBOX_EVENTS
 import com.andrewtinyakov.messenger.infrastructure.outbox.publication.OutboxPublicationWorker
 import com.andrewtinyakov.messenger.shared.id.newId
+import org.jooq.DSLContext
+import org.jooq.JSONB
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -10,7 +13,6 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import org.springframework.test.context.bean.override.mockito.MockitoBean
@@ -37,7 +39,7 @@ class OutboxClaimRepositoryTests {
 
     @Autowired private lateinit var tx: TransactionTemplate
 
-    @Autowired private lateinit var db: JdbcTemplate
+    @Autowired private lateinit var db: DSLContext
 
     private val executor = Executors.newVirtualThreadPerTaskExecutor()
 
@@ -54,7 +56,10 @@ class OutboxClaimRepositoryTests {
         val room = "group:${newId()}"
         val ids = List(3) { EventId(newId()) }
         outboxRepository.enqueue(ids.map { OutboxMessage(it, room, "{}") })
-        ids.forEach { db.update("UPDATE messenger_outbox_events SET created_at='1970-01-01T00:00:00Z' WHERE id=?", it.value) }
+        ids.forEach {
+            db.update(MESSENGER_OUTBOX_EVENTS).set(MESSENGER_OUTBOX_EVENTS.CREATED_AT, OffsetDateTime.parse("1970-01-01T00:00:00Z"))
+                .where(MESSENGER_OUTBOX_EVENTS.ID.eq(it.value)).execute()
+        }
         val now = OffsetDateTime.now()
         val anchor = tx.execute { claimRepository.claim(now, 1000, "expired-a", now.plusSeconds(30)) }.single { it.room == room }
         val tail = tx.execute { claimRepository.claimGroupTail(anchor, now, 2, "expired-a", now.plusSeconds(30)) }
@@ -85,7 +90,10 @@ class OutboxClaimRepositoryTests {
         val now = OffsetDateTime.now()
         val lease = now.plusSeconds(30)
         val anchor = tx.execute { claimRepository.claim(now, 1000, "barrier-a", lease) }.single { it.room == room }
-        db.update("UPDATE messenger_outbox_events SET lease_owner='barrier-b', lease_until=? WHERE id=?", lease, ids[1].value)
+        db.update(MESSENGER_OUTBOX_EVENTS)
+            .set(MESSENGER_OUTBOX_EVENTS.LEASE_OWNER, "barrier-b")
+            .set(MESSENGER_OUTBOX_EVENTS.LEASE_UNTIL, lease)
+            .where(MESSENGER_OUTBOX_EVENTS.ID.eq(ids[1].value)).execute()
         assertEquals(emptyList<OutboxMessage>(), tx.execute { claimRepository.claimGroupTail(anchor, now, 10, "barrier-a", lease) })
         claimRepository.complete(listOf(ids[0]), "barrier-a")
         claimRepository.complete(listOf(ids[1]), "barrier-b")
@@ -99,7 +107,10 @@ class OutboxClaimRepositoryTests {
         val room = "group:${newId()}"
         val ids = List(5) { EventId(newId()) }
         outboxRepository.enqueue(ids.map { OutboxMessage(it, room, "{}") })
-        ids.forEach { db.update("UPDATE messenger_outbox_events SET created_at='1980-01-01T00:00:00Z' WHERE id=?", it.value) }
+        ids.forEach {
+            db.update(MESSENGER_OUTBOX_EVENTS).set(MESSENGER_OUTBOX_EVENTS.CREATED_AT, OffsetDateTime.parse("1980-01-01T00:00:00Z"))
+                .where(MESSENGER_OUTBOX_EVENTS.ID.eq(it.value)).execute()
+        }
         val now = OffsetDateTime.now()
         val lease = now.plusSeconds(30)
         val anchor = tx.execute { claimRepository.claim(now, 1000, "prefix-a", lease) }.single { it.room == room }
@@ -134,7 +145,8 @@ class OutboxClaimRepositoryTests {
         val ids = List(3) { EventId(newId()) }.sortedBy { it.value }
         outboxRepository.enqueue(messages = ids.map { OutboxMessage(id = it, room = room, payload = "{}") })
         ids.forEach {
-            db.update("UPDATE messenger_outbox_events SET created_at='1990-01-01T00:00:00Z' WHERE id=?", it.value)
+            db.update(MESSENGER_OUTBOX_EVENTS).set(MESSENGER_OUTBOX_EVENTS.CREATED_AT, OffsetDateTime.parse("1990-01-01T00:00:00Z"))
+                .where(MESSENGER_OUTBOX_EVENTS.ID.eq(it.value)).execute()
         }
         val now = OffsetDateTime.now()
         val locked = CountDownLatch(1)
@@ -169,17 +181,21 @@ class OutboxClaimRepositoryTests {
     fun `outbox completion deletes only rows leased by this publisher`() {
         val owned = newId()
         val other = newId()
-        db.update(
-            "INSERT INTO messenger_outbox_events(id,room,payload,lease_owner) VALUES (?,'user:test','{}'::jsonb,'publisher-a')," +
-                "(?,'user:test','{}'::jsonb,'publisher-b')",
-            owned,
-            other,
-        )
+        val payload = JSONB.valueOf("{}")
+        db.insertInto(
+            MESSENGER_OUTBOX_EVENTS,
+            MESSENGER_OUTBOX_EVENTS.ID,
+            MESSENGER_OUTBOX_EVENTS.ROOM,
+            MESSENGER_OUTBOX_EVENTS.PAYLOAD,
+            MESSENGER_OUTBOX_EVENTS.LEASE_OWNER,
+        ).values(owned, "user:test", payload, "publisher-a")
+            .values(other, "user:test", payload, "publisher-b")
+            .execute()
 
         claimRepository.complete(listOf(EventId(owned)), "publisher-a")
 
-        assertEquals(0, db.queryForObject("SELECT count(*) FROM messenger_outbox_events WHERE id=?", Int::class.java, owned))
-        assertEquals(1, db.queryForObject("SELECT count(*) FROM messenger_outbox_events WHERE id=?", Int::class.java, other))
+        assertEquals(0, db.fetchCount(MESSENGER_OUTBOX_EVENTS, MESSENGER_OUTBOX_EVENTS.ID.eq(owned)))
+        assertEquals(1, db.fetchCount(MESSENGER_OUTBOX_EVENTS, MESSENGER_OUTBOX_EVENTS.ID.eq(other)))
     }
 
     @Test
@@ -193,7 +209,8 @@ class OutboxClaimRepositoryTests {
             ),
         )
         ids.forEach {
-            db.update("UPDATE messenger_outbox_events SET created_at='1989-01-01T00:00:00Z' WHERE id=?", it)
+            db.update(MESSENGER_OUTBOX_EVENTS).set(MESSENGER_OUTBOX_EVENTS.CREATED_AT, OffsetDateTime.parse("1989-01-01T00:00:00Z"))
+                .where(MESSENGER_OUTBOX_EVENTS.ID.eq(it)).execute()
         }
         val now = OffsetDateTime.now()
 
@@ -211,7 +228,7 @@ class OutboxClaimRepositoryTests {
 
     companion object {
         @Container @JvmField
-        val postgres = PostgreSQLContainer("postgres:17-alpine")
+        val postgres = PostgreSQLContainer("postgres:19-alpine")
 
         @Container @JvmField
         val redis = GenericContainer("redis:7.4-alpine").withExposedPorts(6379)

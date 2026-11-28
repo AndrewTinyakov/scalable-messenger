@@ -1,7 +1,13 @@
 package com.andrewtinyakov.messenger.infrastructure.outbox
 
+import com.andrewtinyakov.messenger.infrastructure.database.PostgresStatements
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSENGER_OUTBOX_EVENTS
+import com.andrewtinyakov.messenger.infrastructure.database.generated.enums.RoomKind
+import com.andrewtinyakov.messenger.infrastructure.database.postgresFunction
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
 import com.andrewtinyakov.messenger.shared.id.newId
+import org.jooq.impl.DSL
+import org.jooq.impl.SQLDataType.OTHER
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -22,13 +28,13 @@ class OutboxRepositoryTests
     ) : MessengerIntegrationTest() {
         @Test
         fun `publishers wake after the enqueueing transaction commits, not inside it`() {
-            assertEquals(
-                0,
-                db.queryForObject("SELECT count(*) FROM pg_trigger WHERE tgrelid = 'messenger_outbox_events'::regclass", Int::class.java),
-            )
+            val triggers = DSL.table(DSL.name("pg_catalog", "pg_trigger"))
+            val relation = DSL.field(DSL.name("tgrelid"), OTHER)
+            val outboxRelation = postgresFunction("to_regclass", OTHER, DSL.inline(MESSENGER_OUTBOX_EVENTS.name))
+            assertEquals(0, db.fetchCount(triggers, relation.eq(outboxRelation)))
             dataSource.connection.use { connection ->
                 connection.autoCommit = true
-                connection.createStatement().use { it.execute("LISTEN $OUTBOX_WAKEUP_CHANNEL") }
+                PostgresStatements.execute(connection, PostgresStatements.listen(DSL.name(OUTBOX_WAKEUP_CHANNEL)))
                 val listener = connection.unwrap(PGConnection::class.java)
                 listener.getNotifications(200)
                 val event = { OutboxMessage(EventId(newId()), "user:${newId()}", "{}") }
@@ -54,7 +60,7 @@ class OutboxRepositoryTests
                 assertThrows(DataIntegrityViolationException::class.java) {
                     outboxRepository.enqueue(listOf(OutboxMessage(id, "user:${newId()}", """{"$field":"retained content"}""")))
                 }
-                assertEquals(0, db.queryForObject("SELECT count(*) FROM messenger_outbox_events WHERE id=?", Int::class.java, id.value))
+                assertEquals(0, db.fetchCount(MESSENGER_OUTBOX_EVENTS, MESSENGER_OUTBOX_EVENTS.ID.eq(id.value)))
             }
         }
 
@@ -70,19 +76,23 @@ class OutboxRepositoryTests
             )
 
             assertEquals(
-                "USER",
-                db.queryForObject("SELECT room_kind::text FROM messenger_outbox_events WHERE id=?", String::class.java, userEvent.value),
+                RoomKind.USER,
+                db.select(MESSENGER_OUTBOX_EVENTS.ROOM_KIND).from(MESSENGER_OUTBOX_EVENTS)
+                    .where(MESSENGER_OUTBOX_EVENTS.ID.eq(userEvent.value)).fetchSingle().value1(),
             )
             assertEquals(
-                "GROUP",
-                db.queryForObject("SELECT room_kind::text FROM messenger_outbox_events WHERE id=?", String::class.java, groupEvent.value),
+                RoomKind.GROUP,
+                db.select(MESSENGER_OUTBOX_EVENTS.ROOM_KIND).from(MESSENGER_OUTBOX_EVENTS)
+                    .where(MESSENGER_OUTBOX_EVENTS.ID.eq(groupEvent.value)).fetchSingle().value1(),
             )
 
-            db.update("UPDATE messenger_outbox_events SET room=? WHERE id=?", "group:${newId()}", userEvent.value)
+            db.update(MESSENGER_OUTBOX_EVENTS).set(MESSENGER_OUTBOX_EVENTS.ROOM, "group:${newId()}")
+                .where(MESSENGER_OUTBOX_EVENTS.ID.eq(userEvent.value)).execute()
 
             assertEquals(
-                "GROUP",
-                db.queryForObject("SELECT room_kind::text FROM messenger_outbox_events WHERE id=?", String::class.java, userEvent.value),
+                RoomKind.GROUP,
+                db.select(MESSENGER_OUTBOX_EVENTS.ROOM_KIND).from(MESSENGER_OUTBOX_EVENTS)
+                    .where(MESSENGER_OUTBOX_EVENTS.ID.eq(userEvent.value)).fetchSingle().value1(),
             )
         }
 
@@ -104,12 +114,7 @@ class OutboxRepositoryTests
                 assertEquals("23502", (failure.mostSpecificCause as SQLException).sqlState)
                 assertEquals(
                     0,
-                    db.queryForObject(
-                        "SELECT count(*) FROM messenger_outbox_events WHERE id IN (?, ?)",
-                        Int::class.java,
-                        validEvent.value,
-                        invalidEvent.value,
-                    ),
+                    db.fetchCount(MESSENGER_OUTBOX_EVENTS, MESSENGER_OUTBOX_EVENTS.ID.`in`(validEvent.value, invalidEvent.value)),
                 )
             }
         }

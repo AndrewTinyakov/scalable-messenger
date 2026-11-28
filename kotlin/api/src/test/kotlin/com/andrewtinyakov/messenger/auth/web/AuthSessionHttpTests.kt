@@ -1,9 +1,13 @@
 package com.andrewtinyakov.messenger.auth.web
 
 import com.andrewtinyakov.messenger.ApiApplication
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.SESSIONS
 import com.andrewtinyakov.messenger.shared.crypto.sha256
 import com.andrewtinyakov.messenger.shared.id.newId
 import io.micrometer.core.instrument.MeterRegistry
+import org.jooq.DSLContext
+import org.jooq.impl.DSL
+import org.jooq.types.DayToSecond
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -18,7 +22,6 @@ import org.mockito.Mockito.verify
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
@@ -54,7 +57,7 @@ private const val CLIENT_ORIGIN = "http://localhost:5173"
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class AuthSessionHttpTests {
     companion object {
-        private val postgres = PostgreSQLContainer<Nothing>("postgres:17-alpine").apply {
+        private val postgres = PostgreSQLContainer<Nothing>("postgres:19-alpine").apply {
             withDatabaseName("messenger")
             withUsername("messenger")
             withPassword("messenger")
@@ -75,7 +78,7 @@ class AuthSessionHttpTests {
 
     @Autowired private lateinit var mapper: ObjectMapper
 
-    @Autowired private lateinit var db: JdbcTemplate
+    @Autowired private lateinit var db: DSLContext
 
     @Autowired private lateinit var metrics: MeterRegistry
 
@@ -135,19 +138,16 @@ class AuthSessionHttpTests {
         assertTrue(header.contains("; Max-Age=${Duration.ofDays(400).seconds};"), header)
         val account = login(username = username)
 
-        db.update(
-            "UPDATE sessions SET last_used_at=now() - interval '2 days', expires_at=now() + interval '28 days' WHERE token_hash=?",
-            account.sessionId,
-        )
+        db.update(SESSIONS)
+            .set(SESSIONS.LAST_USED_AT, DSL.currentOffsetDateTime().sub(DSL.inline(DayToSecond.valueOf(Duration.ofDays(2)))))
+            .set(SESSIONS.EXPIRES_AT, DSL.currentOffsetDateTime().add(DSL.inline(DayToSecond.valueOf(Duration.ofDays(28)))))
+            .where(SESSIONS.TOKEN_HASH.eq(account.sessionId)).execute()
         val renewed = send(get("/api/v1/auth/session").header("Cookie", account.cookie))
 
         assertEquals(200, renewed.statusCode())
         assertFalse(renewed.headers().firstValue("Set-Cookie").isPresent)
-        val expiresAt = db.queryForObject(
-            "SELECT expires_at FROM sessions WHERE token_hash=?",
-            OffsetDateTime::class.java,
-            account.sessionId,
-        )!!
+        val expiresAt = db.select(SESSIONS.EXPIRES_AT).from(SESSIONS)
+            .where(SESSIONS.TOKEN_HASH.eq(account.sessionId)).fetchSingle().value1()
         assertTrue(Duration.between(OffsetDateTime.now(), expiresAt) > Duration.ofDays(29))
     }
 
@@ -236,13 +236,12 @@ class AuthSessionHttpTests {
         assertTrue(rotated != current.cookie && rotated.startsWith(current.cookie.substringBefore('=') + "="))
         assertEquals(200, send(get("/api/v1/auth/session").header("Cookie", rotated)).statusCode())
         assertEquals(200, send(get("/api/v1/auth/session").header("Cookie", current.cookie)).statusCode())
-        val retiredUntil = db.queryForObject(
-            "SELECT expires_at FROM sessions WHERE token_hash=?",
-            OffsetDateTime::class.java,
-            current.sessionId,
-        )!!
+        val retiredUntil = db.select(SESSIONS.EXPIRES_AT).from(SESSIONS)
+            .where(SESSIONS.TOKEN_HASH.eq(current.sessionId)).fetchSingle().value1()
         assertTrue(Duration.between(OffsetDateTime.now(), retiredUntil) <= Duration.ofSeconds(60))
-        db.update("UPDATE sessions SET expires_at=now() - interval '1 minute' WHERE token_hash=?", current.sessionId)
+        db.update(SESSIONS)
+            .set(SESSIONS.EXPIRES_AT, DSL.currentOffsetDateTime().sub(DSL.inline(DayToSecond.valueOf(Duration.ofMinutes(1)))))
+            .where(SESSIONS.TOKEN_HASH.eq(current.sessionId)).execute()
         assertEquals(401, send(get("/api/v1/auth/session").header("Cookie", current.cookie)).statusCode())
         assertEquals(401, send(get("/api/v1/auth/session").header("Cookie", other.cookie)).statusCode())
         assertEquals(401, send(post("/api/v1/auth/login", credentials(username, "long-demo-password"))).statusCode())

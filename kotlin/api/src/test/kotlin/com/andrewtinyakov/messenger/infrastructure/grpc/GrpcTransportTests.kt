@@ -10,6 +10,10 @@ import com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupsRequest
 import com.andrewtinyakov.messenger.generated.grpc.ChatAuthorizationGrpc
 import com.andrewtinyakov.messenger.generated.grpc.ValidateSessionRequest
 import com.andrewtinyakov.messenger.generated.grpc.ValidateSessionsRequest
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHATS
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHAT_MEMBERS
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.SESSIONS
+import com.andrewtinyakov.messenger.infrastructure.database.generated.enums.ChatKind
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
 import com.andrewtinyakov.messenger.shared.id.newId
 import com.andrewtinyakov.messenger.ws.grpc.ChatAuthorizationGrpcService
@@ -170,11 +174,8 @@ class GrpcTransportTests : MessengerIntegrationTest() {
         val loggedOut = register("out")
         val expired = register("old")
         authenticationService.logout(loggedOut.token)
-        db.update(
-            "UPDATE sessions SET expires_at=? WHERE token_hash=?",
-            OffsetDateTime.now().minusSeconds(1),
-            expired.session.sessionId.value,
-        )
+        db.update(SESSIONS).set(SESSIONS.EXPIRES_AT, OffsetDateTime.now().minusSeconds(1))
+            .where(SESSIONS.TOKEN_HASH.eq(expired.session.sessionId.value)).execute()
         val ids = listOf(live, loggedOut, expired).map { it.session.sessionId.value } + "0".repeat(64)
 
         withClient { client ->
@@ -194,11 +195,8 @@ class GrpcTransportTests : MessengerIntegrationTest() {
     @Test
     fun `RPCs reject sessions expired in SQL`() {
         val credentials = authenticationService.register("exp_${UUID.randomUUID().toString().replace("-", "").take(20)}", "test-password")
-        db.update(
-            "UPDATE sessions SET expires_at=? WHERE token_hash=?",
-            OffsetDateTime.now().minusSeconds(1),
-            credentials.session.sessionId.value,
-        )
+        db.update(SESSIONS).set(SESSIONS.EXPIRES_AT, OffsetDateTime.now().minusSeconds(1))
+            .where(SESSIONS.TOKEN_HASH.eq(credentials.session.sessionId.value)).execute()
         withClient { client ->
             assertRpcStatus(Status.Code.UNAUTHENTICATED) {
                 client.validateSession(ValidateSessionRequest.newBuilder().setSessionId(credentials.session.sessionId.value).build())
@@ -258,8 +256,8 @@ class GrpcTransportTests : MessengerIntegrationTest() {
     fun `group authorization rejects direct chats even when the session user is a member`() {
         val credentials = authenticationService.register(username = "direct_${newId().lowercase()}", password = "test-password")
         val chatId = newId()
-        db.update("INSERT INTO chats(id,kind,direct_pair_key) VALUES (?,'DIRECT',?)", chatId, "pair_$chatId")
-        db.update("INSERT INTO chat_members(chat_id,user_id) VALUES (?,?)", chatId, credentials.session.userId.value)
+        db.insertInto(CHATS, CHATS.ID, CHATS.KIND, CHATS.DIRECT_PAIR_KEY).values(chatId, ChatKind.DIRECT, "pair_$chatId").execute()
+        db.insertInto(CHAT_MEMBERS, CHAT_MEMBERS.CHAT_ID, CHAT_MEMBERS.USER_ID).values(chatId, credentials.session.userId.value).execute()
         withClient { client ->
             assertRpcStatus(Status.Code.PERMISSION_DENIED) {
                 client.authorizeGroup(

@@ -10,6 +10,9 @@ import com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupsRequest
 import com.andrewtinyakov.messenger.generated.grpc.AuthorizeGroupsResponse
 import com.andrewtinyakov.messenger.generated.grpc.ValidateSessionRequest
 import com.andrewtinyakov.messenger.generated.grpc.ValidateSessionResponse
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSENGER_OUTBOX_EVENTS
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.SESSIONS
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.USERS
 import com.andrewtinyakov.messenger.shared.crypto.sha256
 import com.andrewtinyakov.messenger.shared.id.newId
 import com.andrewtinyakov.messenger.shared.web.ApiException
@@ -21,6 +24,7 @@ import io.grpc.stub.StreamObserver
 import org.jooq.DSLContext
 import org.jooq.ExecuteContext
 import org.jooq.ExecuteListener
+import org.jooq.impl.DSL
 import org.jooq.impl.DefaultExecuteListenerProvider
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
@@ -30,7 +34,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
@@ -55,12 +59,11 @@ class AuthenticationServiceTests
         private val wsTicketService: WsTicketService,
         private val chatAuthorizationGrpcService: ChatAuthorizationGrpcService,
         private val chatService: ChatService,
-        private val db: JdbcTemplate,
         private val mapper: ObjectMapper,
-        private val jooq: DSLContext,
+        private val db: DSLContext,
     ) {
         companion object {
-            private val postgres = PostgreSQLContainer<Nothing>("postgres:17-alpine").apply {
+            private val postgres = PostgreSQLContainer<Nothing>("postgres:19-alpine").apply {
                 withDatabaseName("messenger")
                 withUsername("messenger")
                 withPassword("messenger")
@@ -101,7 +104,7 @@ class AuthenticationServiceTests
             val bearer = created.token
             val session = authenticationService.authenticatedSession(bearer)
             val expiry = OffsetDateTime.now(ZoneOffset.UTC).plusMinutes(5).withNano(0)
-            db.update("UPDATE sessions SET expires_at=? WHERE token_hash=?", expiry, session.sessionId.value)
+            db.update(SESSIONS).set(SESSIONS.EXPIRES_AT, expiry).where(SESSIONS.TOKEN_HASH.eq(session.sessionId.value)).execute()
 
             val issued = wsTicketService.issue(authenticationService.authenticatedSession(bearer))
 
@@ -125,7 +128,7 @@ class AuthenticationServiceTests
             val username = "legacy_${UUID.randomUUID().toString().replace("-", "").take(20)}"
             val userId = newId()
             val hash = BCryptPasswordEncoder().encode("legacy-password")
-            db.update("INSERT INTO users(id,username,password_hash) VALUES (?,?,?)", userId, username, hash)
+            db.insertInto(USERS, USERS.ID, USERS.USERNAME, USERS.PASSWORD_HASH).values(userId, username, hash).execute()
 
             assertEquals(userId, authenticationService.login(username, "legacy-password").session.userId.value)
             assertThrows(ApiException::class.java) { authenticationService.login(username, "incorrect-password") }
@@ -155,11 +158,11 @@ class AuthenticationServiceTests
             assertEquals(second.session.userId, authenticationService.authenticatedSession(secondBearer).userId)
             assertEquals(Status.Code.UNAUTHENTICATED, validateError(validation).status.code)
 
-            val payload = db.queryForObject(
-                "SELECT payload::text FROM messenger_outbox_events WHERE room=? AND payload->>'type'='session_revoked'",
-                String::class.java,
-                "user:${first.session.userId.value}",
-            )!!
+            val payload = db.select(MESSENGER_OUTBOX_EVENTS.PAYLOAD).from(MESSENGER_OUTBOX_EVENTS)
+                .where(
+                    MESSENGER_OUTBOX_EVENTS.ROOM.eq("user:${first.session.userId.value}"),
+                    DSL.jsonbGetAttributeAsText(MESSENGER_OUTBOX_EVENTS.PAYLOAD, "type").eq("session_revoked"),
+                ).fetchSingle().value1().data()
             val event = mapper.readTree(payload)
             assertEquals(5, event.size())
             assertEquals("session_revoked", event.path("type").stringValue())
@@ -208,11 +211,8 @@ class AuthenticationServiceTests
                 assertEquals(Status.Code.UNAUTHENTICATED, validateError(request.toBuilder().setSessionId(value).build()).status.code)
             }
             assertEquals(Status.Code.UNAUTHENTICATED, validateError(request.toBuilder().setSessionId("0".repeat(64)).build()).status.code)
-            db.update(
-                "UPDATE sessions SET expires_at=? WHERE token_hash=?",
-                OffsetDateTime.now().minusSeconds(1),
-                created.session.sessionId.value,
-            )
+            db.update(SESSIONS).set(SESSIONS.EXPIRES_AT, OffsetDateTime.now().minusSeconds(1))
+                .where(SESSIONS.TOKEN_HASH.eq(created.session.sessionId.value)).execute()
             assertEquals(Status.Code.UNAUTHENTICATED, validateError(request).status.code)
         }
 
@@ -240,11 +240,8 @@ class AuthenticationServiceTests
         @Test
         fun `expired sessions are deleted and revoked despite stale or duplicate expected identity`() {
             val credentials = authenticationService.register(username = "expired_${newId().lowercase()}", password = "long-demo-password")
-            db.update(
-                "UPDATE sessions SET expires_at=? WHERE token_hash=?",
-                OffsetDateTime.now().minusSeconds(1),
-                credentials.session.sessionId.value,
-            )
+            db.update(SESSIONS).set(SESSIONS.EXPIRES_AT, OffsetDateTime.now().minusSeconds(1))
+                .where(SESSIONS.TOKEN_HASH.eq(credentials.session.sessionId.value)).execute()
 
             authenticationService.logout(
                 token = credentials.token,
@@ -288,31 +285,21 @@ class AuthenticationServiceTests
         @Test
         fun `failed outbox persistence rolls back logout and permits retry`() {
             val credentials = authenticationService.register(username = "outbox_${newId().lowercase()}", password = "long-demo-password")
-            val suffix = UUID.randomUUID().toString().replace("-", "")
-            val function = "reject_revocation_$suffix"
+            val constraint = DSL.name("reject_revocation_${newId().lowercase()}")
             val sessionId = credentials.session.sessionId.value
-            db.execute(
-                """
-                CREATE FUNCTION $function() RETURNS trigger LANGUAGE plpgsql AS ${'$'}${'$'}
-                BEGIN
-                    IF NEW.payload->>'sessionId' = '$sessionId' THEN
-                        RAISE EXCEPTION 'outbox unavailable';
-                    END IF;
-                    RETURN NEW;
-                END;
-                ${'$'}${'$'}
-                """.trimIndent(),
-            )
+            db.alterTable(MESSENGER_OUTBOX_EVENTS).add(
+                DSL.constraint(
+                    constraint,
+                ).check(DSL.jsonbGetAttributeAsText(MESSENGER_OUTBOX_EVENTS.PAYLOAD, "sessionId").isDistinctFrom(sessionId)),
+            ).execute()
             try {
-                db.execute("CREATE TRIGGER $function BEFORE INSERT ON messenger_outbox_events FOR EACH ROW EXECUTE FUNCTION $function()")
-                assertThrows(org.jooq.exception.DataAccessException::class.java) {
+                assertThrows(DataIntegrityViolationException::class.java) {
                     authenticationService.logout(token = credentials.token)
                 }
                 assertEquals(credentials.session.sessionId, authenticationService.authenticatedSession(credentials.token).sessionId)
                 assertEquals(0, revocationCount(sessionId = sessionId))
             } finally {
-                db.execute("DROP TRIGGER IF EXISTS $function ON messenger_outbox_events")
-                db.execute("DROP FUNCTION $function()")
+                db.alterTable(MESSENGER_OUTBOX_EVENTS).dropConstraint(constraint).execute()
             }
 
             authenticationService.logout(token = credentials.token)
@@ -368,11 +355,11 @@ class AuthenticationServiceTests
             assertEquals(Status.Code.INVALID_ARGUMENT, malformedBatch.status.code)
         }
 
-        private fun revocationCount(sessionId: String): Int = db.queryForObject(
-            "SELECT count(*) FROM messenger_outbox_events WHERE payload->>'type'='session_revoked' AND payload->>'sessionId'=?",
-            Int::class.java,
-            sessionId,
-        )!!
+        private fun revocationCount(sessionId: String): Int = db.fetchCount(
+            MESSENGER_OUTBOX_EVENTS,
+            DSL.jsonbGetAttributeAsText(MESSENGER_OUTBOX_EVENTS.PAYLOAD, "type").eq("session_revoked"),
+            DSL.jsonbGetAttributeAsText(MESSENGER_OUTBOX_EVENTS.PAYLOAD, "sessionId").eq(sessionId),
+        )
 
         private fun statements(action: () -> Unit): List<String> {
             val statements = mutableListOf<String>()
@@ -382,7 +369,7 @@ class AuthenticationServiceTests
                     if (Thread.currentThread() == owner) statements.add(requireNotNull(ctx.sql()).substringAfter("*/ "))
                 }
             }
-            val configuration = jooq.configuration()
+            val configuration = db.configuration()
             val previous = configuration.executeListenerProviders()
             configuration.set(*previous, DefaultExecuteListenerProvider(listener))
             try {

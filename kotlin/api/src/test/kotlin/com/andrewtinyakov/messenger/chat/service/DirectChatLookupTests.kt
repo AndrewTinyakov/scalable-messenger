@@ -9,13 +9,13 @@ import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHA
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSAGES
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSENGER_OUTBOX_EVENTS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.SEND_REQUESTS
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.USERS
 import com.andrewtinyakov.messenger.infrastructure.redis.RoomAddress
 import com.andrewtinyakov.messenger.message.model.CommandResult
 import com.andrewtinyakov.messenger.message.service.MessageSendService
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
 import com.andrewtinyakov.messenger.shared.id.isValidId
 import com.andrewtinyakov.messenger.shared.id.newId
-import org.jooq.DSLContext
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -41,7 +41,6 @@ class DirectChatLookupTests
         private val authenticationService: AuthenticationService,
         private val messageSendService: MessageSendService,
         private val mapper: ObjectMapper,
-        private val sql: DSLContext,
     ) : MessengerIntegrationTest() {
         private val http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()
 
@@ -49,7 +48,7 @@ class DirectChatLookupTests
         fun `draft reads return the recipient without creating durable state`() {
             val sender = account()
             val recipient = user("draft_${newId()}")
-            val username = db.queryForObject("SELECT username FROM users WHERE id=?", String::class.java, recipient)
+            val username = db.fetchValue(USERS.USERNAME, USERS.ID.eq(recipient))!!
             val before = durableCounts(sender.first, recipient)
 
             repeat(2) {
@@ -73,7 +72,7 @@ class DirectChatLookupTests
                 CommandResult.SAVED,
                 messageSendService.process(command(left.first, newId(), "hello", recipient = right.first)),
             )
-            val chatId = db.queryForObject("SELECT chat_id FROM messages WHERE sender_id=?", String::class.java, left.first)
+            val chatId = db.fetchValue(MESSAGES.CHAT_ID, MESSAGES.SENDER_ID.eq(left.first))!!
             val before = durableCounts(left.first, right.first)
 
             for ((viewer, recipient) in listOf(left to right, right to left)) {
@@ -130,7 +129,7 @@ class DirectChatLookupTests
                 CommandResult.SAVED,
                 messageSendService.process(command(sender.first, newId(), "hello", recipient = recipient)),
             )
-            db.update("DELETE FROM chat_members WHERE user_id=?", sender.first)
+            db.deleteFrom(CHAT_MEMBERS).where(CHAT_MEMBERS.USER_ID.eq(sender.first)).execute()
 
             val response = get(recipient, sender.second)
 
@@ -156,15 +155,15 @@ class DirectChatLookupTests
             val pairKeys = users.flatMapIndexed { index, user ->
                 users.drop(index + 1).map { directPairKey(user, it) }
             }
-            val memberships = sql.select(CHAT_MEMBERS.CHAT_ID).from(CHAT_MEMBERS).where(CHAT_MEMBERS.USER_ID.`in`(userIds))
+            val memberships = db.select(CHAT_MEMBERS.CHAT_ID).from(CHAT_MEMBERS).where(CHAT_MEMBERS.USER_ID.`in`(userIds))
             val chatFilter = CHATS.ID.`in`(memberships).or(CHATS.DIRECT_PAIR_KEY.`in`(pairKeys))
-            val chats = sql.select(CHATS.ID).from(CHATS).where(chatFilter)
+            val chats = db.select(CHATS.ID).from(CHATS).where(chatFilter)
             return listOf(
-                sql.fetchCount(CHATS, chatFilter),
-                sql.fetchCount(CHAT_MEMBERS, CHAT_MEMBERS.CHAT_ID.`in`(chats)),
-                sql.fetchCount(MESSAGES, MESSAGES.CHAT_ID.`in`(chats).or(MESSAGES.SENDER_ID.`in`(userIds))),
-                sql.fetchCount(SEND_REQUESTS, SEND_REQUESTS.CHAT_ID.`in`(chats).or(SEND_REQUESTS.SENDER_ID.`in`(userIds))),
-                sql.fetchCount(MESSENGER_OUTBOX_EVENTS, MESSENGER_OUTBOX_EVENTS.ROOM.`in`(users.map(RoomAddress::user))),
+                db.fetchCount(CHATS, chatFilter),
+                db.fetchCount(CHAT_MEMBERS, CHAT_MEMBERS.CHAT_ID.`in`(chats)),
+                db.fetchCount(MESSAGES, MESSAGES.CHAT_ID.`in`(chats).or(MESSAGES.SENDER_ID.`in`(userIds))),
+                db.fetchCount(SEND_REQUESTS, SEND_REQUESTS.CHAT_ID.`in`(chats).or(SEND_REQUESTS.SENDER_ID.`in`(userIds))),
+                db.fetchCount(MESSENGER_OUTBOX_EVENTS, MESSENGER_OUTBOX_EVENTS.ROOM.`in`(users.map(RoomAddress::user))),
             )
         }
     }

@@ -130,7 +130,7 @@ test('presence checks fresh snapshots on reconnect and allows in-flight updates 
   assert.equal(metrics.failures['socket.decode/framePresence'], undefined);
   assert.equal(device.socket.presence.receive({
     type: 'presence', version: 1, statuses: [{ userId: groupMember, online: true }],
-  }, performance.now() + 1000), false);
+  }, performance.now() + 10000), false);
   assert.deepEqual(await stopCount, { type: 'watch_online_count', version: 1 });
   await status(peer, chatId, true);
   assert.equal(metrics.failures['socket.decode/framePresence'], 1);

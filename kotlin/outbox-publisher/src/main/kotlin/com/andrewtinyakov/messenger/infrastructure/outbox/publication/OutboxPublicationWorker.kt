@@ -1,8 +1,10 @@
 package com.andrewtinyakov.messenger.infrastructure.outbox.publication
 
+import com.andrewtinyakov.messenger.infrastructure.database.PostgresStatements
 import com.andrewtinyakov.messenger.infrastructure.outbox.OUTBOX_WAKEUP_CHANNEL
 import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxPublisherProperties
 import jakarta.annotation.PreDestroy
+import org.jooq.impl.DSL
 import org.postgresql.PGConnection
 import org.slf4j.LoggerFactory
 import org.springframework.boot.context.event.ApplicationReadyEvent
@@ -93,6 +95,6 @@ class OutboxPublicationWorker(
 
     private fun listen(connection: Connection) {
         connection.autoCommit = true
-        connection.createStatement().use { it.execute("LISTEN $OUTBOX_WAKEUP_CHANNEL") }
+        PostgresStatements.execute(connection, PostgresStatements.listen(DSL.name(OUTBOX_WAKEUP_CHANNEL)))
     }
 }

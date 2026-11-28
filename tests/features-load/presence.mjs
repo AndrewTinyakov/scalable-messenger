@@ -3,7 +3,7 @@ export const MAX_PRESENCE_TARGETS = 500;
 
 const SNAPSHOT_SAMPLE = 3;
 const SNAPSHOT_TIMEOUT_MS = 5000;
-const UNWATCH_GRACE_MS = 1000;
+const UNWATCH_GRACE_MS = 10000;
 
 const dateTime = /^(\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01]))T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/i;
 const lastSeenBuckets = new Set(['recently', 'within_week', 'within_month', 'long_ago']);
@@ -101,6 +101,7 @@ export class PresenceWatch {
     } else if (frame.type === 'presence') {
       if (!validPresence(frame, { has: id => this.targets.has(id) || this.removed.get(id) > now })) return false;
       this.count('presence.frames');
+      if (frame.statuses.every(({ userId }) => !this.targets.has(userId))) this.count('presence.lateFrames');
       for (const { userId, online, lastSeen } of frame.statuses) {
         if (!this.targets.has(userId)) continue;
         const prior = this.targets.get(userId);

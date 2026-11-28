@@ -1,6 +1,10 @@
 package com.andrewtinyakov.messenger.infrastructure.outbox
 
+import com.andrewtinyakov.messenger.infrastructure.database.postgresFunction
 import jakarta.annotation.PreDestroy
+import org.jooq.SQLDialect
+import org.jooq.impl.DSL
+import org.jooq.impl.SQLDataType
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import org.springframework.transaction.support.TransactionSynchronization
@@ -40,10 +44,10 @@ class OutboxWakeup(
         try {
             dataSource.connection.use { connection ->
                 connection.autoCommit = false
-                connection.createStatement().use { statement ->
-                    statement.execute("SET LOCAL synchronous_commit TO OFF")
-                    statement.execute("NOTIFY $OUTBOX_WAKEUP_CHANNEL")
-                }
+                DSL.using(connection, SQLDialect.POSTGRES).select(
+                    postgresFunction("set_config", SQLDataType.CLOB, DSL.inline("synchronous_commit"), DSL.inline("off"), DSL.inline(true)),
+                    postgresFunction("pg_notify", SQLDataType.OTHER, DSL.inline(OUTBOX_WAKEUP_CHANNEL), DSL.inline("")),
+                ).fetch()
                 connection.commit()
             }
         } catch (error: Exception) {

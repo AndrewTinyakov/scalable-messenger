@@ -2,14 +2,19 @@ package com.andrewtinyakov.messenger.auth.service
 
 import com.andrewtinyakov.messenger.auth.model.AuthenticatedSession
 import com.andrewtinyakov.messenger.auth.model.SessionCredentials
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.LOGIN_THROTTLES
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSENGER_OUTBOX_EVENTS
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.SESSIONS
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.USERS
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
 import com.andrewtinyakov.messenger.shared.id.newId
 import com.andrewtinyakov.messenger.shared.web.ApiErrorCode
 import com.andrewtinyakov.messenger.shared.web.ApiException
-import org.jooq.DSLContext
 import org.jooq.ExecuteContext
 import org.jooq.ExecuteListener
+import org.jooq.impl.DSL
 import org.jooq.impl.DefaultExecuteListenerProvider
+import org.jooq.types.DayToSecond
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
@@ -24,6 +29,7 @@ import org.mockito.Mockito.doAnswer
 import org.mockito.Mockito.times
 import org.mockito.Mockito.verify
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.HttpStatus
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder
 import org.springframework.security.crypto.password.PasswordEncoder
@@ -52,8 +58,6 @@ class SessionSecurityServiceTests : MessengerIntegrationTest() {
 
     @Autowired private lateinit var passwordChangeService: PasswordChangeService
 
-    @Autowired private lateinit var jooq: DSLContext
-
     @MockitoSpyBean private lateinit var passwordEncoder: PasswordEncoder
 
     @Test
@@ -65,23 +69,19 @@ class SessionSecurityServiceTests : MessengerIntegrationTest() {
         assertEquals(emptyList<String>(), skipped)
 
         val nearlyDue = OffsetDateTime.now().minusHours(23)
-        db.update(
-            "UPDATE sessions SET last_used_at=?, expires_at=? WHERE token_hash=?",
-            nearlyDue,
-            nearlyDue.plusDays(30),
-            fresh.sessionId.value,
-        )
+        db.update(SESSIONS)
+            .set(SESSIONS.LAST_USED_AT, nearlyDue)
+            .set(SESSIONS.EXPIRES_AT, nearlyDue.plusDays(30))
+            .where(SESSIONS.TOKEN_HASH.eq(fresh.sessionId.value)).execute()
         val recent = authenticationService.authenticatedSession(credentials.token)
         assertEquals(emptyList<String>(), statements { assertNull(sessionRenewalService.renewIfDue(recent)) })
 
         val lastUsed = OffsetDateTime.now().minusHours(25)
         val expiresAt = lastUsed.plusDays(30)
-        db.update(
-            "UPDATE sessions SET last_used_at=?, expires_at=? WHERE token_hash=?",
-            lastUsed,
-            expiresAt,
-            fresh.sessionId.value,
-        )
+        db.update(SESSIONS)
+            .set(SESSIONS.LAST_USED_AT, lastUsed)
+            .set(SESSIONS.EXPIRES_AT, expiresAt)
+            .where(SESSIONS.TOKEN_HASH.eq(fresh.sessionId.value)).execute()
         val stale = authenticationService.authenticatedSession(credentials.token)
         val before = OffsetDateTime.now()
         var renewed: AuthenticatedSession? = null
@@ -104,12 +104,10 @@ class SessionSecurityServiceTests : MessengerIntegrationTest() {
     fun `renewal never revives an expired or revoked session`() {
         val credentials = register()
         val session = authenticationService.authenticatedSession(credentials.token)
-        db.update(
-            "UPDATE sessions SET last_used_at=?, expires_at=? WHERE token_hash=?",
-            OffsetDateTime.now().minusDays(31),
-            OffsetDateTime.now().minusDays(1),
-            session.sessionId.value,
-        )
+        db.update(SESSIONS)
+            .set(SESSIONS.LAST_USED_AT, OffsetDateTime.now().minusDays(31))
+            .set(SESSIONS.EXPIRES_AT, OffsetDateTime.now().minusDays(1))
+            .where(SESSIONS.TOKEN_HASH.eq(session.sessionId.value)).execute()
         val expired = session.copy(lastUsedAt = OffsetDateTime.now().minusDays(31).toInstant())
 
         assertNull(sessionRenewalService.renewIfDue(expired))
@@ -231,22 +229,13 @@ class SessionSecurityServiceTests : MessengerIntegrationTest() {
         val username = "rollback_${newId().lowercase()}"
         val current = authenticationService.register(username, "long-demo-password")
         val other = authenticationService.login(username, "long-demo-password")
-        val function = "reject_password_${newId().lowercase()}"
-        db.execute(
-            """
-            CREATE FUNCTION $function() RETURNS trigger LANGUAGE plpgsql AS ${'$'}${'$'}
-            BEGIN
-                IF NEW.payload->>'sessionId' = '${other.session.sessionId.value}' THEN
-                    RAISE EXCEPTION 'outbox unavailable';
-                END IF;
-                RETURN NEW;
-            END;
-            ${'$'}${'$'}
-            """.trimIndent(),
-        )
+        val constraint = DSL.name("reject_password_${newId().lowercase()}")
+        val sessionId = DSL.jsonbGetAttributeAsText(MESSENGER_OUTBOX_EVENTS.PAYLOAD, "sessionId")
+        db.alterTable(MESSENGER_OUTBOX_EVENTS).add(
+            DSL.constraint(constraint).check(sessionId.isDistinctFrom(other.session.sessionId.value)),
+        ).execute()
         try {
-            db.execute("CREATE TRIGGER $function BEFORE INSERT ON messenger_outbox_events FOR EACH ROW EXECUTE FUNCTION $function()")
-            assertThrows(org.jooq.exception.DataAccessException::class.java) {
+            assertThrows(DataIntegrityViolationException::class.java) {
                 passwordChangeService.changePassword(
                     current.session.userId,
                     current.session.sessionId,
@@ -255,8 +244,7 @@ class SessionSecurityServiceTests : MessengerIntegrationTest() {
                 )
             }
         } finally {
-            db.execute("DROP TRIGGER IF EXISTS $function ON messenger_outbox_events")
-            db.execute("DROP FUNCTION $function()")
+            db.alterTable(MESSENGER_OUTBOX_EVENTS).dropConstraint(constraint).execute()
         }
 
         assertNotNull(authenticationService.sessionIfActive(other.token))
@@ -331,28 +319,33 @@ class SessionSecurityServiceTests : MessengerIntegrationTest() {
         repeat(3) { assertEquals(401, attemptLogin(username, "wrong-password").status.value()) }
         assertEquals(
             3,
-            db.queryForObject("SELECT attempt_count FROM login_throttles WHERE throttle_key=concat(?, '@')", Int::class.java, username),
+            db.select(LOGIN_THROTTLES.ATTEMPT_COUNT).from(LOGIN_THROTTLES)
+                .where(LOGIN_THROTTLES.THROTTLE_KEY.eq("$username@")).fetchSingle().value1(),
         )
         val firstBlock = blockedFor(username)
         assertTrue(firstBlock > Duration.ofMinutes(59) && firstBlock <= Duration.ofHours(1), firstBlock.toString())
 
-        db.update("UPDATE login_throttles SET blocked_until=now() - interval '1 second' WHERE throttle_key=concat(?, '@')", username)
+        val expiredBlock = DSL.currentOffsetDateTime().sub(DSL.inline(DayToSecond.valueOf(Duration.ofSeconds(1))))
+        db.update(LOGIN_THROTTLES).set(LOGIN_THROTTLES.BLOCKED_UNTIL, expiredBlock)
+            .where(LOGIN_THROTTLES.THROTTLE_KEY.eq("$username@")).execute()
         assertEquals(401, attemptLogin(username, "wrong-password").status.value())
         val secondBlock = blockedFor(username)
         assertTrue(secondBlock > Duration.ofMinutes(119) && secondBlock <= Duration.ofHours(2), secondBlock.toString())
 
-        db.update("UPDATE login_throttles SET blocked_until=now() - interval '1 second' WHERE throttle_key=concat(?, '@')", username)
+        db.update(LOGIN_THROTTLES).set(LOGIN_THROTTLES.BLOCKED_UNTIL, expiredBlock)
+            .where(LOGIN_THROTTLES.THROTTLE_KEY.eq("$username@")).execute()
         assertEquals(401, attemptLogin(username, "wrong-password").status.value())
         assertEquals(Duration.ofHours(2).toMinutes(), blockedFor(username).plusSeconds(30).toMinutes())
 
-        db.update(
-            "UPDATE login_throttles SET blocked_until=now() - interval '1 second', last_attempt_at=now() - interval '25 hours' WHERE throttle_key=concat(?, '@')",
-            username,
-        )
+        db.update(LOGIN_THROTTLES)
+            .set(LOGIN_THROTTLES.BLOCKED_UNTIL, expiredBlock)
+            .set(LOGIN_THROTTLES.LAST_ATTEMPT_AT, DSL.currentOffsetDateTime().sub(DSL.inline(DayToSecond.valueOf(Duration.ofHours(25)))))
+            .where(LOGIN_THROTTLES.THROTTLE_KEY.eq("$username@")).execute()
         assertEquals(401, attemptLogin(username, "wrong-password").status.value())
         assertEquals(
             1,
-            db.queryForObject("SELECT attempt_count FROM login_throttles WHERE throttle_key=concat(?, '@')", Int::class.java, username),
+            db.select(LOGIN_THROTTLES.ATTEMPT_COUNT).from(LOGIN_THROTTLES)
+                .where(LOGIN_THROTTLES.THROTTLE_KEY.eq("$username@")).fetchSingle().value1(),
         )
         assertEquals(username, authenticationService.login(username, "long-demo-password").user.username)
         assertEquals(0, throttleRows(username))
@@ -382,7 +375,7 @@ class SessionSecurityServiceTests : MessengerIntegrationTest() {
         val username = "rehash_${newId().lowercase().take(16)}"
         val userId = newId()
         val legacy = BCryptPasswordEncoder().encode("legacy-password")!!
-        db.update("INSERT INTO users(id,username,password_hash) VALUES (?,?,?)", userId, username, legacy)
+        db.insertInto(USERS, USERS.ID, USERS.USERNAME, USERS.PASSWORD_HASH).values(userId, username, legacy).execute()
 
         authenticationService.login(username, "legacy-password")
         val upgraded = passwordHash(userId)
@@ -419,10 +412,10 @@ class SessionSecurityServiceTests : MessengerIntegrationTest() {
         assertEquals(HttpStatus.UNAUTHORIZED, rejected.status)
         assertEquals(
             1,
-            db.queryForObject(
-                "SELECT count(*) FROM sessions WHERE user_id=? AND expires_at > now() + interval '1 minute'",
-                Int::class.java,
-                owner.user.id.value,
+            db.fetchCount(
+                SESSIONS,
+                SESSIONS.USER_ID.eq(owner.user.id.value),
+                SESSIONS.EXPIRES_AT.gt(DSL.currentOffsetDateTime().add(DSL.inline(DayToSecond.valueOf(Duration.ofMinutes(1))))),
             ),
         )
     }
@@ -437,24 +430,21 @@ class SessionSecurityServiceTests : MessengerIntegrationTest() {
 
     private fun blockedFor(username: String): Duration = Duration.between(
         OffsetDateTime.now(),
-        db.queryForObject(
-            "SELECT blocked_until FROM login_throttles WHERE throttle_key=concat(?, '@')",
-            OffsetDateTime::class.java,
-            username,
-        ),
+        db.select(LOGIN_THROTTLES.BLOCKED_UNTIL).from(LOGIN_THROTTLES)
+            .where(LOGIN_THROTTLES.THROTTLE_KEY.eq("$username@")).fetchSingle().value1(),
     )
 
     private fun throttleRows(username: String): Int =
-        db.queryForObject("SELECT count(*) FROM login_throttles WHERE throttle_key=concat(?, '@')", Int::class.java, username)!!
+        db.fetchCount(LOGIN_THROTTLES, LOGIN_THROTTLES.THROTTLE_KEY.eq("$username@"))
 
     private fun passwordHash(userId: String): String =
-        db.queryForObject("SELECT password_hash FROM users WHERE id=?", String::class.java, userId)!!
+        db.select(USERS.PASSWORD_HASH).from(USERS).where(USERS.ID.eq(userId)).fetchSingle().value1()
 
-    private fun revocations(sessionId: String): Int = db.queryForObject(
-        "SELECT count(*) FROM messenger_outbox_events WHERE payload->>'type'='session_revoked' AND payload->>'sessionId'=?",
-        Int::class.java,
-        sessionId,
-    )!!
+    private fun revocations(sessionId: String): Int = db.fetchCount(
+        MESSENGER_OUTBOX_EVENTS,
+        DSL.jsonbGetAttributeAsText(MESSENGER_OUTBOX_EVENTS.PAYLOAD, "type").eq("session_revoked"),
+        DSL.jsonbGetAttributeAsText(MESSENGER_OUTBOX_EVENTS.PAYLOAD, "sessionId").eq(sessionId),
+    )
 
     private fun statements(action: () -> Unit): List<String> {
         val statements = mutableListOf<String>()
@@ -464,7 +454,7 @@ class SessionSecurityServiceTests : MessengerIntegrationTest() {
                 if (Thread.currentThread() == owner) statements.add(requireNotNull(ctx.sql()).substringAfter("*/ "))
             }
         }
-        val configuration = jooq.configuration()
+        val configuration = db.configuration()
         val previous = configuration.executeListenerProviders()
         configuration.set(*previous, DefaultExecuteListenerProvider(listener))
         try {

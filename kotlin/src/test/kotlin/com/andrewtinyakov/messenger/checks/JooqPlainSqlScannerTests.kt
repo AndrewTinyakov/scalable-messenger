@@ -50,11 +50,30 @@ class JooqPlainSqlScannerTests {
     }
 
     @Test
-    fun `permits context rendering only in a custom query part accept override`() {
+    fun `permits context rendering only in PostgresStatements custom query parts`() {
         assertEquals(
-            listOf("rawElsewhere" to "sql"),
+            listOf("accept" to "sql", "accept" to "sql", "rawElsewhere" to "sql"),
             violations.filter { it.caller.owner.endsWith("/TypedFieldFixture") }.map { it.caller.name to it.target.name },
         )
+    }
+
+    @Test
+    fun `rejects SQL strings sent through JDBC or Spring JDBC`() {
+        assertEquals(
+            mapOf(
+                "statementExecute" to "execute",
+                "statementQuery" to "executeQuery",
+                "prepare" to "prepareStatement",
+                "driverPrepare" to "prepareStatement",
+                "template" to "update",
+            ),
+            violations.filter { it.caller.owner.endsWith("/JdbcSqlFixture") }.associate { it.caller.name to it.target.name },
+        )
+    }
+
+    @Test
+    fun `permits JDBC SQL execution and statement rendering only in PostgresStatements`() {
+        assertTrue(violations.none { it.caller.owner.contains("/PostgresStatements") })
     }
 
     @Test

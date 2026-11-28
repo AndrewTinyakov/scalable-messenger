@@ -4,8 +4,8 @@ import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.model.ChatKind
 import com.andrewtinyakov.messenger.chat.repository.directory.JooqChatDirectoryRepository
-import com.andrewtinyakov.messenger.infrastructure.database.PostgresExplain
 import com.andrewtinyakov.messenger.infrastructure.database.PostgresExplainFormat
+import com.andrewtinyakov.messenger.infrastructure.database.PostgresStatements
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHAT_MEMBERS
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.HIDDEN_MESSAGE_RANGES
 import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSAGES
@@ -40,6 +40,7 @@ class SidebarPageEvidenceTests {
                     }
                 }
             val db = DSL.using(connection, SQLDialect.POSTGRES)
+            val serverVersion = connection.metaData.databaseProductVersion
             val repository = JooqChatDirectoryRepository(DSL.using(db.configuration().derive(listener)))
             val viewer = UserId("00000000000000000000000001")
 
@@ -50,14 +51,18 @@ class SidebarPageEvidenceTests {
             }
             page()
             val (query, sql) = statements.first { (_, rendered) -> rendered.contains("summary_candidates") }
-            val explain = PostgresExplain(connection)
             statements.clear()
             repeat(5) { page() }
             val wall = List(60) { measureNanoTime { page() } / 1_000_000.0 }.sorted()
             val mapper = JsonMapper.builder().build()
             val execution =
                 List(60) {
-                    val json = explain.analyze(query, PostgresExplainFormat.JSON).single()
+                    val json =
+                        PostgresStatements
+                            .fetchText(
+                                connection,
+                                PostgresStatements.explainAnalyze(query, PostgresExplainFormat.JSON),
+                            ).single()
                     mapper
                         .readTree(json)
                         .get(0)
@@ -72,13 +77,23 @@ class SidebarPageEvidenceTests {
             val directory = Path.of("../../docs/evidence")
             Files.createDirectories(directory)
             Files.writeString(Path.of("../../tests/sidebar-benchmark/sidebar-page.sql"), sql + ";\n")
-            val plan = explain.analyze(query, PostgresExplainFormat.TEXT).joinToString("\n")
+            val plan =
+                PostgresStatements
+                    .fetchText(
+                        connection,
+                        PostgresStatements.explainAnalyze(query, PostgresExplainFormat.TEXT),
+                    ).joinToString("\n")
             Files.writeString(directory.resolve("sidebar-page-plan.txt"), plan + "\n")
             statements.clear()
             val largeChat = ChatId("00000000000000000010000000")
             val large = repository.findMemberDetails(largeChat, viewer)!!
             val (largeQuery) = statements.last { (_, rendered) -> rendered.contains("summary_candidates") }
-            val largePlan = explain.analyze(largeQuery, PostgresExplainFormat.TEXT).joinToString("\n")
+            val largePlan =
+                PostgresStatements
+                    .fetchText(
+                        connection,
+                        PostgresStatements.explainAnalyze(largeQuery, PostgresExplainFormat.TEXT),
+                    ).joinToString("\n")
             Files.writeString(directory.resolve("sidebar-large-chat-plan.txt"), largePlan + "\n")
             val counts =
                 db
@@ -119,7 +134,7 @@ class SidebarPageEvidenceTests {
             Files.writeString(
                 directory.resolve("sidebar-page-measurements.txt"),
                 listOf(
-                    "PostgreSQL 17, isolated compose database, 2 CPU quota, 768 MiB limit.",
+                    "PostgreSQL $serverVersion, isolated compose database, 2 CPU quota, 768 MiB limit.",
                     "Dataset: $counts",
                     "Warmup: 5 pages. Samples: 60 each, serial, warm cache. Page size: 100 plus one lookahead.",
                     "Repository page plus direct member preview wall clock:",

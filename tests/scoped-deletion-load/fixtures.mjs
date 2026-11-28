@@ -61,7 +61,7 @@ export class Fixtures {
     await this.sql(`BEGIN; ${this.guard(chat)}
       DELETE FROM hidden_message_ranges WHERE chat_id=${id(chat.id)} AND user_id=${id(actor)};
       INSERT INTO hidden_message_ranges(chat_id,user_id,after_sequence,through_sequence) ${ranges};
-      UPDATE chat_members SET visibility_revision=visibility_revision+1 WHERE chat_id=${id(chat.id)} AND user_id=${id(actor)};
+      UPDATE chat_members SET member_seq=member_seq+1, visibility_seq=member_seq+1 WHERE chat_id=${id(chat.id)} AND user_id=${id(actor)};
       COMMIT; ANALYZE hidden_message_ranges;`);
   }
   async storage(chat) {

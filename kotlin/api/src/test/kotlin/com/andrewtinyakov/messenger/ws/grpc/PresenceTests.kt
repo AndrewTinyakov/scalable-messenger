@@ -2,6 +2,7 @@ package com.andrewtinyakov.messenger.ws.grpc
 
 import com.andrewtinyakov.messenger.auth.service.AuthenticationService
 import com.andrewtinyakov.messenger.chat.model.ChatId
+import com.andrewtinyakov.messenger.chat.repository.membership.GroupMembershipRepository
 import com.andrewtinyakov.messenger.chat.service.ChatMembershipService
 import com.andrewtinyakov.messenger.chat.service.ChatService
 import com.andrewtinyakov.messenger.deletion.model.DeletionScope
@@ -14,6 +15,7 @@ import com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityRequest
 import com.andrewtinyakov.messenger.generated.grpc.PresenceVisibilityResponse
 import com.andrewtinyakov.messenger.generated.grpc.RecordLastSeenRequest
 import com.andrewtinyakov.messenger.generated.grpc.RecordLastSeenResponse
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.USERS
 import com.andrewtinyakov.messenger.message.model.RequestId
 import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
 import com.andrewtinyakov.messenger.shared.id.newId
@@ -22,8 +24,12 @@ import io.grpc.stub.StreamObserver
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.transaction.support.TransactionTemplate
 import java.time.Instant
+import java.time.OffsetDateTime
 import java.time.temporal.ChronoUnit
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 class PresenceTests
     @Autowired
@@ -33,6 +39,8 @@ class PresenceTests
         private val chats: ChatService,
         private val memberships: ChatMembershipService,
         private val deletion: DeletionService,
+        private val groupMemberships: GroupMembershipRepository,
+        private val tx: TransactionTemplate,
     ) : MessengerIntegrationTest() {
         @Test
         fun `visibility is full for self and users sharing a live chat and none otherwise`() {
@@ -91,6 +99,32 @@ class PresenceTests
             assertStatus(Status.Code.INVALID_ARGUMENT) {
                 authorization.recordLastSeen(lastSeenRequest(member.session.userId.value to later.plusSeconds(3600)), it)
             }
+        }
+
+        @Test
+        fun `last seen waits for group creation locks in user order instead of deadlocking`() {
+            val users = List(2) { credentials().session.userId }.sortedBy { it.value }
+            db.update(USERS).set(USERS.LAST_SEEN_AT, OffsetDateTime.now()).where(USERS.ID.eq(users.first().value)).execute()
+            val firstLocked = CountDownLatch(1)
+            val lastSeenStarted = CountDownLatch(1)
+            val groupLocks = concurrently {
+                tx.execute {
+                    groupMemberships.lockUsers(users.take(1))
+                    firstLocked.countDown()
+                    lastSeenStarted.await(10, TimeUnit.SECONDS)
+                    Thread.sleep(200)
+                    groupMemberships.lockUsers(users)
+                }
+            }
+            firstLocked.await(10, TimeUnit.SECONDS)
+            val seen = Instant.now().truncatedTo(ChronoUnit.MILLIS)
+            val lastSeen = concurrently {
+                lastSeenStarted.countDown()
+                record(*users.reversed().map { it.value to seen }.toTypedArray())
+            }
+
+            assertEquals(users.toSet(), groupLocks.get(10, TimeUnit.SECONDS))
+            lastSeen.get(10, TimeUnit.SECONDS)
         }
 
         @Test

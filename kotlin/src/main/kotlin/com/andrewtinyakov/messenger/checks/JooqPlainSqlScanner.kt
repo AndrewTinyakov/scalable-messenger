@@ -42,6 +42,7 @@ internal class JooqPlainSqlScanner(
                         private var line = 0
                         private val batchReads = mutableMapOf<MethodInsnNode, JooqPlainSqlViolation>()
                         private val customAccept = name == "accept" && descriptor == "(Lorg/jooq/Context;)V" &&
+                            caller.owner.startsWith("$POSTGRES_STATEMENTS$") &&
                             customQueryParts.any { jooqApi.inherits(caller.owner, it, parents) }
 
                         override fun visitLineNumber(number: Int, start: Label) {
@@ -94,8 +95,19 @@ internal class JooqPlainSqlScanner(
                         }
 
                         private fun checkCall(target: JooqMethod) {
-                            if (isBatchRead(target) || jooqApi.forbids(target, parents)) add(violation(target))
+                            if (isBatchRead(target) || jooqApi.forbids(target, parents) || isRawJdbc(target)) add(violation(target))
                         }
+
+                        private fun isRawJdbc(target: JooqMethod) = caller.owner != POSTGRES_STATEMENTS && (
+                            target.owner.startsWith("org/springframework/jdbc/core/") ||
+                                (
+                                    target.name in jdbcSqlMethods && target.descriptor.startsWith("(Ljava/lang/String;") &&
+                                        isJdbcType(target.owner)
+                                )
+                        )
+
+                        private fun isJdbcType(owner: String): Boolean =
+                            jdbcPackages.any(owner::startsWith) || parents[owner].orEmpty().any(::isJdbcType)
 
                         private fun violation(target: JooqMethod) = JooqPlainSqlViolation(caller, sourceFile, line, target)
 
@@ -114,6 +126,19 @@ internal class JooqPlainSqlScanner(
     }
 
     private companion object {
+        const val POSTGRES_STATEMENTS = "com/andrewtinyakov/messenger/infrastructure/database/PostgresStatements"
+        val jdbcPackages = setOf("java/sql/", "javax/sql/", "org/postgresql/", "com/zaxxer/hikari/", "io/r2dbc/")
+        val jdbcSqlMethods = setOf(
+            "execute",
+            "executeQuery",
+            "executeUpdate",
+            "executeLargeUpdate",
+            "addBatch",
+            "prepareStatement",
+            "prepareCall",
+            "nativeSQL",
+            "createStatement",
+        )
         val customQueryParts = setOf("CustomField", "CustomCondition", "CustomQueryPart").map { "org/jooq/impl/$it" }
         val customRenderSignatures = setOf("(C)Lorg/jooq/Context;", "(Ljava/lang/String;)Lorg/jooq/Context;")
         val sqlTaggingHook = JooqMethod(

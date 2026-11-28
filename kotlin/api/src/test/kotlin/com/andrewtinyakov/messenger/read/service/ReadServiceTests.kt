@@ -4,6 +4,14 @@ import com.andrewtinyakov.messenger.auth.model.UserId
 import com.andrewtinyakov.messenger.chat.model.ChatId
 import com.andrewtinyakov.messenger.chat.repository.JooqChatRepository
 import com.andrewtinyakov.messenger.chat.service.ChatService
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHATS
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHAT_MEMBERS
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHAT_READ_NOTIFICATIONS
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHAT_READ_PROGRESS
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.CHAT_READ_RANGES
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSAGES
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.MESSENGER_OUTBOX_EVENTS
+import com.andrewtinyakov.messenger.infrastructure.database.generated.Tables.PENDING_READ_NOTIFICATIONS
 import com.andrewtinyakov.messenger.infrastructure.outbox.OutboxRepository
 import com.andrewtinyakov.messenger.message.model.MessageId
 import com.andrewtinyakov.messenger.read.config.ReadProperties
@@ -14,7 +22,6 @@ import com.andrewtinyakov.messenger.shared.MessengerIntegrationTest
 import com.andrewtinyakov.messenger.shared.id.newId
 import com.andrewtinyakov.messenger.shared.web.ApiException
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
-import org.jooq.DSLContext
 import org.jooq.impl.DSL
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -39,7 +46,6 @@ class ReadServiceTests
     @Autowired
     constructor(
         private val chatService: ChatService,
-        private val jooq: DSLContext,
         private val outbox: OutboxRepository,
         private val mapper: ObjectMapper,
         private val tx: TransactionTemplate,
@@ -48,25 +54,26 @@ class ReadServiceTests
             val owner = UserId(user("reads-${newId()}"))
             val members = (1..count).map { UserId(user("reader-${newId()}")) }
             val chat = ChatId(chatService.createGroup(owner, "Read receipts", members).id)
+            val timestamp = OffsetDateTime.parse(createdAt)
             val ids = (1..messages).map { sequence ->
                 MessageId(newId()).also { id ->
-                    db.update(
-                        "INSERT INTO messages(id,chat_id,sequence,sender_id,body,created_at) VALUES (?,?,?,?,'hello',?::timestamptz)",
-                        id.value,
-                        chat.value,
-                        sequence.toLong(),
-                        owner.value,
-                        createdAt,
-                    )
+                    db.insertInto(MESSAGES)
+                        .set(MESSAGES.ID, id.value)
+                        .set(MESSAGES.CHAT_ID, chat.value)
+                        .set(MESSAGES.SEQUENCE, sequence.toLong())
+                        .set(MESSAGES.SENDER_ID, owner.value)
+                        .set(MESSAGES.BODY, "hello")
+                        .set(MESSAGES.CREATED_AT, timestamp)
+                        .execute()
                 }
             }
-            db.update("UPDATE chats SET next_sequence=? WHERE id=?", messages.toLong() + 1, chat.value)
+            db.update(CHATS).set(CHATS.NEXT_SEQUENCE, messages.toLong() + 1).where(CHATS.ID.eq(chat.value)).execute()
             return ReadFixture(owner, members, chat, ids)
         }
 
         private fun service(clock: Clock, registry: SimpleMeterRegistry = SimpleMeterRegistry()): ReadService = ReadService(
-            JooqReadRepository(jooq, clock),
-            JooqChatRepository(jooq),
+            JooqReadRepository(db, clock),
+            JooqChatRepository(db),
             ReadOutbox(outbox, mapper),
             ReadProperties(),
             tx,
@@ -78,7 +85,7 @@ class ReadServiceTests
         fun `pending advance locks out drain until progress commits`() {
             val f = fixture(messages = 2)
             val clock = MutableClock("2026-11-02T12:00:00Z")
-            val repository = JooqReadRepository(jooq, clock)
+            val repository = JooqReadRepository(db, clock)
             tx.execute { repository.advance(f.chat, f.members.first(), 1) }
             val advanced = CountDownLatch(1)
             val release = CountDownLatch(1)
@@ -105,13 +112,13 @@ class ReadServiceTests
         fun `deleted chats discard pending read work`() {
             val f = fixture(messages = 1)
             val clock = MutableClock("2026-11-02T12:00:00Z")
-            val repository = JooqReadRepository(jooq, clock)
+            val repository = JooqReadRepository(db, clock)
             tx.execute { repository.advance(f.chat, f.members.first(), 1) }
-            db.update("UPDATE chats SET deleted_at=now() WHERE id=?", f.chat.value)
+            db.update(CHATS).set(CHATS.DELETED_AT, DSL.currentOffsetDateTime()).where(CHATS.ID.eq(f.chat.value)).execute()
             tx.execute { repository.pendingNotifications(OffsetDateTime.now(clock), 1000) }
             assertEquals(
                 0,
-                db.queryForObject("SELECT count(*) FROM pending_read_notifications WHERE chat_id=?", Int::class.java, f.chat.value),
+                db.fetchCount(PENDING_READ_NOTIFICATIONS, PENDING_READ_NOTIFICATIONS.CHAT_ID.eq(f.chat.value)),
             )
         }
 
@@ -137,7 +144,7 @@ class ReadServiceTests
             val clock = MutableClock("2026-11-02T12:00:00Z")
             val reads = service(clock)
             reads.advance(f.chat, f.members.first(), 1L)
-            db.update("DELETE FROM messenger_outbox_events WHERE room=?", "group:${f.chat.value}")
+            db.deleteFrom(MESSENGER_OUTBOX_EVENTS).where(MESSENGER_OUTBOX_EVENTS.ROOM.eq("group:${f.chat.value}")).execute()
             clock.set("2026-11-02T12:00:01Z")
             reads.advance(f.chat, f.members.first(), 3L)
             reads.publishPendingNotifications()
@@ -150,7 +157,7 @@ class ReadServiceTests
             assertEquals(1, sharedNotifications(f.chat))
             assertEquals(
                 0,
-                db.queryForObject("SELECT count(*) FROM pending_read_notifications WHERE chat_id=?", Int::class.java, f.chat.value),
+                db.fetchCount(PENDING_READ_NOTIFICATIONS, PENDING_READ_NOTIFICATIONS.CHAT_ID.eq(f.chat.value)),
             )
         }
 
@@ -180,11 +187,18 @@ class ReadServiceTests
             assertEquals("2", reads.summary(f.chat, f.owner).maxOtherReadSequence)
         }
 
-        private fun sharedNotifications(chatId: ChatId): Int = db.queryForObject(
-            "SELECT count(*) FROM messenger_outbox_events WHERE room=? AND payload->>'type'='reads_changed'",
-            Int::class.java,
-            "group:${chatId.value}",
-        )!!
+        private fun sharedNotifications(chatId: ChatId): Int = db.fetchCount(
+            MESSENGER_OUTBOX_EVENTS,
+            MESSENGER_OUTBOX_EVENTS.ROOM.eq("group:${chatId.value}"),
+            DSL.jsonbGetAttributeAsText(MESSENGER_OUTBOX_EVENTS.PAYLOAD, "type").eq("reads_changed"),
+        )
+
+        private fun groupNotificationsForChat(chatId: ChatId): Int = db.fetchCount(
+            MESSENGER_OUTBOX_EVENTS,
+            DSL.jsonbGetAttributeAsText(MESSENGER_OUTBOX_EVENTS.PAYLOAD, "type").eq("reads_changed"),
+            DSL.jsonbGetAttributeAsText(MESSENGER_OUTBOX_EVENTS.PAYLOAD, "chatId").eq(chatId.value),
+            MESSENGER_OUTBOX_EVENTS.ROOM.like("group:%"),
+        )
 
         @Test
         fun `every advanced read invalidates its account even when group notifications coalesce`() {
@@ -203,11 +217,11 @@ class ReadServiceTests
             for (member in f.members.take(2)) {
                 assertEquals(
                     1,
-                    db.queryForObject(
-                        "SELECT count(*) FROM messenger_outbox_events WHERE room=? AND payload->>'type'='reads_changed' AND payload->>'chatId'=?",
-                        Int::class.java,
-                        "user:${member.value}",
-                        f.chat.value,
+                    db.fetchCount(
+                        MESSENGER_OUTBOX_EVENTS,
+                        MESSENGER_OUTBOX_EVENTS.ROOM.eq("user:${member.value}"),
+                        DSL.jsonbGetAttributeAsText(MESSENGER_OUTBOX_EVENTS.PAYLOAD, "type").eq("reads_changed"),
+                        DSL.jsonbGetAttributeAsText(MESSENGER_OUTBOX_EVENTS.PAYLOAD, "chatId").eq(f.chat.value),
                     ),
                 )
             }
@@ -220,7 +234,7 @@ class ReadServiceTests
             val reads = service(clock)
             val reader = f.members.first()
             tx.execute {
-                jooq.setLocal(DSL.name("TimeZone"), DSL.inline("America/Los_Angeles")).execute()
+                db.setLocal(DSL.name("TimeZone"), DSL.inline("America/Los_Angeles")).execute()
                 reads.advance(f.chat, reader, 1L)
                 assertEquals(reader.value, reads.readers(f.chat, f.owner, f.messages.single(), null, 50).readers.single().userId)
             }
@@ -250,7 +264,7 @@ class ReadServiceTests
             )
             assertEquals("3", reads.summary(f.chat, f.owner).maxOtherReadSequence)
             assertEquals("0", reads.summary(f.chat, member).maxOtherReadSequence)
-            assertEquals(2, db.queryForObject("SELECT count(*) FROM chat_read_ranges WHERE chat_id=?", Int::class.java, f.chat.value))
+            assertEquals(2, db.fetchCount(CHAT_READ_RANGES, CHAT_READ_RANGES.CHAT_ID.eq(f.chat.value)))
             clock.set("2026-11-02T11:00:00Z")
             assertEquals(latest.readAt.toInstant(), reads.advance(f.chat, member, 3L).readAt!!.toInstant())
         }
@@ -282,27 +296,28 @@ class ReadServiceTests
                 assertTrue(pool.awaitTermination(10, TimeUnit.SECONDS))
             }
             assertEquals("30", reads.summary(f.chat, f.members.first()).throughSequence)
+            val earlier = CHAT_READ_RANGES.`as`("earlier")
+            val later = CHAT_READ_RANGES.`as`("later")
             assertEquals(
                 0,
-                db.queryForObject(
-                    """SELECT count(*) FROM chat_read_ranges a JOIN chat_read_ranges b
-            ON a.chat_id=b.chat_id AND a.user_id=b.user_id AND a.creation_day=b.creation_day
-            AND a.through_sequence<b.through_sequence AND a.through_sequence>b.after_sequence WHERE a.chat_id=?""",
-                    Int::class.java,
-                    f.chat.value,
+                db.fetchCount(
+                    earlier.join(later).on(
+                        earlier.CHAT_ID.eq(later.CHAT_ID),
+                        earlier.USER_ID.eq(later.USER_ID),
+                        earlier.CREATION_DAY.eq(later.CREATION_DAY),
+                        earlier.THROUGH_SEQUENCE.lt(later.THROUGH_SEQUENCE),
+                        earlier.THROUGH_SEQUENCE.gt(later.AFTER_SEQUENCE),
+                    ),
+                    earlier.CHAT_ID.eq(f.chat.value),
                 ),
             )
             assertEquals(
                 1,
-                db.queryForObject(
-                    "SELECT count(*) FROM messenger_outbox_events WHERE payload->>'type'='reads_changed' AND payload->>'chatId'=? AND room LIKE 'group:%'",
-                    Int::class.java,
-                    f.chat.value,
-                ),
+                groupNotificationsForChat(f.chat),
             )
             assertEquals(
                 1,
-                db.queryForObject("SELECT count(*) FROM chat_read_notifications WHERE chat_id=?", Int::class.java, f.chat.value),
+                db.fetchCount(CHAT_READ_NOTIFICATIONS, CHAT_READ_NOTIFICATIONS.CHAT_ID.eq(f.chat.value)),
             )
         }
 
@@ -330,11 +345,7 @@ class ReadServiceTests
                 assertEquals("2", reads.summary(f.chat, f.owner).maxOtherReadSequence)
                 assertEquals(
                     0,
-                    db.queryForObject(
-                        "SELECT count(*) FROM messenger_outbox_events WHERE payload->>'type'='reads_changed' AND payload->>'chatId'=? AND room LIKE 'group:%'",
-                        Int::class.java,
-                        f.chat.value,
-                    ),
+                    groupNotificationsForChat(f.chat),
                 )
             } finally {
                 release.countDown()
@@ -344,11 +355,7 @@ class ReadServiceTests
             }
             assertEquals(
                 1,
-                db.queryForObject(
-                    "SELECT count(*) FROM messenger_outbox_events WHERE payload->>'type'='reads_changed' AND payload->>'chatId'=? AND room LIKE 'group:%'",
-                    Int::class.java,
-                    f.chat.value,
-                ),
+                groupNotificationsForChat(f.chat),
             )
         }
 
@@ -365,13 +372,15 @@ class ReadServiceTests
             assertEquals(f.members.map { it.value }.sorted().drop(2), second.readers.map { it.userId })
             assertNull(second.nextUserId)
             assertEquals(Instant.parse("2026-11-08T12:00:00Z"), first.detailsExpiresAt.toInstant())
-            db.update("DELETE FROM chat_members WHERE chat_id=? AND user_id=?", f.chat.value, first.readers.first().userId)
+            db.deleteFrom(CHAT_MEMBERS)
+                .where(CHAT_MEMBERS.CHAT_ID.eq(f.chat.value), CHAT_MEMBERS.USER_ID.eq(first.readers.first().userId))
+                .execute()
             assertEquals(2, reads.readers(f.chat, f.owner, f.messages.single(), null, 50).readers.size)
             clock.set("2026-11-08T12:00:00Z")
             assertFalse(reads.readers(f.chat, f.owner, f.messages.single(), null, 50).detailsAvailable)
             assertTrue(reads.readers(f.chat, f.owner, f.messages.single(), null, 50).readers.isEmpty())
             assertEquals("1", reads.summary(f.chat, f.owner).maxOtherReadSequence)
-            assertTrue(db.queryForObject("SELECT count(*) FROM chat_read_ranges WHERE chat_id=?", Int::class.java, f.chat.value)!! > 0)
+            assertTrue(db.fetchCount(CHAT_READ_RANGES, CHAT_READ_RANGES.CHAT_ID.eq(f.chat.value)) > 0)
         }
 
         @Test
@@ -399,7 +408,9 @@ class ReadServiceTests
                 }.status,
             )
             reads.advance(f.chat, f.members.first(), 1L)
-            db.update("DELETE FROM chat_members WHERE chat_id=? AND user_id=?", f.chat.value, f.members.first().value)
+            db.deleteFrom(CHAT_MEMBERS)
+                .where(CHAT_MEMBERS.CHAT_ID.eq(f.chat.value), CHAT_MEMBERS.USER_ID.eq(f.members.first().value))
+                .execute()
             assertEquals("0", reads.summary(f.chat, f.owner).maxOtherReadSequence)
             assertEquals(
                 HttpStatus.NOT_FOUND,
@@ -407,9 +418,13 @@ class ReadServiceTests
                     reads.advance(f.chat, f.members.first(), 1L)
                 }.status,
             )
-            db.update("UPDATE messages SET body='',deleted_at=now() WHERE id=?", f.messages.single().value)
+            db.update(MESSAGES)
+                .set(MESSAGES.BODY, "")
+                .set(MESSAGES.DELETED_AT, DSL.currentOffsetDateTime())
+                .where(MESSAGES.ID.eq(f.messages.single().value))
+                .execute()
             assertFalse(reads.readers(f.chat, f.owner, f.messages.single(), null, 50).detailsAvailable)
-            db.update("UPDATE chats SET deleted_at=now() WHERE id=?", f.chat.value)
+            db.update(CHATS).set(CHATS.DELETED_AT, DSL.currentOffsetDateTime()).where(CHATS.ID.eq(f.chat.value)).execute()
             assertEquals(HttpStatus.NOT_FOUND, assertThrows(ApiException::class.java) { reads.summary(f.chat, f.owner) }.status)
             assertEquals(
                 HttpStatus.NOT_FOUND,
@@ -428,12 +443,15 @@ class ReadServiceTests
         @Test
         fun `bounded cleanup removes expired creation buckets while progress and recent details survive`() {
             val f = fixture(messages = 2, createdAt = "2026-11-01T12:00:00Z")
-            db.update("UPDATE messages SET created_at='2026-11-08T11:00:00Z' WHERE id=?", f.messages.last().value)
+            db.update(MESSAGES)
+                .set(MESSAGES.CREATED_AT, OffsetDateTime.parse("2026-11-08T11:00:00Z"))
+                .where(MESSAGES.ID.eq(f.messages.last().value))
+                .execute()
             val clock = MutableClock("2026-11-08T11:59:59Z")
             val reads = service(clock)
             reads.advance(f.chat, f.members.first(), 1L)
             clock.set("2026-11-09T00:00:00Z")
-            val repo = JooqReadRepository(jooq, clock)
+            val repo = JooqReadRepository(db, clock)
             val cleanup = ReadCleanupService(repo, ReadProperties(), tx, clock, ReadMetrics(SimpleMeterRegistry()))
             val first = cleanup.cleanup(1)!!
             assertEquals(1, first.ranges)
@@ -449,10 +467,10 @@ class ReadServiceTests
             assertEquals(Instant.parse("2026-11-09T00:00:00Z"), recent.readers.single().readAt.toInstant())
             assertEquals(
                 0,
-                db.queryForObject(
-                    "SELECT count(*) FROM chat_read_ranges WHERE chat_id=? AND expires_at <= '2026-11-09T00:00:00Z'",
-                    Int::class.java,
-                    f.chat.value,
+                db.fetchCount(
+                    CHAT_READ_RANGES,
+                    CHAT_READ_RANGES.CHAT_ID.eq(f.chat.value),
+                    CHAT_READ_RANGES.EXPIRES_AT.le(OffsetDateTime.parse("2026-11-09T00:00:00Z")),
                 ),
             )
         }
@@ -479,7 +497,7 @@ class ReadServiceTests
             val reads = service(clock)
             reads.advance(f.chat, f.members.first(), 1L)
             clock.set("2026-11-09T00:00:00Z")
-            val repository = JooqReadRepository(jooq, clock)
+            val repository = JooqReadRepository(db, clock)
             val cleanup = ReadCleanupService(repository, ReadProperties(), tx, clock, ReadMetrics(SimpleMeterRegistry()))
             val locked = CountDownLatch(1)
             val release = CountDownLatch(1)
@@ -509,6 +527,12 @@ class ReadServiceTests
             }
         }
 
+        private fun activeMembership(chatId: ChatId, userId: UserId): Boolean = db.select(CHAT_READ_PROGRESS.ACTIVE_MEMBERSHIP)
+            .from(CHAT_READ_PROGRESS)
+            .where(CHAT_READ_PROGRESS.CHAT_ID.eq(chatId.value), CHAT_READ_PROGRESS.USER_ID.eq(userId.value))
+            .fetchSingle()
+            .value1()!!
+
         @Test
         fun `membership removal and rejoin update indexed peer frontier without losing first read time`() {
             val f = fixture(messages = 1)
@@ -516,17 +540,14 @@ class ReadServiceTests
             val reads = service(clock)
             val member = f.members.first()
             val first = reads.advance(f.chat, member, 1L)
-            db.update("DELETE FROM chat_members WHERE chat_id=? AND user_id=?", f.chat.value, member.value)
+            db.deleteFrom(CHAT_MEMBERS)
+                .where(CHAT_MEMBERS.CHAT_ID.eq(f.chat.value), CHAT_MEMBERS.USER_ID.eq(member.value))
+                .execute()
             assertEquals("0", reads.summary(f.chat, f.owner).maxOtherReadSequence)
             assertFalse(
-                db.queryForObject(
-                    "SELECT active_membership FROM chat_read_progress WHERE chat_id=? AND user_id=?",
-                    Boolean::class.java,
-                    f.chat.value,
-                    member.value,
-                )!!,
+                activeMembership(f.chat, member),
             )
-            db.update("INSERT INTO chat_members(chat_id,user_id) VALUES (?,?)", f.chat.value, member.value)
+            db.insertInto(CHAT_MEMBERS, CHAT_MEMBERS.CHAT_ID, CHAT_MEMBERS.USER_ID).values(f.chat.value, member.value).execute()
             assertEquals("1", reads.summary(f.chat, f.owner).maxOtherReadSequence)
             clock.set("2026-11-02T13:00:00Z")
             assertEquals(first.readAt!!.toInstant(), reads.advance(f.chat, member, 1L).readAt!!.toInstant())
@@ -541,7 +562,7 @@ class ReadServiceTests
             val f = fixture(messages = 1)
             val clock = MutableClock("2026-11-02T12:00:00Z")
             val reads = service(clock)
-            val repository = JooqReadRepository(jooq, clock)
+            val repository = JooqReadRepository(db, clock)
             val authorized = CountDownLatch(1)
             val release = CountDownLatch(1)
             val removing = CountDownLatch(1)
@@ -561,7 +582,9 @@ class ReadServiceTests
                 val removed = pool.submit(
                     Callable {
                         removing.countDown()
-                        db.update("DELETE FROM chat_members WHERE chat_id=? AND user_id=?", f.chat.value, f.members.first().value)
+                        db.deleteFrom(CHAT_MEMBERS)
+                            .where(CHAT_MEMBERS.CHAT_ID.eq(f.chat.value), CHAT_MEMBERS.USER_ID.eq(f.members.first().value))
+                            .execute()
                     },
                 )
                 assertTrue(removing.await(10, TimeUnit.SECONDS))
@@ -571,12 +594,7 @@ class ReadServiceTests
                 assertEquals(1, removed.get(10, TimeUnit.SECONDS))
                 assertEquals("0", reads.summary(f.chat, f.owner).maxOtherReadSequence)
                 assertFalse(
-                    db.queryForObject(
-                        "SELECT active_membership FROM chat_read_progress WHERE chat_id=? AND user_id=?",
-                        Boolean::class.java,
-                        f.chat.value,
-                        f.members.first().value,
-                    )!!,
+                    activeMembership(f.chat, f.members.first()),
                 )
             } finally {
                 release.countDown()
@@ -599,7 +617,7 @@ class ReadServiceTests
             assertTrue(serializedDetails.get("nextUserId").isNull)
             assertTrue(details.detailsAvailable)
             assertTrue(details.readers.isEmpty())
-            assertEquals(0, db.queryForObject("SELECT count(*) FROM chat_read_ranges WHERE chat_id=?", Int::class.java, f.chat.value))
+            assertEquals(0, db.fetchCount(CHAT_READ_RANGES, CHAT_READ_RANGES.CHAT_ID.eq(f.chat.value)))
         }
 
         @Test
@@ -615,11 +633,17 @@ class ReadServiceTests
         @Test
         fun `small prefixes store only actual creation days without assuming chronological timestamps`() {
             val f = fixture(messages = 3)
-            db.update("UPDATE messages SET created_at='2026-10-28T13:00:00Z' WHERE id=?", f.messages[1].value)
-            db.update("UPDATE messages SET created_at='2026-11-02T11:00:00Z' WHERE id=?", f.messages[2].value)
+            db.update(MESSAGES)
+                .set(MESSAGES.CREATED_AT, OffsetDateTime.parse("2026-10-28T13:00:00Z"))
+                .where(MESSAGES.ID.eq(f.messages[1].value))
+                .execute()
+            db.update(MESSAGES)
+                .set(MESSAGES.CREATED_AT, OffsetDateTime.parse("2026-11-02T11:00:00Z"))
+                .where(MESSAGES.ID.eq(f.messages[2].value))
+                .execute()
             val reads = service(Clock.fixed(Instant.parse("2026-11-02T12:00:00Z"), ZoneOffset.UTC))
             reads.advance(f.chat, f.members.first(), 3L)
-            assertEquals(3, db.queryForObject("SELECT count(*) FROM chat_read_ranges WHERE chat_id=?", Int::class.java, f.chat.value))
+            assertEquals(3, db.fetchCount(CHAT_READ_RANGES, CHAT_READ_RANGES.CHAT_ID.eq(f.chat.value)))
             for (id in f.messages) assertEquals(1, reads.readers(f.chat, f.owner, id, null, 50).readers.size)
         }
 
@@ -629,12 +653,12 @@ class ReadServiceTests
             val clock = MutableClock("2026-11-02T12:00:00Z")
             val reads = service(clock)
             reads.advance(f.chat, f.members.first(), 300L)
-            assertEquals(8, db.queryForObject("SELECT count(*) FROM chat_read_ranges WHERE chat_id=?", Int::class.java, f.chat.value))
+            assertEquals(8, db.fetchCount(CHAT_READ_RANGES, CHAT_READ_RANGES.CHAT_ID.eq(f.chat.value)))
             assertEquals(1, reads.readers(f.chat, f.owner, f.messages.first(), null, 50).readers.size)
             assertEquals(1, reads.readers(f.chat, f.owner, f.messages.last(), null, 50).readers.size)
             val old = fixture(messages = 1, createdAt = "2026-10-25T12:00:00Z")
             reads.advance(old.chat, old.members.first(), 1L)
-            assertEquals(0, db.queryForObject("SELECT count(*) FROM chat_read_ranges WHERE chat_id=?", Int::class.java, old.chat.value))
+            assertEquals(0, db.fetchCount(CHAT_READ_RANGES, CHAT_READ_RANGES.CHAT_ID.eq(old.chat.value)))
             assertEquals("1", reads.summary(old.chat, old.members.first()).throughSequence)
             assertFalse(reads.readers(old.chat, old.owner, old.messages.single(), null, 50).detailsAvailable)
         }
@@ -647,7 +671,7 @@ class ReadServiceTests
             reads.advance(f.chat, f.members.first(), 1L)
             clock.set("2026-11-02T12:02:00Z")
             val cleanup =
-                ReadCleanupService(JooqReadRepository(jooq, clock), ReadProperties(), tx, clock, ReadMetrics(SimpleMeterRegistry()))
+                ReadCleanupService(JooqReadRepository(db, clock), ReadProperties(), tx, clock, ReadMetrics(SimpleMeterRegistry()))
             assertEquals(1, cleanup.cleanup()!!.notifications)
             assertEquals(1, reads.readers(f.chat, f.owner, f.messages.single(), null, 50).readers.size)
         }

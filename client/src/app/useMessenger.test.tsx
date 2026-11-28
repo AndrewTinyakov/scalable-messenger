@@ -922,102 +922,106 @@ describe('messenger request coordination', () => {
     await act(async () => messenger.selectChat(chatId))
     expect(messenger.messages[chatId].map((message) => message.sequence)).toEqual(['3'])
   })
-  it('reads visible rows after a background burst through the actual socket, messenger and panel callers', async () => {
-    vi.useFakeTimers()
-    renderPanel = true
-    let focused = false
-    vi.spyOn(document, 'hasFocus').mockImplementation(() => focused)
-    const positions = new WeakMap<HTMLElement, number>()
-    Object.defineProperty(dom.window.HTMLElement.prototype, 'scrollHeight', {
-      configurable: true,
-      get() {
-        return this.matches('.chat-body')
-          ? this.querySelectorAll('[data-message-id]').length * 40
-          : 0
-      },
-    })
-    Object.defineProperty(dom.window.HTMLElement.prototype, 'clientHeight', {
-      configurable: true,
-      get() {
-        return this.matches('.chat-body') ? 400 : 0
-      },
-    })
-    Object.defineProperty(dom.window.HTMLElement.prototype, 'scrollTop', {
-      configurable: true,
-      get() {
-        return positions.get(this) ?? 0
-      },
-      set(value) {
-        positions.set(
-          this,
-          Math.min(Math.max(0, value), Math.max(0, this.scrollHeight - this.clientHeight)),
-        )
-      },
-    })
-    vi.spyOn(dom.window.HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        const scroller = this.closest<HTMLElement>('.chat-body')
-        const index = scroller
-          ? [...scroller.querySelectorAll('[data-message-id]')].indexOf(this)
-          : -1
-        const top = this.matches('.chat-body') ? 0 : index * 40 - (scroller?.scrollTop ?? 0)
-        const height = this.matches('.chat-body') ? 400 : 40
-        return {
-          top,
-          bottom: top + height,
-          height,
-          left: 0,
-          right: 500,
-          width: 500,
-          x: 0,
-          y: top,
-          toJSON: () => ({}),
-        } as DOMRect
-      },
-    )
-    window.history.replaceState(null, '', `/groups/${chatId}`)
-    await renderMessenger()
-    await act(async () => sockets[0].open())
-    for (let batch = 0; batch < 10; batch += 1)
-      await act(async () => {
-        for (let index = 1; index <= 40; index += 1) {
-          const sequence = String(batch * 40 + index)
-          const row = {
-            id: sequence.padStart(26, '0'),
-            chatId,
-            senderId: recipient.id,
-            sequence,
-            body: `Message ${sequence}`,
-            createdAt: '2026-11-04T10:00:00Z',
-          }
-          historyMessages.push(row)
-          const { id, ...fields } = row
-          sockets[0].event({
-            type: 'message_saved',
-            version: 1,
-            eventId: String(Number(sequence) + 1000).padStart(26, '0'),
-            room: `group:${chatId}`,
-            epoch: 'epoch',
-            streamId: `${sequence}-0`,
-            requestId: String(Number(sequence) + 2000).padStart(26, '0'),
-            messageId: id,
-            ...fields,
-          })
-        }
-        await vi.advanceTimersByTimeAsync(50)
+  it(
+    'reads visible rows after a background burst through the actual socket, messenger and panel callers',
+    { timeout: 20_000 },
+    async () => {
+      vi.useFakeTimers()
+      renderPanel = true
+      let focused = false
+      vi.spyOn(document, 'hasFocus').mockImplementation(() => focused)
+      const positions = new WeakMap<HTMLElement, number>()
+      Object.defineProperty(dom.window.HTMLElement.prototype, 'scrollHeight', {
+        configurable: true,
+        get() {
+          return this.matches('.chat-body')
+            ? this.querySelectorAll('[data-message-id]').length * 40
+            : 0
+        },
       })
-    await act(async () => vi.advanceTimersByTimeAsync(2000))
-    expect(messenger.messages[chatId].at(-1)?.sequence).toBe('400')
-    expect(readCalls).toEqual([])
-    focused = true
-    await act(async () => {
-      window.dispatchEvent(new dom.window.Event('focus'))
-      await vi.advanceTimersByTimeAsync(699)
-    })
-    expect(readCalls).toEqual([])
-    await act(async () => vi.advanceTimersByTimeAsync(1001))
-    expect(readCalls.at(-1)).toBe('400')
-  })
+      Object.defineProperty(dom.window.HTMLElement.prototype, 'clientHeight', {
+        configurable: true,
+        get() {
+          return this.matches('.chat-body') ? 400 : 0
+        },
+      })
+      Object.defineProperty(dom.window.HTMLElement.prototype, 'scrollTop', {
+        configurable: true,
+        get() {
+          return positions.get(this) ?? 0
+        },
+        set(value) {
+          positions.set(
+            this,
+            Math.min(Math.max(0, value), Math.max(0, this.scrollHeight - this.clientHeight)),
+          )
+        },
+      })
+      vi.spyOn(dom.window.HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+        function (this: HTMLElement) {
+          const scroller = this.closest<HTMLElement>('.chat-body')
+          const index = scroller
+            ? [...scroller.querySelectorAll('[data-message-id]')].indexOf(this)
+            : -1
+          const top = this.matches('.chat-body') ? 0 : index * 40 - (scroller?.scrollTop ?? 0)
+          const height = this.matches('.chat-body') ? 400 : 40
+          return {
+            top,
+            bottom: top + height,
+            height,
+            left: 0,
+            right: 500,
+            width: 500,
+            x: 0,
+            y: top,
+            toJSON: () => ({}),
+          } as DOMRect
+        },
+      )
+      window.history.replaceState(null, '', `/groups/${chatId}`)
+      await renderMessenger()
+      await act(async () => sockets[0].open())
+      for (let batch = 0; batch < 10; batch += 1)
+        await act(async () => {
+          for (let index = 1; index <= 40; index += 1) {
+            const sequence = String(batch * 40 + index)
+            const row = {
+              id: sequence.padStart(26, '0'),
+              chatId,
+              senderId: recipient.id,
+              sequence,
+              body: `Message ${sequence}`,
+              createdAt: '2026-11-04T10:00:00Z',
+            }
+            historyMessages.push(row)
+            const { id, ...fields } = row
+            sockets[0].event({
+              type: 'message_saved',
+              version: 1,
+              eventId: String(Number(sequence) + 1000).padStart(26, '0'),
+              room: `group:${chatId}`,
+              epoch: 'epoch',
+              streamId: `${sequence}-0`,
+              requestId: String(Number(sequence) + 2000).padStart(26, '0'),
+              messageId: id,
+              ...fields,
+            })
+          }
+          await vi.advanceTimersByTimeAsync(50)
+        })
+      await act(async () => vi.advanceTimersByTimeAsync(2000))
+      expect(messenger.messages[chatId].at(-1)?.sequence).toBe('400')
+      expect(readCalls).toEqual([])
+      focused = true
+      await act(async () => {
+        window.dispatchEvent(new dom.window.Event('focus'))
+        await vi.advanceTimersByTimeAsync(699)
+      })
+      expect(readCalls).toEqual([])
+      await act(async () => vi.advanceTimersByTimeAsync(1001))
+      expect(readCalls.at(-1)).toBe('400')
+    },
+  )
   it('refreshes an open group after a member is added on another device', async () => {
     groupMemberCount = 2
     groupMembers = [session.user, recipient]

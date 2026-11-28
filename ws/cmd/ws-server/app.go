@@ -82,7 +82,8 @@ func run(ctx context.Context, logger *slog.Logger) error {
 		backgroundWG.Add(1)
 		go func() { defer backgroundWG.Done(); run(background) }()
 	}
-	defer func() { stopBackground(); backgroundWG.Wait() }()
+	stopBackgroundWork := func() { stopBackground(); backgroundWG.Wait() }
+	defer stopBackgroundWork()
 	rooms := roomregistry.NewRooms(redis, logger, cfg.ReplayLimit, cfg.QueueItems, cfg.QueueBytes, cfg.PositionCheckInterval, metrics, cfg.MaxRooms, cfg.MaxMemberships)
 	ws, err := socket.NewServer(context.WithoutCancel(ctx), cfg, logger, socket.Dependencies{
 		GroupAuthorizer: groupAuth, SessionAuthorizer: groupAuth, Publisher: publisher,
@@ -118,12 +119,12 @@ func run(ctx context.Context, logger *slog.Logger) error {
 		defer cancel()
 		ws.Drain(shutdown)
 		ws.CloseContext(shutdown)
-		if err := httpServer.Shutdown(shutdown); err != nil {
+		err := httpServer.Shutdown(shutdown)
+		if err != nil {
 			_ = httpServer.Close()
-			<-result
-			return err
 		}
 		<-result
-		return nil
+		releaseGatewayPresence(shutdown, stopBackgroundWork, tracker, gateways.ID, logger)
+		return err
 	}
 }

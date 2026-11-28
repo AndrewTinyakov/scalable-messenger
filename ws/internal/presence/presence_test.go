@@ -637,3 +637,30 @@ func TestHubSendsTheCountAgainWhenOnlyTheGroupSizeChanges(t *testing.T) {
 		t.Fatalf("count after a member joined = %+v", event)
 	}
 }
+
+func TestStoppedTrackerClearsUsersStillInGraceWithoutLaterWrites(t *testing.T) {
+	store := newFakeStore()
+	tracker := NewTracker(store, recorderFunc(func(context.Context, []grpcauth.LastSeen) error { return nil }), func() string { return "gateway" }, testConfig(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan struct{})
+	go func() { tracker.Run(ctx); close(stopped) }()
+	alice := user(1)
+	tracker.SetActive(alice, true)
+	waitWrites(t, store, 1)
+	tracker.SetActive(alice, false)
+	cancel()
+	<-stopped
+	if err := tracker.RemoveGateway(context.Background(), "gateway"); err != nil {
+		t.Fatal(err)
+	}
+	store.mu.Lock()
+	cleared := len(store.writes) == 2 && !store.writes[1][alice]
+	store.mu.Unlock()
+	if !cleared {
+		t.Fatalf("writes = %v, want online then offline from the shutdown clear", store.writes)
+	}
+	time.Sleep(2 * testConfig().Grace)
+	if got := writeCount(store); got != 2 {
+		t.Fatalf("writes after grace = %d, want no write from the stopped tracker", got)
+	}
+}

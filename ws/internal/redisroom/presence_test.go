@@ -51,6 +51,10 @@ func TestPresencePublishesOnlyAccountTransitions(t *testing.T) {
 	}
 	set("b", true)
 	set("a", false)
+	set("a", false)
+	if states, _, err := first.PresenceSnapshot(ctx, []string{user}); err != nil || !states[user].Online {
+		t.Fatalf("after clearing gateway a = %+v, %v, want still online through gateway b", states[user], err)
+	}
 	set("b", false)
 	offline := next()
 	if offline["o"] != false || offline["l"].(float64) <= 0 || offline["s"].(float64) <= online["s"].(float64) || offline["v"].(string) <= online["v"].(string) {
